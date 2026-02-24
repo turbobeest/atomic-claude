@@ -1,0 +1,323 @@
+# ============================================================
+# AUDIT: Data Clump Detection
+# ============================================================
+
+audit:
+  id: "code-quality.code-smells.data-clump"
+  name: "Data Clump Detection Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "code-smells"
+
+  tier: "expert"
+  estimated_duration: "40 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Identifies groups of data that repeatedly appear together throughout
+    the codebase. Data clumps occur when the same 3+ parameters are passed
+    together to multiple methods, or when the same set of fields appears
+    in multiple classes.
+
+  why_it_matters: |
+    Data clumps suggest missing abstractions. They should often be extracted
+    into their own class or value object. Failing to do so leads to repeated
+    parameter lists, scattered validation logic, and code that's harder to
+    understand and modify consistently.
+
+  when_to_run:
+    - "During code reviews"
+    - "When refactoring parameter lists"
+    - "Domain modeling reviews"
+    - "Technical debt assessments"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+
+  access_requirements:
+    - "Read access to source code repository"
+
+discovery:
+  code_patterns:
+    - pattern: "\\(.*,.*,.*,.*\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify functions with 4+ parameters"
+
+    - pattern: "(firstName|lastName|email|address|street|city|state|zip)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify common data clump fields"
+
+    - pattern: "(startDate|endDate|startTime|endTime)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify date range patterns"
+
+    - pattern: "(x|y|z|width|height|lat|lng|latitude|longitude)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify coordinate/dimension patterns"
+
+  file_patterns:
+    - glob: "**/*.{java,cs,ts,py,rb,go}"
+      purpose: "Source code files"
+
+knowledge_sources:
+  guides:
+    - id: "fowler-data-clump"
+      name: "Martin Fowler - Data Clumps"
+      url: "https://refactoring.guru/smells/data-clumps"
+      offline_cache: true
+
+    - id: "fowler-extract-class"
+      name: "Martin Fowler - Extract Class"
+      url: "https://refactoring.com/catalog/extractClass.html"
+      offline_cache: true
+
+    - id: "fowler-introduce-parameter-object"
+      name: "Martin Fowler - Introduce Parameter Object"
+      url: "https://refactoring.com/catalog/introduceParameterObject.html"
+      offline_cache: true
+
+    - id: "refactoring-fowler"
+      name: "Martin Fowler - Refactoring"
+      url: "https://refactoring.com/"
+      offline_cache: false
+
+    - id: "refactoring-catalog"
+      name: "Refactoring Catalog"
+      url: "https://refactoring.com/catalog/"
+      offline_cache: false
+
+    - id: "clean-code"
+      name: "Robert C. Martin - Clean Code"
+      url: "https://www.oreilly.com/library/view/clean-code-a/9780136083238/"
+      offline_cache: false
+
+tooling:
+  static_analysis:
+    - tool: "sonarqube"
+      purpose: "Data clump detection"
+      offline_capable: false
+    - tool: "jdeodorant"
+      purpose: "Java data clump detection"
+      offline_capable: true
+    - tool: "pmd"
+      purpose: "Java parameter count rules"
+      offline_capable: true
+
+  scripts:
+    - id: "data-clump-scan"
+      language: "bash"
+      purpose: "Find repeated parameter patterns"
+      source: "inline"
+      code: |
+        # Find functions with many parameters
+        grep -rn --include="*.{ts,java}" -E "function.*\(.*,.*,.*,.*\)|def.*\(.*,.*,.*,.*\)" . 2>/dev/null | head -50
+
+signals:
+  critical:
+    - id: "CS-CLUMP-CRIT-001"
+      signal: "Same 5+ parameters in 10+ methods"
+      evidence_pattern: "param_set_occurrence > 10 && param_count >= 5"
+      explanation: |
+        Highly repeated parameter sets strongly indicate a missing domain
+        object that should encapsulate the related data.
+      remediation: "Extract Parameter Object or Value Object"
+
+    - id: "CS-CLUMP-CRIT-002"
+      signal: "Address-like field groups without Address class"
+      evidence_pattern: "(street|city|state|zip|country).*repeated"
+      explanation: |
+        Address fields appearing separately in multiple places indicate
+        a missing Address value object.
+      remediation: "Create Address value object"
+
+  high:
+    - id: "CS-CLUMP-HIGH-001"
+      signal: "Same 3-4 parameters in 5+ methods"
+      evidence_pattern: "param_set_occurrence >= 5 && param_count >= 3"
+      explanation: |
+        Repeated parameter groups indicate missing abstractions that
+        make code harder to maintain and understand.
+      remediation: "Introduce Parameter Object refactoring"
+
+    - id: "CS-CLUMP-HIGH-002"
+      signal: "Coordinate/dimension fields without dedicated type"
+      evidence_pattern: "(x|y|z|width|height).*repeated"
+      explanation: |
+        Geometric data should be encapsulated in Point, Rectangle, or
+        similar value objects for type safety.
+      remediation: "Create appropriate value type"
+
+  medium:
+    - id: "CS-CLUMP-MED-001"
+      signal: "Date range parameters (startDate, endDate)"
+      evidence_pattern: "(startDate|endDate|from|to).*param"
+      remediation: "Consider DateRange or TimeRange value object"
+
+    - id: "CS-CLUMP-MED-002"
+      signal: "Name fields (firstName, lastName) without Name type"
+      evidence_pattern: "(firstName|lastName|middleName)"
+      remediation: "Consider FullName or PersonName value object"
+
+  low:
+    - id: "CS-CLUMP-LOW-001"
+      signal: "Occasional parameter groups (2-3 occurrences)"
+      evidence_pattern: "param_set_occurrence <= 3"
+      remediation: "Monitor for growth, extract if pattern increases"
+
+  positive:
+    - id: "CS-CLUMP-POS-001"
+      signal: "Value objects used for common data groups"
+      evidence_pattern: "Address|DateRange|Money|Coordinates"
+    - id: "CS-CLUMP-POS-002"
+      signal: "Domain primitives encapsulate concepts"
+      evidence_pattern: "domain_primitive_types"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Extract Parameter Signatures"
+      description: |
+        Parse method signatures to identify parameter groupings
+        and their frequencies.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find multi-parameter functions"
+          command: |
+            grep -rn --include="*.{ts,java}" -E "\w+\s*\([^)]+,[^)]+,[^)]+\)" . 2>/dev/null | head -100
+        - purpose: "Find common field patterns"
+          command: |
+            grep -rn --include="*.{ts,java}" -E "(firstName|lastName|street|city|state)" . 2>/dev/null | head -50
+      expected_findings:
+        - "Methods with repeated parameter patterns"
+        - "Common field groupings"
+
+    - id: "2"
+      name: "Identify Repeated Groups"
+      description: |
+        Analyze parameter lists to find groups that appear together
+        in multiple locations.
+      duration_estimate: "10 min"
+      expected_findings:
+        - "Parameter groups with frequency"
+        - "Field groups across classes"
+
+    - id: "3"
+      name: "Assess Domain Concepts"
+      description: |
+        Determine if identified groups represent domain concepts
+        that deserve their own types.
+      duration_estimate: "10 min"
+      expected_findings:
+        - "Missing value objects"
+        - "Domain concepts to extract"
+
+    - id: "4"
+      name: "Generate Refactoring Plan"
+      description: |
+        Create prioritized list of value objects to introduce.
+      duration_estimate: "5 min"
+      expected_findings:
+        - "Value objects to create"
+        - "Affected methods list"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "data_clump_signature"
+        - "occurrence_count"
+        - "locations"
+        - "suggested_type"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Data Clump Inventory"
+        - "Domain Analysis"
+        - "Refactoring Recommendations"
+
+  confidence_guidance:
+    high: "Clear repeated pattern with obvious domain concept"
+    medium: "Pattern detected, domain concept unclear"
+    low: "Possible coincidental grouping"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "fowler-data-clump"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires pattern analysis across codebase"
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "data-clump-001"
+    item: "Parameter pattern analysis completed"
+    level: "BLOCKING"
+    verification: |
+      grep -rn --include="*.{ts,java}" -E "\w+\([^)]+,[^)]+,[^)]+,[^)]+\)" . 2>/dev/null | wc -l
+    expected: "Analysis complete"
+
+  - id: "data-clump-002"
+    item: "Repeated groups documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review groups appearing 5+ times"
+    expected: "All documented"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modularity"]
+
+relationships:
+  commonly_combined:
+    - "code-quality.code-smells.primitive-obsession"
+    - "code-quality.code-smells.long-parameter-list"
+    - "code-quality.code-smells.feature-envy"

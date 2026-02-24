@@ -1,0 +1,393 @@
+# ============================================================
+# AUDIT: Constraint Validation
+# ============================================================
+
+audit:
+  id: "data-state-management.data-validation.constraint-validation"
+  name: "Constraint Validation Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-validation"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "data"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the implementation and consistency of data constraints across
+    the application stack, including database constraints (primary keys,
+    foreign keys, unique constraints, check constraints), ORM-level constraints,
+    and application-level validation. Ensures constraints are properly layered
+    and consistently enforced.
+
+  why_it_matters: |
+    Constraints are the ultimate guardians of data integrity. When constraints
+    are missing or inconsistent between layers, invalid data enters the system.
+    Database constraints catch what application validation misses, but relying
+    solely on database constraints provides poor user experience. Proper
+    constraint layering provides defense in depth.
+
+  when_to_run:
+    - "Database schema reviews"
+    - "After adding new entities"
+    - "Data integrity audits"
+    - "Before production deployment"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code including models and migrations"
+    - type: "database_schema"
+      description: "Database schema definitions or migrations"
+
+  access_requirements:
+    - "Read access to application source code"
+    - "Read access to database schema or migrations"
+
+discovery:
+  code_patterns:
+    - pattern: "PRIMARY KEY|FOREIGN KEY|UNIQUE|CHECK|NOT NULL"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect SQL constraints"
+
+    - pattern: "@NotNull|@Unique|@Column.*nullable.*false"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect ORM constraints"
+
+    - pattern: "foreignKey|references|belongsTo|hasMany"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect relationship definitions"
+
+    - pattern: "CHECK.*constraint|ADD CONSTRAINT"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect explicit check constraints"
+
+  file_patterns:
+    - glob: "**/migrations/**"
+      purpose: "Database migrations"
+    - glob: "**/schema/**"
+      purpose: "Schema definitions"
+    - glob: "**/models/**"
+      purpose: "ORM model definitions"
+    - glob: "**/*.sql"
+      purpose: "SQL scripts"
+
+knowledge_sources:
+  specifications:
+    - id: "sql-standard"
+      name: "SQL Standard - Constraints"
+      url: "https://www.iso.org/standard/63555.html"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "constraint-patterns"
+      name: "Database Constraint Best Practices"
+      url: "https://www.postgresql.org/docs/current/ddl-constraints.html"
+      offline_cache: true
+
+    - id: "referential-integrity"
+      name: "Referential Integrity Patterns"
+      url: "https://use-the-index-luke.com/sql/join/outer-join-performance"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "schema-inspector"
+      purpose: "Analyze database schema for missing constraints"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "pg_dump"
+      purpose: "Extract PostgreSQL schema for analysis"
+      command: "pg_dump --schema-only -d dbname"
+
+    - tool: "mysqldump"
+      purpose: "Extract MySQL schema for analysis"
+      command: "mysqldump --no-data dbname"
+
+  scripts:
+    - id: "constraint-scan"
+      language: "bash"
+      purpose: "Scan for constraint definitions"
+      source: "inline"
+      code: |
+        echo "=== Constraint Analysis ==="
+        echo "--- Database constraints in migrations ---"
+        grep -rn "CONSTRAINT\|PRIMARY KEY\|FOREIGN KEY\|UNIQUE\|CHECK\|NOT NULL" \
+          --include="*.sql" --include="*.migration.*" . 2>/dev/null | head -40
+
+        echo "--- ORM constraints ---"
+        grep -rn "@NotNull\|@Column\|nullable\|unique:\s*true" \
+          --include="*.java" --include="*.ts" --include="*.py" . 2>/dev/null | head -30
+
+signals:
+  critical:
+    - id: "CV-CRIT-001"
+      signal: "Missing foreign key constraints on relationship columns"
+      evidence_pattern: "References user_id without FOREIGN KEY constraint"
+      explanation: |
+        Missing foreign keys allow orphaned records - children pointing to
+        non-existent parents. This corrupts data and causes runtime errors
+        or incorrect query results.
+      remediation: "Add FOREIGN KEY constraints with appropriate ON DELETE behavior"
+
+    - id: "CV-CRIT-002"
+      signal: "No primary key defined on tables"
+      evidence_pattern: "CREATE TABLE without PRIMARY KEY"
+      explanation: |
+        Tables without primary keys cannot guarantee row uniqueness and
+        have severe performance implications for updates and deletes.
+        Every table should have an explicit primary key.
+      remediation: "Add primary key to all tables (natural or surrogate)"
+
+  high:
+    - id: "CV-HIGH-001"
+      signal: "Nullable columns that should be required"
+      evidence_pattern: "Business-critical fields without NOT NULL"
+      explanation: |
+        Nullable columns that logically should always have values lead to
+        defensive null checking throughout the codebase and potential
+        NullPointerExceptions at runtime.
+      remediation: "Add NOT NULL constraint with appropriate default if needed"
+
+    - id: "CV-HIGH-002"
+      signal: "Missing unique constraints on naturally unique fields"
+      evidence_pattern: "Email, username, or SSN columns without UNIQUE"
+      explanation: |
+        Without unique constraints, duplicate entries are possible, causing
+        data quality issues and potential security problems (multiple accounts).
+      remediation: "Add UNIQUE constraint or unique index"
+
+    - id: "CV-HIGH-003"
+      signal: "Check constraints missing for enumerated values"
+      evidence_pattern: "Status column accepts any string value"
+      explanation: |
+        Columns representing enumerated types should use CHECK constraints
+        to prevent invalid values. Without this, typos or bugs insert
+        garbage data.
+      remediation: "Add CHECK constraint with allowed values or use ENUM type"
+
+  medium:
+    - id: "CV-MED-001"
+      signal: "Constraints at database level only, not in ORM"
+      evidence_pattern: "Database NOT NULL but ORM allows null"
+      remediation: "Mirror database constraints in ORM model definitions"
+
+    - id: "CV-MED-002"
+      signal: "Cascade delete without soft delete consideration"
+      evidence_pattern: "ON DELETE CASCADE for audit-relevant data"
+      remediation: "Consider soft delete for data requiring audit trails"
+
+    - id: "CV-MED-003"
+      signal: "Inconsistent constraint naming conventions"
+      evidence_pattern: "Mixed naming: fk_user_id vs users_id_fkey"
+      remediation: "Establish and enforce constraint naming convention"
+
+  low:
+    - id: "CV-LOW-001"
+      signal: "Missing constraint documentation"
+      evidence_pattern: "Complex CHECK constraints without comments"
+      remediation: "Document business rationale for non-obvious constraints"
+
+    - id: "CV-LOW-002"
+      signal: "Deferrable constraints not used for complex transactions"
+      evidence_pattern: "Circular references require specific insert order"
+      remediation: "Consider DEFERRABLE constraints for circular dependencies"
+
+  positive:
+    - id: "CV-POS-001"
+      signal: "Comprehensive foreign key coverage"
+      evidence_pattern: "All relationship columns have FK constraints"
+
+    - id: "CV-POS-002"
+      signal: "Constraints mirrored at application and database levels"
+      evidence_pattern: "ORM and database constraints aligned"
+
+    - id: "CV-POS-003"
+      signal: "Domain types with constraints (PostgreSQL domains)"
+      evidence_pattern: "Custom types with built-in validation"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze Database Schema"
+      description: |
+        Extract and examine database constraints.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find primary key definitions"
+          command: |
+            grep -rn "PRIMARY KEY\|serial\|IDENTITY" \
+              --include="*.sql" --include="*.migration.*" . 2>/dev/null | head -40
+        - purpose: "Find foreign key definitions"
+          command: |
+            grep -rn "FOREIGN KEY\|REFERENCES\|belongsTo" \
+              --include="*.sql" --include="*.migration.*" --include="*.ts" --include="*.java" . 2>/dev/null | head -40
+
+      expected_findings:
+        - "Primary key coverage"
+        - "Foreign key relationships"
+
+    - id: "2"
+      name: "Review ORM Constraints"
+      description: |
+        Examine application-level constraint definitions.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find ORM model constraints"
+          command: |
+            grep -rn "@Column\|@NotNull\|@Unique\|nullable\|unique:" \
+              --include="*.java" --include="*.ts" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -40
+        - purpose: "Find validation decorators"
+          command: |
+            grep -rn "@IsNotEmpty\|@IsEmail\|@Min\|@Max\|@Length" \
+              --include="*.ts" --include="*.java" . 2>/dev/null | head -30
+
+      expected_findings:
+        - "ORM constraint coverage"
+        - "Validation decorator usage"
+
+    - id: "3"
+      name: "Check Constraint Consistency"
+      description: |
+        Compare constraints across layers for consistency.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find nullable definitions"
+          command: |
+            grep -rn "nullable.*true\|nullable.*false\|NOT NULL" \
+              --include="*.sql" --include="*.ts" --include="*.java" . 2>/dev/null | head -40
+
+      expected_findings:
+        - "Cross-layer consistency"
+        - "Gaps between database and ORM"
+
+    - id: "4"
+      name: "Identify Missing Constraints"
+      description: |
+        Find relationship columns without proper constraints.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find potential foreign key columns"
+          command: |
+            grep -rn "_id\|Id.*INT\|user_id\|order_id" \
+              --include="*.sql" --include="*.migration.*" . 2>/dev/null | \
+              grep -v "REFERENCES\|FOREIGN" | head -30
+
+      expected_findings:
+        - "Missing foreign keys"
+        - "Orphan-prone columns"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "constraint_inventory"
+        - "missing_constraints"
+        - "consistency_issues"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Constraint Coverage"
+        - "Layer Consistency"
+        - "Gap Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear constraint missing at database level"
+    medium: "ORM and database constraints misaligned"
+    low: "Constraint may exist in framework not visible in scan"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "constraint-patterns"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires schema analysis"
+    full:
+      included: true
+      priority: 1
+    data:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cv-001"
+    item: "All tables have primary keys"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "CREATE TABLE" --include="*.sql" . 2>/dev/null | wc -l > /tmp/tables.txt && \
+      grep -rn "PRIMARY KEY" --include="*.sql" . 2>/dev/null | wc -l > /tmp/pks.txt && \
+      test $(cat /tmp/pks.txt) -ge $(cat /tmp/tables.txt) && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "cv-002"
+    item: "Foreign key constraints on relationship columns"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "_id\s" --include="*.sql" . 2>/dev/null | grep -v "REFERENCES\|FOREIGN\|PRIMARY" | \
+        wc -l | xargs -I {} test {} -lt 3 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "cv-003"
+    item: "ORM constraints match database constraints"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Compare ORM model definitions with database schema"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 27001"
+      controls: ["A.14.1.3"]
+    - framework: "GDPR"
+      controls: ["Data Integrity"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-validation.input-validation"
+    - "data-state-management.storage-strategy.database-technology-choice"
+    - "data-state-management.data-access-patterns.orm-usage"

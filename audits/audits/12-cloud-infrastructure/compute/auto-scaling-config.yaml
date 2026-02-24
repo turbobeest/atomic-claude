@@ -1,0 +1,347 @@
+audit:
+  id: cloud-infrastructure.compute.auto-scaling-config
+  name: Auto-Scaling Configuration
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: compute
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates auto-scaling configurations across cloud infrastructure including
+    scaling policies, triggers, cooldown periods, health checks, and scaling
+    limits. Examines whether scaling behaviors align with application load
+    patterns and business requirements.
+  why_it_matters: |
+    Poorly configured auto-scaling leads to either over-spending during
+    low-traffic periods or service degradation during traffic spikes.
+    Misconfigured scaling policies can cause oscillation (rapid scale up/down),
+    delayed responses to traffic changes, or failure to scale when needed.
+    Proper auto-scaling ensures cost efficiency while maintaining availability.
+  when_to_run:
+  - Before expected traffic events
+  - After application performance changes
+  - During cost optimization reviews
+  - After auto-scaling incidents
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to auto-scaling configurations
+  - type: metrics_access
+    description: Access to scaling event history and metrics
+  access_requirements:
+  - Auto Scaling Group/Instance Group configuration access
+  - CloudWatch/Monitoring metrics access
+  - Scaling activity logs access
+discovery:
+  metrics_queries:
+  - system: CloudWatch
+    query: |
+      SELECT COUNT(*) as scaling_events
+      FROM ASGScalingActivity
+      WHERE Timestamp > NOW() - INTERVAL '7 days'
+      GROUP BY AutoScalingGroupName
+    purpose: Identify scaling frequency and patterns
+    threshold: Excessive scaling (>50/day) may indicate misconfiguration
+  - system: Prometheus
+    query: |
+      sum(increase(kube_horizontalpodautoscaler_status_desired_replicas[24h])) by (horizontalpodautoscaler)
+    purpose: Track HPA scaling activity
+    threshold: Frequent changes suggest instability
+  file_patterns:
+  - glob: '**/terraform/**/*autoscaling*.tf'
+    purpose: Find Terraform auto-scaling definitions
+  - glob: '**/k8s/**/*hpa*.yaml'
+    purpose: Find Kubernetes HPA configurations
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: Find CloudFormation auto-scaling resources
+knowledge_sources:
+  specifications:
+  - id: aws-asg-docs
+    name: AWS Auto Scaling Documentation
+    url: https://docs.aws.amazon.com/autoscaling/
+    offline_cache: true
+    priority: required
+  - id: k8s-hpa
+    name: Kubernetes Horizontal Pod Autoscaler
+    url: https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-scaling-best-practices
+    name: AWS Auto Scaling Best Practices
+    url: https://docs.aws.amazon.com/autoscaling/ec2/userguide/auto-scaling-best-practices.html
+    offline_cache: true
+  - id: gcp-autoscaler-guide
+    name: GCP Autoscaler Best Practices
+    url: https://cloud.google.com/compute/docs/autoscaler/best-practices
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: Inspect Auto Scaling Group configurations
+    command: aws autoscaling describe-auto-scaling-groups
+  - tool: kubectl
+    purpose: Inspect HPA configurations
+    command: kubectl get hpa --all-namespaces -o yaml
+  - tool: gcloud
+    purpose: Inspect GCP autoscaler configurations
+    command: gcloud compute instance-groups managed list-autoscaling-policies
+  monitoring_queries:
+  - system: CloudWatch
+    query: |
+      aws autoscaling describe-scaling-activities
+      --auto-scaling-group-name {asg_name}
+      --max-items 100
+    purpose: Review recent scaling activities
+  scripts:
+  - id: scaling-config-audit
+    language: bash
+    purpose: Audit auto-scaling configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Auto Scaling Group Analysis ==="
+
+      for asg in $(aws autoscaling describe-auto-scaling-groups --query 'AutoScalingGroups[].AutoScalingGroupName' --output text); do
+        echo "--- ASG: $asg ---"
+        aws autoscaling describe-auto-scaling-groups \
+          --auto-scaling-group-names "$asg" \
+          --query 'AutoScalingGroups[0].{Min:MinSize,Max:MaxSize,Desired:DesiredCapacity,Cooldown:DefaultCooldown}' \
+          --output table
+
+        echo "Scaling Policies:"
+        aws autoscaling describe-policies \
+          --auto-scaling-group-name "$asg" \
+          --query 'ScalingPolicies[].{Name:PolicyName,Type:PolicyType,Target:TargetTrackingConfiguration.TargetValue}' \
+          --output table
+      done
+signals:
+  critical:
+  - id: AUTOSCALING-CRIT-001
+    signal: Auto-scaling disabled or non-functional for production workloads
+    evidence_indicators:
+    - MinSize equals MaxSize in ASG configuration
+    - No scaling policies attached to ASG
+    - HPA status shows unable to scale
+    explanation: |
+      Disabled auto-scaling means workloads cannot respond to traffic changes,
+      leading to outages during traffic spikes or wasted resources during
+      low-traffic periods.
+    remediation: Configure appropriate scaling policies with min/max bounds
+  - id: AUTOSCALING-CRIT-002
+    signal: Scaling limits prevent handling expected peak load
+    evidence_threshold: MaxSize < calculated peak instance requirement
+    explanation: |
+      If the maximum scaling limit is below what's needed for peak traffic,
+      the system will fail under load even with auto-scaling enabled.
+    remediation: Increase MaxSize to accommodate expected peak + buffer
+  high:
+  - id: AUTOSCALING-HIGH-001
+    signal: Scaling cooldown period too long causing slow response
+    evidence_threshold: Cooldown > 300 seconds for latency-sensitive workloads
+    explanation: |
+      Long cooldown periods delay scaling responses, causing extended
+      periods of degraded performance during traffic ramps.
+    remediation: Reduce cooldown period or use step scaling with faster response
+  - id: AUTOSCALING-HIGH-002
+    signal: Scaling policies based on incorrect metrics
+    evidence_indicators:
+    - CPU-based scaling for I/O-bound workloads
+    - Memory-based scaling without memory pressure issues
+    explanation: |
+      Scaling on the wrong metric means the system won't respond to
+      actual load conditions effectively.
+    remediation: Use application-specific metrics (queue depth, request latency)
+  - id: AUTOSCALING-HIGH-003
+    signal: No health checks configured for scaling decisions
+    evidence_pattern: 'HealthCheckType: EC2 without ELB health checks'
+    explanation: |
+      Without proper health checks, unhealthy instances stay in rotation,
+      and scaling decisions may be based on broken instances.
+    remediation: Configure ELB health checks or custom health check endpoints
+  medium:
+  - id: AUTOSCALING-MED-001
+    signal: Scaling thresholds not aligned with SLOs
+    remediation: Tune scaling triggers to maintain SLO targets
+  - id: AUTOSCALING-MED-002
+    signal: Predictive scaling not enabled for predictable workloads
+    remediation: Enable predictive scaling for workloads with regular patterns
+  - id: AUTOSCALING-MED-003
+    signal: Warm pool not configured for slow-starting instances
+    remediation: Configure warm pools to reduce scale-out latency
+  low:
+  - id: AUTOSCALING-LOW-001
+    signal: Scaling notifications not configured
+    remediation: Set up SNS notifications for scaling events
+  positive:
+  - id: AUTOSCALING-POS-001
+    signal: Target tracking scaling with appropriate metrics
+  - id: AUTOSCALING-POS-002
+    signal: Predictive scaling enabled with good accuracy
+  - id: AUTOSCALING-POS-003
+    signal: Scaling events correlate with traffic patterns
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Configuration Discovery
+    description: |
+      Identify all auto-scaling configurations across the infrastructure
+      including ASGs, HPAs, and cloud-native autoscalers.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all AWS Auto Scaling Groups
+      command: aws autoscaling describe-auto-scaling-groups --query 'AutoScalingGroups[].{Name:AutoScalingGroupName,Min:MinSize,Max:MaxSize,Desired:DesiredCapacity}'
+        --output table
+    - purpose: List Kubernetes HPAs
+      command: kubectl get hpa --all-namespaces -o wide
+    - purpose: List GCP managed instance groups
+      command: gcloud compute instance-groups managed list
+    expected_findings:
+    - Complete inventory of auto-scaling configurations
+    - Current min/max/desired settings for each
+  - id: '2'
+    name: Scaling Policy Analysis
+    description: |
+      Examine scaling policies, triggers, and thresholds to understand
+      how the system responds to load changes.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get detailed scaling policies
+      command: aws autoscaling describe-policies --output yaml
+    - purpose: Describe HPA details
+      command: kubectl describe hpa --all-namespaces
+    expected_findings:
+    - Scaling policy types (target tracking, step, simple)
+    - Metric thresholds and cooldown periods
+  - id: '3'
+    name: Historical Scaling Analysis
+    description: |
+      Review historical scaling events to identify patterns,
+      oscillation, and effectiveness of current policies.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get recent scaling activities
+      command: aws autoscaling describe-scaling-activities --max-items 50 --output table
+    expected_findings:
+    - Scaling event frequency and patterns
+    - Evidence of oscillation or delayed scaling
+  - id: '4'
+    name: Load Testing Correlation
+    description: |
+      Compare scaling behavior against load test results or
+      production traffic patterns to validate effectiveness.
+    duration_estimate: 45 min
+    questions:
+    - How quickly does the system scale during traffic ramps?
+    - Does scaling complete before SLO degradation?
+    - Are there load patterns that scaling cannot handle?
+    expected_findings:
+    - Scaling response time measurements
+    - Gap analysis between capacity and demand
+  - id: '5'
+    name: Recommendation Development
+    description: |
+      Develop specific recommendations for scaling configuration
+      improvements based on analysis findings.
+    duration_estimate: 30 min
+    expected_findings:
+    - Prioritized scaling configuration changes
+    - Estimated impact on cost and availability
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Current Configuration Analysis
+    - Scaling Behavior Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Full access to configs, 30+ days of scaling history, load test data
+    medium: Config access with 7-30 days of history
+    low: Limited config access or short history
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-asg-docs
+      priority: required
+    - source_id: k8s-hpa
+      priority: required
+  limitations:
+  - Cannot access live scaling configurations offline
+  - Historical scaling data requires API access
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed configuration analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: autoscaling-001
+  item: All auto-scaling configurations inventoried
+  level: CRITICAL
+  verification: aws autoscaling describe-auto-scaling-groups --query 'length(AutoScalingGroups)' | grep
+    -q '[0-9]' && echo PASS || echo FAIL
+  expected: PASS
+- id: autoscaling-002
+  item: Scaling policies documented and reviewed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm all scaling policies have been analyzed
+  expected: Confirmed by reviewer
+- id: autoscaling-003
+  item: Historical scaling events reviewed for issues
+  level: BLOCKING
+  verification: manual
+  verification_notes: Check for oscillation, delayed scaling, or failures
+  expected: Confirmed by reviewer
+- id: autoscaling-004
+  item: Scaling limits appropriate for expected load
+  level: WARNING
+  verification: manual
+  verification_notes: Verify max capacity exceeds peak load requirements
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.5
+  - framework: ISO 27001
+    controls:
+    - A.12.1.3
+    - A.17.2.1
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.compute.instance-right-sizing
+  - cloud-infrastructure.compute.compute-redundancy
+  - cloud-infrastructure.networking.load-balancer-config

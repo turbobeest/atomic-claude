@@ -1,0 +1,286 @@
+# ============================================================
+# AUDIT FILE: Connection Draining Audit
+# ============================================================
+
+audit:
+  id: "scalability-capacity.load-distribution.connection-draining"
+  name: "Connection Draining Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "load-distribution"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates connection draining (deregistration delay) configurations
+    across load balancers and service meshes. Analyzes how gracefully
+    backends are removed from rotation during deployments, scaling events,
+    or failures, ensuring in-flight requests complete without errors.
+
+  why_it_matters: |
+    Poor connection draining causes request failures during deployments
+    and scaling events. Users experience errors, transactions may be
+    interrupted, and long-running operations fail unexpectedly. Proper
+    draining ensures zero-downtime deployments and graceful degradation.
+
+  when_to_run:
+    - "Before implementing zero-downtime deployments"
+    - "After load balancer configuration changes"
+    - "When deployment errors are observed"
+    - "During service mesh configuration review"
+
+prerequisites:
+  required_artifacts:
+    - type: "configuration"
+      description: "Load balancer and service mesh configurations"
+    - type: "logs"
+      description: "Deployment logs showing instance deregistration"
+
+  access_requirements:
+    - "Load balancer configuration access"
+    - "Deployment pipeline access"
+    - "Application timeout configurations"
+
+discovery:
+  code_patterns:
+    - pattern: "(deregistration.?delay|connection.?draining|drain.?timeout)"
+      type: "regex"
+      scope: "config"
+      purpose: "Find connection draining configurations"
+    - pattern: "(graceful.?shutdown|termination.?grace)"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify graceful shutdown settings"
+
+  file_patterns:
+    - glob: "**/target-group*.tf"
+      purpose: "AWS target group Terraform configurations"
+    - glob: "**/deployment*.yaml"
+      purpose: "Kubernetes deployment configurations"
+    - glob: "**/service*.yaml"
+      purpose: "Service configurations"
+
+  metrics_queries:
+    - system: "CloudWatch"
+      query: "HTTPCode_Target_5XX_Count during deployments"
+      purpose: "Detect errors during instance deregistration"
+    - system: "Prometheus"
+      query: "increase(http_requests_total{status=~'5..'}[5m])"
+      purpose: "Monitor error rates during rollouts"
+
+knowledge_sources:
+  guides:
+    - id: "aws-deregistration-delay"
+      name: "AWS Target Group Deregistration Delay"
+      url: "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-target-groups.html#deregistration-delay"
+      offline_cache: true
+    - id: "k8s-pod-lifecycle"
+      name: "Kubernetes Pod Lifecycle"
+      url: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+      offline_cache: true
+    - id: "envoy-draining"
+      name: "Envoy Connection Draining"
+      url: "https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/operations/draining"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Check target group deregistration delay"
+      command: "aws elbv2 describe-target-group-attributes --target-group-arn ARN"
+    - tool: "kubectl"
+      purpose: "Check pod termination grace period"
+      command: "kubectl get deployment -o jsonpath='{.spec.template.spec.terminationGracePeriodSeconds}'"
+
+  monitoring_queries:
+    - system: "CloudWatch"
+      query: "ConnectionDraining Count by TargetGroup"
+      purpose: "Monitor draining connections during deregistration"
+
+signals:
+  critical:
+    - id: "SCALE-CD-CRIT-001"
+      signal: "No connection draining configured"
+      evidence_pattern: "deregistration_delay.timeout_seconds = 0"
+      explanation: |
+        Without connection draining, in-flight requests are terminated
+        immediately when instances are removed, causing user-facing errors
+        and failed transactions.
+      remediation: "Configure appropriate deregistration delay based on request timeout"
+
+  high:
+    - id: "SCALE-CD-HIGH-001"
+      signal: "Draining timeout shorter than request timeout"
+      explanation: "Long-running requests fail during deregistration"
+      remediation: "Set draining timeout >= maximum expected request duration"
+    - id: "SCALE-CD-HIGH-002"
+      signal: "Application ignores shutdown signals"
+      explanation: "Application continues accepting requests during drain period"
+      remediation: "Implement graceful shutdown handler to stop accepting new requests"
+
+  medium:
+    - id: "SCALE-CD-MED-001"
+      signal: "Inconsistent draining configuration across services"
+      remediation: "Standardize draining configuration across all services"
+    - id: "SCALE-CD-MED-002"
+      signal: "Excessively long draining timeout"
+      remediation: "Optimize timeout to balance graceful shutdown with deployment speed"
+
+  low:
+    - id: "SCALE-CD-LOW-001"
+      signal: "Draining configuration not documented"
+
+  positive:
+    - id: "SCALE-CD-POS-001"
+      signal: "Zero errors observed during rolling deployments"
+    - id: "SCALE-CD-POS-002"
+      signal: "Proper graceful shutdown implementation verified"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Draining Configurations"
+      description: |
+        Document connection draining settings across all load balancers,
+        target groups, and service mesh configurations.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List target group attributes"
+          command: "aws elbv2 describe-target-group-attributes --target-group-arn $ARN"
+        - purpose: "Check Kubernetes termination grace period"
+          command: "kubectl get deployment -o yaml | grep terminationGracePeriodSeconds"
+      expected_findings:
+        - "Draining timeout per service"
+        - "Configuration consistency"
+
+    - id: "2"
+      name: "Compare with Request Timeouts"
+      description: |
+        Analyze application request timeout settings and compare with
+        draining timeouts to identify potential issues.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Request timeout configurations"
+        - "Timeout alignment assessment"
+
+    - id: "3"
+      name: "Review Application Shutdown Handling"
+      description: |
+        Examine application code and configuration for graceful shutdown
+        implementation.
+      duration_estimate: "30 min"
+      questions:
+        - "Does application handle SIGTERM?"
+        - "Does it stop accepting new requests during drain?"
+        - "Does it wait for in-flight requests to complete?"
+      expected_findings:
+        - "Shutdown handler implementation status"
+        - "Application drain behavior"
+
+    - id: "4"
+      name: "Analyze Deployment Error Rates"
+      description: |
+        Review metrics for errors occurring during deployment windows
+        that may indicate draining issues.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Deployment-correlated error patterns"
+        - "Draining effectiveness assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Draining Configuration Inventory"
+        - "Timeout Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Configuration verified with deployment testing"
+    medium: "Configuration review with historical error analysis"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-deregistration-delay"
+        priority: "recommended"
+      - source_id: "k8s-pod-lifecycle"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed configuration analysis"
+    full:
+      included: true
+      priority: 4
+
+closeout_checklist:
+  - id: "connection-draining-001"
+    item: "Draining configurations inventoried"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm all load balancers and services documented"
+    expected: "Confirmed by reviewer"
+
+  - id: "connection-draining-002"
+    item: "Timeout alignment verified"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify draining timeout >= request timeout"
+    expected: "Confirmed by reviewer"
+
+  - id: "connection-draining-003"
+    item: "Graceful shutdown implementation reviewed"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm application handles shutdown signals"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["microservices", "web-application", "api-platform"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.load-distribution.load-balancing-algorithm"
+    - "scalability-capacity.auto-scaling.scale-in-protection"

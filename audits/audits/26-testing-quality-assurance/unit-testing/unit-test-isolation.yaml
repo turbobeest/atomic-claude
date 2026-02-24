@@ -1,0 +1,371 @@
+# ============================================================
+# AUDIT: Unit Test Isolation
+# ============================================================
+# Evaluates whether unit tests are properly isolated from external
+# dependencies and other tests.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.unit-testing.unit-test-isolation"
+  name: "Unit Test Isolation"
+  version: "1.0.0"
+  last_updated: "2026-01-22"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 26
+  subcategory: "unit-testing"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether unit tests are truly isolated - independent of
+    external systems (databases, networks, file systems), independent
+    of each other (no shared state), and independent of execution order.
+    Checks for proper dependency injection and mocking practices.
+
+  why_it_matters: |
+    Non-isolated tests are slow, flaky, and hard to debug. Tests that
+    depend on external systems fail due to environment issues, not code
+    bugs. Tests that share state produce inconsistent results and cannot
+    run in parallel. True isolation enables fast, reliable, parallelizable
+    test execution.
+
+  when_to_run:
+    - "Test suite maintenance"
+    - "Investigating flaky tests"
+    - "Before enabling parallel test execution"
+    - "Code review for test quality"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Source code with unit tests"
+    - type: "test_suite"
+      description: "Runnable test suite"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Ability to run tests in random order"
+
+discovery:
+  file_patterns:
+    - glob: "**/*.test.{js,ts}"
+      purpose: "JavaScript test files"
+    - glob: "**/test_*.py"
+      purpose: "Python test files"
+
+  code_patterns:
+    - pattern: "beforeAll|afterAll|beforeEach|afterEach"
+      type: "regex"
+      scope: "test"
+      purpose: "Test setup/teardown hooks"
+    - pattern: "@BeforeClass|@AfterClass|@Before|@After"
+      type: "regex"
+      scope: "test"
+      purpose: "JUnit lifecycle annotations"
+    - pattern: "fetch\\(|axios|http\\.get|request\\("
+      type: "regex"
+      scope: "test"
+      purpose: "Network calls in tests"
+    - pattern: "fs\\.|open\\(|readFile|writeFile"
+      type: "regex"
+      scope: "test"
+      purpose: "File system access in tests"
+    - pattern: "process\\.env|os\\.environ"
+      type: "regex"
+      scope: "test"
+      purpose: "Environment variable access"
+
+knowledge_sources:
+  specifications:
+    - id: "first-principles"
+      name: "F.I.R.S.T Principles of Unit Testing"
+      url: "https://github.com/ghsukumar/SFDC_Best_Practices/wiki/F.I.R.S.T-Principles-of-Unit-Testing"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "mocking-guide"
+      name: "Mocking Best Practices"
+      url: "https://martinfowler.com/articles/mocksArentStubs.html"
+      offline_cache: true
+    - id: "test-isolation"
+      name: "Test Isolation in Unit Tests"
+      url: "https://www.baeldung.com/java-test-isolation"
+      offline_cache: true
+
+  learning_resources:
+    - id: "unit-testing-patterns"
+      title: "xUnit Test Patterns"
+      type: "book"
+      reference: "ISBN 978-0131495050"
+
+tooling:
+  static_analysis:
+    - tool: "eslint-plugin-jest"
+      purpose: "Jest best practices linting"
+      offline_capable: true
+    - tool: "pytest-randomly"
+      purpose: "Randomize test order"
+      offline_capable: true
+    - tool: "junit-platform"
+      purpose: "Random test order in JUnit"
+      offline_capable: true
+
+  scripts:
+    - id: "isolation-check"
+      language: "bash"
+      purpose: "Check for isolation violations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Test Isolation Analysis ==="
+
+        echo "Network calls in tests:"
+        grep -r -E "(fetch|axios|http|request)\s*\(" --include='*.test.*' --include='test_*' . 2>/dev/null | wc -l
+
+        echo "File system access in tests:"
+        grep -r -E "(fs\.|open\(|readFile|writeFile)" --include='*.test.*' --include='test_*' . 2>/dev/null | wc -l
+
+        echo "Database calls in tests:"
+        grep -r -E "(\.query|\.execute|SELECT|INSERT|UPDATE)" --include='*.test.*' --include='test_*' . 2>/dev/null | wc -l
+
+        echo "Global state modifications:"
+        grep -r -E "(global\.|window\.|process\.env)" --include='*.test.*' --include='test_*' . 2>/dev/null | wc -l
+
+signals:
+  critical:
+    - id: "ISOLATION-CRIT-001"
+      signal: "Unit tests make real network calls"
+      evidence_pattern: "HTTP requests without mocking in unit tests"
+      explanation: |
+        Real network calls make tests slow, flaky, and dependent on
+        external services. Tests will fail due to network issues,
+        service outages, or rate limiting - not code bugs.
+      remediation: |
+        Mock all network dependencies:
+        - Use nock, msw, or similar for HTTP mocking
+        - Inject HTTP clients for easy stubbing
+        - Separate integration tests that need real services
+
+    - id: "ISOLATION-CRIT-002"
+      signal: "Unit tests access real database"
+      evidence_pattern: "Database queries without in-memory alternatives"
+      explanation: |
+        Database access makes tests slow, requires environment setup,
+        and creates shared state issues. Tests may interfere with each
+        other's data, causing non-deterministic failures.
+      remediation: |
+        Isolate database access:
+        - Use repository pattern with mock implementations
+        - Use in-memory databases for integration tests
+        - Separate unit tests from database integration tests
+
+  high:
+    - id: "ISOLATION-HIGH-001"
+      signal: "Tests depend on execution order"
+      evidence_pattern: "Tests fail when run in random order"
+      explanation: |
+        Order-dependent tests indicate shared state between tests.
+        This prevents parallel execution and causes mysterious failures
+        when test order changes.
+      remediation: |
+        Enable random test order to identify dependencies:
+        - Jest: --randomize flag
+        - pytest: pytest-randomly plugin
+        - JUnit: MethodOrderer.Random
+        Fix identified dependencies with proper setup/teardown.
+
+    - id: "ISOLATION-HIGH-002"
+      signal: "Tests share mutable global state"
+      evidence_pattern: "Tests modify global/static variables without cleanup"
+      explanation: |
+        Shared mutable state between tests causes non-deterministic
+        behavior. Tests that pass individually may fail together, or
+        the inverse, making debugging extremely difficult.
+      remediation: |
+        Reset all global state in beforeEach/afterEach:
+        - Clear caches
+        - Reset singletons
+        - Restore environment variables
+        - Use fresh mock instances per test
+
+  medium:
+    - id: "ISOLATION-MED-001"
+      signal: "Tests access file system directly"
+      evidence_pattern: "File read/write without virtual file system"
+      remediation: "Use mock file systems or isolated temp directories with cleanup"
+
+    - id: "ISOLATION-MED-002"
+      signal: "Tests depend on environment variables"
+      evidence_pattern: "process.env access without mocking"
+      remediation: "Mock environment variables or use dependency injection"
+
+  low:
+    - id: "ISOLATION-LOW-001"
+      signal: "Time-dependent tests without clock mocking"
+      evidence_pattern: "new Date() or time-based assertions without fake timers"
+
+  positive:
+    - id: "ISOLATION-POS-001"
+      signal: "All dependencies properly mocked"
+      evidence_pattern: "Consistent use of mocking framework"
+
+    - id: "ISOLATION-POS-002"
+      signal: "Tests pass in random order"
+      evidence_pattern: "Random order execution enabled and passing"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Scan for external dependencies"
+      description: |
+        Search test files for patterns indicating external system access.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find network calls"
+          command: "grep -r -l -E '(fetch|axios|http|request)\\(' --include='*.test.*' . 2>/dev/null | head -20"
+        - purpose: "Find database access"
+          command: "grep -r -l -E '(query|execute|connect)\\(' --include='*.test.*' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Tests with external dependencies"
+        - "Dependency type distribution"
+
+    - id: "2"
+      name: "Check mocking practices"
+      description: |
+        Verify that external dependencies are properly mocked.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find mock usage"
+          command: "grep -r -c 'jest.mock\\|mock\\.|Mock\\|patch\\|@Mock' --include='*.test.*' . 2>/dev/null | awk -F: '{sum+=$2} END {print sum}'"
+        - purpose: "Compare mocks to external calls"
+          command: "echo 'Manual comparison needed'"
+      expected_findings:
+        - "Mock usage patterns"
+        - "Unmocked dependencies"
+
+    - id: "3"
+      name: "Test order independence"
+      description: |
+        Run tests in random order to verify independence.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Run Jest in random order"
+          command: "npx jest --randomize 2>/dev/null || echo 'Run manually'"
+        - purpose: "Run pytest randomly"
+          command: "pytest -p pytest_randomly 2>/dev/null || echo 'Run manually'"
+      expected_findings:
+        - "Order-dependent test failures"
+        - "Random order pass rate"
+
+    - id: "4"
+      name: "Check setup/teardown practices"
+      description: |
+        Review test setup and teardown for proper state management.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find setup/teardown usage"
+          command: "grep -r -c 'beforeEach\\|afterEach\\|setUp\\|tearDown' --include='*.test.*' . 2>/dev/null | awk -F: '{sum+=$2} END {print sum}'"
+      expected_findings:
+        - "Setup/teardown coverage"
+        - "State cleanup practices"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "isolation_report"
+      format: "table"
+      sections:
+        - "External Dependencies Found"
+        - "Mocking Coverage"
+        - "Order Independence"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Isolation Analysis"
+        - "Remediation Plan"
+
+  confidence_guidance:
+    high: "Pattern analysis plus random order testing"
+    medium: "Pattern analysis only"
+    low: "Estimated from code structure"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "first-principles"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 5
+
+closeout_checklist:
+  - id: "isolation-001"
+    item: "External dependencies identified"
+    level: "CRITICAL"
+    verification: "grep -r -E '(fetch|axios|http)\\(' --include='*.test.*' . 2>/dev/null | wc -l"
+    expected: "Documented count"
+
+  - id: "isolation-002"
+    item: "Mocking practices verified"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm all external calls are mocked"
+    expected: "Confirmed by reviewer"
+
+  - id: "isolation-003"
+    item: "Random order execution tested"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Run tests in random order and document results"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Testability", "Reliability"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.unit-testing.unit-test-presence"
+    - "testing-quality-assurance.unit-testing.unit-test-speed"
+    - "testing-quality-assurance.test-effectiveness.test-flakiness"

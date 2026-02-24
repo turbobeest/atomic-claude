@@ -1,0 +1,397 @@
+audit:
+  id: security-trust.input-validation.nosql-injection
+  name: NoSQL Injection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines application code for NoSQL injection vulnerabilities where
+    untrusted user input is incorporated into NoSQL database queries without proper
+    validation or sanitization. NoSQL databases (MongoDB, CouchDB, Redis, Cassandra,
+    DynamoDB) use different query languages than SQL but are equally susceptible to
+    injection attacks through operator injection, JavaScript injection, and query
+    manipulation.
+  why_it_matters: |
+    NoSQL injection attacks can lead to unauthorized data access, data manipulation,
+    authentication bypass, and in severe cases, remote code execution. Unlike SQL
+    injection, NoSQL injection can execute within procedural languages, potentially
+    causing greater damage. The OWASP Top 10:2025 ranks Injection as #5, and NoSQL
+    databases are explicitly included in this category with 100% of applications
+    tested for injection vulnerabilities.
+  when_to_run:
+  - During security code reviews
+  - Before deploying applications using NoSQL databases
+  - After adding new database query functionality
+  - When integrating user input with database operations
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with NoSQL database interactions
+  access_requirements:
+  - Read access to application source code
+  - Access to database configuration files
+discovery:
+  code_patterns:
+  - pattern: \$where|\$regex|\$expr|\$function
+    type: regex
+    scope: source
+    purpose: Detect MongoDB operators that can enable injection
+  - pattern: \$ne|\$gt|\$lt|\$gte|\$lte|\$in|\$nin
+    type: regex
+    scope: source
+    purpose: Detect MongoDB comparison operators in user-controlled contexts
+  - pattern: \.find\(|\.(findOne|findById|findOneAndUpdate)\(
+    type: regex
+    scope: source
+    purpose: Identify MongoDB query methods
+  - pattern: eval\(|Function\(|setTimeout\(.*\$
+    type: regex
+    scope: source
+    purpose: Detect JavaScript evaluation in database context
+  - pattern: db\.collection\(|MongoClient|mongoose\.
+    type: regex
+    scope: source
+    purpose: Identify MongoDB connection and collection access
+  - pattern: JSON\.parse\(.*req\.
+    type: regex
+    scope: source
+    purpose: Detect JSON parsing of user input for query construction
+  file_patterns:
+  - glob: '**/*.js'
+    purpose: JavaScript/Node.js files using MongoDB
+  - glob: '**/*.ts'
+    purpose: TypeScript files with NoSQL operations
+  - glob: '**/*.py'
+    purpose: Python files using PyMongo or other NoSQL drivers
+  - glob: '**/models/**'
+    purpose: Database model definitions
+  - glob: '**/repositories/**'
+    purpose: Data access layer code
+knowledge_sources:
+  specifications:
+  - id: owasp-nosql-cheatsheet
+    name: OWASP NoSQL Security Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/NoSQL_Security_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  - id: owasp-injection-prevention
+    name: OWASP Injection Prevention Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Injection_Prevention_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  - id: cwe-943
+    name: 'CWE-943: Improper Neutralization of Special Elements in Data Query Logic'
+    url: https://cwe.mitre.org/data/definitions/943.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-wstg-nosql
+    name: OWASP Testing for NoSQL Injection
+    url: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/05.6-Testing_for_NoSQL_Injection
+    offline_cache: true
+  - id: owasp-top10-2025-injection
+    name: OWASP Top 10:2025 - A05 Injection
+    url: https://owasp.org/Top10/2025/A05_2025-Injection/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect NoSQL injection patterns
+    offline_capable: true
+  - tool: eslint-plugin-security
+    purpose: JavaScript security linting including injection detection
+    offline_capable: true
+  - tool: bandit
+    purpose: Python security linting for PyMongo injection patterns
+    offline_capable: true
+  scripts:
+  - id: nosql-injection-scan
+    language: bash
+    purpose: Scan for common NoSQL injection patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      # Scan for NoSQL injection vulnerabilities
+      echo "=== Scanning for NoSQL Injection Patterns ==="
+
+      # Check for dangerous MongoDB operators with user input
+      grep -rn --include="*.js" --include="*.ts" '\$where.*req\.' . 2>/dev/null
+      grep -rn --include="*.js" --include="*.ts" '\$regex.*req\.' . 2>/dev/null
+      grep -rn --include="*.js" --include="*.ts" '\$expr.*req\.' . 2>/dev/null
+
+      # Check for direct JSON parsing into queries
+      grep -rn --include="*.js" --include="*.ts" 'JSON\.parse.*req\.(body|query|params)' . 2>/dev/null
+signals:
+  critical:
+  - id: NOSQL-CRIT-001
+    signal: Direct user input in $where clause
+    evidence_pattern: \$where.*req\.(body|query|params)
+    explanation: |
+      The $where operator in MongoDB executes JavaScript code, allowing
+      attackers to inject arbitrary JavaScript. When combined with user input,
+      this can lead to authentication bypass, data exfiltration, or denial
+      of service. CWE-943.
+    remediation: Remove $where clauses entirely or use safe query operators with validated input
+    cwe: CWE-943
+  - id: NOSQL-CRIT-002
+    signal: Unsanitized user input in database query operators
+    evidence_pattern: find\(.*req\.(body|query|params).*\$
+    explanation: |
+      Passing unsanitized user input containing MongoDB operators like $ne,
+      $gt, $regex directly into queries enables operator injection attacks.
+      Attackers can bypass authentication by injecting {$ne: null} or
+      extract data through $regex queries. CWE-943.
+    remediation: Validate input types, use allowlists for query parameters, and sanitize operator characters
+    cwe: CWE-943
+  - id: NOSQL-CRIT-003
+    signal: JavaScript evaluation with user-controlled data
+    evidence_pattern: eval\(.*req\.|Function\(.*req\.
+    explanation: |
+      Using eval() or the Function constructor with user input in database
+      contexts enables arbitrary code execution within the database engine.
+      This is the most severe form of NoSQL injection. CWE-94.
+    remediation: Never use eval() or dynamic code execution with user input
+    cwe: CWE-94
+  high:
+  - id: NOSQL-HIGH-001
+    signal: Unvalidated JSON parsing for query construction
+    evidence_pattern: JSON\.parse\(req\.(body|query)
+    explanation: |
+      Parsing user-provided JSON directly into query objects allows attackers
+      to inject MongoDB operators. For example, {username: {$ne: null}}
+      could bypass authentication. CWE-943.
+    remediation: Use schema validation libraries, explicitly extract expected fields only
+    cwe: CWE-943
+  - id: NOSQL-HIGH-002
+    signal: Dynamic query construction from user input
+    evidence_pattern: \[req\.(body|query|params)\.
+    explanation: |
+      Using user input as property accessors for query construction allows
+      attackers to manipulate query structure and inject operators. CWE-943.
+    remediation: Use parameterized queries and validate input against an allowlist of field names
+    cwe: CWE-943
+  - id: NOSQL-HIGH-003
+    signal: $regex operator with unescaped user input
+    evidence_pattern: \$regex.*req\.(body|query|params)
+    explanation: |
+      Using $regex with unescaped user input can lead to ReDoS attacks
+      through malicious regex patterns, or data extraction through
+      carefully crafted patterns. CWE-943, CWE-1333.
+    remediation: Escape regex special characters or use text search instead of $regex
+    cwe: CWE-943
+  medium:
+  - id: NOSQL-MED-001
+    signal: Missing input type validation for query parameters
+    evidence_pattern: find\(\{.*:.*req\.(body|query|params)
+    explanation: |
+      Query parameters should be validated for expected types. String
+      inputs should remain strings, not objects that could contain
+      operators. CWE-20.
+    remediation: Implement strict type checking using typeof or schema validation
+    cwe: CWE-20
+  - id: NOSQL-MED-002
+    signal: Missing ODM/ORM sanitization layer
+    explanation: |
+      Direct use of low-level MongoDB driver without Mongoose or similar
+      ODM increases injection risk as type coercion and validation are
+      not automatic.
+    remediation: Use Mongoose, Typegoose, or similar ODM with schema definitions
+  positive:
+  - id: NOSQL-POS-001
+    signal: Schema validation using Mongoose or similar ODM
+  - id: NOSQL-POS-002
+    signal: Explicit type casting before query construction
+  - id: NOSQL-POS-003
+    signal: Use of parameterized queries with allowlisted fields
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify NoSQL database usage
+    description: |
+      Locate all files that interact with NoSQL databases by searching
+      for database driver imports and connection patterns.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find MongoDB/Mongoose usage in JavaScript/TypeScript
+      command: grep -rn --include='*.js' --include='*.ts' 'mongoose\|mongodb\|MongoClient' .
+    - purpose: Find PyMongo usage in Python
+      command: grep -rn --include='*.py' 'pymongo\|motor\|mongoengine' .
+    expected_findings:
+    - List of files with NoSQL database connections
+    - Database driver and ODM usage patterns
+  - id: '2'
+    name: Scan for dangerous query patterns
+    description: |
+      Search for query constructions that incorporate user input
+      without proper validation or sanitization.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find $where clauses
+      command: grep -rn --include='*.js' --include='*.ts' '\$where' .
+    - purpose: Find direct request body in queries
+      command: grep -rn --include='*.js' --include='*.ts' 'find.*req\.body\|findOne.*req\.body' .
+    - purpose: Find JSON parsing for queries
+      command: grep -rn --include='*.js' --include='*.ts' 'JSON\.parse.*req\.' .
+    expected_findings:
+    - Instances of dangerous operator usage
+    - User input flowing into query construction
+  - id: '3'
+    name: Analyze input validation mechanisms
+    description: |
+      Review how user input is validated before being used in
+      database queries. Check for type validation, schema enforcement,
+      and sanitization.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find schema definitions
+      command: grep -rn --include='*.js' --include='*.ts' 'new Schema\|mongoose\.Schema' .
+    - purpose: Find validation middleware
+      command: grep -rn --include='*.js' --include='*.ts' 'joi\|yup\|zod\|express-validator' .
+    expected_findings:
+    - Input validation library usage
+    - Schema-based type enforcement
+  - id: '4'
+    name: Run static analysis tools
+    description: |
+      Execute automated security scanning tools to detect
+      NoSQL injection vulnerabilities.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Run semgrep for NoSQL injection
+      command: semgrep --config=p/javascript-nosql-injection . 2>/dev/null || echo 'Semgrep not available'
+    - purpose: Run ESLint security plugin
+      command: 'npx eslint --plugin security --rule ''security/detect-non-literal-regexp: error'' . 2>/dev/null
+        || echo ''ESLint not configured'''
+    expected_findings:
+    - Automated detection of injection patterns
+    - Security rule violations
+  - id: '5'
+    name: Review authentication queries
+    description: |
+      Specifically audit authentication-related database queries
+      as these are high-value targets for injection attacks.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find authentication query patterns
+      command: grep -rn --include='*.js' --include='*.ts' 'findOne.*password\|findOne.*email\|findOne.*username'
+        .
+    expected_findings:
+    - Authentication bypass vulnerabilities
+    - Credential validation patterns
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Critical Vulnerabilities
+    - High-Risk Patterns
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence of user input in query operators without validation
+    medium: Query patterns that could be vulnerable depending on input handling
+    low: Potential issues requiring further investigation of data flow
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-nosql-cheatsheet
+      priority: required
+    - source_id: cwe-943
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough code analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: nosql-injection-001
+  item: No $where clauses with user input detected
+  level: CRITICAL
+  verification: grep -rn --include='*.js' --include='*.ts' '\$where.*req\.' . | wc -l | xargs -I {} test
+    {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: nosql-injection-002
+  item: No unvalidated JSON parsing for query construction
+  level: CRITICAL
+  verification: grep -rn --include='*.js' --include='*.ts' 'find.*JSON\.parse.*req\.' . | wc -l | xargs
+    -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: nosql-injection-003
+  item: Input validation library in use
+  level: BLOCKING
+  verification: grep -rn 'joi\|yup\|zod\|express-validator\|class-validator' . | head -1 | grep -q . &&
+    echo PASS || echo FAIL
+  expected: PASS
+- id: nosql-injection-004
+  item: Schema validation for database models
+  level: WARNING
+  verification: grep -rn 'mongoose\.Schema\|new Schema' . | head -1 | grep -q . && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - api-service
+    - microservice
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A03:2021-Injection
+  - framework: CWE
+    controls:
+    - CWE-943
+    - CWE-94
+    - CWE-20
+  - framework: PCI-DSS
+    controls:
+    - 6.5.1
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.sql-injection
+  - security-trust.input-validation.command-injection
+  - security-trust.authentication.credential-handling

@@ -1,0 +1,360 @@
+audit:
+  id: data-state-management.data-access-patterns.orm-usage
+  name: ORM Usage Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: data-state-management
+  category_number: 8
+  subcategory: data-access-patterns
+  tier: phd
+  estimated_duration: 120 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - performance
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the usage of Object-Relational Mapping (ORM) tools including
+    proper configuration, N+1 query prevention, lazy loading management,
+    transaction handling, and awareness of ORM-generated SQL. Analyzes
+    whether ORM usage patterns lead to efficient database interactions.
+  why_it_matters: |
+    ORMs abstract database complexity but can hide serious performance problems.
+    N+1 queries, excessive lazy loading, and inefficient mappings can make
+    applications orders of magnitude slower than necessary. Understanding
+    ORM behavior is critical for maintaining performance at scale.
+  when_to_run:
+  - Performance audits
+  - After ORM version upgrades
+  - Before production deployment
+  - When investigating slow queries
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with ORM models and queries
+  - type: orm_config
+    description: ORM configuration files
+  access_requirements:
+  - Read access to application source code
+  - Access to ORM configuration
+discovery:
+  code_patterns:
+  - pattern: '@Entity|@Table|@Column|Model\.|Entity\.'
+    type: regex
+    scope: source
+    purpose: Detect ORM entity definitions
+  - pattern: '@ManyToOne|@OneToMany|hasMany|belongsTo|ForeignKey'
+    type: regex
+    scope: source
+    purpose: Detect relationship mappings
+  - pattern: '@Query|createQueryBuilder|raw.*query|execute.*sql'
+    type: regex
+    scope: source
+    purpose: Detect custom queries
+  - pattern: eager|lazy|fetch.*type|join.*fetch
+    type: regex
+    scope: source
+    purpose: Detect loading strategies
+  file_patterns:
+  - glob: '**/entities/**'
+    purpose: Entity definitions
+  - glob: '**/models/**'
+    purpose: Model definitions
+  - glob: '**/*orm*.json'
+    purpose: ORM configuration
+knowledge_sources:
+  guides:
+  - id: jpa-performance
+    name: JPA Performance Best Practices
+    url: https://vladmihalcea.com/tutorials/hibernate/
+    offline_cache: true
+  - id: typeorm-relations
+    name: TypeORM Relations
+    url: https://typeorm.io/relations
+    offline_cache: true
+  - id: django-optimization
+    name: Django ORM Optimization
+    url: https://docs.djangoproject.com/en/stable/topics/db/optimization/
+    offline_cache: true
+  learning_resources:
+  - id: high-performance-java
+    title: High-Performance Java Persistence
+    type: book
+    reference: 'Vlad Mihalcea, ISBN: 978-9730228236'
+tooling:
+  static_analysis:
+  - tool: hibernate-analyzer
+    purpose: Detect Hibernate anti-patterns
+    offline_capable: true
+  - tool: eslint-plugin-typeorm
+    purpose: TypeORM usage linting
+    offline_capable: true
+  scripts:
+  - id: orm-usage-scan
+    language: bash
+    purpose: Analyze ORM usage patterns
+    source: inline
+    code: |
+      echo "=== ORM Usage Analysis ==="
+      echo "--- Entity definitions ---"
+      grep -rn "@Entity\|@Table\|class.*Model" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -30
+
+      echo "--- Relationship mappings ---"
+      grep -rn "@ManyToOne\|@OneToMany\|hasMany\|belongsTo\|ForeignKey" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -30
+
+      echo "--- Loading strategies ---"
+      grep -rn "eager\|lazy\|LAZY\|EAGER\|fetch.*=\|relations:" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: ORM-CRIT-001
+    signal: N+1 query patterns in loops
+    evidence_pattern: Accessing related entities inside iteration without preloading
+    explanation: |
+      N+1 queries occur when code iterates over N records and makes a
+      separate query for each record's related data. A loop over 100
+      records becomes 101 queries. This is the most common ORM
+      performance killer.
+    remediation: Use eager loading, join fetch, or batch loading for related data
+  - id: ORM-CRIT-002
+    signal: Lazy loading in serialization context
+    evidence_pattern: Entities with lazy relations serialized to JSON
+    explanation: |
+      When lazy-loaded entities are serialized (e.g., for API response),
+      each lazy property access triggers a database query. This causes
+      N+1 queries and can happen after transaction is closed (causing errors).
+    remediation: Load required relations eagerly before serialization; use DTOs
+  high:
+  - id: ORM-HIGH-001
+    signal: SELECT * when few columns needed
+    evidence_pattern: Loading full entities when only ID or name needed
+    explanation: |
+      ORMs often load all columns by default. When only a few fields are
+      needed, this wastes memory, network bandwidth, and can prevent
+      index-only scans.
+    remediation: Use projections or DTOs to load only needed columns
+  - id: ORM-HIGH-002
+    signal: No query logging in development
+    evidence_pattern: ORM query logging disabled
+    explanation: |
+      Without seeing generated SQL, developers can't identify inefficient
+      queries. N+1 patterns and missing indices go unnoticed until
+      production performance issues.
+    remediation: Enable SQL logging in development; review generated queries
+  - id: ORM-HIGH-003
+    signal: Open session in view pattern
+    evidence_pattern: Hibernate session or context open across entire request
+    explanation: |
+      Open Session in View allows lazy loading in view layer but makes
+      database access unpredictable. Any template access can trigger
+      queries, making performance analysis difficult.
+    remediation: Load all needed data in service layer; close session before view
+  medium:
+  - id: ORM-MED-001
+    signal: String-based queries without parameterization
+    evidence_pattern: String concatenation in query building
+    remediation: Use parameterized queries or query builder
+  - id: ORM-MED-002
+    signal: Missing cascade configuration
+    evidence_pattern: Related entities saved manually in loops
+    remediation: Configure appropriate cascade settings
+  - id: ORM-MED-003
+    signal: Inconsistent fetch strategies across code
+    evidence_pattern: Same relation lazy in one query, eager in another
+    remediation: Establish consistent loading strategies per use case
+  low:
+  - id: ORM-LOW-001
+    signal: No second-level cache configuration
+    evidence_pattern: ORM caching not configured for read-heavy entities
+    remediation: Configure second-level cache for appropriate entities
+  - id: ORM-LOW-002
+    signal: Entity equals/hashCode using database ID
+    evidence_pattern: Generated ID in equals before entity is persisted
+    remediation: Use business key for equals/hashCode or handle transient state
+  positive:
+  - id: ORM-POS-001
+    signal: Query optimization with explicit loading
+    evidence_pattern: Consistent use of eager loading or fetch joins
+  - id: ORM-POS-002
+    signal: Query logging enabled in development
+    evidence_pattern: SQL logging configured for dev environment
+  - id: ORM-POS-003
+    signal: DTOs used for read operations
+    evidence_pattern: Projections or DTOs instead of full entities
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory ORM Configuration
+    description: |
+      Review ORM setup and configuration.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find ORM configuration
+      command: |
+        find . -type f \( -name "ormconfig*" -o -name "*orm*.json" -o -name "persistence.xml" \) \
+          -not -path "*/node_modules/*" 2>/dev/null
+    - purpose: Find entity definitions
+      command: |
+        grep -rn "@Entity\|@Table" --include="*.ts" --include="*.java" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - ORM configuration details
+    - Entity inventory
+  - id: '2'
+    name: Analyze Relationship Mappings
+    description: |
+      Review how relationships are configured.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find relationship definitions
+      command: |
+        grep -rn "@ManyToOne\|@OneToMany\|@ManyToMany\|hasMany\|belongsTo" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -40
+    - purpose: Find loading configurations
+      command: |
+        grep -rn "FetchType\|eager\|lazy\|relations:" \
+          --include="*.ts" --include="*.java" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Relationship mapping patterns
+    - Loading strategy distribution
+  - id: '3'
+    name: Check for N+1 Patterns
+    description: |
+      Identify potential N+1 query scenarios.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find loops accessing entities
+      command: |
+        grep -rn "for.*\.find\|forEach.*\.get\|map.*\.load" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | grep -v test | head -30
+    - purpose: Find lazy loading access
+      command: |
+        grep -rn "\.user\.\|\.orders\.\|\.items\.\|\.children\." \
+          --include="*.ts" --include="*.java" . 2>/dev/null | \
+          grep -v node_modules | grep -v test | head -30
+    expected_findings:
+    - Potential N+1 scenarios
+    - Lazy loading access points
+  - id: '4'
+    name: Review Query Patterns
+    description: |
+      Analyze custom queries and query building.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find custom queries
+      command: |
+        grep -rn "createQueryBuilder\|@Query\|raw.*sql\|execute" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -40
+    expected_findings:
+    - Query pattern analysis
+    - Raw SQL usage
+  - id: '5'
+    name: Check SQL Logging
+    description: |
+      Verify query logging configuration.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find logging configuration
+      command: |
+        grep -rn "logging.*true\|show_sql\|debug.*query\|LOG_QUERIES" \
+          --include="*.json" --include="*.yaml" --include="*.properties" . 2>/dev/null | head -20
+    expected_findings:
+    - SQL logging status
+    - Debug configuration
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - entity_inventory
+    - n_plus_one_risks
+    - loading_strategy_analysis
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - ORM Configuration
+    - Relationship Analysis
+    - Performance Risks
+    - Recommendations
+  confidence_guidance:
+    high: Clear N+1 pattern or lazy loading in serialization
+    medium: Potential N+1 based on code structure
+    low: Requires query log analysis to confirm issues
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: jpa-performance
+      priority: required
+    - source_id: high-performance-java
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    performance:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: orm-001
+  item: No N+1 query patterns in critical paths
+  level: CRITICAL
+  verification: |
+    grep -rn "for.*await.*find\|forEach.*await.*get" \
+      --include="*.ts" --include="*.js" . 2>/dev/null | \
+      grep -v node_modules | grep -v test | wc -l | \
+      xargs -I {} test {} -lt 5 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: orm-002
+  item: SQL logging enabled in development
+  level: BLOCKING
+  verification: |
+    grep -rn "logging.*true\|show_sql\|debug.*query" \
+      --include="*.json" --include="*.yaml" --include="*.properties" . 2>/dev/null | \
+      wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: orm-003
+  item: Eager loading used for serialized relations
+  level: WARNING
+  verification: manual
+  verification_notes: Review entities returned from API for eager loading of included relations
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Performance Efficiency
+relationships:
+  commonly_combined:
+  - data-state-management.data-access-patterns.query-pattern
+  - data-state-management.data-access-patterns.repository-pattern
+  - performance-efficiency.database.query-optimization

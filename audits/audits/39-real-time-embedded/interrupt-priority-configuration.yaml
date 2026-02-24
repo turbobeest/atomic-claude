@@ -1,0 +1,268 @@
+audit:
+  id: real-time-embedded.interrupt-handling.interrupt-priority-configuration
+  name: Interrupt Priority Configuration Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: real-time-embedded
+  category_number: 39
+  subcategory: interrupt-handling
+  tier: expert
+  estimated_duration: 3-5 hours  # median: 4h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: embedded-systems
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews interrupt priority assignments for the embedded system including
+    hardware interrupt controller configuration, RTOS kernel priority threshold,
+    and per-interrupt priority levels. Examines priority grouping, preemption
+    settings, and relationship between interrupt priorities and task priorities.
+  why_it_matters: |
+    Interrupt priority configuration determines which interrupts can preempt
+    others and affects latency for all interrupt sources. Incorrect configuration
+    can lead to priority inversion at the interrupt level, excessive latency
+    for critical events, or failure to properly integrate with RTOS scheduling.
+    ARM Cortex-M BASEPRI/NVIC configuration is particularly error-prone.
+  when_to_run:
+  - During initial system setup
+  - After adding new interrupts
+  - When debugging latency issues
+  - After RTOS integration
+  - Before safety certification
+prerequisites:
+  required_artifacts:
+  - type: interrupt_configuration
+    description: Interrupt controller configuration code
+  - type: priority_map
+    description: Interrupt priority assignments
+  - type: processor_manual
+    description: Interrupt controller documentation
+  - type: rtos_configuration
+    description: RTOS interrupt settings
+  access_requirements:
+  - Access to source code
+  - Access to hardware documentation
+  - Debug probe access
+  - RTOS documentation
+discovery:
+  file_patterns:
+  - glob: '**/nvic*.c'
+    purpose: Find NVIC configuration
+  - glob: '**/interrupt_config*.c'
+    purpose: Find interrupt configuration
+  - glob: '**/FreeRTOSConfig.h'
+    purpose: Find RTOS interrupt settings
+  - glob: '**/irq_priority*.h'
+    purpose: Find priority definitions
+  - glob: '**/hal_nvic*.c'
+    purpose: Find HAL interrupt code
+knowledge_sources:
+  guides:
+  - id: arm-nvic-guide
+    name: ARM NVIC Configuration Guide
+    url: https://developer.arm.com/documentation/dui0553/latest
+  - id: freertos-interrupts
+    name: FreeRTOS and Interrupt Priorities
+    url: https://www.freertos.org/RTOS-Cortex-M3-M4.html
+  standards:
+  - id: arm-cortex-m
+    name: ARM Cortex-M Technical Reference
+    relevance: NVIC architecture
+  - id: autosar-os
+    name: AUTOSAR OS Specification
+    relevance: Interrupt category mapping
+tooling:
+  analysis_tools:
+  - tool: debugger
+    purpose: NVIC register inspection
+  - tool: svd-viewer
+    purpose: Peripheral register view
+  - tool: tracealyzer
+    purpose: Interrupt preemption visualization
+signals:
+  critical:
+  - id: IPC-CRIT-001
+    signal: RTOS-aware ISR below kernel priority
+    evidence_indicators:
+    - ISR calls RTOS API but priority too high
+    - BASEPRI doesn't mask the interrupt
+    - Kernel corruption possible
+    explanation: |
+      RTOS kernel assumes it masks certain interrupts via BASEPRI.
+      ISRs above this priority calling RTOS APIs corrupt kernel state.
+    remediation: Ensure all RTOS-aware ISRs are at managed priority levels
+  - id: IPC-CRIT-002
+    signal: Safety-critical interrupt at low priority
+    evidence_indicators:
+    - Critical interrupt can be preempted by non-critical
+    - Safety function may be delayed
+    - Priority assignment violates safety requirements
+    explanation: |
+      Safety-critical interrupts should have highest priorities to
+      ensure they are never delayed by less important work.
+    remediation: Assign highest priorities to safety-critical interrupts
+  high:
+  - id: IPC-HIGH-001
+    signal: Priority grouping misconfigured
+    evidence_indicators:
+    - PRIGROUP doesn't match design intent
+    - Preemption behavior unexpected
+    - Sub-priority not working as expected
+    explanation: |
+      Priority grouping determines preemption vs sub-priority split.
+      Misconfiguration causes unexpected preemption behavior.
+    remediation: Configure PRIGROUP appropriately for design
+  - id: IPC-HIGH-002
+    signal: Interrupt priorities not centrally managed
+    evidence_indicators:
+    - Priorities scattered across code
+    - Magic numbers used
+    - No priority scheme documented
+    explanation: |
+      Scattered priority definitions make it difficult to understand
+      and maintain consistent priority scheme.
+    remediation: Centralize priority definitions in single header
+  medium:
+  - id: IPC-MED-001
+    signal: Sparse priority usage
+    evidence_indicators:
+    - Large gaps between used priorities
+    - No room for additional interrupts
+    - Priority assignment ad-hoc
+    explanation: |
+      Sparse priority usage wastes available priority levels and
+      may not leave room for future interrupts at appropriate levels.
+    remediation: Plan priority scheme with growth in mind
+  - id: IPC-MED-002
+    signal: All interrupts at same priority
+    evidence_indicators:
+    - No differentiation between interrupts
+    - Default priorities used
+    - No preemption optimization
+    explanation: |
+      Equal priorities prevent proper preemption. Critical interrupts
+      should preempt less important ones.
+    remediation: Differentiate priorities based on timing requirements
+  low:
+  - id: IPC-LOW-001
+    signal: Priority scheme not documented
+    evidence_indicators:
+    - No priority map
+    - Assignment rationale missing
+    - Relationship to timing not explained
+    explanation: |
+      Documentation supports maintenance and helps prevent errors
+      when modifying interrupt configuration.
+    remediation: Document priority scheme and rationale
+  positive:
+  - id: IPC-POS-001
+    signal: Well-designed priority scheme
+    evidence_indicators:
+    - Priorities match timing requirements
+    - Centrally managed definitions
+    - RTOS integration correct
+  - id: IPC-POS-002
+    signal: Priority configuration documented
+    evidence_indicators:
+    - Complete priority map
+    - Rationale for assignments
+    - Relationship to requirements
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review Priority Scheme
+    description: Map all interrupt priorities and grouping
+    duration_estimate: 1 hour
+  - id: '2'
+    name: Verify RTOS Integration
+    description: Check kernel priority threshold configuration
+    duration_estimate: 1 hour
+  - id: '3'
+    name: Analyze Preemption Behavior
+    description: Trace actual preemption patterns
+    duration_estimate: 1 hour
+  - id: '4'
+    name: Verify Criticality Alignment
+    description: Check priorities match safety criticality
+    duration_estimate: 30 minutes
+  - id: '5'
+    name: Check Configuration Consistency
+    description: Verify all priority settings are consistent
+    duration_estimate: 30 minutes
+  - id: '6'
+    name: Document Findings
+    description: Compile analysis results and recommendations
+    duration_estimate: 30 minutes
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Priority Scheme Analysis
+    - RTOS Integration Review
+    - Preemption Analysis
+    - Recommendations
+closeout_checklist:
+- id: ipc-001
+  item: Priority scheme mapped
+  level: HIGH
+  verification: manual
+- id: ipc-002
+  item: RTOS integration verified
+  level: CRITICAL
+  verification: manual
+- id: ipc-003
+  item: Preemption analyzed
+  level: HIGH
+  verification: automated
+- id: ipc-004
+  item: Criticality alignment checked
+  level: CRITICAL
+  verification: manual
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - safety-critical
+    - real-time
+  compliance_mappings:
+  - framework: DO-178C
+    control: 6.3.1
+    description: Interrupt architecture
+  - framework: ISO 26262
+    control: Part 6
+    description: Priority and resource management
+  - framework: AUTOSAR
+    control: OS
+    description: ISR categories and priorities
+relationships:
+  commonly_combined:
+  - real-time-embedded.interrupt-handling.isr-latency-analysis
+  - real-time-embedded.rtos-configuration.task-priority-analysis
+  depends_on:
+  - hardware.interrupt-controller
+  feeds_into:
+  - real-time-embedded.interrupt-handling.isr-latency-analysis
+  - safety.interrupt-safety
+
+# Glossary of domain-specific terms:
+glossary:
+  "WCET": "Worst-Case Execution Time - maximum possible execution time for a code path"
+  "ISR": "Interrupt Service Routine - function executed in response to hardware interrupt"
+  "jitter": "Variation in timing between expected and actual execution"

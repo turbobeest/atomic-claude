@@ -1,0 +1,310 @@
+audit:
+  id: testing-quality-assurance.e2e-testing.e2e-test-speed
+  name: E2E Test Speed
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: testing-quality-assurance
+  category_number: 26
+  subcategory: e2e-testing
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: medium
+  scope: testing
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates E2E test execution speed including total suite duration,
+    individual test times, parallelization effectiveness, and startup
+    overhead. Identifies slow tests and optimization opportunities to
+    improve CI pipeline speed.
+  why_it_matters: |
+    Slow E2E tests bottleneck CI/CD pipelines and delay feedback.
+    Developers wait longer for results, reducing productivity.
+    Long test cycles discourage frequent testing and slow release
+    velocity. Fast E2E tests enable rapid iteration and deployment.
+  when_to_run:
+  - CI pipeline optimization
+  - Test suite maintenance
+  - After adding new E2E tests
+  - Developer experience improvement
+prerequisites:
+  required_artifacts:
+  - type: e2e_tests
+    description: E2E test suite
+  - type: ci_logs
+    description: CI pipeline execution logs
+  access_requirements:
+  - Source code repository access
+  - CI/CD system access
+  - Test execution capability
+discovery:
+  metrics_queries:
+  - system: CI/CD
+    query: e2e_test_duration_seconds
+    purpose: Total E2E suite duration
+    threshold: < 15 minutes
+  - system: Test Runner
+    query: individual_test_duration
+    purpose: Per-test execution time
+    threshold: < 60 seconds per test
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: e2e-performance
+    name: E2E Test Performance Optimization
+    url: https://playwright.dev/docs/ci
+    offline_cache: true
+  - id: parallel-testing
+    name: Parallel Test Execution
+    url: https://docs.cypress.io/guides/guides/parallelization
+    offline_cache: true
+  learning_resources:
+  - id: test-speed
+    title: Optimizing Test Execution Time
+    type: article
+    reference: https://circleci.com/blog/reduce-testing-time/
+tooling:
+  infrastructure_tools:
+  - tool: Cypress Dashboard
+    purpose: Test parallelization and analytics
+    offline_capable: false
+  - tool: Playwright sharding
+    purpose: Built-in test sharding
+    offline_capable: false
+  scripts:
+  - id: e2e-timing
+    language: bash
+    purpose: Measure E2E test performance
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== E2E Test Speed Analysis ==="
+
+      echo "Running E2E tests with timing..."
+      start=$(date +%s)
+
+      # Run tests
+      if [ -f "cypress.config.js" ] || [ -f "cypress.config.ts" ]; then
+        npx cypress run --reporter json 2>/dev/null | tail -20
+      elif [ -f "playwright.config.ts" ]; then
+        npx playwright test --reporter=json 2>/dev/null | tail -20
+      fi
+
+      end=$(date +%s)
+      echo ""
+      echo "Total duration: $((end - start)) seconds"
+signals:
+  critical:
+  - id: E2ESPEED-CRIT-001
+    signal: E2E suite takes more than 30 minutes
+    evidence_threshold: Total E2E execution > 1800 seconds
+    explanation: |
+      A 30+ minute E2E suite severely impacts development velocity.
+      Developers avoid running E2E tests locally and CI feedback
+      is too slow for rapid iteration. This often leads to skipping
+      E2E tests entirely.
+    remediation: |
+      Optimize E2E suite performance:
+      1. Enable parallel execution across machines
+      2. Identify and optimize slowest tests
+      3. Remove redundant tests
+      4. Use API shortcuts for test setup
+      5. Run subset for PRs, full suite on merge
+  - id: E2ESPEED-CRIT-002
+    signal: Individual tests take more than 5 minutes
+    evidence_threshold: Any single E2E test > 300 seconds
+    explanation: |
+      Tests taking 5+ minutes are testing too much or have
+      severe performance issues. They disproportionately impact
+      total suite time and are likely testing integration rather
+      than single journeys.
+    remediation: |
+      Split or optimize long tests:
+      - Break into smaller focused tests
+      - Use API calls for setup instead of UI
+      - Check for unnecessary waits
+      - Verify no redundant steps
+  high:
+  - id: E2ESPEED-HIGH-001
+    signal: No parallel execution configured
+    evidence_pattern: Tests run sequentially despite multiple scenarios
+    explanation: |
+      Sequential E2E execution wastes time. Modern frameworks
+      support parallelization that can cut execution time
+      dramatically with minimal configuration.
+    remediation: |
+      Enable parallel execution:
+      - Cypress: Use cypress-parallel or Dashboard
+      - Playwright: --workers flag
+      - Configure CI with multiple runners
+  - id: E2ESPEED-HIGH-002
+    signal: Excessive UI setup for each test
+    evidence_pattern: Tests navigate through UI for setup instead of using API
+    explanation: |
+      Using the UI for test setup multiplies execution time.
+      Creating test data through APIs is much faster and equally
+      valid for testing the actual journey.
+    remediation: |
+      Use API shortcuts for setup:
+      - Create test users via API
+      - Set up test data via API
+      - Login via API, then start UI test
+      - Reserve UI for actual journey under test
+  medium:
+  - id: E2ESPEED-MED-001
+    signal: Application startup included in each test
+    evidence_threshold: Each test restarts the application
+    remediation: Use shared application instance across test suite
+  - id: E2ESPEED-MED-002
+    signal: Redundant navigation between tests
+    evidence_pattern: Each test starts from home page unnecessarily
+    remediation: Start tests from appropriate state, not always home
+  low:
+  - id: E2ESPEED-LOW-001
+    signal: Test artifacts (screenshots, videos) always generated
+    evidence_pattern: Videos recorded even on success
+  positive:
+  - id: E2ESPEED-POS-001
+    signal: E2E suite completes in under 15 minutes
+    evidence_threshold: Total time < 900 seconds
+  - id: E2ESPEED-POS-002
+    signal: Effective parallelization configured
+    evidence_pattern: Tests distributed across multiple workers
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Measure total suite time
+    description: |
+      Run the full E2E suite and measure total duration.
+    duration_estimate: Variable
+    commands:
+    - purpose: Time E2E execution
+      command: time npx cypress run 2>&1 | tail -20 || time npx playwright test 2>&1 | tail -20
+    expected_findings:
+    - Total suite duration
+    - Pass/fail summary
+  - id: '2'
+    name: Identify slow tests
+    description: |
+      Find the slowest individual tests.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Get test timing report
+      command: cat cypress/results/*.json 2>/dev/null | jq '.stats.duration' || echo 'Check test runner
+        output'
+    expected_findings:
+    - Slowest tests list
+    - Time distribution
+  - id: '3'
+    name: Check parallelization
+    description: |
+      Verify parallel execution configuration.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check Cypress parallel config
+      command: cat cypress.config.* 2>/dev/null | grep -E 'parallel|numTestsKeptInMemory'
+    - purpose: Check Playwright workers
+      command: cat playwright.config.* 2>/dev/null | grep -E 'workers|fullyParallel'
+    expected_findings:
+    - Parallelization status
+    - Worker configuration
+  - id: '4'
+    name: Analyze setup patterns
+    description: |
+      Check if tests use efficient setup patterns.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find UI setup patterns
+      command: grep -r 'cy.visit\|page.goto' --include='*.cy.*' --include='*.spec.*' . 2>/dev/null | wc
+        -l
+    - purpose: Find API setup patterns
+      command: grep -r 'cy.request\|request.post' --include='*.cy.*' --include='*.spec.*' . 2>/dev/null
+        | wc -l
+    expected_findings:
+    - UI vs API setup ratio
+    - Optimization opportunities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: performance_report
+    format: table
+    sections:
+    - Suite Duration
+    - Slowest Tests
+    - Parallelization Status
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Performance Analysis
+    - Optimization Recommendations
+  confidence_guidance:
+    high: Actual execution with timing
+    medium: Configuration analysis
+    low: Estimated from CI logs
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: e2e-performance
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires execution analysis
+    full:
+      included: true
+      priority: 8
+closeout_checklist:
+- id: e2espeed-001
+  item: Suite duration measured
+  level: CRITICAL
+  verification: manual
+  verification_notes: Document total E2E suite time
+  expected: Confirmed by reviewer
+- id: e2espeed-002
+  item: Slowest tests identified
+  level: BLOCKING
+  verification: manual
+  verification_notes: List top 10 slowest tests
+  expected: Confirmed by reviewer
+- id: e2espeed-003
+  item: Parallelization assessed
+  level: WARNING
+  verification: manual
+  verification_notes: Document parallel execution configuration
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: DevOps Metrics
+    controls:
+    - Lead Time
+    - CI Duration
+relationships:
+  commonly_combined:
+  - testing-quality-assurance.e2e-testing.e2e-test-stability
+  - testing-quality-assurance.e2e-testing.e2e-test-coverage
+  - cicd-pipeline.build-performance.build-time

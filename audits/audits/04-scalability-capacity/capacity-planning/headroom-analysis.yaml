@@ -1,0 +1,290 @@
+# ============================================================
+# AUDIT FILE: Headroom Analysis Audit
+# ============================================================
+
+audit:
+  id: "scalability-capacity.capacity-planning.headroom-analysis"
+  name: "Headroom Analysis Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "capacity-planning"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes the capacity headroom (spare capacity) across all system
+    components to assess readiness for traffic spikes, growth, and
+    failure scenarios. Reviews current utilization, maximum capacity,
+    and the buffer maintained for unexpected demand.
+
+  why_it_matters: |
+    Adequate headroom provides resilience against traffic spikes, allows
+    graceful handling of component failures, and provides runway for
+    growth. Insufficient headroom leads to performance degradation under
+    load and service outages. Excessive headroom wastes infrastructure
+    budget.
+
+  when_to_run:
+    - "Monthly as part of capacity reviews"
+    - "Before expected traffic events"
+    - "After capacity changes"
+    - "When approaching utilization thresholds"
+
+prerequisites:
+  required_artifacts:
+    - type: "metrics"
+      description: "Current resource utilization metrics"
+    - type: "configuration"
+      description: "Resource limits and quotas"
+    - type: "documentation"
+      description: "Capacity thresholds and policies"
+
+  access_requirements:
+    - "Monitoring system access"
+    - "Cloud provider quota information"
+    - "Capacity planning documentation"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "1 - (avg(rate(container_cpu_usage_seconds_total[5m])) / avg(kube_pod_container_resource_limits{resource='cpu'}))"
+      purpose: "Calculate CPU headroom percentage"
+    - system: "Prometheus"
+      query: "1 - (avg(container_memory_usage_bytes) / avg(kube_pod_container_resource_limits{resource='memory'}))"
+      purpose: "Calculate memory headroom percentage"
+    - system: "CloudWatch"
+      query: "100 - CPUUtilization"
+      purpose: "Calculate EC2 CPU headroom"
+
+  file_patterns:
+    - glob: "**/quotas*.yaml"
+      purpose: "Resource quota configurations"
+    - glob: "**/limits*.yaml"
+      purpose: "Resource limit configurations"
+
+knowledge_sources:
+  guides:
+    - id: "google-headroom"
+      name: "Google SRE - Handling Overload"
+      url: "https://sre.google/sre-book/handling-overload/"
+      offline_cache: true
+    - id: "aws-rightsizing"
+      name: "AWS Right Sizing"
+      url: "https://docs.aws.amazon.com/cost-management/latest/userguide/ce-rightsizing.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Check resource requests and limits"
+      command: "kubectl top nodes"
+    - tool: "aws-cli"
+      purpose: "Check service quotas"
+      command: "aws service-quotas list-service-quotas --service-code ec2"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "100 * (1 - avg(rate(cpu_usage[5m])) / avg(cpu_limit))"
+      purpose: "Calculate percentage headroom"
+    - system: "Grafana"
+      query: "Headroom dashboard across all services"
+      purpose: "Visualize headroom trends"
+
+signals:
+  critical:
+    - id: "SCALE-HR-CRIT-001"
+      signal: "Critical component below minimum headroom threshold"
+      evidence_threshold: "Utilization >90% for critical services"
+      explanation: |
+        Near-zero headroom means no capacity for traffic spikes or
+        failure recovery. A minor increase in load or single instance
+        failure could cause service degradation or outage.
+      remediation: "Immediately provision additional capacity"
+
+  high:
+    - id: "SCALE-HR-HIGH-001"
+      signal: "Multiple services approaching headroom threshold"
+      explanation: "Several services >80% utilization simultaneously"
+      remediation: "Prioritize and address approaching capacity limits"
+    - id: "SCALE-HR-HIGH-002"
+      signal: "No headroom policy defined"
+      explanation: "Organization lacks defined minimum headroom requirements"
+      remediation: "Establish headroom policies by service criticality"
+
+  medium:
+    - id: "SCALE-HR-MED-001"
+      signal: "Headroom below target but above critical threshold"
+      remediation: "Plan capacity increase in next planning cycle"
+    - id: "SCALE-HR-MED-002"
+      signal: "Excessive headroom wasting resources"
+      remediation: "Right-size or implement auto-scaling"
+
+  low:
+    - id: "SCALE-HR-LOW-001"
+      signal: "Headroom metrics not consistently tracked"
+
+  positive:
+    - id: "SCALE-HR-POS-001"
+      signal: "Healthy headroom maintained across all services"
+    - id: "SCALE-HR-POS-002"
+      signal: "Headroom monitoring and alerting in place"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Define Headroom Requirements"
+      description: |
+        Establish or document the headroom requirements based on
+        service criticality, traffic variability, and scaling speed.
+      duration_estimate: "30 min"
+      questions:
+        - "What are the defined headroom targets?"
+        - "How do targets vary by service criticality?"
+        - "What factors influence headroom requirements?"
+      expected_findings:
+        - "Headroom requirements documentation"
+        - "Variability by service tier"
+
+    - id: "2"
+      name: "Measure Current Utilization"
+      description: |
+        Collect current utilization metrics for compute, memory,
+        storage, and network across all services.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Get node utilization"
+          command: "kubectl top nodes"
+        - purpose: "Get pod utilization"
+          command: "kubectl top pods -A"
+      expected_findings:
+        - "Current utilization per service"
+        - "Resource type breakdown"
+
+    - id: "3"
+      name: "Calculate Headroom Percentages"
+      description: |
+        Calculate available headroom as percentage of maximum
+        capacity for each service and resource type.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Headroom percentage per service"
+        - "Services below target threshold"
+        - "Trend analysis"
+
+    - id: "4"
+      name: "Assess Headroom Adequacy"
+      description: |
+        Evaluate whether current headroom is sufficient for expected
+        traffic patterns, growth, and failure scenarios.
+      duration_estimate: "45 min"
+      questions:
+        - "Can current headroom absorb typical traffic spikes?"
+        - "Is there capacity for N-1 failure scenarios?"
+        - "How long until headroom is exhausted at projected growth?"
+      expected_findings:
+        - "Adequacy assessment"
+        - "Time to exhaustion projections"
+        - "Risk identification"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Headroom Requirements"
+        - "Current State Analysis"
+        - "Risk Assessment"
+        - "Recommendations"
+
+    - type: "visualization"
+      format: "chart"
+      sections:
+        - "Headroom by Service"
+        - "Trend Analysis"
+
+  confidence_guidance:
+    high: "Real-time metrics with historical trend analysis"
+    medium: "Current metrics without trend analysis"
+    low: "Estimated based on configuration review"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "google-headroom"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "Quick headroom check valuable for rapid assessment"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "headroom-analysis-001"
+    item: "Headroom requirements defined"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm headroom targets documented"
+    expected: "Confirmed by reviewer"
+
+  - id: "headroom-analysis-002"
+    item: "Current utilization measured"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify utilization metrics collected"
+    expected: "Confirmed by reviewer"
+
+  - id: "headroom-analysis-003"
+    item: "Services below threshold identified"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm at-risk services documented"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1", "CC7.5"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.capacity-planning.capacity-model"
+    - "scalability-capacity.capacity-planning.peak-load-analysis"

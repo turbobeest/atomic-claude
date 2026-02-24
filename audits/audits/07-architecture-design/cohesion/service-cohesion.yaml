@@ -1,0 +1,354 @@
+audit:
+  id: architecture-design.cohesion.service-cohesion
+  name: Service Cohesion Analysis
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: architecture-design
+  category_number: 7
+  subcategory: cohesion
+  tier: phd
+  estimated_duration: 3-5 hours  # median: 4h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: architecture
+  default_profiles:
+  - full
+  - architecture
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit assesses service-level cohesion in distributed systems,
+    evaluating whether each service has a single, well-defined business
+    capability and appropriate bounded context. It examines service API
+    surface, data ownership, and operational independence.
+  why_it_matters: |
+    Poor service cohesion leads to:
+    - Distributed monolith - microservice overhead without benefits
+    - Cross-service data dependencies and eventual consistency issues
+    - Deployment coupling - services must deploy together
+    - Team coordination overhead
+    - Performance problems from chattiness
+    Well-cohesive services enable independent development and deployment.
+  when_to_run:
+  - During microservice architecture reviews
+  - Before extracting services from monolith
+  - When experiencing coordination issues between services
+  - When services have excessive API calls between them
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Service source code
+  - type: api_definitions
+    description: Service API contracts (OpenAPI, gRPC)
+  - type: architecture_documentation
+    description: Service boundaries and responsibilities
+  access_requirements:
+  - Read access to all service repositories
+  - Access to API documentation
+  - Service dependency information
+discovery:
+  code_patterns:
+  - pattern: RestTemplate|WebClient|HttpClient|fetch\(
+    type: regex
+    scope: source
+    purpose: Find inter-service HTTP calls
+  - pattern: '@FeignClient|@GrpcClient'
+    type: regex
+    scope: source
+    purpose: Find service client annotations
+  - pattern: kafka|rabbitmq|sns|sqs|eventbridge
+    type: regex
+    scope: source
+    purpose: Find async messaging patterns
+  file_patterns:
+  - glob: '**/openapi.yaml'
+    purpose: REST API definitions
+  - glob: '**/*.proto'
+    purpose: gRPC service definitions
+  - glob: '**/docker-compose.yaml'
+    purpose: Service composition
+  - glob: '**/kubernetes/**/*.yaml'
+    purpose: Kubernetes service definitions
+knowledge_sources:
+  specifications:
+  - id: domain-driven-design
+    name: Domain-Driven Design - Bounded Contexts
+    url: https://martinfowler.com/bliki/BoundedContext.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: microservices-patterns
+    name: Microservices Patterns
+    url: https://microservices.io/patterns/
+    offline_cache: true
+  - id: ddd-evans
+    name: Domain-Driven Design Reference
+    url: https://www.domainlanguage.com/ddd/reference/
+    offline_cache: true
+  - id: clean-architecture
+    name: Clean Architecture
+    url: https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html
+    offline_cache: true
+  - id: pragmatic-programmer
+    name: Pragmatic Programmer Tips
+    url: https://pragprog.com/tips/
+    offline_cache: true
+  learning_resources:
+  - id: building-microservices
+    title: Building Microservices
+    type: book
+    reference: Sam Newman - 2nd Edition
+  - id: ddd-reference
+    title: Domain-Driven Design Reference
+    type: book
+    reference: Eric Evans - DDD Reference
+tooling:
+  static_analysis:
+  - tool: OpenAPI Generator
+    purpose: Analyze API surface and complexity
+    offline_capable: true
+  - tool: Spectral
+    purpose: Lint OpenAPI specifications
+    offline_capable: true
+  infrastructure_tools:
+  - tool: Jaeger/Zipkin
+    purpose: Trace inter-service communication patterns
+    command: kubectl port-forward svc/jaeger-query 16686:16686
+  - tool: kube-state-metrics
+    purpose: Kubernetes service relationships
+    command: kubectl get services -o wide
+  scripts:
+  - id: service-api-analyzer
+    language: bash
+    purpose: Analyze service API patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Service API Endpoints ==="
+      find . -name 'openapi.yaml' -o -name 'swagger.yaml' | while read f; do
+        echo "Service: $(dirname $f)"
+        grep "  /[a-z]" "$f" | wc -l
+      done
+
+      echo "=== Inter-Service Calls ==="
+      grep -rn "RestTemplate\|WebClient\|FeignClient" --include="*.java" | head -30
+signals:
+  critical:
+  - id: SERVICE-COH-CRIT-001
+    signal: Service spans multiple bounded contexts
+    evidence_pattern: Service manages User, Order, and Inventory aggregates
+    explanation: |
+      A service handling multiple bounded contexts is a distributed monolith.
+      It will have internal coupling, require coordinated changes, and
+      cannot be owned by a single team effectively.
+    remediation: Split service along bounded context boundaries
+  - id: SERVICE-COH-CRIT-002
+    signal: Excessive synchronous inter-service calls (>5 per operation)
+    evidence_pattern: Single user request triggers >5 HTTP calls to other services
+    explanation: |
+      High synchronous coupling indicates services are too granular or
+      responsibilities are poorly allocated. This creates latency,
+      failure cascades, and distributed transaction challenges.
+    remediation: Consolidate related services or use async patterns
+  high:
+  - id: SERVICE-COH-HIGH-001
+    signal: Shared database between services
+    evidence_pattern: Multiple services connect to same database schema
+    explanation: |
+      Database sharing creates hidden coupling - services can affect
+      each other through data changes, defeating service independence.
+    remediation: Each service owns its data; use events for synchronization
+  - id: SERVICE-COH-HIGH-002
+    signal: Service has mixed responsibilities (CRUD + domain logic)
+    evidence_pattern: Service has both data CRUD APIs and business process APIs
+    explanation: |
+      Mixing data access with business logic creates a service that
+      cannot evolve independently in either direction.
+    remediation: Separate into data service and domain service if needed
+  medium:
+  - id: SERVICE-COH-MED-001
+    signal: Large API surface (>30 endpoints)
+    evidence_pattern: OpenAPI spec has >30 operations
+    remediation: Review if service should be split by subdomain
+  - id: SERVICE-COH-MED-002
+    signal: Service with utility/helper responsibilities
+    evidence_pattern: Service exists only to provide common functionality
+    remediation: Consider library instead of service; or promote to domain service
+  low:
+  - id: SERVICE-COH-LOW-001
+    signal: Inconsistent service naming conventions
+    remediation: Establish naming standards aligned with domains
+  positive:
+  - id: SERVICE-COH-POS-001
+    signal: Service aligned with single bounded context
+  - id: SERVICE-COH-POS-002
+    signal: Service has clear data ownership
+  - id: SERVICE-COH-POS-003
+    signal: Service can be deployed independently
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory services and responsibilities
+    description: |
+      Create a catalog of all services with their stated
+      responsibilities and domain alignment.
+    duration_estimate: 40 min
+    commands:
+    - purpose: Find service definitions
+      command: find . -name 'openapi.yaml' -o -name 'docker-compose.yaml' -o -name 'service.yaml' | head
+        -20
+    - purpose: List Kubernetes services
+      command: kubectl get services -A 2>/dev/null | head -30 || echo 'kubectl not available'
+    expected_findings:
+    - Service inventory
+    - Stated service responsibilities
+  - id: '2'
+    name: Map service dependencies
+    description: |
+      Identify all inter-service communication to understand
+      coupling patterns.
+    duration_estimate: 35 min
+    commands:
+    - purpose: Find HTTP client usage
+      command: grep -rn 'RestTemplate\|WebClient\|FeignClient\|HttpClient' --include='*.java' --include='*.ts'
+        | head -30
+    - purpose: Find gRPC client usage
+      command: grep -rn 'GrpcClient\|grpc\.Dial' --include='*.java' --include='*.go' | head -20
+    - purpose: Find message queue usage
+      command: grep -rn 'KafkaTemplate\|RabbitTemplate\|SqsClient' --include='*.java' | head -20
+    expected_findings:
+    - Synchronous dependencies
+    - Asynchronous communication patterns
+  - id: '3'
+    name: Analyze API surface
+    description: |
+      Review each service's API to assess cohesion of
+      exposed capabilities.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Count API endpoints per service
+      command: 'for f in $(find . -name ''openapi.yaml''); do echo "$(dirname $f): $(grep -c ''^  /''
+        $f 2>/dev/null)"; done | head -20'
+    - purpose: Find endpoint patterns
+      command: grep -h '^  /' $(find . -name 'openapi.yaml') 2>/dev/null | sort | uniq | head -30
+    expected_findings:
+    - API endpoint count per service
+    - API pattern consistency
+  - id: '4'
+    name: Assess data ownership
+    description: |
+      Determine if each service has clear data ownership or
+      if there's shared/duplicated data.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find database configurations
+      command: grep -rn 'datasource.url\|DATABASE_URL\|connectionString' --include='*.yaml' --include='*.properties'
+        | head -20
+    - purpose: Find shared entity patterns
+      command: 'grep -rn ''@Entity\|@Table'' --include=''*.java'' | cut -d: -f3 | sort | uniq -c | sort
+        -rn | head -15'
+    expected_findings:
+    - Database per service assessment
+    - Shared entity detection
+  - id: '5'
+    name: Evaluate bounded context alignment
+    description: |
+      Assess whether services align with business capability
+      boundaries and DDD bounded contexts.
+    duration_estimate: 40 min
+    questions:
+    - Can each service's purpose be described in business terms?
+    - Does the service correspond to a team or business unit?
+    - Would a domain expert recognize the service boundary?
+    expected_findings:
+    - Bounded context mapping
+    - Misaligned services
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: service_map
+    format: visual
+    sections:
+    - Service Inventory
+    - Dependency Graph
+    - Data Ownership Map
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Service Cohesion Assessment
+    - Bounded Context Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct analysis of service contracts and code
+    medium: Pattern-based assessment
+    low: Inferred from naming and structure
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: domain-driven-design
+      priority: required
+    - source_id: microservices-patterns
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive service analysis
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: service-cohesion-001
+  item: Each service aligned with single bounded context
+  level: CRITICAL
+  verification: manual
+  verification_notes: Service responsibilities map to business capabilities
+  expected: Confirmed by reviewer
+- id: service-cohesion-002
+  item: No shared databases between services
+  level: CRITICAL
+  verification: manual
+  verification_notes: Each service has dedicated data store
+  expected: Confirmed by reviewer
+- id: service-cohesion-003
+  item: Synchronous call chains <= 3 services
+  level: BLOCKING
+  verification: manual
+  verification_notes: No request requires >3 synchronous service hops
+  expected: Confirmed by reviewer
+- id: service-cohesion-004
+  item: Service API surface appropriate (<30 endpoints)
+  level: WARNING
+  verification: manual
+  verification_notes: Large APIs have documented justification
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - distributed
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+    - Scalability
+relationships:
+  commonly_combined:
+  - architecture-design.system-decomposition.service-granularity
+  - architecture-design.system-decomposition.data-ownership-clarity
+  - architecture-design.coupling.tight-coupling-detection

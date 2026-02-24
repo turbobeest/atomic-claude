@@ -1,0 +1,345 @@
+audit:
+  id: observability-instrumentation.visualization-dashboards.time-series-visualization
+  name: Time Series Visualization Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: visualization-dashboards
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: metrics
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses the quality and effectiveness of time series visualizations
+    including appropriate graph types, time range configurations,
+    aggregation methods, axis scaling, and data resolution. Evaluates
+    whether visualizations accurately represent data and support
+    effective analysis and decision-making.
+  why_it_matters: |
+    Poor time series visualization causes:
+    - Misinterpretation of trends and patterns
+    - Missed anomalies due to inappropriate aggregation
+    - False alarms from misleading graphs
+    - Delayed incident detection
+    - Poor capacity planning from inaccurate forecasts
+    - Incorrect conclusions from visual artifacts
+  when_to_run:
+  - When creating new metrics dashboards
+  - After data analysis reveals discrepancies
+  - During dashboard review cycles
+  - When users report confusing visualizations
+prerequisites:
+  required_artifacts:
+  - type: dashboard_access
+    description: Access to dashboards with time series panels
+  - type: metrics_backend
+    description: Access to underlying metrics data
+  optional_artifacts:
+  - type: visualization_guidelines
+    description: Organizational standards for data visualization
+  access_requirements:
+  - Dashboard viewer access
+  - Query access to metrics backend
+discovery:
+  documents_to_review:
+  - type: Dashboard JSON
+    purpose: Analyze visualization configurations
+  - type: Visualization best practices
+    purpose: Reference for evaluation criteria
+  metrics_queries:
+  - system: Prometheus
+    query: count by (__name__) ({__name__=~'.+'})
+    purpose: Understand available metrics and their types
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: effective-data-viz
+    name: Effective Data Visualization for Time Series
+    url: https://grafana.com/docs/grafana/latest/panels-visualizations/visualizations/time-series/
+    offline_cache: true
+    priority: required
+  - id: prometheus-histogram
+    name: Prometheus Histograms and Summaries
+    url: https://prometheus.io/docs/practices/histograms/
+    offline_cache: true
+    priority: required
+  learning_resources:
+  - id: tufte-quantitative
+    title: The Visual Display of Quantitative Information
+    type: book
+    reference: Edward Tufte, ISBN 978-1930824133
+  - id: few-dashboard-design
+    title: Information Dashboard Design
+    type: book
+    reference: Stephen Few, ISBN 978-1938377006
+tooling:
+  infrastructure_tools:
+  - tool: grafana-cli
+    purpose: Query dashboard configurations
+    command: 'curl -H ''Authorization: Bearer $TOKEN'' $GRAFANA_URL/api/dashboards/uid/$UID'
+  scripts:
+  - id: visualization-analyzer
+    language: bash
+    purpose: Analyze visualization configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      # Analyze time series visualizations
+
+      DASHBOARD_UID=$1
+
+      dashboard=$(curl -s -H "Authorization: Bearer $TOKEN" \
+        "$GRAFANA_URL/api/dashboards/uid/$DASHBOARD_UID")
+
+      echo "=== Visualization Analysis for $DASHBOARD_UID ==="
+
+      # List panel types
+      echo "Panel types:"
+      echo "$dashboard" | jq -r '.dashboard.panels[].type' | sort | uniq -c
+
+      # Check for common issues
+      echo ""
+      echo "=== Potential Issues ==="
+
+      # Check for pie charts (often inappropriate for time series)
+      if echo "$dashboard" | jq -e '.dashboard.panels[] | select(.type == "piechart")' > /dev/null 2>&1; then
+        echo "WARNING: Pie charts detected - consider if appropriate for time data"
+      fi
+
+      # Check for truncated Y-axis
+      echo "$dashboard" | jq -r '
+        .dashboard.panels[] |
+        select(.fieldConfig.defaults.min != null and .fieldConfig.defaults.min != 0) |
+        "Y-axis starts at \(.fieldConfig.defaults.min) for panel: \(.title)"'
+signals:
+  critical:
+  - id: TIMEVIZ-CRIT-001
+    signal: Truncated Y-axis hiding baseline in critical metrics
+    evidence_indicators:
+    - Y-axis minimum set to non-zero value
+    - Small variations appear as dramatic changes
+    explanation: |
+      Truncated Y-axes exaggerate small variations, making normal
+      fluctuations appear as critical changes. This leads to alert
+      fatigue and misguided operational decisions.
+    remediation: |
+      - Set Y-axis minimum to 0 for most metrics
+      - If non-zero is required, clearly label it
+      - Consider dual-axis or comparison panels for context
+  - id: TIMEVIZ-CRIT-002
+    signal: Aggregation hiding critical spikes
+    evidence_indicators:
+    - Large time buckets smoothing out anomalies
+    - 5-minute aggregation on latency metrics
+    explanation: |
+      Over-aggregation masks important signals. A brief but severe
+      latency spike may disappear in 5-minute averages while
+      significantly impacting users.
+    remediation: |
+      - Use appropriate resolution for the metric type
+      - Show max/p99 alongside averages
+      - Reduce aggregation interval for critical metrics
+  high:
+  - id: TIMEVIZ-HIGH-001
+    signal: Wrong visualization type for data
+    explanation: |
+      Using inappropriate chart types (e.g., area charts for
+      unrelated metrics, pie charts for time series) misleads
+      viewers and obscures patterns.
+    remediation: |
+      - Line charts for trends over time
+      - Area charts for stacked proportional data
+      - Bar charts for discrete comparisons
+      - Heatmaps for distribution over time
+  - id: TIMEVIZ-HIGH-002
+    signal: Mismatched time ranges across related panels
+    explanation: |
+      Panels showing related metrics with different time ranges
+      make correlation and comparison impossible.
+    remediation: |
+      Use dashboard-level time range variables for consistency.
+      Link related panels to the same time control.
+  medium:
+  - id: TIMEVIZ-MED-001
+    signal: Missing unit labels on axes
+    remediation: |
+      Always include units on Y-axis (ms, %, bytes, requests/s).
+      Configure proper unit formatting in panel settings.
+  - id: TIMEVIZ-MED-002
+    signal: Overcrowded graphs with too many series
+    remediation: |
+      Limit series to 5-7 per panel for readability.
+      Use TopK queries or create drill-down dashboards.
+  - id: TIMEVIZ-MED-003
+    signal: Inconsistent color usage across panels
+    remediation: |
+      Establish color conventions (e.g., red=errors, green=success)
+      and apply consistently across all dashboards.
+  low:
+  - id: TIMEVIZ-LOW-001
+    signal: Default panel titles not customized
+    remediation: |
+      Provide meaningful titles that describe what the panel shows.
+  positive:
+  - id: TIMEVIZ-POS-001
+    signal: Consistent visualization standards across dashboards
+  - id: TIMEVIZ-POS-002
+    signal: Appropriate chart types for all data types
+  - id: TIMEVIZ-POS-003
+    signal: Clear annotations and context on graphs
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Visualization Types
+    description: |
+      Catalog all visualization types used across dashboards
+      and verify appropriateness for the data.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List visualization types
+      command: |
+        curl -s -H "Authorization: Bearer $TOKEN" "$GRAFANA_URL/api/search?type=dash-db" | \
+        jq -r '.[].uid' | while read uid; do
+          curl -s -H "Authorization: Bearer $TOKEN" "$GRAFANA_URL/api/dashboards/uid/$uid" | \
+          jq -r '.dashboard.panels[].type'
+        done | sort | uniq -c
+    expected_findings:
+    - Distribution of visualization types
+    - Potentially inappropriate uses
+  - id: '2'
+    name: Axis and Scale Analysis
+    description: |
+      Review axis configurations for accuracy and clarity.
+    duration_estimate: 30 min
+    questions:
+    - Do Y-axes start at zero where appropriate?
+    - Are units clearly labeled?
+    - Is log scale used only when justified?
+    expected_findings:
+    - Axis configuration issues
+    - Missing or incorrect unit labels
+  - id: '3'
+    name: Aggregation Review
+    description: |
+      Evaluate whether aggregation levels are appropriate
+      for the metrics and use cases.
+    duration_estimate: 30 min
+    questions:
+    - Are critical metrics using fine-grained resolution?
+    - Are capacity metrics using appropriate smoothing?
+    - Are percentiles shown alongside averages?
+    expected_findings:
+    - Over-aggregated critical metrics
+    - Under-aggregated trend metrics
+  - id: '4'
+    name: Visual Consistency Audit
+    description: |
+      Check for consistent visual patterns and conventions.
+    duration_estimate: 30 min
+    questions:
+    - Are colors used consistently for similar concepts?
+    - Do related panels use matching time ranges?
+    - Are legend positions and styles consistent?
+    expected_findings:
+    - Inconsistency patterns
+    - Standardization opportunities
+output:
+  deliverables:
+  - type: visualization_inventory
+    format: table
+    description: Catalog of visualizations with type appropriateness
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Visualization Type Analysis
+    - Axis and Scale Findings
+    - Aggregation Issues
+    - Recommendations
+  confidence_guidance:
+    high: Direct analysis of dashboard configurations
+    medium: Pattern-based assessment of appropriateness
+    low: Subjective evaluation of effectiveness
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: effective-data-viz
+      priority: required
+    - source_id: prometheus-histogram
+      priority: required
+  degradation:
+  - feature: Live dashboard analysis
+    impact: Cannot analyze current configurations
+    mitigation: Export dashboard JSON before going offline
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed visual analysis
+    full:
+      included: true
+      priority: 16
+closeout_checklist:
+- id: timeviz-001
+  item: No truncated Y-axes on critical metrics without justification
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review axis min values in dashboard JSON
+  expected: Confirmed by reviewer
+- id: timeviz-002
+  item: Appropriate aggregation for metric types
+  level: BLOCKING
+  verification: manual
+  verification_notes: Latency shows percentiles, rates use appropriate intervals
+  expected: Confirmed by reviewer
+- id: timeviz-003
+  item: Unit labels present on all axes
+  level: WARNING
+  verification: manual
+  verification_notes: All Y-axes have configured units
+  expected: Confirmed by reviewer
+- id: timeviz-004
+  item: Visualization types appropriate for data
+  level: WARNING
+  verification: manual
+  verification_notes: No pie charts for time series, appropriate use of area vs line
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    - serverless
+  compliance_frameworks:
+  - framework: Internal Standards
+    controls:
+    - Data Visualization Guidelines
+relationships:
+  commonly_combined:
+  - observability-instrumentation.visualization-dashboards.dashboard-performance
+  - observability-instrumentation.metrics.metrics-accuracy
+  - observability-instrumentation.visualization-dashboards.dashboard-accessibility

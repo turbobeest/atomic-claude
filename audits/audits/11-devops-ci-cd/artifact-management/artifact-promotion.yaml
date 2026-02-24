@@ -1,0 +1,335 @@
+# ============================================================
+# AUDIT FILE: Artifact Promotion
+# ============================================================
+# Evaluates artifact promotion processes between environments
+# ensuring controlled progression through the deployment pipeline.
+# ============================================================
+
+audit:
+  id: "devops-ci-cd.artifact-management.artifact-promotion"
+  name: "Artifact Promotion Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "artifact-management"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines artifact promotion processes including promotion
+    gates, approval requirements, promotion traceability, and environment
+    progression. It evaluates whether artifacts progress through environments
+    in a controlled, auditable manner.
+
+  why_it_matters: |
+    Uncontrolled artifact promotion can deploy untested or unapproved
+    artifacts to production. Proper promotion processes ensure artifacts
+    are validated at each stage and maintain compliance with change
+    management requirements.
+
+  when_to_run:
+    - "When establishing deployment pipelines"
+    - "After incidents involving wrong artifact deployment"
+    - "During compliance audits"
+    - "Quarterly process reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "ci_cd_config"
+      description: "CI/CD pipeline configurations"
+    - type: "promotion_policies"
+      description: "Artifact promotion policies"
+
+  access_requirements:
+    - "Read access to CI/CD configurations"
+    - "Access to artifact registry metadata"
+    - "Permission to view promotion history"
+
+discovery:
+  file_patterns:
+    - glob: "**/.github/workflows/*.yaml"
+      purpose: "GitHub Actions workflows"
+    - glob: "**/Jenkinsfile"
+      purpose: "Jenkins pipeline"
+    - glob: "**/promotion*"
+      purpose: "Promotion-related files"
+    - glob: "**/environments/**"
+      purpose: "Environment configurations"
+
+  code_patterns:
+    - pattern: "promote|promotion|stage|environment"
+      type: "keyword"
+      scope: "config"
+      purpose: "Promotion-related configurations"
+    - pattern: "needs:|dependsOn:|require"
+      type: "regex"
+      scope: "config"
+      purpose: "Pipeline dependencies and gates"
+
+knowledge_sources:
+  guides:
+    - id: "gitops-promotion"
+      name: "GitOps Promotion Strategies"
+      url: "https://opengitops.dev/"
+      offline_cache: true
+    - id: "spinnaker-pipelines"
+      name: "Spinnaker Pipeline Best Practices"
+      url: "https://spinnaker.io/docs/guides/user/pipeline-expressions/"
+      offline_cache: true
+
+  specifications:
+    - id: "cd-foundation"
+      name: "CD Foundation Best Practices"
+      url: "https://cd.foundation/"
+      offline_cache: true
+      priority: "recommended"
+    - id: "nsa-supply-chain"
+      name: "NSA: Securing the Software Supply Chain"
+      url: "https://media.defense.gov/2022/Sep/01/2003068942/-1/-1/0/ESF_SECURING_THE_SOFTWARE_SUPPLY_CHAIN_DEVELOPERS.PDF"
+      offline_cache: true
+      priority: "required"
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Check deployed artifact versions"
+      command: "kubectl get deployments -o jsonpath='{.items[*].spec.template.spec.containers[*].image}'"
+    - tool: "gh"
+      purpose: "Review deployment environment history"
+      command: "gh api repos/{owner}/{repo}/deployments"
+
+  scripts:
+    - id: "promotion-check"
+      language: "bash"
+      purpose: "Find promotion configurations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find promotion patterns
+        grep -ri 'promot\|stage\|environment' \
+          --include='*.yaml' --include='*.yml' \
+          .github/workflows/ 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "ARTPRO-CRIT-001"
+      signal: "Artifacts can be deployed to production without staging validation"
+      evidence_indicators:
+        - "Direct deployment to production possible"
+        - "No mandatory staging gate before production"
+      explanation: |
+        Bypassing staging allows untested artifacts to reach production,
+        increasing incident risk and violating change management.
+      remediation: "Enforce mandatory staging deployment and validation before production"
+
+    - id: "ARTPRO-CRIT-002"
+      signal: "Artifacts rebuilt between environments"
+      evidence_indicators:
+        - "Build step runs in each environment deployment"
+        - "Different artifact content between environments"
+      explanation: |
+        Rebuilding artifacts between environments means staging and
+        production run different code, invalidating staging testing.
+      remediation: "Promote exact same artifact (by digest) through all environments"
+
+  high:
+    - id: "ARTPRO-HIGH-001"
+      signal: "No approval gate for production promotion"
+      evidence_pattern: "approval|manual|gate"
+      explanation: |
+        Automatic production promotion without approval bypasses
+        change management and compliance requirements.
+      remediation: "Implement mandatory approval for production promotions"
+
+    - id: "ARTPRO-HIGH-002"
+      signal: "Promotion history not auditable"
+      evidence_indicators:
+        - "No record of who promoted what when"
+        - "Promotion metadata not retained"
+      explanation: |
+        Without promotion audit trail, compliance cannot be demonstrated
+        and incident investigation is compromised.
+      remediation: "Log all promotions with timestamp, actor, and artifact details"
+
+  medium:
+    - id: "ARTPRO-MED-001"
+      signal: "No automated validation between environments"
+      remediation: "Implement automated smoke tests at each promotion stage"
+
+    - id: "ARTPRO-MED-002"
+      signal: "Promotion process differs between pipelines"
+      remediation: "Standardize promotion process across all deployment pipelines"
+
+  low:
+    - id: "ARTPRO-LOW-001"
+      signal: "Promotion process not documented"
+
+  positive:
+    - id: "ARTPRO-POS-001"
+      signal: "Digest-based promotion ensures artifact immutability"
+    - id: "ARTPRO-POS-002"
+      signal: "Automated validation gates between all environments"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map promotion workflow"
+      description: |
+        Document the artifact promotion path from build through
+        production including all environments and gates.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find environment configurations"
+          command: "find . -type d -name '*environment*' -o -name '*deploy*' 2>/dev/null | head -10"
+        - purpose: "Check workflow stages"
+          command: "grep -rE 'stage:|environment:|jobs:' --include='*.yaml' .github/workflows/ 2>/dev/null | head -25"
+      expected_findings:
+        - "Promotion path documentation"
+        - "Environment sequence"
+
+    - id: "2"
+      name: "Verify artifact immutability through promotion"
+      description: |
+        Confirm that the same artifact (by digest) is promoted
+        through all environments without rebuilding.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check for rebuild steps"
+          command: "grep -rE 'build|docker build' --include='*.yaml' .github/workflows/ 2>/dev/null | head -15"
+      expected_findings:
+        - "Immutability assessment"
+        - "Rebuild pattern identification"
+
+    - id: "3"
+      name: "Evaluate promotion gates"
+      description: |
+        Review approval requirements and automated validation
+        between environments.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find approval configurations"
+          command: "grep -rE 'approval|manual|gate|review' --include='*.yaml' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Gate configuration assessment"
+        - "Approval requirement coverage"
+
+    - id: "4"
+      name: "Audit promotion history"
+      description: |
+        Review recent promotions to verify process compliance
+        and audit trail completeness.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check deployment history"
+          command: "git log --oneline --grep='deploy\\|promot' 2>/dev/null | head -15"
+      expected_findings:
+        - "Process compliance rate"
+        - "Audit trail completeness"
+
+    - id: "5"
+      name: "Test promotion controls"
+      description: |
+        Verify that promotion controls cannot be bypassed and
+        are technically enforced.
+      duration_estimate: "30 min"
+      questions:
+        - "Can someone deploy to production without going through staging?"
+        - "Are promotion approvals technically enforced or just procedural?"
+        - "Can the promotion process be manipulated?"
+      expected_findings:
+        - "Control effectiveness"
+        - "Bypass vulnerability assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Promotion Workflow Analysis"
+        - "Control Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct testing of promotion controls with history verification"
+    medium: "Configuration analysis with sample verification"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "gitops-promotion"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive pipeline review"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "artpro-001"
+    item: "Same artifact promoted through all environments"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify no rebuild between environments - same digest throughout"
+    expected: "Confirmed by reviewer"
+
+  - id: "artpro-002"
+    item: "Mandatory staging before production"
+    level: "CRITICAL"
+    verification: "grep -r 'environment.*production' --include='*.yaml' .github/workflows/ 2>/dev/null | head -5 && echo 'PASS' || echo 'REVIEW'"
+    expected: "PASS"
+
+  - id: "artpro-003"
+    item: "Promotion approvals logged and auditable"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify promotion audit trail exists"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC8.1"]
+    - framework: "ISO27001"
+      controls: ["A.14.2.2"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.artifact-management.artifact-versioning"
+    - "devops-ci-cd.release-management.release-approval-process"

@@ -1,0 +1,398 @@
+# ============================================================
+# AUDIT: CDN Configuration
+# ============================================================
+# Category 12 - Cloud Infrastructure / Networking
+# Evaluates CDN configurations and optimization
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.networking.cdn-configuration"
+  name: "CDN Configuration"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "networking"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates Content Delivery Network (CDN) configurations including
+    CloudFront distributions, caching behaviors, origin configurations,
+    SSL/TLS settings, security policies, and geographic restrictions.
+    Examines whether CDN is optimally configured for performance, security,
+    and cost efficiency.
+
+  why_it_matters: |
+    CDN configuration significantly impacts user experience, security, and
+    costs. Poor caching reduces performance and increases origin load. Weak
+    security policies expose vulnerabilities. Missing geographic restrictions
+    may violate compliance. Well-configured CDN can reduce latency by 50%+
+    and origin costs by 80%+.
+
+  when_to_run:
+    - "Performance optimization projects"
+    - "Security assessments"
+    - "Cost optimization reviews"
+    - "Before major launches"
+
+prerequisites:
+  required_artifacts:
+    - type: "cloud_access"
+      description: "Read access to CDN configurations"
+    - type: "content_requirements"
+      description: "Content caching and security requirements"
+
+  access_requirements:
+    - "CloudFront distribution access"
+    - "Origin configuration access"
+    - "WAF association access"
+
+discovery:
+  metrics_queries:
+    - system: "CloudWatch"
+      query: |
+        SELECT AVG(CacheHitRate)
+        FROM CloudFront
+        WHERE DistributionId = '{dist_id}'
+      purpose: "Measure cache effectiveness"
+      threshold: "Cache hit rate < 80% suggests optimization needed"
+
+  file_patterns:
+    - glob: "**/terraform/**/*cloudfront*.tf"
+      purpose: "Find Terraform CloudFront configurations"
+    - glob: "**/terraform/**/*cdn*.tf"
+      purpose: "Find CDN configurations"
+
+knowledge_sources:
+  specifications:
+    - id: "aws-cloudfront-docs"
+      name: "AWS CloudFront Documentation"
+      url: "https://docs.aws.amazon.com/cloudfront/"
+      offline_cache: true
+      priority: "required"
+    - id: "nist-800-207"
+      name: "NIST SP 800-207: Zero Trust Architecture"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-207/final"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "cloudfront-best-practices"
+      name: "CloudFront Best Practices"
+      url: "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/best-practices.html"
+      offline_cache: true
+
+    - id: "cloudfront-security"
+      name: "CloudFront Security"
+      url: "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/SecurityAndPrivateContent.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "AWS CLI"
+      purpose: "List CloudFront distributions"
+      command: "aws cloudfront list-distributions"
+
+    - tool: "AWS CLI"
+      purpose: "Get distribution config"
+      command: "aws cloudfront get-distribution-config --id {distribution_id}"
+
+    - tool: "AWS CLI"
+      purpose: "Check cache statistics"
+      command: "aws cloudfront get-distribution --id {distribution_id}"
+
+  scripts:
+    - id: "cdn-analyzer"
+      language: "bash"
+      purpose: "Analyze CDN configurations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== CDN Configuration Analysis ==="
+
+        # List all distributions
+        echo "CloudFront Distributions:"
+        aws cloudfront list-distributions \
+          --query 'DistributionList.Items[].{ID:Id,Domain:DomainName,Status:Status,Enabled:Enabled,PriceClass:PriceClass}' \
+          --output table
+
+        # Check origins
+        echo ""
+        echo "Distribution Origins:"
+        for dist in $(aws cloudfront list-distributions --query 'DistributionList.Items[].Id' --output text); do
+          echo "--- Distribution: $dist ---"
+          aws cloudfront get-distribution --id $dist \
+            --query 'Distribution.DistributionConfig.Origins.Items[].{Domain:DomainName,Protocol:CustomOriginConfig.OriginProtocolPolicy}' \
+            --output table 2>/dev/null
+        done
+
+        # Check security
+        echo ""
+        echo "Security Settings:"
+        for dist in $(aws cloudfront list-distributions --query 'DistributionList.Items[].Id' --output text); do
+          echo "--- Distribution: $dist ---"
+          aws cloudfront get-distribution --id $dist \
+            --query 'Distribution.DistributionConfig.{ViewerProtocol:DefaultCacheBehavior.ViewerProtocolPolicy,WAF:WebACLId}' \
+            --output table 2>/dev/null
+        done
+
+signals:
+  critical:
+    - id: "CDN-CRIT-001"
+      signal: "HTTP allowed without redirect to HTTPS"
+      evidence_pattern: "ViewerProtocolPolicy: allow-all"
+      explanation: |
+        Allowing HTTP exposes user data in transit. All CDN traffic
+        should be HTTPS-only or redirect HTTP to HTTPS.
+      remediation: "Set ViewerProtocolPolicy to https-only or redirect-to-https"
+
+    - id: "CDN-CRIT-002"
+      signal: "Origin connection using HTTP instead of HTTPS"
+      evidence_pattern: "OriginProtocolPolicy: http-only"
+      explanation: |
+        HTTP origin connections expose data between CDN and origin,
+        even if viewer connection is HTTPS.
+      remediation: "Configure origin to use HTTPS or match-viewer"
+
+    - id: "CDN-CRIT-003"
+      signal: "Outdated TLS/SSL security policy"
+      evidence_pattern: "MinimumProtocolVersion: TLSv1 or SSLv3"
+      explanation: |
+        Old TLS versions have known vulnerabilities. Modern
+        security requires TLS 1.2 or higher.
+      remediation: "Update to TLSv1.2_2021 or newer"
+
+  high:
+    - id: "CDN-HIGH-001"
+      signal: "No WAF protection on distribution"
+      evidence_pattern: "WebACLId: null or empty"
+      explanation: |
+        Without WAF, the CDN has no application-layer protection
+        against attacks like SQL injection or XSS.
+      remediation: "Associate WAF WebACL with distribution"
+
+    - id: "CDN-HIGH-002"
+      signal: "Caching disabled or poorly configured"
+      evidence_indicators:
+        - "Default TTL = 0"
+        - "Cache hit rate < 50%"
+      explanation: |
+        Poor caching negates CDN benefits, causing all requests
+        to hit origin and increasing costs.
+      remediation: "Configure appropriate caching behaviors and TTLs"
+
+    - id: "CDN-HIGH-003"
+      signal: "Access logging not enabled"
+      evidence_pattern: "Logging.Enabled: false"
+      explanation: |
+        Without access logs, traffic analysis, troubleshooting,
+        and security investigation are not possible.
+      remediation: "Enable access logging to S3"
+
+  medium:
+    - id: "CDN-MED-001"
+      signal: "No geographic restrictions for compliance"
+      remediation: "Configure geo-restrictions for compliance requirements"
+
+    - id: "CDN-MED-002"
+      signal: "Using PriceClass_All when regional would suffice"
+      remediation: "Consider regional price class for cost savings"
+
+    - id: "CDN-MED-003"
+      signal: "No custom error pages configured"
+      remediation: "Configure custom error pages for better UX"
+
+  low:
+    - id: "CDN-LOW-001"
+      signal: "No origin shield configured"
+      remediation: "Consider Origin Shield for reduced origin load"
+
+  positive:
+    - id: "CDN-POS-001"
+      signal: "HTTPS-only with modern TLS"
+    - id: "CDN-POS-002"
+      signal: "High cache hit rate (>80%)"
+    - id: "CDN-POS-003"
+      signal: "WAF protection enabled"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Distribution Inventory"
+      description: |
+        Collect inventory of all CDN distributions with
+        current configuration summary.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List all distributions"
+          command: "aws cloudfront list-distributions --query 'DistributionList.Items[].{ID:Id,Domain:DomainName,Enabled:Enabled,Status:Status}' --output table"
+      expected_findings:
+        - "Complete distribution inventory"
+        - "Enabled/disabled status"
+
+    - id: "2"
+      name: "Security Configuration Review"
+      description: |
+        Review SSL/TLS settings, viewer protocol policies,
+        and WAF associations.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check security settings"
+          command: "for dist in $(aws cloudfront list-distributions --query 'DistributionList.Items[].Id' --output text); do echo \"=== $dist ===\"; aws cloudfront get-distribution --id $dist --query 'Distribution.DistributionConfig.{ViewerProtocol:DefaultCacheBehavior.ViewerProtocolPolicy,MinTLS:ViewerCertificate.MinimumProtocolVersion,WAF:WebACLId}' --output yaml 2>/dev/null; done"
+      expected_findings:
+        - "Protocol policies"
+        - "TLS versions"
+        - "WAF coverage"
+
+    - id: "3"
+      name: "Caching Analysis"
+      description: |
+        Analyze caching behaviors, TTLs, and cache hit rates
+        for optimization opportunities.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check cache behaviors"
+          command: "for dist in $(aws cloudfront list-distributions --query 'DistributionList.Items[].Id' --output text); do echo \"=== $dist ===\"; aws cloudfront get-distribution --id $dist --query 'Distribution.DistributionConfig.DefaultCacheBehavior.{MinTTL:MinTTL,MaxTTL:MaxTTL,DefaultTTL:DefaultTTL}' --output yaml 2>/dev/null; done"
+      expected_findings:
+        - "TTL configurations"
+        - "Cache behavior patterns"
+
+    - id: "4"
+      name: "Origin Configuration Review"
+      description: |
+        Review origin configurations for security and
+        performance settings.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check origin settings"
+          command: "for dist in $(aws cloudfront list-distributions --query 'DistributionList.Items[].Id' --output text); do echo \"=== $dist ===\"; aws cloudfront get-distribution --id $dist --query 'Distribution.DistributionConfig.Origins.Items[].{Domain:DomainName,Protocol:CustomOriginConfig.OriginProtocolPolicy,OAI:S3OriginConfig.OriginAccessIdentity}' --output yaml 2>/dev/null; done"
+      expected_findings:
+        - "Origin protocols"
+        - "S3 origin access identity usage"
+
+    - id: "5"
+      name: "Logging and Monitoring"
+      description: |
+        Verify access logging is enabled and configured
+        appropriately.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check logging configuration"
+          command: "for dist in $(aws cloudfront list-distributions --query 'DistributionList.Items[].Id' --output text); do echo \"=== $dist ===\"; aws cloudfront get-distribution --id $dist --query 'Distribution.DistributionConfig.Logging' --output yaml 2>/dev/null; done"
+      expected_findings:
+        - "Logging enablement"
+        - "Log destination"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Security Assessment"
+        - "Caching Analysis"
+        - "Origin Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full access to distributions, metrics, and logs"
+    medium: "Configuration access without metrics"
+    low: "Limited configuration access"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-cloudfront-docs"
+        priority: "required"
+      - source_id: "cloudfront-security"
+        priority: "required"
+
+  limitations:
+    - "Cannot access live configurations offline"
+    - "Cache metrics require runtime access"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed configuration analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cdn-001"
+    item: "All distributions inventoried"
+    level: "CRITICAL"
+    verification: "aws cloudfront list-distributions --query 'length(DistributionList.Items)' 2>/dev/null | grep -qE '[0-9]+' && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "cdn-002"
+    item: "HTTPS enforced for all distributions"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify ViewerProtocolPolicy is https-only or redirect"
+    expected: "Confirmed by reviewer"
+
+  - id: "cdn-003"
+    item: "Modern TLS policies configured"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify minimum TLS 1.2"
+    expected: "Confirmed by reviewer"
+
+  - id: "cdn-004"
+    item: "Access logging enabled"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify logging for all production distributions"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC6.1", "CC6.7"]
+    - framework: "PCI-DSS"
+      controls: ["4.1"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.networking.load-balancer-config"
+    - "cloud-infrastructure.storage.storage-access-patterns"
+    - "security.web-application.waf-configuration"

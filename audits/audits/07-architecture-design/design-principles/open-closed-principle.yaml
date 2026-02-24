@@ -1,0 +1,378 @@
+# ============================================================
+# AUDIT: Open-Closed Principle (OCP) Compliance
+# ============================================================
+# Evaluates whether components are open for extension but
+# closed for modification, following the O in SOLID.
+# ============================================================
+
+audit:
+  id: "architecture-design.design-principles.open-closed-principle"
+  name: "Open-Closed Principle Compliance"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "design-principles"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates compliance with the Open-Closed Principle,
+    which states that software entities should be open for extension
+    but closed for modification. It identifies code that requires
+    modification to add new behaviors versus code that allows extension
+    through polymorphism, composition, or plugin patterns.
+
+  why_it_matters: |
+    OCP violations cause:
+    - Risk of breaking existing functionality when adding features
+    - Frequent modification of stable, tested code
+    - Difficulty adding new behaviors without core changes
+    - Code that's hard to extend by other teams
+    - Proliferation of conditional logic (if/switch) for variants
+    OCP enables evolution without regression risk.
+
+  when_to_run:
+    - "When adding new features requires modifying existing code"
+    - "During architecture reviews for extensibility"
+    - "When building frameworks or libraries"
+    - "Before defining plugin or extension points"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+
+  access_requirements:
+    - "Read access to source code"
+
+discovery:
+  code_patterns:
+    - pattern: "switch\\s*\\(\\s*\\w+\\.type|switch\\s*\\(\\s*\\w+\\.kind"
+      type: "regex"
+      scope: "source"
+      purpose: "Find type-based switch statements"
+
+    - pattern: "if\\s*\\(.*instanceof|if\\s*\\(.*\\.type\\s*=="
+      type: "regex"
+      scope: "source"
+      purpose: "Find type-checking conditionals"
+
+    - pattern: "enum\\s+\\w+Type|enum\\s+\\w+Kind"
+      type: "regex"
+      scope: "source"
+      purpose: "Find type discriminator enums"
+
+  file_patterns:
+    - glob: "**/*Factory*.{java,ts,py}"
+      purpose: "Factories may have type-switching logic"
+    - glob: "**/*Strategy*.{java,ts,py}"
+      purpose: "Strategy pattern implementations (positive)"
+    - glob: "**/*Plugin*.{java,ts,py}"
+      purpose: "Plugin pattern implementations (positive)"
+
+knowledge_sources:
+  specifications:
+    - id: "ocp-original"
+      name: "The Open-Closed Principle - Bertrand Meyer"
+      url: "https://en.wikipedia.org/wiki/Open%E2%80%93closed_principle"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "ocp-uncle-bob"
+      name: "The Open-Closed Principle - Robert C. Martin"
+      url: "https://blog.cleancoder.com/uncle-bob/2014/05/12/TheOpenClosedPrinciple.html"
+      offline_cache: true
+
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "clean-code"
+      name: "Clean Code Summary"
+      url: "https://gist.github.com/wojteklu/73c6914cc446146b8b533c0988cf8d29"
+      offline_cache: true
+
+  learning_resources:
+    - id: "agile-ppp"
+      title: "Agile Software Development: Principles, Patterns, and Practices"
+      type: "book"
+      reference: "Robert C. Martin - Chapter 9"
+
+    - id: "design-patterns"
+      title: "Design Patterns: Elements of Reusable Object-Oriented Software"
+      type: "book"
+      reference: "Gang of Four"
+
+tooling:
+  static_analysis:
+    - tool: "SonarQube"
+      purpose: "Detect excessive switch/if complexity"
+      offline_capable: false
+
+    - tool: "PMD"
+      purpose: "Find switch statement code smells"
+      offline_capable: true
+
+    - tool: "Checkstyle"
+      purpose: "Detect cyclomatic complexity"
+      offline_capable: true
+
+  scripts:
+    - id: "ocp-analyzer"
+      language: "bash"
+      purpose: "Find potential OCP violations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Type-Based Switch Statements ==="
+        grep -rn "switch.*\\.type\\|switch.*\\.kind\\|switch.*Type\\." --include="*.java" | head -30
+
+        echo "=== instanceof Checks ==="
+        grep -rn "instanceof" --include="*.java" | grep -v "Test" | head -30
+
+        echo "=== Type Discriminator Enums ==="
+        grep -rn "enum.*Type\\|enum.*Kind" --include="*.java" | head -20
+
+signals:
+  critical:
+    - id: "OCP-CRIT-001"
+      signal: "Switch on type discriminator requiring modification for new types"
+      evidence_pattern: "switch(entity.getType()) with cases for each entity type"
+      explanation: |
+        When adding a new type requires modifying existing switch statements
+        throughout the codebase, the design violates OCP. Each new type
+        risks breaking existing code and requires touching stable modules.
+      remediation: "Replace with polymorphism - each type implements interface method"
+
+    - id: "OCP-CRIT-002"
+      signal: "Factory with hardcoded type-to-class mappings"
+      evidence_pattern: "Factory using if/switch to instantiate based on type string"
+      explanation: |
+        Factories that hardcode type mappings must be modified to add new
+        types. This couples the factory to all concrete implementations.
+      remediation: "Use registry pattern or dependency injection; self-registering types"
+
+  high:
+    - id: "OCP-HIGH-001"
+      signal: "Cascading instanceof checks"
+      evidence_pattern: "if(x instanceof A) else if(x instanceof B)..."
+      explanation: |
+        instanceof chains are a classic OCP violation - adding new types
+        requires updating all locations with such checks.
+      remediation: "Use visitor pattern or define interface method on types"
+
+    - id: "OCP-HIGH-002"
+      signal: "Serialization/deserialization with type switching"
+      evidence_pattern: "JSON/XML handling with type-based conditionals"
+      explanation: |
+        Type-discriminated serialization requires modification for each
+        new type, often in multiple locations.
+      remediation: "Use polymorphic serializers or registry-based approach"
+
+  medium:
+    - id: "OCP-MED-001"
+      signal: "Validation logic with type-specific rules inline"
+      evidence_pattern: "Validator has different rules per entity type"
+      remediation: "Extract validation strategies; register validators per type"
+
+    - id: "OCP-MED-002"
+      signal: "Report generation with hardcoded format handlers"
+      evidence_pattern: "if format == 'pdf' ... else if format == 'excel'..."
+      remediation: "Create ReportFormatter interface with implementations"
+
+  low:
+    - id: "OCP-LOW-001"
+      signal: "Configuration with hardcoded options"
+      remediation: "Consider allowing plugin/extension registration"
+
+  positive:
+    - id: "OCP-POS-001"
+      signal: "Strategy pattern used for variant behaviors"
+    - id: "OCP-POS-002"
+      signal: "Plugin architecture allowing extension without modification"
+    - id: "OCP-POS-003"
+      signal: "Registry pattern for self-registering components"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Find type discriminator patterns"
+      description: |
+        Search for switch statements and conditionals that branch
+        based on type or kind discriminators.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find switch on type"
+          command: "grep -rn 'switch.*[Tt]ype\\|switch.*[Kk]ind' --include='*.java' --include='*.ts' | head -30"
+        - purpose: "Find instanceof chains"
+          command: "grep -rn 'instanceof' --include='*.java' | grep -v Test | head -30"
+      expected_findings:
+        - "Type-based switch locations"
+        - "instanceof usage patterns"
+
+    - id: "2"
+      name: "Analyze factory implementations"
+      description: |
+        Review factory classes for hardcoded type-to-implementation
+        mappings that violate OCP.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find factory classes"
+          command: "find . -name '*Factory*.java' -o -name '*Factory*.ts' | head -20"
+        - purpose: "Sample factory implementations"
+          command: "grep -rn 'case.*return new\\|if.*return new' --include='*Factory*.java' | head -20"
+      expected_findings:
+        - "Factory creation patterns"
+        - "Hardcoded type mappings"
+
+    - id: "3"
+      name: "Identify extension patterns in use"
+      description: |
+        Find positive patterns like Strategy, Plugin, or Registry
+        that support extension without modification.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find Strategy pattern"
+          command: "find . -name '*Strategy*.java' -o -name '*Strategy*.ts' | head -20"
+        - purpose: "Find registry patterns"
+          command: "grep -rn 'register.*\\|Registry\\.' --include='*.java' | head -20"
+      expected_findings:
+        - "Existing extension mechanisms"
+        - "Opportunities to expand usage"
+
+    - id: "4"
+      name: "Review modification history"
+      description: |
+        Analyze git history to find files frequently modified when
+        adding new types or behaviors.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find frequently modified files"
+          command: "git log --oneline --name-only -n 200 | grep -E '\\.(java|ts)$' | sort | uniq -c | sort -rn | head -20"
+        - purpose: "Find commits adding new types"
+          command: "git log --oneline -n 100 | grep -iE 'add.*type\\|new.*type\\|support.*type' | head -15"
+      expected_findings:
+        - "Modification patterns"
+        - "Files affected by type additions"
+
+    - id: "5"
+      name: "Develop refactoring recommendations"
+      description: |
+        For identified OCP violations, recommend specific
+        patterns to enable extension without modification.
+      duration_estimate: "25 min"
+      questions:
+        - "What pattern would allow new types without modification?"
+        - "Can a registry or plugin architecture work here?"
+        - "What's the migration path from current design?"
+      expected_findings:
+        - "Pattern recommendations per violation"
+        - "Refactoring priority"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "OCP Violations Identified"
+        - "Pattern Recommendations"
+        - "Refactoring Plan"
+
+  confidence_guidance:
+    high: "Clear switch/instanceof pattern with type discrimination"
+    medium: "Conditional logic that may relate to types"
+    low: "Potential concern requiring context review"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "ocp-original"
+        priority: "required"
+      - source_id: "ocp-uncle-bob"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed code analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "ocp-001"
+    item: "No type-switching for polymorphic behavior"
+    level: "CRITICAL"
+    verification: "grep -rn 'switch.*Type' --include='*.java' | grep -v Test | wc -l"
+    expected: "0 or documented exceptions"
+
+  - id: "ocp-002"
+    item: "Factories use registry or DI, not hardcoded mappings"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Factory implementations reviewed for OCP compliance"
+    expected: "Confirmed by reviewer"
+
+  - id: "ocp-003"
+    item: "Extension points documented for plugin areas"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Extension mechanisms are documented"
+    expected: "Confirmed by reviewer"
+
+  - id: "ocp-004"
+    item: "OCP violations have refactoring plan"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Identified violations tracked for remediation"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modifiability"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.design-principles.liskov-substitution"
+    - "architecture-design.architectural-patterns.pattern-appropriateness"
+    - "architecture-design.extensibility-evolution.extension-point"

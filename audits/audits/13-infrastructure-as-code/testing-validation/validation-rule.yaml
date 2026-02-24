@@ -1,0 +1,381 @@
+audit:
+  id: infrastructure-as-code.testing-validation.validation-rule
+  name: Validation Rules
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: testing-validation
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the implementation of validation rules in Terraform
+    configurations, including:
+
+    - Variable validation blocks that enforce input constraints
+    - Preconditions that verify assumptions before resource creation
+    - Postconditions that verify outcomes after resource creation
+    - Custom conditions in lifecycle blocks
+    - Check blocks for continuous assertions
+
+    These mechanisms catch configuration errors at plan time rather than
+    after resources are created or when they fail in unexpected ways.
+  why_it_matters: |
+    Without input validation and custom conditions:
+
+    - Invalid inputs cause cryptic cloud API errors
+    - Misconfigurations aren't detected until resources fail
+    - Module users don't understand expected input formats
+    - Resources may be created in invalid states
+    - Debugging requires tracing through cloud provider errors
+
+    Proper validation rules provide clear, actionable error messages and
+    catch issues before they affect infrastructure.
+  when_to_run:
+  - When reviewing module quality
+  - After deployment failures from invalid inputs
+  - During IaC code review process improvements
+  - When establishing module authoring standards
+prerequisites:
+  required_artifacts:
+  - type: terraform_configuration
+    description: Terraform configurations with variables and resources
+  - type: module_source
+    description: Reusable modules to evaluate
+  access_requirements:
+  - Read access to Terraform configuration repository
+discovery:
+  code_patterns:
+  - pattern: validation\s*\{
+    type: regex
+    scope: source
+    purpose: Find variable validation blocks
+  - pattern: precondition\s*\{
+    type: regex
+    scope: source
+    purpose: Find lifecycle preconditions
+  - pattern: postcondition\s*\{
+    type: regex
+    scope: source
+    purpose: Find lifecycle postconditions
+  - pattern: check\s*\{
+    type: regex
+    scope: source
+    purpose: Find check blocks for continuous assertions
+  - pattern: condition\s*=\s*
+    type: regex
+    scope: source
+    purpose: Identify condition expressions
+  - pattern: error_message\s*=
+    type: regex
+    scope: source
+    purpose: Find custom error messages
+  file_patterns:
+  - glob: '**/variables.tf'
+    purpose: Variable definitions with validations
+  - glob: '**/*.tf'
+    purpose: All Terraform files for condition checks
+  - glob: '**/outputs.tf'
+    purpose: Output preconditions
+knowledge_sources:
+  specifications:
+  - id: terraform-validation-docs
+    name: Terraform Variable Validation
+    url: https://developer.hashicorp.com/terraform/language/values/variables#custom-validation-rules
+    offline_cache: true
+    priority: required
+  - id: terraform-conditions-docs
+    name: Terraform Preconditions and Postconditions
+    url: https://developer.hashicorp.com/terraform/language/expressions/custom-conditions
+    offline_cache: true
+    priority: required
+  guides:
+  - id: terraform-module-best-practices
+    name: HashiCorp Module Best Practices
+    url: https://developer.hashicorp.com/terraform/language/modules/develop
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: terraform validate
+    purpose: Validates configuration including validation rules
+    offline_capable: true
+  - tool: tflint
+    purpose: Checks for validation best practices
+    offline_capable: true
+  scripts:
+  - id: validation-coverage
+    language: bash
+    purpose: Calculate percentage of variables with validation
+    source: inline
+    code: |
+      #!/bin/bash
+      # Count variables and validation blocks
+      TOTAL_VARS=$(grep -r 'variable\s*"' --include='*.tf' . | wc -l)
+      VALIDATED_VARS=$(grep -B5 -A10 'variable\s*"' --include='*.tf' . | grep -c 'validation {')
+
+      if [ "$TOTAL_VARS" -gt 0 ]; then
+        COVERAGE=$((VALIDATED_VARS * 100 / TOTAL_VARS))
+        echo "Validation coverage: $COVERAGE% ($VALIDATED_VARS/$TOTAL_VARS variables)"
+      else
+        echo "No variables found"
+      fi
+signals:
+  critical:
+  - id: IAC-VAL-CRIT-001
+    signal: No validation on security-sensitive variables
+    evidence_pattern: |
+      variable "allowed_cidr_blocks" without validation
+      variable "iam_role_arn" without validation
+      variable "kms_key_id" without validation
+    explanation: |
+      Security-sensitive inputs without validation can accept malformed
+      or overly permissive values (like 0.0.0.0/0 for CIDR blocks) without
+      any warning, leading to security vulnerabilities.
+    remediation: |
+      Add validation blocks to security-sensitive variables:
+      variable "allowed_cidr_blocks" {
+        type = list(string)
+        validation {
+          condition = alltrue([
+            for cidr in var.allowed_cidr_blocks :
+            can(cidrnetmask(cidr)) && cidr != "0.0.0.0/0"
+          ])
+          error_message = "CIDR blocks must be valid and not allow all traffic."
+        }
+      }
+  high:
+  - id: IAC-VAL-HIGH-001
+    signal: Environment/region variables accept any string
+    evidence_pattern: variable "environment".*type = string(?!.*validation)
+    explanation: |
+      Without validation, typos like "porduction" instead of "production"
+      can cause resources to be created with incorrect configurations
+      or in wrong environments.
+    remediation: |
+      Validate enumerated values:
+      variable "environment" {
+        type = string
+        validation {
+          condition     = contains(["dev", "staging", "prod"], var.environment)
+          error_message = "Environment must be dev, staging, or prod."
+        }
+      }
+  - id: IAC-VAL-HIGH-002
+    signal: No preconditions on data sources
+    evidence_pattern: data "aws_.*" without precondition
+    explanation: |
+      Data sources that fail to find resources cause confusing errors.
+      Preconditions can validate that expected data exists before use.
+    remediation: |
+      Add preconditions to critical data sources:
+      data "aws_ami" "app" {
+        # ... filter configuration
+
+        lifecycle {
+          precondition {
+            condition     = self.image_id != null
+            error_message = "No AMI found matching the specified filters."
+          }
+        }
+      }
+  medium:
+  - id: IAC-VAL-MED-001
+    signal: Validation error messages don't explain expected format
+    evidence_pattern: error_message.*invalid\|error_message.*wrong
+    remediation: |
+      Write descriptive error messages:
+      error_message = "The instance_type must be a valid AWS instance type (e.g., t3.micro, m5.large)."
+  - id: IAC-VAL-MED-002
+    signal: No postconditions verifying resource creation results
+    remediation: |
+      Add postconditions to verify expected outcomes:
+      resource "aws_instance" "app" {
+        lifecycle {
+          postcondition {
+            condition     = self.private_ip != null
+            error_message = "Instance must have a private IP address."
+          }
+        }
+      }
+  low:
+  - id: IAC-VAL-LOW-001
+    signal: Check blocks not used for continuous validation
+    remediation: |
+      Add check blocks for ongoing assertions:
+      check "api_health" {
+        data "http" "api" { url = "https://api.example.com/health" }
+        assert {
+          condition     = data.http.api.status_code == 200
+          error_message = "API is not healthy"
+        }
+      }
+  positive:
+  - id: IAC-VAL-POS-001
+    signal: Comprehensive validation on all public module inputs
+  - id: IAC-VAL-POS-002
+    signal: Descriptive error messages guide users to correct values
+  - id: IAC-VAL-POS-003
+    signal: Preconditions and postconditions on critical resources
+  - id: IAC-VAL-POS-004
+    signal: Check blocks verify infrastructure health assumptions
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory validation coverage
+    description: |
+      Count variables and determine what percentage have validation blocks.
+      Identify categories of variables (security, environment, naming).
+    duration_estimate: 30 min
+    commands:
+    - purpose: Count total variables
+      command: grep -r 'variable\s*"' --include='*.tf' . | wc -l
+    - purpose: Count variables with validation
+      command: grep -r -A20 'variable\s*"' --include='*.tf' . | grep -c 'validation {'
+    - purpose: List variables without validation
+      command: |
+        grep -r -l 'variable\s*"' --include='*.tf' . | while read f; do
+          grep -Pzo '(?s)variable\s*"[^"]+"\s*\{(?:(?!validation).)*?\}' "$f" 2>/dev/null | tr '\0' '\n'
+        done | head -50
+    expected_findings:
+    - Validation coverage percentage
+    - Variables lacking validation
+  - id: '2'
+    name: Analyze security-sensitive variables
+    description: |
+      Identify variables that handle security-sensitive values and verify
+      they have appropriate validation.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find CIDR/IP variables
+      command: grep -r -A10 'variable.*cidr\|variable.*ip\|variable.*subnet' --include='*.tf' . | head
+        -50
+    - purpose: Find IAM/role variables
+      command: grep -r -A10 'variable.*iam\|variable.*role\|variable.*policy' --include='*.tf' . | head
+        -50
+    - purpose: Find port/protocol variables
+      command: grep -r -A10 'variable.*port\|variable.*protocol' --include='*.tf' . | head -50
+    expected_findings:
+    - Security-sensitive variables identified
+    - Validation status of each
+  - id: '3'
+    name: Review preconditions and postconditions
+    description: |
+      Check for lifecycle preconditions and postconditions on resources
+      and data sources.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find preconditions
+      command: grep -r -B5 -A10 'precondition' --include='*.tf' . | head -50
+    - purpose: Find postconditions
+      command: grep -r -B5 -A10 'postcondition' --include='*.tf' . | head -50
+    - purpose: Find check blocks
+      command: grep -r -A10 'check\s*"' --include='*.tf' . | head -30
+    expected_findings:
+    - Precondition usage patterns
+    - Postcondition coverage
+    - Check block implementation
+  - id: '4'
+    name: Evaluate error message quality
+    description: |
+      Review error messages for clarity and actionability.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Extract error messages
+      command: grep -r 'error_message' --include='*.tf' . | head -30
+    expected_findings:
+    - Error message quality
+    - Actionable guidance in messages
+  - id: '5'
+    name: Test validation effectiveness
+    description: |
+      Attempt to apply invalid inputs and verify validation catches them.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test with invalid environment
+      command: terraform plan -var='environment=invalid' 2>&1 | head -20
+    expected_findings:
+    - Validation triggering correctly
+    - Clear error messages displayed
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Validation Coverage Analysis
+    - Security-Sensitive Variable Review
+    - Condition Implementation
+    - Recommendations
+  confidence_guidance:
+    high: Validation tested with invalid inputs
+    medium: Configuration reviewed for validation blocks
+    low: Only file patterns searched
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-validation-docs
+      priority: required
+    - source_id: terraform-conditions-docs
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Can quickly scan for validation blocks
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: validation-001
+  item: Security-sensitive variables have validation
+  level: CRITICAL
+  verification: manual
+  verification_notes: Reviewer verifies CIDR, IAM, port variables have validation
+  expected: Confirmed by reviewer
+- id: validation-002
+  item: Environment/region variables validate allowed values
+  level: BLOCKING
+  verification: grep -r 'variable.*environment' --include='*.tf' -A15 . | grep -c 'validation'
+  expected: '>0'
+- id: validation-003
+  item: Error messages are descriptive and actionable
+  level: WARNING
+  verification: manual
+  verification_notes: Reviewer confirms error messages explain expected format
+  expected: Confirmed by reviewer
+- id: validation-004
+  item: Critical data sources have preconditions
+  level: WARNING
+  verification: grep -r 'precondition' --include='*.tf' . | wc -l
+  expected: '>0'
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC8.1
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.testing-validation.iac-unit-testing
+  - infrastructure-as-code.provider-version.module-version-pinning

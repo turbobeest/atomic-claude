@@ -1,0 +1,394 @@
+audit:
+  id: security-trust.authorization.privilege-escalation
+  name: Privilege Escalation Path Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authorization
+  tier: phd
+  estimated_duration: 2.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    Analyzes the codebase for privilege escalation vulnerabilities that allow
+    users to gain elevated permissions. Examines both vertical escalation
+    (gaining higher-level privileges like admin) and horizontal escalation
+    (accessing other users' resources at the same privilege level). Reviews
+    role assignment, permission granting, and privilege management logic.
+  why_it_matters: |
+    Privilege escalation (CWE-269) allows attackers to bypass access controls
+    and gain unauthorized capabilities. This is a critical security weakness
+    that can lead to complete system compromise. Common attack vectors include
+    role manipulation, permission injection, and exploiting misconfigurations.
+    Recent CVEs demonstrate continued prevalence of these vulnerabilities.
+  when_to_run:
+  - Initial security assessment
+  - After changes to role/permission logic
+  - Before production deployment
+  - During penetration testing
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application with role/permission management
+  - type: configuration
+    description: Role hierarchy and permission definitions
+  access_requirements:
+  - Read access to source code repository
+  - Access to authorization configuration
+  - Understanding of privilege model
+discovery:
+  code_patterns:
+  - pattern: (setRole|assignRole|grantRole|addRole|promoteUser)
+    type: regex
+    scope: source
+    purpose: Find role assignment patterns
+  - pattern: (setAdmin|makeAdmin|isAdmin\s*=\s*true)
+    type: regex
+    scope: source
+    purpose: Detect admin privilege assignment
+  - pattern: (permission|privilege)\s*[=:]\s*(req|request|input|body)
+    type: regex
+    scope: source
+    purpose: Find user-controlled permission assignment
+  - pattern: (escalate|elevate|promote).*privilege
+    type: regex
+    scope: source
+    purpose: Identify privilege escalation functions
+  - pattern: user\.(role|permissions?)\s*\+?=
+    type: regex
+    scope: source
+    purpose: Find permission/role modification patterns
+  file_patterns:
+  - glob: '**/auth/**'
+    purpose: Authentication and authorization modules
+  - glob: '**/permissions/**'
+    purpose: Permission management files
+  - glob: '**/roles/**'
+    purpose: Role management files
+  - glob: '**/admin/**'
+    purpose: Admin functionality files
+  - glob: '**/user-management/**'
+    purpose: User management modules
+knowledge_sources:
+  specifications:
+  - id: cwe-269
+    name: 'CWE-269: Improper Privilege Management'
+    url: https://cwe.mitre.org/data/definitions/269.html
+    offline_cache: true
+    priority: required
+  - id: cwe-266
+    name: 'CWE-266: Incorrect Privilege Assignment'
+    url: https://cwe.mitre.org/data/definitions/266.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-authz
+    name: OWASP Authorization Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-access-control
+    name: OWASP Access Control
+    url: https://owasp.org/www-community/Access_Control
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect privilege escalation patterns
+    offline_capable: true
+  - tool: CodeQL
+    purpose: Analyze privilege flow
+    offline_capable: true
+  scripts:
+  - id: privesc-search
+    language: bash
+    purpose: Find privilege escalation patterns
+    source: inline
+    code: |
+      # Search for privilege modification patterns
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs}" \
+        -E "(setRole|assignRole|grant|addPermission|isAdmin|makeAdmin)" .
+signals:
+  critical:
+  - id: PRIV-CRIT-001
+    signal: User-controlled role assignment
+    evidence_pattern: (role|roles)\s*=\s*(req|request|body|params|input)
+    cwe: CWE-269
+    explanation: |
+      Role or privilege values are assigned directly from user input,
+      allowing attackers to self-assign elevated roles including admin.
+      This is the most severe form of privilege escalation.
+    remediation: Validate role assignments against whitelist; require admin authorization for role changes
+  - id: PRIV-CRIT-002
+    signal: Missing authorization on admin endpoints
+    evidence_pattern: \/admin\/.*(?!@PreAuthorize|requireAdmin|isAdmin)
+    cwe: CWE-269
+    explanation: |
+      Admin functionality is accessible without admin role verification,
+      allowing any authenticated user to access administrative features.
+    remediation: Enforce admin role check on all admin endpoints
+  - id: PRIV-CRIT-003
+    signal: Privilege bypass through parameter manipulation
+    evidence_pattern: (admin|superuser|elevated)\s*[=:]\s*(true|1|['"](true|admin))
+    cwe: CWE-269
+    explanation: |
+      Boolean or string parameters control privilege levels without
+      proper validation, enabling bypass through request manipulation.
+    remediation: Never trust client-provided privilege flags; verify from server state
+  high:
+  - id: PRIV-HIGH-001
+    signal: Unvalidated permission granting
+    evidence_pattern: grant.*permission\(.*\)(?!.*validate|.*authorize)
+    cwe: CWE-266
+    explanation: |
+      Permissions are granted without validation of the granting user's
+      authority, allowing unauthorized privilege delegation.
+    remediation: Verify granting user has permission to grant; enforce permission boundaries
+  - id: PRIV-HIGH-002
+    signal: Role inheritance bypass
+    evidence_pattern: role.*!=.*admin|!.*hasRole.*admin
+    cwe: CWE-863
+    explanation: |
+      Role checks use negative logic that can be bypassed by creating
+      new roles or exploiting role hierarchy gaps.
+    remediation: Use positive role validation; enumerate allowed roles explicitly
+  - id: PRIV-HIGH-003
+    signal: Privilege state manipulation through serialization
+    evidence_pattern: (serialize|deserialize|JSON\.parse).*role|permission
+    cwe: CWE-502
+    explanation: |
+      Privilege information stored in serialized objects can be
+      manipulated if the serialization is user-controllable.
+    remediation: Never serialize privilege state to untrusted sources; verify on server
+  medium:
+  - id: PRIV-MED-001
+    signal: Privilege escalation through registration
+    evidence_pattern: register.*role|signup.*admin|create.*User.*role
+    cwe: CWE-269
+    remediation: Restrict role assignment during registration to minimum privileges
+  - id: PRIV-MED-002
+    signal: Missing privilege drop after operation
+    evidence_pattern: elevate.*(?!.*drop|.*revoke|.*reset)
+    cwe: CWE-272
+    remediation: Implement automatic privilege drop after elevated operations
+  low:
+  - id: PRIV-LOW-001
+    signal: Privilege changes not logged
+    evidence_pattern: (setRole|grant|revoke)(?!.*log|.*audit)
+    remediation: Add audit logging for all privilege changes
+  positive:
+  - id: PRIV-POS-001
+    signal: Principle of least privilege enforced
+    evidence_pattern: least.*privilege|minimal.*role|minimum.*permission
+  - id: PRIV-POS-002
+    signal: Separation of duties implemented
+    evidence_pattern: (separation.*duties|dual.*control|four.*eyes)
+  - id: PRIV-POS-003
+    signal: Privilege audit logging present
+    evidence_pattern: (audit|log).*(privilege|role|permission)
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map Privilege Assignment Points
+    description: |
+      Identify all locations where privileges, roles, or permissions
+      are assigned to users or entities.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find role assignment patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(setRole|assignRole|grantRole|addRole|user\.role\s*=)" .
+    - purpose: Find permission granting
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(grant|add|assign).*[pP]ermission" .
+    expected_findings:
+    - Role assignment mechanisms
+    - Permission granting logic
+  - id: '2'
+    name: Analyze Input Sources for Privilege Data
+    description: |
+      Determine if privilege assignments accept user-controlled input
+      without proper validation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find user input in privilege assignments
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(role|permission|privilege).*=.*(req|request|body|params)" .
+    - purpose: Check registration for role assignment
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -B5 -A10 \
+          "(register|signup|createUser)" . | grep -E "(role|admin|permission)"
+    expected_findings:
+    - Identification of user-controllable privilege sources
+    - Registration role restrictions
+  - id: '3'
+    name: Review Admin Endpoint Protection
+    description: |
+      Verify that administrative endpoints require appropriate
+      privilege verification.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find admin endpoints
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(\\/admin\\/|@Admin|adminRouter|admin.*route)" .
+    - purpose: Check admin endpoint authorization
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -B3 -A3 \
+          "\\/admin\\/" . | grep -E "(PreAuthorize|requireAdmin|isAdmin|authorize)"
+    expected_findings:
+    - Admin endpoint protection
+    - Consistent authorization on admin routes
+  - id: '4'
+    name: Verify Privilege Boundaries
+    description: |
+      Ensure that users cannot grant permissions beyond their own
+      and that privilege boundaries are enforced.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find privilege delegation patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(delegate|grant|transfer).*permission" .
+    - purpose: Check for boundary validation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(can.*grant|permission.*boundary|max.*permission)" .
+    expected_findings:
+    - Privilege delegation controls
+    - Boundary enforcement
+  - id: '5'
+    name: Audit Privilege Change Logging
+    description: |
+      Verify that all privilege changes are logged for security
+      audit purposes.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find privilege change logging
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(log|audit).*(role|permission|privilege|grant|revoke)" .
+    expected_findings:
+    - Audit trail for privilege changes
+    - Logging of role assignments
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Privilege Escalation Paths
+    - Critical Vulnerabilities
+    - Remediation Roadmap
+  confidence_guidance:
+    high: Privilege assignment validated; boundaries enforced; audit logging present
+    medium: Some controls present but gaps identified
+    low: Privilege patterns found but controls unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-269
+      priority: required
+    - source_id: owasp-authz
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Privilege escalation requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: priv-001
+  item: No user-controlled role assignment
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "role\s*=\s*(req|request|body|params)" . | wc -l
+  expected: '0'
+- id: priv-002
+  item: Admin endpoints protected
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "/admin" . | wc -l && \
+    grep -rn --include="*.{js,ts,py,java,go}" "/admin.*isAdmin\|requireAdmin\|@Admin" . | wc -l
+  expected: Counts should be close
+- id: priv-003
+  item: Privilege boundaries enforced
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "(grant|delegate).*permission" . | wc -l && \
+    grep -rn --include="*.{js,ts,py,java,go}" -E "(canGrant|boundary|maxPermission)" . | wc -l
+  expected: Boundary checks present if delegation exists
+- id: priv-004
+  item: Privilege change audit logging
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "(log|audit).*(role|permission)" . | wc -l
+  expected: Greater than 0
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-269
+    - CWE-266
+    - CWE-272
+  - framework: OWASP Top 10 2021
+    controls:
+    - A01:2021
+  - framework: NIST SP 800-53
+    controls:
+    - AC-6
+    - AC-2
+relationships:
+  commonly_combined:
+  - security-trust.authorization.rbac-implementation
+  - security-trust.authorization.admin-access
+  - security-trust.authorization.permission-boundary

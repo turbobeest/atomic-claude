@@ -1,0 +1,317 @@
+# ============================================================
+# AUDIT: Retry Guidance Assessment
+# ============================================================
+# Evaluates API retry behavior documentation and headers
+# ============================================================
+
+audit:
+  id: "api-integration.error-handling.retry-guidance"
+
+  name: "Retry Guidance Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "error-handling"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates how the API guides consumers on retry behavior including
+    Retry-After headers, rate limit information, idempotency support,
+    backoff recommendations, and clear indication of retryable vs
+    non-retryable errors.
+
+  why_it_matters: |
+    Without retry guidance, consumers implement inappropriate retry logic -
+    either not retrying when they should (missing transient errors) or
+    retrying when they shouldn't (amplifying failures). Good guidance
+    enables resilient integrations and prevents cascading failures.
+
+  when_to_run:
+    - "During API reliability reviews"
+    - "Before production launch"
+    - "When experiencing retry storms"
+
+prerequisites:
+  required_artifacts:
+    - type: "api-source"
+      description: "API response handling code"
+    - type: "api-docs"
+      description: "API documentation"
+
+  access_requirements:
+    - "Read access to API source code"
+    - "Access to API documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "Retry-After|retry.*after|retryAfter"
+      type: "regex"
+      scope: "source"
+      purpose: "Retry-After header usage"
+    - pattern: "X-RateLimit|rateLimit|rate.*limit"
+      type: "regex"
+      scope: "source"
+      purpose: "Rate limit headers"
+    - pattern: "idempotency|idempotent|retry.*safe"
+      type: "regex"
+      scope: "source"
+      purpose: "Idempotency markers"
+    - pattern: "retryable|non.*retryable|transient"
+      type: "regex"
+      scope: "source"
+      purpose: "Retry classification"
+
+  file_patterns:
+    - glob: "**/errors/**/*.{java,ts,py}"
+      purpose: "Error definitions"
+    - glob: "**/*openapi*.{yaml,yml,json}"
+      purpose: "API specifications"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc-7231-retry"
+      name: "RFC 7231 - Retry-After Header"
+      url: "https://datatracker.ietf.org/doc/html/rfc7231#section-7.1.3"
+      offline_cache: true
+      priority: "required"
+    - id: "owasp-api-security"
+      name: "OWASP API Security Top 10"
+      url: "https://owasp.org/API-Security/"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "retry-patterns"
+      name: "Retry Pattern - Cloud Design Patterns"
+      url: "https://docs.microsoft.com/en-us/azure/architecture/patterns/retry"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "spectral"
+      purpose: "Check for retry documentation in OpenAPI"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "RETRY-CRIT-001"
+      signal: "No indication of retryable vs non-retryable errors"
+      evidence_indicators:
+        - "All errors treated same way"
+        - "No retry classification in error response"
+      explanation: |
+        Consumers cannot distinguish between transient (retry) and permanent
+        (don't retry) failures. This leads to either missed recovery
+        opportunities or wasted retries that amplify failures.
+      remediation: "Include retryable boolean or classification in error response"
+
+    - id: "RETRY-CRIT-002"
+      signal: "429 responses without Retry-After header"
+      evidence_pattern: "429(?!.*Retry-After)"
+      explanation: |
+        Rate limited responses without Retry-After force consumers to guess
+        when to retry, leading to either immediate retries (worsening the
+        problem) or overly conservative backoff (poor user experience).
+      remediation: "Always include Retry-After header with 429 responses"
+
+  high:
+    - id: "RETRY-HIGH-001"
+      signal: "503 responses without Retry-After"
+      evidence_pattern: "503(?!.*Retry-After)"
+      explanation: |
+        Service Unavailable responses should indicate when service is
+        expected to recover, enabling intelligent client retry behavior.
+      remediation: "Include Retry-After header with 503 responses"
+
+    - id: "RETRY-HIGH-002"
+      signal: "No backoff recommendation in documentation"
+      evidence_indicators:
+        - "No exponential backoff guidance"
+        - "No jitter recommendation"
+      explanation: |
+        Without backoff guidance, consumers may implement immediate retries
+        or synchronized retries, causing thundering herd problems.
+      remediation: "Document exponential backoff with jitter recommendations"
+
+  medium:
+    - id: "RETRY-MED-001"
+      signal: "Rate limit headers incomplete"
+      evidence_pattern: "X-RateLimit-Limit(?!.*X-RateLimit-Remaining)"
+      remediation: "Include Limit, Remaining, and Reset headers together"
+
+    - id: "RETRY-MED-002"
+      signal: "No idempotency key support for retries"
+      evidence_indicators:
+        - "POST without idempotency key support"
+        - "No retry-safe documentation"
+      remediation: "Support idempotency keys for safe POST retries"
+
+  low:
+    - id: "RETRY-LOW-001"
+      signal: "No retry limit recommendation"
+      remediation: "Document recommended maximum retry attempts"
+
+  positive:
+    - id: "RETRY-POS-001"
+      signal: "Retry-After header on all appropriate errors"
+    - id: "RETRY-POS-002"
+      signal: "Errors clearly classified as retryable/non-retryable"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Check Retry Headers"
+      description: |
+        Find Retry-After and rate limit header implementations.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find Retry-After usage"
+          command: "grep -rn 'Retry-After\\|retryAfter\\|retry.*header' --include='*.java' --include='*.ts' ."
+        - purpose: "Find rate limit headers"
+          command: "grep -rn 'X-RateLimit\\|RateLimit-\\|rate.*limit.*header' --include='*.java' --include='*.ts' ."
+        - purpose: "Check 429 handling"
+          command: "grep -rn '429\\|TOO_MANY_REQUESTS' --include='*.java' --include='*.ts' . | head -20"
+      expected_findings:
+        - "Header implementation"
+        - "Rate limit response handling"
+
+    - id: "2"
+      name: "Analyze Error Classifications"
+      description: |
+        Check for retryable vs non-retryable error classification.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find retryable markers"
+          command: "grep -rn 'retryable\\|isRetryable\\|canRetry\\|transient' --include='*.java' --include='*.ts' ."
+        - purpose: "Find error type classifications"
+          command: "grep -rn 'TransientException\\|PermanentException\\|RetryableError' --include='*.java' --include='*.ts' ."
+        - purpose: "Check error response for retry info"
+          command: "grep -rn 'error.*retry\\|retry.*error' --include='*.java' --include='*.ts' . | head -20"
+      expected_findings:
+        - "Error classification patterns"
+        - "Retry indicators"
+
+    - id: "3"
+      name: "Review Documentation"
+      description: |
+        Check retry guidance in documentation.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find retry docs"
+          command: "grep -rn 'retry\\|backoff\\|rate.*limit' --include='*.md' . | head -30"
+        - purpose: "Check OpenAPI for retry info"
+          command: "grep -rn 'retry\\|Retry-After\\|rate' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null | head -20"
+      expected_findings:
+        - "Documentation coverage"
+        - "Backoff recommendations"
+
+    - id: "4"
+      name: "Check Idempotency Support"
+      description: |
+        Verify idempotency support for safe retries.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find idempotency implementation"
+          command: "grep -rn 'idempotency\\|Idempotency-Key\\|idempotent' --include='*.java' --include='*.ts' ."
+        - purpose: "Check POST methods"
+          command: "grep -rn '@PostMapping\\|app\\.post' --include='*.java' --include='*.ts' . | head -20"
+      expected_findings:
+        - "Idempotency support"
+        - "POST endpoint patterns"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Retry Mechanism Analysis"
+        - "Documentation Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Retry mechanisms thoroughly analyzed"
+    medium: "Partial retry support found"
+    low: "Limited retry guidance"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "rfc-7231-retry"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed code analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "retry-001"
+    item: "429 responses include Retry-After header"
+    level: "CRITICAL"
+    verification: |
+      if grep -rq '429\|TOO_MANY_REQUESTS' --include='*.java' --include='*.ts' . 2>/dev/null; then if grep -rq 'Retry-After' --include='*.java' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "retry-002"
+    item: "Errors classified as retryable/non-retryable"
+    level: "BLOCKING"
+    verification: |
+      if grep -rq 'retryable\|isRetryable\|canRetry' --include='*.java' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "retry-003"
+    item: "Rate limit headers implemented"
+    level: "BLOCKING"
+    verification: |
+      if grep -rq 'X-RateLimit\|RateLimit-' --include='*.java' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "retry-004"
+    item: "Backoff strategy documented"
+    level: "WARNING"
+    verification: |
+      if grep -rq 'backoff\|exponential\|retry.*delay' --include='*.md' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["api-service", "microservice", "platform"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.api-design.idempotency-design"
+    - "api-integration.error-handling.error-response-format"

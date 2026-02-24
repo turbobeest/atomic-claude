@@ -1,0 +1,294 @@
+audit:
+  id: performance-efficiency.database-performance.table-scan
+  name: Table Scan Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: database-performance
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: data
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit identifies full table scans (sequential scans) that read
+    entire tables instead of using index lookups. It analyzes database
+    statistics to find tables with high sequential scan activity, evaluates
+    the impact on performance, and identifies queries causing unnecessary
+    table scans.
+  why_it_matters: |
+    Full table scans are the most expensive database operation, reading every
+    row regardless of how many match the query. On large tables, this can
+    take minutes instead of milliseconds. Table scans consume I/O bandwidth,
+    memory, and CPU, affecting not just the scanning query but all concurrent
+    database operations.
+  when_to_run:
+  - When investigating slow database queries
+  - After data volume growth
+  - During performance optimization
+  - After new query patterns are deployed
+prerequisites:
+  required_artifacts:
+  - type: database-access
+    description: Access to database statistics
+  - type: query-logs
+    description: Access to execution plans or slow query logs
+  access_requirements:
+  - Read access to pg_stat_user_tables or equivalent
+  - EXPLAIN privileges
+  - Access to query statistics
+discovery:
+  metrics_queries:
+  - system: PostgreSQL
+    query: |
+      SELECT relname, seq_scan, seq_tup_read, idx_scan, n_live_tup
+      FROM pg_stat_user_tables
+      WHERE seq_scan > 0 AND n_live_tup > 10000
+      ORDER BY seq_tup_read DESC
+    purpose: Tables with high sequential scan activity
+    threshold: Large tables should have more idx_scan than seq_scan
+  - system: MySQL
+    query: |
+      SELECT * FROM sys.schema_tables_with_full_table_scans
+      ORDER BY rows_full_scanned DESC
+    purpose: Tables with full table scans in MySQL
+    threshold: Should be minimal for large tables
+  - system: PostgreSQL
+    query: |
+      SELECT relname, seq_scan,
+             round(seq_tup_read::numeric / NULLIF(seq_scan, 0)) as avg_rows_per_scan
+      FROM pg_stat_user_tables
+      WHERE seq_scan > 100
+      ORDER BY avg_rows_per_scan DESC
+    purpose: Average rows read per sequential scan
+    threshold: High values indicate expensive scans
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  specifications:
+  - id: postgres-explain
+    name: PostgreSQL EXPLAIN
+    url: https://www.postgresql.org/docs/current/using-explain.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: postgres-seqscan
+    name: Understanding Sequential Scans
+    url: https://www.postgresql.org/docs/current/planner-stats.html
+    offline_cache: true
+  - id: mysql-full-table-scan
+    name: Avoiding Full Table Scans in MySQL
+    url: https://dev.mysql.com/doc/refman/8.0/en/table-scan-avoidance.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: psql
+    purpose: Query table scan statistics
+    command: psql -c 'SELECT relname, seq_scan, idx_scan FROM pg_stat_user_tables ORDER BY seq_scan DESC'
+  - tool: pg_stat_statements
+    purpose: Identify queries causing scans
+    command: psql -c 'SELECT query FROM pg_stat_statements WHERE query NOT LIKE '%pg_%' ORDER BY total_exec_time
+      DESC'
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      rate(pg_stat_user_tables_seq_scan[5m])
+    purpose: Sequential scan rate over time
+signals:
+  critical:
+  - id: SCAN-CRIT-001
+    signal: Sequential scans on tables with millions of rows
+    evidence_threshold: seq_scan > 0 AND n_live_tup > 1000000
+    explanation: |
+      Sequential scans on million-row tables are extremely expensive,
+      potentially taking seconds or minutes. Each scan reads every row
+      from disk or consumes significant buffer cache.
+    remediation: Add appropriate index or rewrite query
+  - id: SCAN-CRIT-002
+    signal: Sequential scans in high-frequency critical paths
+    evidence_threshold: seq_scan > 1000/hour on large table in critical path
+    explanation: |
+      Frequent sequential scans compound their impact. A scan that takes
+      100ms executed 1000 times consumes 100 seconds of database time per
+      hour, plus I/O contention affecting other queries.
+    remediation: Urgent index addition or query optimization
+  high:
+  - id: SCAN-HIGH-001
+    signal: Sequential scan ratio exceeds 50% on indexed table
+    evidence_threshold: seq_scan > idx_scan AND index exists
+    explanation: |
+      When a table has indexes but sequential scans dominate, either the
+      indexes don't match query patterns, statistics are outdated, or
+      planner settings are suboptimal.
+    remediation: ANALYZE table, review index coverage, check planner settings
+  - id: SCAN-HIGH-002
+    signal: EXPLAIN shows Seq Scan with Filter reading most rows
+    evidence_pattern: Seq Scan with low rows/filter ratio
+    explanation: |
+      A sequential scan that reads many rows but returns few indicates
+      a missing index on the filter columns. The database reads everything
+      to find matching rows.
+    remediation: Add index on filter columns
+  medium:
+  - id: SCAN-MED-001
+    signal: Small table sequential scans (may be acceptable)
+    evidence_threshold: seq_scan > idx_scan but n_live_tup < 1000
+    remediation: Verify sequential scan is actually more efficient for small table
+  - id: SCAN-MED-002
+    signal: Sequential scans from analytics/reporting queries
+    evidence_pattern: Batch/ETL queries causing full scans
+    remediation: Schedule analytics during off-peak, consider read replicas
+  low:
+  - id: SCAN-LOW-001
+    signal: Sequential scan count increasing after statistics reset
+  positive:
+  - id: SCAN-POS-001
+    signal: Index scan ratio > 95% on large tables
+  - id: SCAN-POS-002
+    signal: No sequential scans on tables > 100k rows
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify high-scan tables
+    description: |
+      Query database statistics to identify tables with the highest
+      sequential scan activity.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Top tables by sequential scan count
+      command: |
+        psql -c "SELECT relname, seq_scan, seq_tup_read, idx_scan, n_live_tup, pg_size_pretty(pg_total_relation_size(relid)) as size FROM pg_stat_user_tables ORDER BY seq_tup_read DESC LIMIT 20"
+    - purpose: Sequential vs index scan ratio
+      command: |
+        psql -c "SELECT relname, CASE WHEN seq_scan + idx_scan > 0 THEN round(100.0 * seq_scan / (seq_scan + idx_scan)) END as seq_pct, n_live_tup FROM pg_stat_user_tables WHERE n_live_tup > 1000 ORDER BY seq_pct DESC NULLS LAST"
+    expected_findings:
+    - Tables with most sequential scans
+    - Sequential scan ratios
+  - id: '2'
+    name: Analyze scan impact
+    description: |
+      Evaluate the cost and impact of identified sequential scans
+      on overall database performance.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Rows read per scan
+      command: |
+        psql -c "SELECT relname, seq_scan, seq_tup_read, CASE WHEN seq_scan > 0 THEN seq_tup_read / seq_scan END as rows_per_scan FROM pg_stat_user_tables WHERE seq_scan > 0 ORDER BY rows_per_scan DESC NULLS LAST LIMIT 20"
+    - purpose: Table sizes for context
+      command: |
+        psql -c "SELECT relname, n_live_tup, pg_size_pretty(pg_total_relation_size(relid)) as total_size FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 20"
+    expected_findings:
+    - Scan cost assessment
+    - Impact on large tables
+  - id: '3'
+    name: Identify causing queries
+    description: |
+      Find the specific queries responsible for sequential scans
+      on the problematic tables.
+    duration_estimate: 40 min
+    commands:
+    - purpose: Slow queries on high-scan tables
+      command: |
+        psql -c "SELECT query, calls, mean_exec_time FROM pg_stat_statements WHERE query ~* 'FROM tablename' ORDER BY total_exec_time DESC LIMIT 10"
+    - purpose: EXPLAIN for suspect query
+      command: |
+        psql -c "EXPLAIN (ANALYZE, BUFFERS) <query>"
+    expected_findings:
+    - Queries causing sequential scans
+    - Execution plans showing scan operations
+  - id: '4'
+    name: Check index availability
+    description: |
+      Verify whether appropriate indexes exist for the problematic
+      queries and why they may not be used.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Indexes on high-scan tables
+      command: |
+        psql -c "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'high_scan_table'"
+    - purpose: Table statistics freshness
+      command: |
+        psql -c "SELECT relname, last_analyze, last_autoanalyze FROM pg_stat_user_tables WHERE relname = 'high_scan_table'"
+    expected_findings:
+    - Available indexes
+    - Statistics currency
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Table Scan Inventory
+    - Impact Assessment
+    - Root Cause Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Statistics from production with EXPLAIN ANALYZE verification
+    medium: Statistics available but limited query correlation
+    low: Statistics review without query analysis
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: postgres-explain
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime statistics analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: scan-001
+  item: No sequential scans on tables > 1M rows in OLTP paths
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify no seq_scan on million-row tables in critical paths
+  expected: Confirmed by reviewer
+- id: scan-002
+  item: Index scan ratio > 90% on tables > 10k rows
+  level: BLOCKING
+  verification: |
+    psql -c "SELECT count(*) FROM pg_stat_user_tables WHERE n_live_tup > 10000 AND seq_scan + idx_scan > 0 AND 100.0 * idx_scan / (seq_scan + idx_scan) < 90" -t | grep -q "^0$"
+  expected: 'true'
+- id: scan-003
+  item: All high-scan tables have been analyzed recently
+  level: WARNING
+  verification: |
+    psql -c "SELECT count(*) FROM pg_stat_user_tables WHERE seq_scan > 100 AND (last_analyze IS NULL OR last_analyze < now() - interval '7 days')" -t | grep -q "^0$"
+  expected: 'true'
+governance:
+  applicable_to:
+    archetypes:
+    - all
+relationships:
+  commonly_combined:
+  - performance-efficiency.database-performance.missing-index
+  - performance-efficiency.database-performance.query-optimization

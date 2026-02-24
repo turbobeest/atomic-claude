@@ -1,0 +1,348 @@
+audit:
+  id: data-state-management.data-validation.input-validation
+  name: Input Validation Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: data-state-management
+  category_number: 8
+  subcategory: data-validation
+  tier: phd
+  estimated_duration: 90 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the application's input validation strategy across all entry points
+    including API endpoints, form submissions, file uploads, command-line inputs,
+    and inter-service communication. Analyzes validation completeness, placement
+    (client vs server), and consistency of validation rules.
+  why_it_matters: |
+    Input validation is the first line of defense against injection attacks,
+    data corruption, and application crashes. Missing or inconsistent validation
+    leads to SQL injection, XSS, command injection, and buffer overflows.
+    Validation must occur at trust boundaries, not just at the UI layer.
+  when_to_run:
+  - Security audits
+  - API design reviews
+  - Before production deployment
+  - After adding new input sources
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code including controllers, handlers, and validators
+  - type: api_specs
+    description: API specifications (OpenAPI, GraphQL schema)
+  access_requirements:
+  - Read access to application source code
+  - Access to API documentation
+discovery:
+  code_patterns:
+  - pattern: req\.body|req\.params|req\.query|request\.json
+    type: regex
+    scope: source
+    purpose: Detect request data access points
+  - pattern: '@Valid|@Validated|@NotNull|@NotEmpty|@Pattern'
+    type: regex
+    scope: source
+    purpose: Detect validation annotations
+  - pattern: sanitize|escape|validate|htmlspecialchars|strip_tags
+    type: regex
+    scope: source
+    purpose: Detect validation/sanitization functions
+  - pattern: JSON\.parse|eval|exec|spawn|query\(
+    type: regex
+    scope: source
+    purpose: Detect dangerous operations requiring validation
+  file_patterns:
+  - glob: '**/validators/**'
+    purpose: Validation modules
+  - glob: '**/controllers/**'
+    purpose: Input handling points
+  - glob: '**/handlers/**'
+    purpose: Request handlers
+  - glob: '**/schemas/**'
+    purpose: Validation schemas
+knowledge_sources:
+  specifications:
+  - id: owasp-input-validation
+    name: OWASP Input Validation Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: cwe-20
+    name: 'CWE-20: Improper Input Validation'
+    url: https://cwe.mitre.org/data/definitions/20.html
+    offline_cache: true
+  - id: sans-input-validation
+    name: SANS Input Validation Guidelines
+    url: https://www.sans.org/reading-room/whitepapers/application/input-validation-cheat-sheet-33546
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect missing input validation patterns
+    offline_capable: true
+  - tool: eslint-plugin-security
+    purpose: JavaScript security linting
+    offline_capable: true
+  - tool: bandit
+    purpose: Python security analysis
+    offline_capable: true
+  scripts:
+  - id: input-validation-scan
+    language: bash
+    purpose: Scan for input validation patterns and gaps
+    source: inline
+    code: |
+      echo "=== Input Validation Analysis ==="
+      echo "--- Request body access without validation ---"
+      grep -rn "req\.body\|request\.json\|@RequestBody" \
+        --include="*.js" --include="*.ts" --include="*.py" --include="*.java" . 2>/dev/null | \
+        grep -v "validate\|sanitize\|@Valid" | head -30
+
+      echo "--- Potential injection points ---"
+      grep -rn "query(\|exec(\|eval(\|execute(" \
+        --include="*.js" --include="*.ts" --include="*.py" --include="*.java" . 2>/dev/null | head -30
+signals:
+  critical:
+  - id: IV-CRIT-001
+    signal: Direct use of user input in SQL queries without parameterization
+    evidence_pattern: query.*\+.*req\.|execute.*%.*input
+    explanation: |
+      String concatenation in SQL queries enables SQL injection attacks.
+      Attackers can bypass authentication, exfiltrate data, or destroy
+      the database.
+    remediation: Use parameterized queries or prepared statements exclusively
+  - id: IV-CRIT-002
+    signal: User input passed to eval/exec without validation
+    evidence_pattern: eval\(.*req\.|exec\(.*input
+    explanation: |
+      Passing user input to code execution functions enables remote
+      code execution (RCE), the most severe class of vulnerability.
+    remediation: Never use eval/exec with user input; use safe alternatives
+  - id: IV-CRIT-003
+    signal: No server-side validation (client-only validation)
+    evidence_pattern: Client validates but server accepts raw input
+    explanation: |
+      Client-side validation can be bypassed by attackers using tools
+      like curl or Burp Suite. Server must always validate independently.
+    remediation: Implement server-side validation for all inputs
+  high:
+  - id: IV-HIGH-001
+    signal: Missing content-type validation on file uploads
+    evidence_pattern: upload.*file.*without.*type.*check
+    explanation: |
+      Without content-type validation, attackers can upload malicious
+      files (web shells, malware) disguised as legitimate file types.
+    remediation: Validate file content-type, extension, and magic bytes
+  - id: IV-HIGH-002
+    signal: No length limits on string inputs
+    evidence_pattern: String fields without maxLength validation
+    explanation: |
+      Unbounded string inputs can cause denial of service through
+      memory exhaustion or database storage attacks.
+    remediation: Set appropriate maxLength on all string inputs
+  - id: IV-HIGH-003
+    signal: User input in shell commands without escaping
+    evidence_pattern: spawn\(.*\$\{|exec.*\+.*input
+    explanation: |
+      Unescaped input in shell commands enables command injection,
+      allowing attackers to execute arbitrary system commands.
+    remediation: Use parameterized commands or strict allowlists
+  medium:
+  - id: IV-MED-001
+    signal: Inconsistent validation between endpoints
+    evidence_pattern: Same field validated differently across endpoints
+    remediation: Centralize validation rules in shared schemas
+  - id: IV-MED-002
+    signal: Missing type coercion validation
+    evidence_pattern: String input used as number without parsing
+    remediation: Validate and coerce types explicitly
+  - id: IV-MED-003
+    signal: No validation on array/object depth
+    evidence_pattern: Deep nested objects accepted without limits
+    remediation: Limit nesting depth to prevent prototype pollution
+  low:
+  - id: IV-LOW-001
+    signal: Validation errors leak implementation details
+    evidence_pattern: Error messages reveal field names or schema
+    remediation: Return generic validation error messages
+  - id: IV-LOW-002
+    signal: No input trimming for string fields
+    evidence_pattern: Leading/trailing whitespace not stripped
+    remediation: Trim string inputs where appropriate
+  positive:
+  - id: IV-POS-001
+    signal: Comprehensive validation schema (JSON Schema, Joi, Zod)
+    evidence_pattern: All endpoints use validation schemas
+  - id: IV-POS-002
+    signal: Allowlist-based validation for constrained fields
+    evidence_pattern: Enum validation for categorical inputs
+  - id: IV-POS-003
+    signal: Input validation at trust boundaries
+    evidence_pattern: Validation in API gateway or controller layer
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Input Entry Points
+    description: |
+      Map all locations where external input enters the application.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find API controllers/handlers
+      command: |
+        find . -type f \( -name "*.controller.*" -o -name "*Handler*" -o -name "*Controller*" \) \
+          -not -path "*/node_modules/*" 2>/dev/null
+    - purpose: Find route definitions
+      command: |
+        grep -rn "router\.\|app\.get\|app\.post\|@GetMapping\|@PostMapping" \
+          --include="*.js" --include="*.ts" --include="*.java" . 2>/dev/null | head -40
+    expected_findings:
+    - Complete list of input entry points
+    - API endpoint inventory
+  - id: '2'
+    name: Analyze Validation Coverage
+    description: |
+      Check if all entry points have corresponding validation.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find validation patterns
+      command: |
+        grep -rn "@Valid\|validate(\|Joi\.\|zod\.\|yup\.\|JSON\.parse" \
+          --include="*.js" --include="*.ts" --include="*.java" . 2>/dev/null | head -40
+    - purpose: Find unvalidated request body access
+      command: |
+        grep -rn "req\.body\|request\.json\|@RequestBody" \
+          --include="*.js" --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v "@Valid\|validate" | head -30
+    expected_findings:
+    - Validation coverage percentage
+    - Gaps in validation
+  - id: '3'
+    name: Check Dangerous Operations
+    description: |
+      Identify dangerous operations that require validated input.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find SQL query construction
+      command: |
+        grep -rn "query(\|execute(\|raw(\|\\$\\{" \
+          --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    - purpose: Find shell command execution
+      command: |
+        grep -rn "exec(\|spawn(\|system(\|popen(" \
+          --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - Dangerous operation inventory
+    - Input flow to dangerous operations
+  - id: '4'
+    name: Review Validation Schemas
+    description: |
+      Examine validation schema completeness and consistency.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find validation schema files
+      command: |
+        find . -type f \( -name "*.schema.*" -o -name "*validator*" -o -name "*validation*" \) \
+          -not -path "*/node_modules/*" 2>/dev/null
+    expected_findings:
+    - Schema coverage
+    - Validation rule consistency
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - unvalidated_inputs
+    - injection_risks
+    - validation_gaps
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Entry Point Analysis
+    - Validation Coverage
+    - Security Risks
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence of missing validation at dangerous operation
+    medium: Input reaches code without visible validation in call path
+    low: Validation may exist in framework or middleware not visible in scan
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-input-validation
+      priority: required
+    - source_id: cwe-20
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: iv-001
+  item: All API endpoints have server-side validation
+  level: CRITICAL
+  verification: |
+    grep -rn "@RequestBody\|req\.body" --include="*.java" --include="*.ts" --include="*.js" . 2>/dev/null | \
+      grep -v "@Valid\|validate" | wc -l | xargs -I {} test {} -eq 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: iv-002
+  item: No string concatenation in SQL queries
+  level: CRITICAL
+  verification: |
+    grep -rn "query.*\\+\|execute.*\\+" --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -eq 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: iv-003
+  item: Validation schemas exist for all input types
+  level: BLOCKING
+  verification: |
+    find . -type f \( -name "*.schema.*" -o -name "*validator*" \) -not -path "*/node_modules/*" 2>/dev/null | \
+      wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A03:2021-Injection
+  - framework: CWE
+    controls:
+    - CWE-20
+    - CWE-89
+    - CWE-79
+  - framework: PCI DSS
+    controls:
+    - 6.5.1
+relationships:
+  commonly_combined:
+  - data-state-management.data-validation.cross-field-validation
+  - data-state-management.data-validation.business-rule-enforcement
+  - security-trust.injection.sql-injection

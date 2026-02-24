@@ -1,0 +1,308 @@
+audit:
+  id: signal-processing-data-acquisition.filtering.filter-stability
+  name: Filter Stability Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: filtering
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates digital filter stability, particularly for IIR
+    filters where stability is not guaranteed. It examines:
+    - Pole locations relative to unit circle
+    - Fixed-point coefficient quantization effects
+    - Cascaded section stability
+    - Limit cycle behavior
+    - Overflow handling and scaling
+    - Stability margins
+  why_it_matters: |
+    Filter stability is essential for reliable operation:
+    - Unstable IIR filters produce unbounded output
+    - Coefficient quantization can move poles outside unit circle
+    - Limit cycles produce unwanted oscillations
+    - Overflow can cause sudden instability
+    - FIR filters are inherently stable but IIR requires verification
+
+    An unstable filter corrupts data and can cause system failure,
+    making stability verification critical for IIR implementations.
+  when_to_run:
+  - IIR filter design review
+  - Fixed-point implementation
+  - After coefficient modification
+  - System validation
+  - Stability troubleshooting
+prerequisites:
+  required_artifacts:
+  - type: filter_coefficients
+    description: Filter coefficient values
+  - type: source_code
+    description: Filter implementation
+  - type: data_type_specification
+    description: Fixed-point format if applicable
+  access_requirements:
+  - Access to filter coefficients
+  - Filter implementation source
+  - Signal analysis tools
+discovery:
+  code_patterns:
+  - pattern: (iir|biquad|recursive)_(filter|section)
+    type: regex
+    scope: source
+    purpose: Detect IIR filter implementations
+  - pattern: (pole|zero|transfer)_(location|calc)
+    type: regex
+    scope: source
+    purpose: Detect pole/zero analysis
+  - pattern: (q15|q31|fix|fixed)_(mult|add|coeff)
+    type: regex
+    scope: source
+    purpose: Detect fixed-point arithmetic
+  - pattern: (overflow|saturate|limit)
+    type: regex
+    scope: source
+    purpose: Detect overflow handling
+  file_patterns:
+  - glob: '**/iir*.{c,h,cpp,py}'
+    purpose: IIR filter files
+  - glob: '**/biquad*.{c,h,cpp}'
+    purpose: Biquad filter files
+  - glob: '**/filter*.{c,h,cpp,py}'
+    purpose: General filter files
+knowledge_sources:
+  specifications:
+  - id: oppenheim-stability
+    name: Discrete-Time Signal Processing - Stability
+    url: https://www.pearson.com/store/p/discrete-time-signal-processing/P100000298298
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ti-iir-stability
+    name: Texas Instruments IIR Filter Stability
+    url: https://www.ti.com/lit/an/spra669/spra669.pdf
+    offline_cache: true
+  - id: arm-biquad
+    name: ARM CMSIS-DSP Biquad Documentation
+    url: https://arm-software.github.io/CMSIS_5/DSP/html/group__BiquadCascadeDF1.html
+    offline_cache: true
+signals:
+  critical:
+  - id: STAB-CRIT-001
+    signal: IIR filter poles outside or on unit circle
+    evidence_indicators:
+    - Pole magnitude >= 1
+    - Filter output grows unbounded
+    - Oscillation or instability observed
+    explanation: |
+      IIR filter stability requires all poles strictly inside the
+      unit circle. Poles on or outside cause unbounded growth or
+      sustained oscillation. This is a fundamental design failure.
+    remediation: |
+      - Redesign filter to move poles inside unit circle
+      - Use different filter type or order
+      - Consider FIR alternative for guaranteed stability
+      - Verify pole locations analytically
+    cwe: CWE-682
+  - id: STAB-CRIT-002
+    signal: Coefficient quantization causes instability
+    evidence_indicators:
+    - Floating-point filter stable but fixed-point unstable
+    - Pole locations shifted by quantization
+    - Marginal stability lost after quantization
+    explanation: |
+      Fixed-point coefficient quantization can shift pole locations.
+      Filters that are barely stable in floating-point may become
+      unstable when coefficients are quantized.
+    remediation: |
+      - Increase coefficient word length
+      - Use cascaded second-order sections
+      - Select filter with larger stability margin
+      - Verify stability with quantized coefficients
+    cwe: CWE-682
+  high:
+  - id: STAB-HIGH-001
+    signal: Limit cycles present in fixed-point IIR
+    evidence_indicators:
+    - Persistent low-level oscillation
+    - Zero input produces non-zero output
+    - Oscillation at DC or Nyquist
+    explanation: |
+      Limit cycles are sustained oscillations caused by fixed-point
+      quantization in feedback paths. They produce unwanted tones
+      even with zero input signal.
+    remediation: |
+      - Add dither to break up limit cycles
+      - Use larger word length for state variables
+      - Implement magnitude truncation
+      - Consider different filter structure
+  - id: STAB-HIGH-002
+    signal: Overflow causing filter instability
+    evidence_indicators:
+    - Large input causes filter to become unstable
+    - No overflow protection implemented
+    - Sudden transition to unstable behavior
+    explanation: |
+      Internal overflow in fixed-point IIR filters can cause
+      large errors that exceed the feedback capacity of the filter,
+      leading to instability or oscillation.
+    remediation: |
+      - Implement saturation arithmetic
+      - Scale filter gains to prevent overflow
+      - Use guard bits for intermediate calculations
+      - Test with maximum expected input levels
+  medium:
+  - id: STAB-MED-001
+    signal: Cascaded sections not optimized for stability
+    evidence_indicators:
+    - High-order IIR implemented as single section
+    - Cascaded sections not paired optimally
+    - Sensitivity to coefficient errors
+    explanation: |
+      High-order IIR filters should be implemented as cascaded
+      second-order sections (biquads) with optimal pairing to
+      minimize coefficient sensitivity and improve stability.
+    remediation: |
+      - Factor into second-order sections
+      - Pair poles and zeros for minimum gain peaking
+      - Order sections by increasing Q
+      - Implement using standard biquad structure
+  - id: STAB-MED-002
+    signal: Stability margin not adequate for variations
+    evidence_indicators:
+    - Poles very close to unit circle
+    - Small coefficient changes cause instability
+    - Temperature or aging sensitivity
+    explanation: |
+      Filters with poles very close to the unit circle have
+      minimal stability margin. Small variations from temperature,
+      aging, or implementation differences may cause instability.
+    remediation: |
+      - Design with larger stability margin
+      - Move poles further inside unit circle
+      - Accept reduced Q or different filter type
+      - Document and test stability margin
+  low:
+  - id: STAB-LOW-001
+    signal: Stability analysis not documented
+    evidence_indicators:
+    - No pole-zero analysis recorded
+    - Stability not verified analytically
+    - Design assumes stability without verification
+    explanation: |
+      Without documented stability analysis, IIR filter stability
+      cannot be verified. Changes to coefficients may inadvertently
+      create unstable filters.
+    remediation: |
+      - Perform and document pole-zero analysis
+      - Record stability margins
+      - Include stability verification in design process
+      - Add stability test to validation procedures
+  positive:
+  - id: STAB-POS-001
+    signal: Well-designed filter with verified stability
+    evidence_indicators:
+    - Poles well inside unit circle
+    - Stability verified with quantized coefficients
+    - Overflow protection implemented
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: dsp-engineer
+  steps:
+  - id: '1'
+    name: IIR Implementation Review
+    description: |
+      Identify IIR filter implementations for stability analysis.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find IIR implementations
+      command: |
+        grep -rniE "(iir|biquad|recursive)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - IIR filter locations
+    - Filter structure type
+    - Coefficient format
+  - id: '2'
+    name: Pole Location Analysis
+    description: |
+      Analyze pole locations for stability.
+    duration_estimate: 45 min
+    manual_verification: true
+    expected_findings:
+    - Pole magnitudes
+    - Stability margin
+    - Quantization effects
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Stability Analysis
+    - Fixed-Point Effects
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 1
+    signal-processing:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: stab-001
+  item: All IIR poles inside unit circle
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify pole magnitude < 1 for all poles
+  expected: Confirmed by reviewer
+- id: stab-002
+  item: Fixed-point implementation stable
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify stability with quantized coefficients
+  expected: Confirmed by reviewer
+- id: stab-003
+  item: Overflow protection implemented
+  level: BLOCKING
+  verification: |
+    grep -rniE "(overflow|saturate)" \
+      --include="*.c" --include="*.h" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "N/A"
+  expected: PASS or N/A
+governance:
+  applicable_to:
+    archetypes:
+    - signal-processing
+    - embedded-systems
+    - audio-systems
+relationships:
+  commonly_combined:
+  - signal-processing.filtering.filter-design
+  - signal-processing.filtering.filter-coefficient-precision
+  - signal-processing.algorithm-verification.overflow-underflow-handling
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

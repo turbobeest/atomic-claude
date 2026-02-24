@@ -1,0 +1,286 @@
+# ============================================================
+# AUDIT FILE: Traffic Distribution Audit
+# ============================================================
+
+audit:
+  id: "scalability-capacity.load-distribution.traffic-distribution"
+  name: "Traffic Distribution Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "load-distribution"
+
+  tier: "expert"
+  estimated_duration: "4 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes actual traffic distribution patterns across the infrastructure,
+    examining how requests flow through the system from entry points to
+    backend services. Reviews traffic volume allocation, routing decisions,
+    and distribution efficiency across all tiers of the architecture.
+
+  why_it_matters: |
+    Uneven traffic distribution leads to resource waste, performance degradation,
+    and potential bottlenecks. Understanding actual traffic flows enables
+    optimization of resource allocation, identification of capacity constraints,
+    and validation that architectural decisions translate to expected behavior.
+
+  when_to_run:
+    - "During capacity planning exercises"
+    - "After architectural changes"
+    - "When investigating performance anomalies"
+    - "As part of regular operational reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "metrics"
+      description: "Traffic metrics from all tiers (ingress, service mesh, backends)"
+    - type: "architecture"
+      description: "System architecture documentation showing traffic flow"
+
+  access_requirements:
+    - "Monitoring system access with traffic metrics"
+    - "Service mesh observability access"
+    - "CDN/Edge analytics access"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "sum(rate(http_requests_total[5m])) by (service, instance)"
+      purpose: "Measure traffic distribution per service instance"
+      threshold: "Even distribution within 20% variance"
+    - system: "Prometheus"
+      query: "sum(rate(istio_requests_total[5m])) by (destination_service, destination_workload)"
+      purpose: "Service mesh traffic distribution"
+    - system: "CloudWatch"
+      query: "RequestCount by TargetGroup"
+      purpose: "AWS ALB target distribution"
+
+  file_patterns:
+    - glob: "**/traffic-policy*.yaml"
+      purpose: "Traffic routing policies"
+    - glob: "**/virtual-service*.yaml"
+      purpose: "Istio virtual service configurations"
+
+knowledge_sources:
+  guides:
+    - id: "istio-traffic-mgmt"
+      name: "Istio Traffic Management"
+      url: "https://istio.io/latest/docs/concepts/traffic-management/"
+      offline_cache: true
+    - id: "envoy-load-balancing"
+      name: "Envoy Load Balancing"
+      url: "https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/load_balancing"
+      offline_cache: true
+
+  papers:
+    - id: "maglev-paper"
+      title: "Maglev: A Fast and Reliable Software Network Load Balancer"
+      url: "https://research.google/pubs/pub44824/"
+
+tooling:
+  infrastructure_tools:
+    - tool: "istioctl"
+      purpose: "Analyze service mesh traffic"
+      command: "istioctl proxy-status"
+    - tool: "linkerd"
+      purpose: "Linkerd traffic analysis"
+      command: "linkerd stat deploy"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "topk(10, sum(rate(http_requests_total[1h])) by (service))"
+      purpose: "Identify highest traffic services"
+    - system: "Grafana"
+      query: "Traffic distribution heatmap dashboard"
+      purpose: "Visualize distribution patterns over time"
+
+signals:
+  critical:
+    - id: "SCALE-TD-CRIT-001"
+      signal: "Single point handling majority of traffic"
+      evidence_threshold: "One instance/service receiving >60% of total traffic"
+      explanation: |
+        Extreme traffic concentration creates single points of failure and
+        prevents horizontal scaling benefits. System is vulnerable to
+        localized failures causing global outages.
+      remediation: "Review routing rules; implement proper load distribution; consider traffic splitting"
+
+  high:
+    - id: "SCALE-TD-HIGH-001"
+      signal: "Traffic distribution does not match resource allocation"
+      explanation: "Services with 30% of resources receiving 60% of traffic"
+      remediation: "Realign resource allocation with actual traffic patterns"
+    - id: "SCALE-TD-HIGH-002"
+      signal: "Unintended traffic asymmetry"
+      explanation: "Traffic not evenly distributed despite symmetric configuration"
+      remediation: "Investigate routing rules and client behavior causing asymmetry"
+
+  medium:
+    - id: "SCALE-TD-MED-001"
+      signal: "Traffic spikes not absorbed evenly"
+      remediation: "Implement better burst handling and distribution"
+    - id: "SCALE-TD-MED-002"
+      signal: "Service mesh overhead causing distribution delays"
+      remediation: "Optimize sidecar configuration and resource limits"
+
+  low:
+    - id: "SCALE-TD-LOW-001"
+      signal: "Minor distribution variance during low traffic periods"
+
+  positive:
+    - id: "SCALE-TD-POS-001"
+      signal: "Even traffic distribution with minimal variance"
+    - id: "SCALE-TD-POS-002"
+      signal: "Traffic patterns match capacity planning models"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Traffic Entry Points"
+      description: |
+        Identify and document all traffic entry points including CDN edges,
+        load balancers, API gateways, and direct service access.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Complete list of traffic entry points"
+        - "Traffic volume at each entry point"
+
+    - id: "2"
+      name: "Collect Distribution Metrics"
+      description: |
+        Gather traffic metrics from all tiers showing request counts,
+        byte volumes, and connection counts per destination.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Query traffic distribution"
+          command: "curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(http_requests_total[1h]))by(service)'"
+      expected_findings:
+        - "Traffic volume per service/instance"
+        - "Distribution percentages"
+
+    - id: "3"
+      name: "Analyze Distribution Patterns"
+      description: |
+        Perform statistical analysis on traffic distribution to identify
+        imbalances, trends, and anomalies.
+      duration_estimate: "60 min"
+      expected_findings:
+        - "Distribution variance metrics"
+        - "Time-based pattern analysis"
+        - "Anomaly identification"
+
+    - id: "4"
+      name: "Correlate with Architecture"
+      description: |
+        Compare actual traffic distribution with intended architecture
+        and capacity allocation.
+      duration_estimate: "45 min"
+      questions:
+        - "Does traffic flow match architectural design?"
+        - "Are resources allocated proportionally to traffic?"
+        - "Are there unexpected traffic paths?"
+      expected_findings:
+        - "Architecture alignment assessment"
+        - "Resource allocation recommendations"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Traffic Flow Analysis"
+        - "Distribution Metrics"
+        - "Optimization Recommendations"
+
+    - type: "visualization"
+      format: "diagram"
+      sections:
+        - "Traffic Flow Diagram"
+        - "Distribution Heatmap"
+
+  confidence_guidance:
+    high: "Real-time metrics analysis with extended time windows"
+    medium: "Snapshot metrics with limited historical context"
+    low: "Configuration review without runtime metrics"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "istio-traffic-mgmt"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive metrics collection"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "traffic-distribution-001"
+    item: "All traffic entry points mapped"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm complete inventory of ingress points"
+    expected: "Confirmed by reviewer"
+
+  - id: "traffic-distribution-002"
+    item: "Distribution metrics collected and analyzed"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify statistical analysis performed on traffic data"
+    expected: "Confirmed by reviewer"
+
+  - id: "traffic-distribution-003"
+    item: "Traffic patterns correlated with architecture"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm alignment analysis completed"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["microservices", "distributed-system", "api-platform"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1", "CC7.2"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.load-distribution.load-balancing-algorithm"
+    - "scalability-capacity.load-distribution.geographic-load-distribution"
+    - "scalability-capacity.capacity-planning.peak-load-analysis"

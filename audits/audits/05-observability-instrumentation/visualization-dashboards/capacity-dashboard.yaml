@@ -1,0 +1,364 @@
+audit:
+  id: observability-instrumentation.visualization-dashboards.capacity-dashboard
+  name: Capacity Dashboard Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: visualization-dashboards
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses capacity planning dashboards for coverage of resource
+    utilization trends, growth forecasting, threshold tracking, and
+    actionable capacity insights. Evaluates whether dashboards provide
+    sufficient visibility for proactive capacity management across
+    compute, storage, network, and service-specific resources.
+  why_it_matters: |
+    Inadequate capacity dashboards cause:
+    - Unexpected resource exhaustion and outages
+    - Reactive rather than proactive capacity management
+    - Unplanned emergency scaling during peak events
+    - Budget surprises from unmonitored growth
+    - Performance degradation from saturated resources
+    - Inability to plan infrastructure investments
+  when_to_run:
+  - Quarterly capacity planning reviews
+  - Before major product launches or events
+  - After experiencing capacity-related incidents
+  - During budget planning cycles
+prerequisites:
+  required_artifacts:
+  - type: capacity_dashboards
+    description: Access to capacity and resource dashboards
+  - type: resource_inventory
+    description: List of resources requiring capacity tracking
+  optional_artifacts:
+  - type: capacity_thresholds
+    description: Documented capacity limits and thresholds
+  - type: growth_projections
+    description: Business growth forecasts
+  access_requirements:
+  - Dashboard viewer access
+  - Historical metrics access (6-12 months)
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: node_filesystem_avail_bytes / node_filesystem_size_bytes
+    purpose: Disk capacity utilization
+    threshold: Should track and trend
+  - system: Prometheus
+    query: container_memory_usage_bytes / container_spec_memory_limit_bytes
+    purpose: Memory utilization against limits
+  - system: Prometheus
+    query: rate(container_cpu_usage_seconds_total[5m]) / container_spec_cpu_quota
+    purpose: CPU utilization against limits
+  documents_to_review:
+  - type: Capacity dashboards
+    purpose: Evaluate resource coverage
+  - type: Capacity planning docs
+    purpose: Understand documented thresholds
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: google-capacity-planning
+    name: Google SRE - Capacity Planning
+    url: https://sre.google/sre-book/software-engineering-in-sre/#demand-forecasting-and-capacity-planning
+    offline_cache: true
+    priority: required
+  - id: aws-capacity
+    name: AWS Well-Architected - Performance Efficiency Pillar
+    url: https://docs.aws.amazon.com/wellarchitected/latest/performance-efficiency-pillar/welcome.html
+    offline_cache: true
+    priority: recommended
+  learning_resources:
+  - id: capacity-planning-book
+    title: The Art of Capacity Planning
+    type: book
+    reference: John Allspaw, ISBN 978-0596518578
+tooling:
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      predict_linear(node_filesystem_avail_bytes[30d], 3600*24*90)
+    purpose: 90-day disk capacity forecast
+  - system: Prometheus
+    query: |
+      avg_over_time(container_memory_usage_bytes[30d])
+    purpose: 30-day memory usage trend
+  scripts:
+  - id: capacity-coverage-check
+    language: bash
+    purpose: Check capacity dashboard coverage
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check capacity dashboard for required elements
+
+      DASHBOARD_UID=$1
+
+      dashboard=$(curl -s -H "Authorization: Bearer $TOKEN" \
+        "$GRAFANA_URL/api/dashboards/uid/$DASHBOARD_UID")
+
+      echo "=== Capacity Dashboard Analysis ==="
+
+      # Check for resource types
+      echo "Resource Coverage:"
+
+      resources=("cpu" "memory" "disk" "storage" "network" "connections" "pods" "nodes")
+      for resource in "${resources[@]}"; do
+        if echo "$dashboard" | grep -qi "$resource"; then
+          echo "  [OK] $resource metrics present"
+        else
+          echo "  [MISSING] $resource metrics"
+        fi
+      done
+
+      echo ""
+      echo "Forecasting Capabilities:"
+
+      # Check for prediction/forecasting
+      if echo "$dashboard" | grep -qiE 'predict|forecast|trend|projection'; then
+        echo "  [OK] Forecasting present"
+      else
+        echo "  [MISSING] Forecasting"
+      fi
+
+      # Check for thresholds
+      if echo "$dashboard" | grep -qiE 'threshold|limit|capacity|max'; then
+        echo "  [OK] Threshold indicators present"
+      else
+        echo "  [MISSING] Threshold indicators"
+      fi
+signals:
+  critical:
+  - id: CAPACITY-CRIT-001
+    signal: No disk capacity forecasting
+    evidence_indicators:
+    - Disk usage shown without trend lines
+    - No time-to-exhaustion predictions
+    explanation: |
+      Disk exhaustion causes immediate service failures. Without
+      forecasting, teams cannot proactively prevent disk-full
+      incidents which often occur outside business hours.
+    remediation: |
+      Add predict_linear() or similar forecasting for disk usage.
+      Show days-until-full at current growth rate.
+      Configure alerts for predicted exhaustion.
+  - id: CAPACITY-CRIT-002
+    signal: Missing resource limit visualization
+    evidence_indicators:
+    - Utilization shown without reference to limits
+    - No indication of remaining headroom
+    explanation: |
+      Without limit context, utilization numbers are meaningless.
+      50% CPU could be fine or critical depending on limits.
+    remediation: |
+      Show utilization as percentage of limits.
+      Display remaining headroom clearly.
+      Add threshold markers on graphs.
+  high:
+  - id: CAPACITY-HIGH-001
+    signal: No database capacity tracking
+    explanation: |
+      Database storage, connection pools, and query capacity are
+      common bottlenecks requiring dedicated tracking.
+    remediation: |
+      Add panels for database storage, connection utilization,
+      query throughput capacity, and replication lag.
+  - id: CAPACITY-HIGH-002
+    signal: Missing network capacity metrics
+    explanation: |
+      Network bandwidth and connection limits can cause cascading
+      failures when exhausted.
+    remediation: |
+      Track ingress/egress bandwidth, connection counts, and
+      network saturation indicators.
+  medium:
+  - id: CAPACITY-MED-001
+    signal: No historical comparison views
+    remediation: |
+      Add week-over-week or month-over-month comparison panels
+      to identify growth patterns.
+  - id: CAPACITY-MED-002
+    signal: Missing Kubernetes resource quota tracking
+    remediation: |
+      Track namespace resource quota utilization for
+      container orchestration capacity.
+  - id: CAPACITY-MED-003
+    signal: No cost correlation with capacity
+    remediation: |
+      Add cost metrics alongside capacity to understand
+      financial implications of growth.
+  low:
+  - id: CAPACITY-LOW-001
+    signal: Missing seasonal pattern analysis
+    remediation: |
+      Add longer time range views to identify seasonal patterns
+      affecting capacity needs.
+  positive:
+  - id: CAPACITY-POS-001
+    signal: Comprehensive forecasting for all critical resources
+  - id: CAPACITY-POS-002
+    signal: Clear threshold and headroom visualization
+  - id: CAPACITY-POS-003
+    signal: Automated capacity alerts based on forecasts
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Resource Coverage Assessment
+    description: |
+      Evaluate which resources have capacity tracking and
+      identify gaps.
+    duration_estimate: 30 min
+    questions:
+    - Is compute capacity (CPU, memory) tracked?
+    - Is storage capacity (disk, object storage) tracked?
+    - Is network capacity tracked?
+    - Are service-specific resources tracked?
+    expected_findings:
+    - Resource coverage inventory
+    - Missing resource types
+  - id: '2'
+    name: Forecasting Capability Review
+    description: |
+      Assess whether dashboards provide capacity forecasting.
+    duration_estimate: 30 min
+    questions:
+    - Are trend lines or predictions shown?
+    - Is time-to-exhaustion calculated?
+    - Are growth rates visible?
+    expected_findings:
+    - Forecasting capabilities per resource
+    - Missing predictions
+  - id: '3'
+    name: Threshold Visibility Check
+    description: |
+      Verify that capacity limits and thresholds are visible.
+    duration_estimate: 30 min
+    questions:
+    - Are resource limits displayed?
+    - Is remaining headroom clear?
+    - Are warning thresholds marked?
+    expected_findings:
+    - Threshold visibility status
+    - Unclear capacity boundaries
+  - id: '4'
+    name: Historical Trend Analysis
+    description: |
+      Check for historical data supporting capacity planning.
+    duration_estimate: 30 min
+    questions:
+    - Is sufficient historical data available?
+    - Can growth patterns be identified?
+    - Are comparison views available?
+    expected_findings:
+    - Historical data availability
+    - Trend analysis gaps
+output:
+  deliverables:
+  - type: capacity_coverage_matrix
+    format: table
+    description: Resource-by-resource capacity tracking coverage
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Resource Coverage Analysis
+    - Forecasting Capabilities
+    - Threshold Visibility
+    - Recommendations
+  confidence_guidance:
+    high: Direct dashboard panel analysis
+    medium: Inferred from metric availability
+    low: Based on dashboard naming conventions
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-capacity-planning
+      priority: required
+  degradation:
+  - feature: Live capacity metrics
+    impact: Cannot assess current capacity state
+    mitigation: Export dashboard configurations and recent metrics
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed resource analysis
+    full:
+      included: true
+      priority: 12
+    production:
+      included: true
+      priority: 10
+closeout_checklist:
+- id: capacity-001
+  item: All critical resources have capacity tracking
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify CPU, memory, disk, network coverage
+  expected: Confirmed by reviewer
+- id: capacity-002
+  item: Disk capacity forecasting implemented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify predict_linear or equivalent for disk
+  expected: Confirmed by reviewer
+- id: capacity-003
+  item: Resource limits visible on dashboards
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify utilization shown relative to limits
+  expected: Confirmed by reviewer
+- id: capacity-004
+  item: Historical data retention supports planning
+  level: WARNING
+  verification: manual
+  verification_notes: Verify at least 3 months of historical data
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    - serverless
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC6.1
+  - framework: ISO27001
+    controls:
+    - A.12.1.3
+relationships:
+  commonly_combined:
+  - observability-instrumentation.visualization-dashboards.dashboard-coverage
+  - observability-instrumentation.metrics.resource-metrics
+  - scalability-capacity.capacity-planning.resource-forecasting
+  - cost-optimization.resource-optimization.right-sizing

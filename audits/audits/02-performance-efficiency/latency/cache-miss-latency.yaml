@@ -1,0 +1,285 @@
+audit:
+  id: performance-efficiency.latency.cache-miss-latency
+  name: Cache Miss Latency Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: latency
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures the latency difference between cache hits and
+    cache misses across all caching layers (CDN, application cache,
+    database cache). It evaluates the performance impact of cache
+    misses, identifies cache effectiveness, and assesses the impact
+    on user experience when caches are cold or evicted.
+  why_it_matters: |
+    Cache misses can increase latency by 10-1000x compared to hits.
+    A Redis cache hit might take 1ms while a database query takes
+    100ms. Understanding cache miss latency helps set realistic SLOs,
+    design cache warming strategies, and identify when cache failures
+    will cause cascading performance issues.
+  when_to_run:
+  - When implementing new caching layers
+  - After cache configuration changes
+  - When investigating latency variability
+  - During cache sizing and TTL optimization
+prerequisites:
+  required_artifacts:
+  - type: cache_metrics
+    description: Metrics differentiating hit vs miss latency
+  - type: cache_access
+    description: Access to cache systems for testing
+  access_requirements:
+  - Read access to cache metrics (Redis, Memcached, CDN)
+  - Ability to query or flush caches for testing
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.99,
+        sum(rate(cache_operation_duration_seconds_bucket{result="miss"}[5m])) by (le)
+      )
+    purpose: P99 latency for cache misses
+    threshold: < 500ms
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.99,
+        sum(rate(cache_operation_duration_seconds_bucket{result="hit"}[5m])) by (le)
+      )
+    purpose: P99 latency for cache hits
+    threshold: < 10ms
+  - system: Redis
+    query: INFO stats | grep -E 'keyspace_hits|keyspace_misses'
+    purpose: Calculate cache hit ratio
+    threshold: '> 90% hit rate'
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: redis-optimization
+    name: Redis Performance Optimization
+    url: https://redis.io/docs/management/optimization/
+    offline_cache: true
+  - id: cloudfront-caching
+    name: CloudFront Caching Best Practices
+    url: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/ConfiguringCaching.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: redis-cli
+    purpose: Measure Redis operation latency
+    command: |
+      redis-cli --latency-history -i 1
+  - tool: curl
+    purpose: Measure CDN hit vs miss
+    command: |
+      # Check cache status header
+      curl -sI https://cdn.example.com/asset.js | grep -i 'x-cache'
+  - tool: redis-benchmark
+    purpose: Benchmark cache performance
+    command: redis-benchmark -t get,set -n 100000 -q
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      # Cache miss penalty (miss latency / hit latency)
+      histogram_quantile(0.99, sum(rate(cache_operation_duration_seconds_bucket{result="miss"}[5m])) by (le))
+      /
+      histogram_quantile(0.99, sum(rate(cache_operation_duration_seconds_bucket{result="hit"}[5m])) by (le))
+    purpose: Calculate cache miss latency penalty ratio
+  - system: Prometheus
+    query: |
+      rate(cache_misses_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))
+    purpose: Calculate cache miss rate
+signals:
+  critical:
+  - id: CACHE-CRIT-001
+    signal: Cache miss latency exceeds 5 seconds
+    evidence_threshold: miss_latency_p99 > 5s
+    explanation: |
+      Cache misses this slow will cause request timeouts when caches
+      are cold. This often indicates the backend data source (database
+      or API) is too slow to serve as a fallback.
+    remediation: Optimize backend query; implement async cache population; add cache warming
+  - id: CACHE-CRIT-002
+    signal: Cache miss rate exceeds 50% for critical data
+    evidence_threshold: miss_rate > 0.5
+    explanation: |
+      A miss rate this high means the cache is not effective. Users
+      are frequently hitting the slow path, negating caching benefits.
+      This may indicate TTL misconfiguration, cache sizing issues, or
+      highly random access patterns.
+    remediation: Review TTL settings; increase cache size; implement cache warming
+  high:
+  - id: CACHE-HIGH-001
+    signal: Cache miss latency more than 100x hit latency
+    evidence_threshold: miss_latency / hit_latency > 100
+    explanation: |
+      Extreme latency difference between hits and misses creates
+      highly variable user experience. Some users get sub-second
+      responses while others wait 10+ seconds.
+    remediation: Implement request coalescing; add cache warming; optimize backend
+  - id: CACHE-HIGH-002
+    signal: No cache warming strategy for cold starts
+    evidence_indicators:
+    - No cache population during deployment
+    - First requests after deployment significantly slower
+    explanation: |
+      Without cache warming, every deployment or cache flush exposes
+      users to cache miss latency until the cache is populated.
+    remediation: Implement cache warming during deployment; use lazy loading with background refresh
+  medium:
+  - id: CACHE-MED-001
+    signal: Cache metrics not differentiated by hit/miss
+    remediation: Add result label to cache operation metrics
+  - id: CACHE-MED-002
+    signal: No alerting on cache miss rate spikes
+    remediation: Configure alerts when miss rate exceeds threshold
+  low:
+  - id: CACHE-LOW-001
+    signal: Cache effectiveness not documented
+  positive:
+  - id: CACHE-POS-001
+    signal: Cache hit rate consistently above 95%
+  - id: CACHE-POS-002
+    signal: Cache warming implemented for critical data
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Caching Layers
+    description: |
+      Identify all caching layers: CDN, application cache (Redis,
+      Memcached), database query cache, ORM cache.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find Redis connections in config
+      command: grep -rn 'redis\|memcached\|cache' --include='*.yaml' --include='*.json' .
+    - purpose: Check CDN configuration
+      command: aws cloudfront list-distributions --query 'DistributionList.Items[].DomainName'
+    expected_findings:
+    - List of all caching layers
+    - Cache configuration locations
+  - id: '2'
+    name: Measure Hit vs Miss Latency
+    description: |
+      Measure and compare latency for cache hits versus cache misses
+      across each caching layer.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Measure Redis latency
+      command: redis-cli --latency -n 100
+    - purpose: Query hit/miss metrics from Prometheus
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(cache_operation_duration_seconds_bucket[5m]))by(le,result))'
+    expected_findings:
+    - P99 latency for hits and misses
+    - Latency ratio between hit and miss
+  - id: '3'
+    name: Analyze Cache Effectiveness
+    description: |
+      Calculate cache hit rates and identify data with poor cache
+      utilization.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Get Redis stats
+      command: redis-cli INFO stats | grep -E 'keyspace|hits|misses'
+    - purpose: Query cache hit rate
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=rate(cache_hits_total[5m])/(rate(cache_hits_total[5m])+rate(cache_misses_total[5m]))'
+    expected_findings:
+    - Overall cache hit rate
+    - Data types with low hit rates
+  - id: '4'
+    name: Test Cache Warming
+    description: |
+      Verify cache warming strategies and measure cold start impact.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Flush cache and measure recovery
+      command: |
+        # In staging environment only
+        redis-cli FLUSHDB
+        time curl -s https://staging.api.example.com/warmup
+    expected_findings:
+    - Time to repopulate cache
+    - Impact on request latency during warmup
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Cache Layer Analysis
+    - Hit/Miss Latency Comparison
+    - Recommendations
+  confidence_guidance:
+    high: Measurements from production with differentiated hit/miss metrics
+    medium: Aggregate cache metrics without hit/miss breakdown
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: redis-optimization
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires cache access and runtime measurements
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: cache-miss-001
+  item: Cache hit rate above 90%
+  level: CRITICAL
+  verification: |
+    redis-cli INFO stats | awk -F: '/keyspace_hits/{h=$2}/keyspace_misses/{m=$2}END{print (h/(h+m) > 0.9)}'
+  expected: '1'
+- id: cache-miss-002
+  item: Cache miss latency under 1 second
+  level: BLOCKING
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(cache_operation_duration_seconds_bucket{result="miss"}[5m]))by(le))' | \
+      jq '.data.result[0].value[1] | tonumber < 1'
+  threshold: < 1s
+- id: cache-miss-003
+  item: Cache warming strategy documented
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm cache warming procedure exists in deployment docs
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - cached
+    - high-traffic
+relationships:
+  commonly_combined:
+  - performance-efficiency.caching.cache-hit-ratio
+  - performance-efficiency.latency.end-to-end-latency

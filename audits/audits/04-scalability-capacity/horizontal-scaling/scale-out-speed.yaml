@@ -1,0 +1,262 @@
+audit:
+  id: scalability-capacity.horizontal-scaling.scale-out-speed
+  name: Scale-Out Speed Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: horizontal-scaling
+  tier: expert
+  estimated_duration: 3 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates how quickly new instances can be provisioned and become operational
+    during scale-out events. Measures instance startup time, container pull time,
+    application initialization, health check timing, and load balancer registration.
+    Identifies bottlenecks that delay scaling response.
+  why_it_matters: |
+    Slow scale-out defeats the purpose of auto-scaling. If new instances take
+    10 minutes to become ready but load spikes occur in seconds, the system
+    will degrade before scaling helps. Fast scale-out is critical for handling
+    sudden demand increases and maintaining service quality.
+  when_to_run:
+  - After deploying new services
+  - When optimizing scaling response
+  - After container image changes
+  - Following slow scaling incidents
+prerequisites:
+  required_artifacts:
+  - type: container_images
+    description: Container images for size analysis
+  - type: application_config
+    description: Application startup and health check configuration
+  access_requirements:
+  - Container registry access
+  - Kubernetes/cloud infrastructure access
+  - Ability to trigger scaling events for testing
+discovery:
+  code_patterns:
+  - pattern: (readinessProbe|livenessProbe|health.*check)
+    type: regex
+    scope: config
+    purpose: Detect health check configuration
+  - pattern: (initialDelaySeconds|periodSeconds|failureThreshold)
+    type: regex
+    scope: config
+    purpose: Detect health check timing
+  - pattern: (preStop|postStart|lifecycle)
+    type: regex
+    scope: config
+    purpose: Detect container lifecycle hooks
+  file_patterns:
+  - glob: '**/Dockerfile*'
+    purpose: Container image definitions
+  - glob: '**/k8s/**/*.yaml'
+    purpose: Kubernetes deployment files
+  - glob: '**/docker-compose*.yaml'
+    purpose: Docker compose files
+knowledge_sources:
+  guides:
+  - id: k8s-probes
+    name: Kubernetes Liveness and Readiness Probes
+    url: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+    offline_cache: true
+  - id: container-optimization
+    name: Container Image Optimization
+    url: https://cloud.google.com/architecture/best-practices-for-building-containers
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: docker
+    purpose: Analyze container image size and layers
+    command: docker history --no-trunc <image>
+  - tool: kubectl
+    purpose: Measure pod startup time
+    command: kubectl get events --sort-by='.lastTimestamp'
+  - tool: crictl
+    purpose: Analyze container pull times
+    command: crictl pull --timing <image>
+  monitoring_queries:
+  - system: Prometheus
+    query: kube_pod_container_status_ready - kube_pod_created
+    purpose: Measure time from pod creation to ready
+    threshold: < 60 seconds for most applications
+  scripts:
+  - id: startup-timer
+    language: bash
+    purpose: Measure full scale-out cycle time
+    source: inline
+    code: |
+      #!/bin/bash
+      DEPLOY=$1
+      NAMESPACE=$2
+      START=$(date +%s)
+      kubectl scale deployment/$DEPLOY --replicas=+1 -n $NAMESPACE
+      kubectl rollout status deployment/$DEPLOY -n $NAMESPACE --timeout=300s
+      END=$(date +%s)
+      echo "Scale-out time: $((END-START)) seconds"
+signals:
+  critical:
+  - id: SPEED-CRIT-001
+    signal: Scale-out time exceeds 5 minutes
+    evidence_threshold: startup_time > 300s
+    explanation: |
+      Five-minute scale-out is too slow for most demand spikes. By the time
+      new instances are ready, the spike may have caused degradation or passed.
+    remediation: Optimize container images, pre-warm instances, reduce startup dependencies
+  - id: SPEED-CRIT-002
+    signal: Container image pull dominates startup time
+    evidence_threshold: pull_time > 60% of total_startup_time
+    explanation: |
+      Large images or slow registries create a scaling bottleneck. Every
+      scale-out event pays this penalty.
+    remediation: Optimize image size, use multi-stage builds, enable image caching
+  high:
+  - id: SPEED-HIGH-001
+    signal: Application initialization blocks readiness
+    evidence_pattern: initialDelaySeconds.*[6-9][0-9]|initialDelaySeconds.*[1-9][0-9][0-9]
+    explanation: |
+      Long initial delays indicate slow application startup, delaying
+      when new instances can receive traffic.
+    remediation: Optimize application startup, lazy-load non-critical components
+  - id: SPEED-HIGH-002
+    signal: No readiness probe configured
+    evidence_indicators:
+    - Deployment without readinessProbe
+    - Service routing to unready pods
+    explanation: |
+      Without readiness probes, traffic may route to instances before
+      they're ready to handle requests, causing errors.
+    remediation: Configure readiness probes that verify application is fully operational
+  medium:
+  - id: SPEED-MED-001
+    signal: Container image over 1GB
+    evidence_threshold: image_size > 1GB
+    remediation: Use smaller base images, multi-stage builds, remove unnecessary files
+  positive:
+  - id: SPEED-POS-001
+    signal: Sub-30-second scale-out time
+    evidence_threshold: startup_time < 30s
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Analyze container image size and layers
+    description: |
+      Examine container images for size optimization opportunities
+      and identify large layers that slow pull times.
+    duration_estimate: 45 min
+    commands:
+    - purpose: List image sizes
+      command: docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+    - purpose: Analyze image layers
+      command: docker history <image> --no-trunc
+    expected_findings:
+    - Image sizes for all services
+    - Identification of large layers
+  - id: '2'
+    name: Review health check configuration
+    description: |
+      Analyze readiness and liveness probe configuration for
+      timing and appropriateness.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Extract probe configuration
+      command: rg '(readinessProbe|livenessProbe)' --type yaml -A 10
+    - purpose: Check initial delays
+      command: rg 'initialDelaySeconds' --type yaml
+    expected_findings:
+    - Health check timing configuration
+    - Initial delay appropriateness
+  - id: '3'
+    name: Measure actual scale-out time
+    description: |
+      Trigger scaling events and measure the time from scaling
+      decision to instance readiness.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Trigger and time scale-out
+      command: kubectl scale deployment/<name> --replicas=+1 && time kubectl rollout status deployment/<name>
+    expected_findings:
+    - Actual scale-out time measurements
+    - Breakdown of time spent in each phase
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Scale-Out Time Analysis
+    - Bottleneck Identification
+    - Optimization Recommendations
+  confidence_guidance:
+    high: Direct measurements from scaling tests
+    medium: Configuration analysis without runtime verification
+    low: Estimates based on image size and configuration
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: k8s-probes
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime measurements
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: scale-out-speed-001
+  item: Scale-out time under 2 minutes
+  level: CRITICAL
+  verification: manual
+  verification_notes: Measure actual scale-out time in staging/production
+  expected: < 120 seconds
+- id: scale-out-speed-002
+  item: Container images under 500MB
+  level: BLOCKING
+  verification: manual
+  expected: < 500MB
+  verification_notes: 'Requires variable substitution: docker images --format ''{{.Size}}'' <image>'
+- id: scale-out-speed-003
+  item: Readiness probes configured appropriately
+  level: BLOCKING
+  verification: rg 'readinessProbe' --type yaml | wc -l
+  expected: '> 0 for each deployment'
+governance:
+  applicable_to:
+    archetypes:
+    - web-service
+    - api-service
+    - microservice
+  compliance_frameworks:
+  - framework: AWS Well-Architected
+    controls:
+    - REL-6
+    - PERF-3
+relationships:
+  commonly_combined:
+  - scalability-capacity.horizontal-scaling.auto-scaling-policy
+  - scalability-capacity.horizontal-scaling.scale-in-behavior

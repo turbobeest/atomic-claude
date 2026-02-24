@@ -1,0 +1,360 @@
+audit:
+  id: reliability-resilience.fault-tolerance.graceful-degradation
+  name: Graceful Degradation Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: fault-tolerance
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: architecture
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates graceful degradation capabilities across the system.
+    It examines how the system behaves when dependencies fail, capacity is
+    exhausted, or errors occur. The audit assesses feature toggles, fallback
+    mechanisms, load shedding strategies, and user experience during degraded
+    states. It verifies that partial functionality is maintained rather than
+    complete failure.
+  why_it_matters: |
+    Graceful degradation allows systems to continue serving users during
+    failures, albeit with reduced functionality. Without degradation strategies,
+    a single component failure causes complete outages. Well-designed degradation
+    maintains core functionality (e.g., browsing products) while disabling
+    non-critical features (e.g., recommendations). This preserves revenue,
+    user trust, and SLA compliance during incidents.
+  when_to_run:
+  - During architecture design reviews
+  - Before major feature launches
+  - After dependency additions
+  - Quarterly resilience assessments
+  - Post-incident reviews
+prerequisites:
+  required_artifacts:
+  - type: architecture-docs
+    description: System architecture and dependency documentation
+  - type: source-code
+    description: Application source code for fallback analysis
+  access_requirements:
+  - Read access to application source code
+  - Access to feature flag configurations
+  - Access to error handling documentation
+  - Access to load testing results
+discovery:
+  code_patterns:
+  - pattern: fallback|Fallback|default.*value|DefaultValue
+    type: regex
+    scope: source
+    purpose: Fallback implementations
+  - pattern: feature.*toggle|feature.*flag|FeatureFlag
+    type: regex
+    scope: source
+    purpose: Feature toggle mechanisms
+  - pattern: catch.*return.*default|catch.*fallback
+    type: regex
+    scope: source
+    purpose: Error fallback patterns
+  - pattern: '@HystrixCommand|@CircuitBreaker|@Bulkhead'
+    type: regex
+    scope: source
+    purpose: Resilience annotations
+  - pattern: graceful.*shutdown|shutdown.*hook
+    type: regex
+    scope: source
+    purpose: Graceful shutdown handling
+  file_patterns:
+  - glob: '**/src/**/*.{java,go,py,ts,js}'
+    purpose: Application source code
+  - glob: '**/config/**/*.{yaml,json}'
+    purpose: Feature flag configurations
+  - glob: '**/resilience/**/*'
+    purpose: Resilience configuration
+knowledge_sources:
+  specifications:
+  - id: aws-graceful
+    name: AWS Well-Architected - Graceful Degradation
+    url: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/design-your-workload-to-withstand-component-failures.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: netflix-hystrix
+    name: Netflix Hystrix Wiki
+    url: https://github.com/Netflix/Hystrix/wiki
+    offline_cache: true
+  - id: resilience4j
+    name: Resilience4j User Guide
+    url: https://resilience4j.readme.io/docs
+    offline_cache: true
+  - id: polly
+    name: Polly Resilience Library
+    url: https://github.com/App-vNext/Polly/wiki
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  - id: sre-book
+    name: Site Reliability Engineering
+    url: https://sre.google/sre-book/table-of-contents/
+    offline_cache: true
+  learning_resources:
+  - id: release-it
+    title: Release It! Second Edition
+    type: book
+    reference: 'ISBN 978-1680502398 - Chapter 5: Stability Patterns'
+tooling:
+  static_analysis:
+  - tool: custom-grep
+    purpose: Find fallback patterns
+    offline_capable: true
+  - tool: dependency-analysis
+    purpose: Map critical vs non-critical dependencies
+    offline_capable: true
+  infrastructure_tools:
+  - tool: feature-flag-api
+    purpose: Query feature flag states
+    command: curl -s http://feature-flags.internal/api/flags | jq '.flags[] | select(.category == "degradation")'
+signals:
+  critical:
+  - id: DEGR-CRIT-001
+    signal: No fallback for critical external dependencies
+    evidence_pattern: external_api.*no.*fallback|third_party.*required
+    explanation: |
+      External dependencies (payment processors, auth providers, APIs)
+      can fail unpredictably. Without fallbacks, their failure causes
+      complete feature failure. Critical paths must have degradation
+      strategies: cached data, alternative providers, or graceful UX.
+    remediation: Implement fallback strategies for all critical external dependencies
+  - id: DEGR-CRIT-002
+    signal: Errors propagate without fallback handling
+    evidence_pattern: throw.*exception|raise.*error.*no.*catch
+    explanation: |
+      Unhandled errors from dependencies cascade into user-facing errors.
+      Each dependency call should have error handling that provides
+      fallback behavior rather than propagating failures.
+    remediation: Implement try-catch with fallback logic for dependency calls
+  high:
+  - id: DEGR-HIGH-001
+    signal: No feature toggles for non-critical features
+    evidence_pattern: feature.*flag.*missing|toggle.*not.*found
+    explanation: |
+      Without feature toggles, non-critical features cannot be disabled
+      during overload or failure. Feature toggles enable rapid degradation
+      without code deployment. All non-critical features should be toggleable.
+    remediation: Implement feature toggles for all non-critical features
+  - id: DEGR-HIGH-002
+    signal: No load shedding under capacity pressure
+    evidence_pattern: rate.*limit.*missing|admission.*control.*none
+    explanation: |
+      Without load shedding, capacity exhaustion causes cascading failures
+      and affects all users. Load shedding prioritizes critical requests
+      and rejects excess load to maintain service quality for remaining users.
+    remediation: Implement priority-based load shedding with admission control
+  - id: DEGR-HIGH-003
+    signal: Database failure causes complete application failure
+    evidence_pattern: database.*required|db.*no.*fallback
+    explanation: |
+      Tight database coupling causes complete failure when database is
+      unavailable. Consider caching, read-only modes, or queuing writes
+      for later processing to maintain partial functionality.
+    remediation: Implement cache-aside patterns and read-only degradation modes
+  medium:
+  - id: DEGR-MED-001
+    signal: User experience during degradation not designed
+    explanation: |
+      Users should understand when features are degraded and what
+      alternatives exist. Cryptic errors frustrate users more than
+      clear explanations of temporary limitations.
+    remediation: Design user-friendly degradation notices and alternative paths
+  - id: DEGR-MED-002
+    signal: Degradation not monitored or alerted
+    explanation: |
+      Teams must know when degradation is active. Without monitoring,
+      extended degradation goes unnoticed and unresolved.
+    remediation: Implement monitoring and alerting for degradation states
+  - id: DEGR-MED-003
+    signal: Recovery from degradation is manual
+    explanation: |
+      Manual recovery extends degradation duration and requires human
+      intervention during incidents. Automatic recovery when dependencies
+      return reduces impact.
+    remediation: Implement automatic recovery when dependencies become available
+  low:
+  - id: DEGR-LOW-001
+    signal: Degradation behavior not documented
+    explanation: |
+      Documentation helps operations understand expected degradation
+      behavior and assists with incident response.
+  positive:
+  - id: DEGR-POS-001
+    signal: Feature toggles available for all non-critical features
+  - id: DEGR-POS-002
+    signal: Fallback responses configured for external dependencies
+  - id: DEGR-POS-003
+    signal: Load shedding tested and validated
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map critical vs non-critical features
+    description: |
+      Identify which features are essential for core business value
+      vs which can be disabled during degradation.
+    duration_estimate: 30 min
+    questions:
+    - Which features must always work for the business to function?
+    - Which features enhance experience but aren't essential?
+    - What dependencies does each feature have?
+    expected_findings:
+    - Feature criticality matrix
+    - Dependency map per feature
+  - id: '2'
+    name: Audit fallback implementations
+    description: |
+      Review code for fallback patterns in dependency calls
+      and error handling.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find fallback patterns
+      command: |
+        grep -r "fallback\|Fallback\|default.*value" --include="*.java" --include="*.go" --include="*.py" --include="*.ts" src/
+    - purpose: Find error handling patterns
+      command: |
+        grep -r "catch.*return\|except.*return\|rescue.*return" --include="*.java" --include="*.go" --include="*.py" --include="*.ts" src/
+    expected_findings:
+    - Fallback implementation inventory
+    - Gaps in error handling
+  - id: '3'
+    name: Review feature toggle system
+    description: |
+      Assess feature toggle coverage and ability to rapidly
+      disable non-critical features.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List feature flags
+      command: |
+        grep -r "feature.*flag\|feature.*toggle" --include="*.yaml" --include="*.json" config/
+    questions:
+    - What feature toggle system is used?
+    - Which features have toggles?
+    - How quickly can toggles be changed?
+    expected_findings:
+    - Feature toggle inventory
+    - Toggle coverage gaps
+  - id: '4'
+    name: Evaluate load shedding
+    description: |
+      Review load shedding and admission control mechanisms
+      for capacity protection.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find rate limiting configuration
+      command: |
+        grep -r "rate.*limit\|admission.*control\|load.*shed" --include="*.yaml" --include="*.json" config/
+    questions:
+    - What load shedding mechanisms exist?
+    - How are requests prioritized?
+    - What happens when limits are reached?
+    expected_findings:
+    - Load shedding configuration
+    - Prioritization strategy
+  - id: '5'
+    name: Test degradation scenarios
+    description: |
+      Verify degradation behavior through controlled testing
+      of failure scenarios.
+    duration_estimate: 45 min
+    questions:
+    - What happens when the database is unavailable?
+    - What happens when external APIs fail?
+    - What happens under 10x normal load?
+    - Is the user experience acceptable during degradation?
+    expected_findings:
+    - Degradation behavior per scenario
+    - User experience assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Feature Criticality Analysis
+    - Fallback Implementation Status
+    - Load Shedding Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Degradation tested and verified
+    medium: Code review with configuration analysis
+    low: Architecture review only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: aws-graceful
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: degr-001
+  item: Critical external dependencies have fallback strategies
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify fallback exists for payment, auth, and other critical APIs
+  expected: Confirmed by reviewer
+- id: degr-002
+  item: Feature toggles available for non-critical features
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify recommendations, analytics, and similar features are toggleable
+  expected: Confirmed by reviewer
+- id: degr-003
+  item: Load shedding tested under peak load
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review load test results showing graceful degradation
+  expected: Confirmed by reviewer
+- id: degr-004
+  item: User experience during degradation is acceptable
+  level: WARNING
+  verification: manual
+  verification_notes: Verify users receive clear messaging during degraded states
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.fault-tolerance.fallback-strategy
+  - reliability-resilience.fault-tolerance.circuit-breaker
+  - reliability-resilience.fault-tolerance.bulkhead-pattern

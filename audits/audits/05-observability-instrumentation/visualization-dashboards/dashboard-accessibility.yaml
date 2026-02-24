@@ -1,0 +1,352 @@
+audit:
+  id: observability-instrumentation.visualization-dashboards.dashboard-accessibility
+  name: Dashboard Accessibility Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: visualization-dashboards
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: qualitative
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses dashboard accessibility compliance including color
+    contrast, colorblind-friendly palettes, keyboard navigation,
+    screen reader compatibility, and alternative text for
+    visualizations. Evaluates whether dashboards can be effectively
+    used by team members with various disabilities.
+  why_it_matters: |
+    Inaccessible dashboards cause:
+    - Exclusion of team members with disabilities
+    - Legal compliance risks (ADA, Section 508, WCAG)
+    - Reduced effectiveness during incidents for colorblind engineers
+    - Inability to use dashboards in various conditions
+    - Inconsistent understanding across the team
+    - Potential loss of valuable team members who cannot use tools
+  when_to_run:
+  - Before releasing new dashboards
+  - Annual accessibility compliance review
+  - When accessibility concerns are raised
+  - After major dashboard redesigns
+prerequisites:
+  required_artifacts:
+  - type: dashboard_access
+    description: Access to dashboards for evaluation
+  - type: accessibility_tools
+    description: Browser extensions or tools for accessibility testing
+  optional_artifacts:
+  - type: wcag_guidelines
+    description: WCAG 2.1 AA compliance checklist
+  - type: color_palette_docs
+    description: Documented color standards for dashboards
+  access_requirements:
+  - Dashboard viewer access
+  - Ability to install accessibility testing tools
+discovery:
+  documents_to_review:
+  - type: Dashboard configuration
+    purpose: Review color palettes and visualization settings
+  - type: Accessibility policy
+    purpose: Understand organizational accessibility requirements
+  - type: WCAG guidelines
+    purpose: Reference for compliance criteria
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  specifications:
+  - id: wcag-21
+    name: Web Content Accessibility Guidelines (WCAG) 2.1
+    url: https://www.w3.org/TR/WCAG21/
+    offline_cache: true
+    priority: required
+  - id: section-508
+    name: Section 508 Standards
+    url: https://www.section508.gov/manage/laws-and-policies/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: colorblind-friendly
+    name: Colorblind Friendly Data Visualization
+    url: https://www.tableau.com/about/blog/examining-data-viz-rules-dont-use-red-green-together
+    offline_cache: true
+    priority: required
+  - id: grafana-accessibility
+    name: Grafana Accessibility Features
+    url: https://grafana.com/docs/grafana/latest/dashboards/accessibility/
+    offline_cache: true
+    priority: recommended
+  learning_resources:
+  - id: a11y-guidelines
+    title: Web Accessibility Initiative (WAI) Resources
+    type: article
+    reference: https://www.w3.org/WAI/
+tooling:
+  assessment_tools:
+  - tool: WAVE
+    purpose: Web accessibility evaluation
+  - tool: axe DevTools
+    purpose: Automated accessibility testing
+  - tool: Color Oracle
+    purpose: Colorblindness simulation
+  - tool: Contrast Checker
+    purpose: Color contrast ratio analysis
+  infrastructure_tools:
+  - tool: lighthouse
+    purpose: Automated accessibility auditing
+    command: lighthouse $DASHBOARD_URL --only-categories=accessibility --output=json
+  scripts:
+  - id: color-contrast-check
+    language: bash
+    purpose: Check dashboard theme colors for contrast compliance
+    source: inline
+    code: |
+      #!/bin/bash
+      # Extract and analyze dashboard colors
+
+      DASHBOARD_UID=$1
+
+      # Fetch dashboard JSON
+      dashboard=$(curl -s -H "Authorization: Bearer $TOKEN" \
+        "$GRAFANA_URL/api/dashboards/uid/$DASHBOARD_UID")
+
+      echo "=== Color Analysis for $DASHBOARD_UID ==="
+
+      # Extract color configurations
+      echo "$dashboard" | jq -r '
+        .dashboard.panels[]? |
+        select(.fieldConfig.defaults.color != null) |
+        "\(.title): \(.fieldConfig.defaults.color.mode)"'
+
+      # Check for red-green combinations
+      echo ""
+      echo "=== Checking for red-green palette issues ==="
+      if echo "$dashboard" | grep -qi '"color".*"red"'; then
+        if echo "$dashboard" | grep -qi '"color".*"green"'; then
+          echo "WARNING: Both red and green detected - potential colorblind issue"
+        fi
+      fi
+signals:
+  critical:
+  - id: DASHACCESS-CRIT-001
+    signal: Critical status indicators rely solely on red/green
+    evidence_indicators:
+    - Alert states shown only with red/green colors
+    - No shape, pattern, or text alternative
+    explanation: |
+      Approximately 8% of men and 0.5% of women have some form
+      of color vision deficiency. Red-green colorblindness is
+      most common, making red/green-only indicators invisible
+      to affected users.
+    remediation: |
+      - Use colorblind-friendly palettes (blue/orange, purple/yellow)
+      - Add shapes or icons in addition to color
+      - Include text labels for status indicators
+      - Use patterns (stripes, dots) for differentiation
+  - id: DASHACCESS-CRIT-002
+    signal: Text contrast ratio below 4.5:1
+    evidence_threshold: WCAG AA failure for normal text
+    explanation: |
+      Low contrast text is difficult or impossible to read for
+      users with low vision and in suboptimal lighting conditions
+      (common in NOCs and on-call situations).
+    remediation: |
+      Ensure all text meets WCAG AA standards:
+      - Normal text: 4.5:1 contrast ratio minimum
+      - Large text (18pt+): 3:1 contrast ratio minimum
+  high:
+  - id: DASHACCESS-HIGH-001
+    signal: No keyboard navigation support
+    explanation: |
+      Users with motor impairments may rely on keyboard navigation.
+      Mouse-only interfaces exclude these users.
+    remediation: |
+      Ensure all interactive elements are keyboard accessible.
+      Implement logical tab order through dashboard elements.
+  - id: DASHACCESS-HIGH-002
+    signal: Graphs lack alternative text descriptions
+    explanation: |
+      Screen reader users cannot interpret visual graphs without
+      text alternatives explaining the data.
+    remediation: |
+      Add descriptive panel titles and descriptions that convey
+      the data story, not just "CPU Usage Graph".
+  medium:
+  - id: DASHACCESS-MED-001
+    signal: Insufficient color differentiation between series
+    remediation: |
+      Use distinct colors with adequate contrast between each series.
+      Consider adding patterns or different line styles.
+  - id: DASHACCESS-MED-002
+    signal: Small touch targets for interactive elements
+    remediation: |
+      Ensure interactive elements are at least 44x44 pixels
+      for touch accessibility.
+  low:
+  - id: DASHACCESS-LOW-001
+    signal: Missing focus indicators on interactive elements
+    remediation: |
+      Add visible focus states for keyboard navigation.
+  positive:
+  - id: DASHACCESS-POS-001
+    signal: Colorblind-friendly palette consistently used
+  - id: DASHACCESS-POS-002
+    signal: All WCAG AA requirements met
+  - id: DASHACCESS-POS-003
+    signal: Alternative text provided for all visualizations
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Color Analysis
+    description: |
+      Analyze color choices across dashboards for accessibility.
+    duration_estimate: 45 min
+    questions:
+    - Do dashboards rely on red/green to convey meaning?
+    - Are colors distinguishable to colorblind users?
+    - Are there non-color cues for status indicators?
+    expected_findings:
+    - Color palette inventory
+    - Red/green dependency issues
+    - Contrast ratio measurements
+  - id: '2'
+    name: Contrast Testing
+    description: |
+      Measure text and graphical contrast ratios against WCAG standards.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Run Lighthouse accessibility audit
+      command: lighthouse $DASHBOARD_URL --only-categories=accessibility --output=json
+    expected_findings:
+    - Contrast ratio scores
+    - Elements failing WCAG requirements
+  - id: '3'
+    name: Keyboard Navigation Testing
+    description: |
+      Test dashboard navigation using only keyboard input.
+    duration_estimate: 30 min
+    questions:
+    - Can all panels be accessed via Tab key?
+    - Are focus states visible?
+    - Can time ranges and variables be changed via keyboard?
+    expected_findings:
+    - Keyboard accessibility gaps
+    - Tab order issues
+  - id: '4'
+    name: Screen Reader Testing
+    description: |
+      Test dashboard with screen reader software to evaluate
+      compatibility and information conveyance.
+    duration_estimate: 45 min
+    questions:
+    - Are panel titles announced?
+    - Is data conveyed meaningfully?
+    - Are interactive elements labeled?
+    expected_findings:
+    - Screen reader compatibility issues
+    - Missing labels and descriptions
+output:
+  deliverables:
+  - type: accessibility_report
+    format: structured
+    description: WCAG compliance assessment
+  - type: color_analysis
+    format: visual
+    description: Color palette review with simulated colorblind views
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - WCAG Compliance Status
+    - Color Accessibility Findings
+    - Keyboard and Screen Reader Issues
+    - Remediation Recommendations
+  confidence_guidance:
+    high: Direct automated testing results (Lighthouse, axe)
+    medium: Manual keyboard and screen reader testing
+    low: Visual inspection without simulation tools
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: wcag-21
+      priority: required
+    - source_id: colorblind-friendly
+      priority: required
+  degradation:
+  - feature: Automated accessibility testing
+    impact: Cannot run Lighthouse or automated tools
+    mitigation: Use offline checklists based on WCAG criteria
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed manual testing
+    full:
+      included: true
+      priority: 18
+closeout_checklist:
+- id: dashaccess-001
+  item: No red/green-only status indicators
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify all status indicators have non-color cues
+  expected: Confirmed by reviewer
+- id: dashaccess-002
+  item: All text meets WCAG AA contrast requirements
+  level: CRITICAL
+  verification: |
+    lighthouse $DASHBOARD_URL --only-categories=accessibility --output=json | jq '.categories.accessibility.score >= 0.9'
+  expected: 'true'
+- id: dashaccess-003
+  item: Keyboard navigation functional for critical actions
+  level: BLOCKING
+  verification: manual
+  verification_notes: Test Tab navigation through all interactive elements
+  expected: Confirmed by reviewer
+- id: dashaccess-004
+  item: Visualization panels have descriptive titles
+  level: WARNING
+  verification: manual
+  verification_notes: Review panel titles for meaningfulness
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    - serverless
+  compliance_frameworks:
+  - framework: WCAG 2.1
+    controls:
+    - AA Level
+  - framework: Section 508
+    controls:
+    - '1194.22'
+  - framework: ADA
+    controls:
+    - Title III
+relationships:
+  commonly_combined:
+  - observability-instrumentation.visualization-dashboards.dashboard-coverage
+  - observability-instrumentation.visualization-dashboards.dashboard-performance
+  - code-quality.ui-ux.accessibility-compliance

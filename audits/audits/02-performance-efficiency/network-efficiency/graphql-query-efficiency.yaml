@@ -1,0 +1,397 @@
+# ============================================================
+# AUDIT: GraphQL Query Efficiency Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.network-efficiency.graphql-query-efficiency"
+  name: "GraphQL Query Efficiency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "network-efficiency"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates GraphQL query efficiency including query depth limits, complexity
+    analysis, N+1 query prevention with DataLoader, persisted queries, and
+    proper use of fragments. Analyzes schema design for over-fetching prevention
+    and resolver efficiency. Identifies performance anti-patterns unique to GraphQL.
+
+  why_it_matters: |
+    GraphQL's flexibility can be exploited by malicious or accidental deeply
+    nested queries that cause exponential database load. A single poorly-crafted
+    query can bring down a server. Without DataLoader, GraphQL naturally creates
+    N+1 database queries. Proper query complexity analysis and depth limits are
+    essential for production GraphQL servers. Facebook processes 200+ billion
+    GraphQL queries daily with strict efficiency controls.
+
+  when_to_run:
+    - "GraphQL API development"
+    - "Performance degradation investigations"
+    - "Security audits for DoS prevention"
+    - "Before production launch"
+
+prerequisites:
+  required_artifacts:
+    - type: "codebase"
+      description: "GraphQL schema and resolver implementations"
+    - type: "runtime_access"
+      description: "Running GraphQL endpoint for query testing"
+
+  access_requirements:
+    - "GraphQL schema files"
+    - "Resolver implementations"
+    - "Query logging or APM access"
+
+discovery:
+  code_patterns:
+    - pattern: "graphql|gql`|gql\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find GraphQL definitions and queries"
+    - pattern: "DataLoader|dataloader"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find DataLoader implementations"
+    - pattern: "depthLimit|queryComplexity|costAnalysis"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find query validation rules"
+
+  file_patterns:
+    - glob: "**/*.graphql"
+      purpose: "GraphQL schema files"
+    - glob: "**/resolvers/**/*.{ts,js}"
+      purpose: "Resolver implementations"
+    - glob: "**/*schema*.{ts,js}"
+      purpose: "Schema definitions"
+
+knowledge_sources:
+  specifications:
+    - id: "graphql-spec"
+      name: "GraphQL Specification"
+      url: "https://spec.graphql.org/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "apollo-perf"
+      name: "Apollo Server Performance Guide"
+      url: "https://www.apollographql.com/docs/apollo-server/performance/"
+      offline_cache: true
+    - id: "dataloader"
+      name: "DataLoader Documentation"
+      url: "https://github.com/graphql/dataloader"
+      offline_cache: true
+    - id: "persisted-queries"
+      name: "Apollo Persisted Queries"
+      url: "https://www.apollographql.com/docs/apollo-server/performance/apq/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "production-graphql"
+      title: "Production Ready GraphQL"
+      type: "book"
+      reference: "Marc-Andre Giroux"
+
+tooling:
+  static_analysis:
+    - tool: "graphql-eslint"
+      purpose: "Lint GraphQL operations and schema"
+      offline_capable: true
+    - tool: "graphql-inspector"
+      purpose: "Schema analysis and diff"
+      offline_capable: true
+
+  scripts:
+    - id: "query-complexity-test"
+      language: "bash"
+      purpose: "Test query depth and complexity limits"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        ENDPOINT="$1"
+        echo "=== GraphQL Query Limits Test ==="
+
+        # Test deep nested query
+        echo -e "\n--- Testing Deep Query ---"
+        curl -s -X POST "$ENDPOINT" \
+          -H "Content-Type: application/json" \
+          -d '{"query":"{ user { posts { comments { author { posts { comments { id }}}}}}}"}'
+
+        # Test introspection (should be disabled in production)
+        echo -e "\n--- Testing Introspection ---"
+        curl -s -X POST "$ENDPOINT" \
+          -H "Content-Type: application/json" \
+          -d '{"query":"{ __schema { types { name }}}"}'
+
+signals:
+  critical:
+    - id: "GQL-CRIT-001"
+      signal: "No query depth limit configured"
+      evidence_pattern: "Missing depthLimit validation rule in GraphQL server config"
+      explanation: |
+        Without depth limits, attackers can craft deeply nested queries that
+        cause exponential resolver execution. A query nested 10 levels deep
+        on a user->posts->comments->author chain can generate millions of
+        database queries. This is a critical DoS vulnerability.
+      remediation: "Implement depth limiting (max 7-10 levels) using graphql-depth-limit"
+
+    - id: "GQL-CRIT-002"
+      signal: "No query complexity/cost analysis"
+      evidence_pattern: "Missing cost analysis or complexity limit in server config"
+      explanation: |
+        Query complexity analysis assigns costs to fields and limits total
+        query cost. Without this, a single query requesting 10,000 items
+        from multiple list fields can overload the server. This is the
+        primary defense against GraphQL resource exhaustion attacks.
+      remediation: "Implement query cost analysis with graphql-query-complexity or similar"
+
+  high:
+    - id: "GQL-HIGH-001"
+      signal: "DataLoader not used in resolvers accessing databases"
+      evidence_pattern: "Direct database calls in resolvers without DataLoader batching"
+      explanation: |
+        GraphQL's resolver pattern naturally creates N+1 queries. If fetching
+        users with posts, each user triggers a separate posts query. DataLoader
+        batches these into a single query. Without DataLoader, 100 users
+        means 101 queries instead of 2.
+      remediation: "Implement DataLoader for all data sources, inject via context"
+
+    - id: "GQL-HIGH-002"
+      signal: "Introspection enabled in production"
+      evidence_pattern: "__schema query returns results in production"
+      explanation: |
+        Introspection exposes your entire schema to attackers, revealing
+        internal types, deprecated fields, and potential attack vectors.
+        While essential for development, it should be disabled in production
+        or restricted to authenticated admin users.
+      remediation: "Disable introspection in production: { introspection: false }"
+
+  medium:
+    - id: "GQL-MED-001"
+      signal: "Persisted queries not implemented"
+      evidence_pattern: "No APQ (Automatic Persisted Queries) configuration"
+      remediation: "Implement persisted queries to reduce payload size and enable query whitelisting"
+
+    - id: "GQL-MED-002"
+      signal: "No query timeout configured"
+      evidence_pattern: "Missing timeout in GraphQL execution config"
+      remediation: "Set query execution timeout (e.g., 30 seconds) to prevent runaway queries"
+
+  low:
+    - id: "GQL-LOW-001"
+      signal: "Fragments not used for repeated selections"
+
+  positive:
+    - id: "GQL-POS-001"
+      signal: "Depth limit configured appropriately"
+    - id: "GQL-POS-002"
+      signal: "Query complexity analysis with field-level costs"
+    - id: "GQL-POS-003"
+      signal: "DataLoader implemented for all data sources"
+    - id: "GQL-POS-004"
+      signal: "Persisted queries enabled"
+    - id: "GQL-POS-005"
+      signal: "Introspection disabled in production"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Audit Query Protection Rules"
+      description: |
+        Verify that query depth limits and complexity analysis are
+        configured to protect against resource exhaustion.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find depth limit configuration"
+          command: "grep -rn 'depthLimit\\|depth-limit\\|maxDepth' --include='*.ts' --include='*.js' src/"
+        - purpose: "Find complexity analysis"
+          command: "grep -rn 'complexity\\|costAnalysis\\|queryCost' --include='*.ts' --include='*.js' src/"
+        - purpose: "Check validation rules"
+          command: "grep -rn 'validationRules' --include='*.ts' --include='*.js' src/"
+
+      expected_findings:
+        - "Depth limit configured (7-10)"
+        - "Complexity analysis with field costs"
+
+    - id: "2"
+      name: "Test Query Limits Live"
+      description: |
+        Attempt to execute queries that should be blocked by
+        depth and complexity limits.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Test deep nested query"
+          command: |
+            curl -s -X POST https://api.example.com/graphql \
+              -H "Content-Type: application/json" \
+              -d '{"query":"{ a { b { c { d { e { f { g { h { id }}}}}}}}}"}'
+        - purpose: "Test wide query"
+          command: |
+            curl -s -X POST https://api.example.com/graphql \
+              -H "Content-Type: application/json" \
+              -d '{"query":"{ users(first:1000) { id name email posts(first:100) { id title }}}"}'
+
+      expected_findings:
+        - "Deep queries rejected with error"
+        - "Complex queries rejected or rate limited"
+
+    - id: "3"
+      name: "Review DataLoader Implementation"
+      description: |
+        Verify DataLoader is used for all data sources to prevent
+        N+1 query problems.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find DataLoader imports"
+          command: "grep -rn 'DataLoader\\|dataloader' --include='*.ts' --include='*.js' src/"
+        - purpose: "Find resolver database calls"
+          command: "grep -rn 'findOne\\|findMany\\|query\\|select' --include='*.ts' --include='*.js' src/resolvers/"
+        - purpose: "Check context loaders setup"
+          command: "grep -rn 'context.*loader\\|createLoaders\\|buildLoaders' --include='*.ts' --include='*.js' src/"
+
+      expected_findings:
+        - "DataLoader for each data source"
+        - "Loaders created per-request in context"
+
+    - id: "4"
+      name: "Check Production Security Settings"
+      description: |
+        Verify introspection is disabled and persisted queries
+        are configured for production.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Test introspection in production"
+          command: |
+            curl -s -X POST https://api.example.com/graphql \
+              -H "Content-Type: application/json" \
+              -d '{"query":"{ __schema { types { name }}}"}'
+        - purpose: "Check for introspection config"
+          command: "grep -rn 'introspection' --include='*.ts' --include='*.js' src/"
+        - purpose: "Check persisted queries config"
+          command: "grep -rn 'persistedQueries\\|APQ\\|automaticPersistedQueries' --include='*.ts' --include='*.js' src/"
+
+      expected_findings:
+        - "Introspection returns error in production"
+        - "Persisted queries enabled"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Query Protection Analysis"
+        - "DataLoader Implementation"
+        - "Security Configuration"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct query testing and configuration inspection"
+    medium: "Code pattern analysis"
+    low: "Inferred from partial configuration"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "graphql-spec"
+        priority: "required"
+      - source_id: "dataloader"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive GraphQL analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "graphql-001"
+    item: "Query depth limit configured"
+    level: "CRITICAL"
+    verification: |
+      DEPTH=$(grep -rn 'depthLimit\|maxDepth' --include='*.ts' --include='*.js' src/ | wc -l)
+      if [ "$DEPTH" -gt 0 ]; then echo "PASS"; else echo "FAIL: No depth limit"; fi
+    expected: "PASS"
+
+  - id: "graphql-002"
+    item: "Query complexity analysis enabled"
+    level: "CRITICAL"
+    verification: |
+      COST=$(grep -rn 'complexity\|costAnalysis\|queryCost' --include='*.ts' --include='*.js' src/ | wc -l)
+      if [ "$COST" -gt 0 ]; then echo "PASS"; else echo "FAIL: No complexity analysis"; fi
+    expected: "PASS"
+
+  - id: "graphql-003"
+    item: "DataLoader implemented for data sources"
+    level: "CRITICAL"
+    verification: |
+      DL=$(grep -rn 'DataLoader' --include='*.ts' --include='*.js' src/ | wc -l)
+      if [ "$DL" -gt 0 ]; then echo "PASS: $DL DataLoader references"; else echo "FAIL: No DataLoader"; fi
+    expected: "PASS"
+
+  - id: "graphql-004"
+    item: "Introspection disabled in production"
+    level: "BLOCKING"
+    verification: |
+      INTRO=$(curl -s -X POST https://api.example.com/graphql \
+        -H "Content-Type: application/json" \
+        -d '{"query":"{ __schema { types { name }}}"}' | grep -c 'error\|disabled')
+      if [ "$INTRO" -gt 0 ]; then echo "PASS"; else echo "FAIL: Introspection enabled"; fi
+    expected: "PASS"
+
+  - id: "graphql-005"
+    item: "Query timeout configured"
+    level: "BLOCKING"
+    verification: |
+      TIMEOUT=$(grep -rn 'timeout\|maxExecutionTime' --include='*.ts' --include='*.js' src/ | grep -i graphql | wc -l)
+      if [ "$TIMEOUT" -gt 0 ]; then echo "PASS"; else echo "FAIL: No timeout"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.network-efficiency.request-batching"
+    - "performance-efficiency.database-performance.query-optimization"
+    - "security.api-security.rate-limiting"

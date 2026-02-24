@@ -1,0 +1,406 @@
+audit:
+  id: reliability-resilience.resilience-testing.cascading-failure-prevention
+  name: Cascading Failure Prevention Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: resilience-testing
+  tier: phd
+  estimated_duration: 5 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: true
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: true
+  parallelizable: false
+description:
+  what: |
+    This audit assesses mechanisms that prevent failures from cascading
+    across service boundaries, including circuit breakers, bulkheads,
+    backpressure, and isolation patterns. It validates through chaos
+    experiments that a failure in one component does not cause system-wide
+    outages.
+  why_it_matters: |
+    Cascading failures are the most damaging type of production incident,
+    turning a small component failure into a complete system outage.
+    The 2016 AWS S3 outage is a classic example where a small operational
+    error cascaded to affect most of the internet. Prevention of cascade
+    requires intentional isolation, circuit breaking, and tested containment.
+  when_to_run:
+  - Before major production deployments
+  - When adding new service dependencies
+  - Quarterly resilience assessment
+  - After incidents involving multi-service failures
+prerequisites:
+  required_artifacts:
+  - type: service-dependency-graph
+    description: Complete service dependency mapping
+  - type: circuit-breaker-configs
+    description: Circuit breaker configurations
+  - type: chaos-experiments
+    description: Cascade-focused chaos experiments
+  access_requirements:
+  - Access to chaos engineering platform
+  - Read access to service mesh configurations
+  - Access to distributed tracing system
+  - Read access to circuit breaker dashboards
+discovery:
+  code_patterns:
+  - pattern: circuit.*breaker|bulkhead|isolation
+    type: regex
+    scope: source
+    purpose: Identify cascade prevention patterns
+  - pattern: backpressure|rate.*limit|throttle
+    type: regex
+    scope: source
+    purpose: Find backpressure mechanisms
+  - pattern: timeout|deadline|cancel
+    type: keyword
+    scope: source
+    purpose: Identify timeout implementations
+  - pattern: retry.*budget|retry.*limit
+    type: regex
+    scope: config
+    purpose: Find retry configurations
+  file_patterns:
+  - glob: '**/circuit-breaker/**/*'
+    purpose: Circuit breaker configurations
+  - glob: '**/resilience/**/*'
+    purpose: Resilience pattern implementations
+  - glob: '**/service-mesh/**/*.yaml'
+    purpose: Service mesh resilience configs
+  - glob: '**/envoy/**/*.yaml'
+    purpose: Envoy proxy configurations
+  documents_to_review:
+  - type: Service dependency documentation
+    purpose: Understand service relationships
+  - type: Incident post-mortems
+    purpose: Learn from past cascading failures
+  - type: Resilience architecture documentation
+    purpose: Understand designed cascade prevention
+knowledge_sources:
+  specifications:
+  - id: resilience4j
+    name: Resilience4j Documentation
+    url: https://resilience4j.readme.io/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-cascade
+    name: AWS Avoiding Cascading Failures
+    url: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/avoid-cascading-failure.html
+    offline_cache: true
+  - id: istio-resilience
+    name: Istio Traffic Management
+    url: https://istio.io/latest/docs/concepts/traffic-management/
+    offline_cache: true
+  - id: google-sre-cascade
+    name: Google SRE - Addressing Cascading Failures
+    url: https://sre.google/sre-book/addressing-cascading-failures/
+    offline_cache: true
+  papers:
+  - id: circuit-breaker-pattern
+    title: Release It! Circuit Breaker Pattern
+    url: https://martinfowler.com/bliki/CircuitBreaker.html
+  learning_resources:
+  - id: release-it
+    title: 'Release It!: Design and Deploy Production-Ready Software'
+    type: book
+    reference: 'ISBN: 978-1680502398'
+tooling:
+  infrastructure_tools:
+  - tool: Gremlin
+    purpose: Orchestrated multi-component failure injection
+    command: gremlin scenario run cascade-test.yaml
+  - tool: LitmusChaos
+    purpose: Kubernetes chaos orchestration
+    command: kubectl get chaosengines -A
+  - tool: Istio
+    purpose: Service mesh circuit breaking
+    command: kubectl get destinationrules -A -o yaml | grep -A 20 'trafficPolicy'
+  - tool: Envoy
+    purpose: Proxy-level circuit breaking
+    command: Check Envoy circuit breaker configurations
+  monitoring_queries:
+  - system: Prometheus
+    query: sum(rate(circuit_breaker_state_transitions_total{to_state='open'}[5m])) by (service)
+    purpose: Track circuit breaker activations
+    threshold: Activations during failures, not during normal operation
+  - system: Prometheus
+    query: sum(increase(request_failures_total[5m])) by (upstream_service)
+    purpose: Track failures by upstream dependency
+    threshold: Failures isolated to affected dependency
+  - system: Jaeger/Zipkin
+    query: Trace analysis for cascade patterns
+    purpose: Visualize failure propagation
+    threshold: Failures contained at circuit breaker boundaries
+  scripts:
+  - id: cascade-analyzer
+    language: python
+    purpose: Analyze service dependency graph for cascade risk
+    source: inline
+    code: |
+      #!/usr/bin/env python3
+      """
+      Cascading Failure Risk Analyzer
+      Analyzes service graph for cascade vulnerability
+      """
+      import json
+      import networkx as nx
+
+      def load_service_graph(filepath):
+          with open(filepath) as f:
+              return json.load(f)
+
+      def calculate_cascade_risk(graph):
+          G = nx.DiGraph()
+          for service, deps in graph.items():
+              for dep in deps:
+                  G.add_edge(service, dep)
+
+          # Find services with high fan-out (cascade sources)
+          cascade_sources = [(n, G.out_degree(n)) for n in G.nodes()
+                             if G.out_degree(n) > 5]
+
+          # Find services with high fan-in (cascade sinks)
+          cascade_sinks = [(n, G.in_degree(n)) for n in G.nodes()
+                           if G.in_degree(n) > 5]
+
+          return cascade_sources, cascade_sinks
+
+      def verify_circuit_breakers(graph, circuit_breakers):
+          # Check that circuit breakers exist at high-risk edges
+          pass
+signals:
+  critical:
+  - id: CFP-CRIT-001
+    signal: No circuit breakers on critical dependency paths
+    evidence_indicators:
+    - Missing circuit breaker configurations
+    - Dependencies called without isolation
+    explanation: |
+      Without circuit breakers, a failing dependency will continue receiving
+      requests, exhausting resources and propagating failures to callers.
+      Circuit breakers are essential for cascade prevention.
+    remediation: Implement circuit breakers on all cross-service calls
+  - id: CFP-CRIT-002
+    signal: Cascade testing not performed
+    evidence_indicators:
+    - No chaos experiments for cascade scenarios
+    - Multi-service failure behavior unknown
+    explanation: |
+      Without cascade testing, the system's behavior during multi-component
+      failures is unknown. This is exactly when cascading failures occur.
+    remediation: Implement cascade-focused chaos experiments
+  - id: CFP-CRIT-003
+    signal: Retry storms possible
+    evidence_indicators:
+    - Aggressive retry policies without exponential backoff
+    - No retry budgets configured
+    explanation: |
+      Excessive retries during failures amplify load on struggling services,
+      converting partial failures into complete outages. Retry storms are
+      a primary cause of cascading failures.
+    remediation: Implement exponential backoff and retry budgets
+  high:
+  - id: CFP-HIGH-001
+    signal: No bulkhead isolation between service categories
+    explanation: All services share resources, enabling cross-contamination
+    remediation: Implement bulkhead pattern with isolated resource pools
+  - id: CFP-HIGH-002
+    signal: Timeouts not configured or too long
+    explanation: Long timeouts cause resource exhaustion during failures
+    remediation: Configure appropriate timeouts for all dependencies
+  medium:
+  - id: CFP-MED-001
+    signal: No backpressure mechanisms
+    remediation: Implement backpressure to prevent queue buildup
+  - id: CFP-MED-002
+    signal: Circuit breaker thresholds not tuned
+    remediation: Tune circuit breaker parameters based on failure patterns
+  low:
+  - id: CFP-LOW-001
+    signal: Cascade prevention documentation incomplete
+  positive:
+  - id: CFP-POS-001
+    signal: Circuit breakers configured on all cross-service calls
+  - id: CFP-POS-002
+    signal: Cascade containment verified through chaos experiments
+  - id: CFP-POS-003
+    signal: Bulkhead isolation prevents cross-service contamination
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map Service Dependencies
+    description: |
+      Create a complete service dependency graph to understand
+      potential cascade paths and critical failure points.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Extract service dependencies from Istio
+      command: kubectl get destinationrules -A -o yaml
+    - purpose: Analyze distributed traces for dependencies
+      command: Query distributed tracing for service graph
+    expected_findings:
+    - Complete service dependency graph
+    - Identification of high fan-in/fan-out services
+  - id: '2'
+    name: Assess Circuit Breaker Coverage
+    description: |
+      Verify that circuit breakers are configured for all
+      cross-service calls and that configurations are appropriate.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find circuit breaker configurations
+      command: grep -r 'circuitBreaker\|outlierDetection' config/
+    - purpose: Check Resilience4j configurations
+      command: find . -name 'application*.yaml' | xargs grep -l 'resilience4j'
+    expected_findings:
+    - Circuit breaker configuration inventory
+    - Gaps in circuit breaker coverage
+  - id: '3'
+    name: Review Retry and Timeout Policies
+    description: |
+      Analyze retry policies and timeout configurations to identify
+      potential retry storm or timeout cascade risks.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find retry configurations
+      command: grep -r 'retry\|Retry' config/ src/ | grep -i 'max\|limit\|budget'
+    - purpose: Find timeout configurations
+      command: grep -r 'timeout\|Timeout' config/ src/ | grep -v test
+    expected_findings:
+    - Retry policy analysis
+    - Timeout configuration review
+  - id: '4'
+    name: Execute Cascade Experiments
+    description: |
+      Run chaos experiments that inject failures and verify
+      that cascade prevention mechanisms activate correctly.
+    duration_estimate: 90 min
+    commands:
+    - purpose: Run cascade chaos scenario
+      command: gremlin scenario run cascade-prevention-test
+    expected_findings:
+    - Circuit breaker activation evidence
+    - Cascade containment verification
+  - id: '5'
+    name: Analyze Cascade Containment
+    description: |
+      Use distributed tracing and monitoring to verify that
+      failures are contained and do not propagate beyond boundaries.
+    duration_estimate: 45 min
+    questions:
+    - Did the circuit breaker prevent cascade?
+    - How many services were affected by the injected failure?
+    - Was the failure contained at the expected boundary?
+    expected_findings:
+    - Cascade containment verification
+    - Blast radius analysis from experiments
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: cascade_prevention_matrix
+    format: table
+    sections:
+    - Service Pair
+    - Circuit Breaker Status
+    - Timeout Configuration
+    - Retry Policy
+    - Cascade Test Result
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Dependency Analysis
+    - Cascade Prevention Coverage
+    - Chaos Experiment Results
+    - Recommendations
+  confidence_guidance:
+    high: Cascade prevention verified through chaos experiments
+    medium: Configurations exist but not tested
+    low: Based on documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: resilience4j
+      priority: required
+    - source_id: google-sre-cascade
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive cascade analysis and testing
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cfp-001
+  item: Service dependency graph documented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm complete service dependency map exists
+  expected: Confirmed by reviewer
+- id: cfp-002
+  item: Circuit breakers configured on cross-service calls
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify circuit breaker configurations for all service dependencies
+  expected: Confirmed by reviewer
+- id: cfp-003
+  item: Cascade chaos experiments executed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm cascade scenarios tested with results documented
+  expected: Confirmed by reviewer
+- id: cfp-004
+  item: Retry policies prevent retry storms
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify exponential backoff and retry budgets configured
+  expected: Confirmed by reviewer
+- id: cfp-005
+  item: Failures contained at expected boundaries
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm chaos experiment results show cascade containment
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - distributed-system
+    - microservices
+    - cloud-native
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+    - CC7.2
+    - CC7.4
+  - framework: ISO 27001
+    controls:
+    - A.17.1
+    - A.17.2
+relationships:
+  commonly_combined:
+  - reliability-resilience.resilience-testing.failure-mode-coverage
+  - reliability-resilience.resilience-testing.blast-radius-verification
+  - reliability-resilience.fault-tolerance.circuit-breaker-patterns
+  - reliability-resilience.fault-tolerance.graceful-degradation

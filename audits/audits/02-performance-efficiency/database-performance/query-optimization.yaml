@@ -1,0 +1,349 @@
+# ============================================================
+# Query Optimization Audit
+# ============================================================
+# Evaluates database query efficiency, execution plans, and
+# identifies optimization opportunities in SQL queries.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.database-performance.query-optimization"
+  name: "Query Optimization Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "database-performance"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines database queries for optimization opportunities by
+    analyzing execution plans, identifying inefficient patterns, reviewing
+    query statistics, and evaluating index utilization. It covers both
+    application-generated queries and direct database operations.
+
+  why_it_matters: |
+    Inefficient queries are the most common cause of database performance
+    problems. A single poorly optimized query can consume more resources
+    than the rest of the workload combined. Query optimization directly
+    improves response times, reduces infrastructure costs, and prevents
+    database-induced outages.
+
+  when_to_run:
+    - "After deploying new features with database queries"
+    - "When investigating slow response times"
+    - "During performance tuning exercises"
+    - "After schema changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-access"
+      description: "Read access to database for EXPLAIN analysis"
+    - type: "query-logs"
+      description: "Access to slow query logs or query statistics"
+
+  access_requirements:
+    - "EXPLAIN privileges on target database"
+    - "Access to pg_stat_statements or equivalent"
+    - "Read access to application query logs"
+
+discovery:
+  metrics_queries:
+    - system: "PostgreSQL"
+      query: "SELECT * FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20"
+      purpose: "Top queries by total execution time"
+      threshold: "Individual queries < 100ms mean time"
+    - system: "PostgreSQL"
+      query: "SELECT * FROM pg_stat_statements ORDER BY calls DESC LIMIT 20"
+      purpose: "Most frequently executed queries"
+      threshold: "High-frequency queries should be optimized"
+    - system: "MySQL"
+      query: "SELECT * FROM sys.statement_analysis ORDER BY total_latency DESC LIMIT 20"
+      purpose: "Top queries by latency"
+      threshold: "Individual queries < 100ms average"
+
+  code_patterns:
+    - pattern: "SELECT\\s+\\*\\s+FROM"
+      type: "regex"
+      scope: "source"
+      purpose: "SELECT * patterns that may fetch unnecessary columns"
+    - pattern: "WHERE.*LIKE\\s+'%"
+      type: "regex"
+      scope: "source"
+      purpose: "Leading wildcard LIKE patterns"
+    - pattern: "ORDER BY.*LIMIT"
+      type: "regex"
+      scope: "source"
+      purpose: "Sorting with limits that may need optimization"
+
+knowledge_sources:
+  specifications:
+    - id: "postgres-explain"
+      name: "PostgreSQL EXPLAIN Documentation"
+      url: "https://www.postgresql.org/docs/current/using-explain.html"
+      offline_cache: true
+      priority: "required"
+    - id: "mysql-explain"
+      name: "MySQL EXPLAIN Output Format"
+      url: "https://dev.mysql.com/doc/refman/8.0/en/explain-output.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "use-the-index-luke"
+      name: "Use The Index, Luke!"
+      url: "https://use-the-index-luke.com/"
+      offline_cache: true
+    - id: "postgres-performance"
+      name: "PostgreSQL Performance Tips"
+      url: "https://www.postgresql.org/docs/current/performance-tips.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "Execute EXPLAIN ANALYZE"
+      command: "psql -c 'EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) <query>'"
+    - tool: "mysql"
+      purpose: "Execute MySQL EXPLAIN"
+      command: "mysql -e 'EXPLAIN FORMAT=JSON <query>'"
+    - tool: "pganalyze"
+      purpose: "Automated query analysis"
+      command: "pganalyze-collector --analyze"
+
+  monitoring_queries:
+    - system: "PostgreSQL"
+      query: |
+        SELECT query, calls, total_exec_time, mean_exec_time,
+               rows / calls as avg_rows
+        FROM pg_stat_statements
+        WHERE mean_exec_time > 100
+        ORDER BY total_exec_time DESC
+      purpose: "Slow queries needing optimization"
+
+signals:
+  critical:
+    - id: "QUERY-CRIT-001"
+      signal: "Sequential scans on large tables in critical paths"
+      evidence_pattern: "EXPLAIN shows Seq Scan on table with >100k rows"
+      explanation: |
+        Sequential scans on large tables are extremely expensive, reading
+        every row regardless of the query's selectivity. In production
+        with concurrent queries, this can exhaust I/O capacity and cause
+        widespread slowdowns.
+      remediation: "Add appropriate index or rewrite query to use existing indexes"
+
+    - id: "QUERY-CRIT-002"
+      signal: "Queries with mean execution time exceeding 1 second"
+      evidence_threshold: "mean_exec_time > 1000ms"
+      explanation: |
+        Queries taking over a second indicate severe inefficiency. Users
+        experience poor response times, connection pools may be exhausted
+        waiting for slow queries, and database resources are tied up.
+      remediation: "Analyze EXPLAIN plan, add indexes, or rewrite query logic"
+
+  high:
+    - id: "QUERY-HIGH-001"
+      signal: "Queries returning significantly more rows than needed"
+      evidence_threshold: "rows_returned > 10x rows_used by application"
+      explanation: |
+        Fetching more rows than needed wastes network bandwidth, memory,
+        and database resources. Often caused by missing WHERE clauses,
+        SELECT *, or overly broad queries.
+      remediation: "Add appropriate filters, limit columns, use pagination"
+
+    - id: "QUERY-HIGH-002"
+      signal: "Inefficient sort operations in execution plan"
+      evidence_pattern: "EXPLAIN shows external merge Disk sort"
+      explanation: |
+        Disk-based sorting is orders of magnitude slower than memory-based
+        sorting. This often occurs when sort_mem is exceeded or when
+        sorting unindexed columns.
+      remediation: "Add index on sorted columns or increase work_mem"
+
+  medium:
+    - id: "QUERY-MED-001"
+      signal: "Hash joins where nested loop would be more efficient"
+      evidence_pattern: "Hash Join on highly selective inner table"
+      remediation: "Hint or rewrite to encourage nested loop join"
+
+    - id: "QUERY-MED-002"
+      signal: "Suboptimal join order in complex queries"
+      evidence_pattern: "Large table scanned before selective filter"
+      remediation: "Reorder joins or update statistics for better planning"
+
+  low:
+    - id: "QUERY-LOW-001"
+      signal: "Missing query statistics collection"
+
+  positive:
+    - id: "QUERY-POS-001"
+      signal: "Index-only scans on frequently executed queries"
+    - id: "QUERY-POS-002"
+      signal: "Efficient use of partial indexes"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify slow queries"
+      description: |
+        Query database statistics to identify the slowest and most
+        resource-intensive queries in the workload.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Top queries by execution time (PostgreSQL)"
+          command: |
+            psql -c "SELECT query, calls, total_exec_time::int, mean_exec_time::int, rows FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20"
+        - purpose: "Top queries by execution time (MySQL)"
+          command: |
+            mysql -e "SELECT DIGEST_TEXT, COUNT_STAR, SUM_TIMER_WAIT/1000000000 as total_time_sec, AVG_TIMER_WAIT/1000000000 as avg_time_sec FROM performance_schema.events_statements_summary_by_digest ORDER BY SUM_TIMER_WAIT DESC LIMIT 20"
+      expected_findings:
+        - "List of slowest queries"
+        - "Query execution statistics"
+
+    - id: "2"
+      name: "Analyze execution plans"
+      description: |
+        Generate and analyze execution plans for identified slow queries
+        to understand where time is being spent.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Generate EXPLAIN ANALYZE for slow query"
+          command: |
+            psql -c "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) <slow_query>"
+        - purpose: "Check for sequential scans"
+          command: |
+            psql -c "SELECT relname, seq_scan, seq_tup_read, idx_scan, idx_tup_fetch FROM pg_stat_user_tables WHERE seq_scan > idx_scan AND seq_tup_read > 10000 ORDER BY seq_tup_read DESC"
+      expected_findings:
+        - "Execution plan details"
+        - "Bottleneck operations identified"
+
+    - id: "3"
+      name: "Review query patterns in code"
+      description: |
+        Search application code for common anti-patterns that lead to
+        poor query performance.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find SELECT * usage"
+          command: |
+            grep -rn "SELECT \*" --include="*.java" --include="*.py" --include="*.js" --include="*.rb"
+        - purpose: "Find LIKE patterns with leading wildcards"
+          command: |
+            grep -rn "LIKE.*'%" --include="*.java" --include="*.py" --include="*.js"
+      expected_findings:
+        - "Query anti-patterns in code"
+        - "Optimization opportunities"
+
+    - id: "4"
+      name: "Evaluate index utilization"
+      description: |
+        Check how effectively existing indexes are being used by the
+        problematic queries.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check index usage statistics"
+          command: |
+            psql -c "SELECT schemaname, relname, indexrelname, idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes ORDER BY idx_scan DESC LIMIT 20"
+        - purpose: "Find unused indexes"
+          command: |
+            psql -c "SELECT schemaname, relname, indexrelname FROM pg_stat_user_indexes WHERE idx_scan = 0"
+      expected_findings:
+        - "Index usage patterns"
+        - "Unused or underutilized indexes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Slow Query Analysis"
+        - "Execution Plan Findings"
+        - "Index Utilization Review"
+        - "Optimization Recommendations"
+
+  confidence_guidance:
+    high: "EXPLAIN ANALYZE results with production-representative data"
+    medium: "EXPLAIN (without ANALYZE) or non-production analysis"
+    low: "Code pattern analysis without execution verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "postgres-explain"
+        priority: "required"
+      - source_id: "use-the-index-luke"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed execution plan analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "query-001"
+    item: "No queries with mean execution time > 500ms"
+    level: "CRITICAL"
+    verification: |
+      psql -c "SELECT count(*) FROM pg_stat_statements WHERE mean_exec_time > 500" -t | grep -q "^0$"
+    expected: "true"
+
+  - id: "query-002"
+    item: "No sequential scans on tables > 100k rows in hot paths"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review EXPLAIN plans for critical queries"
+    expected: "Confirmed by reviewer"
+
+  - id: "query-003"
+    item: "All SELECT * replaced with explicit column lists"
+    level: "WARNING"
+    verification: |
+      grep -r "SELECT \*" --include="*.java" --include="*.py" | wc -l | xargs test 0 -eq
+    expected: "true"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.database-performance.index-usage"
+    - "performance-efficiency.database-performance.slow-query"

@@ -1,0 +1,389 @@
+audit:
+  id: infrastructure-as-code.state-management.state-encryption
+  name: IaC State Encryption
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: state-management
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates encryption mechanisms for Infrastructure as Code
+    state files, including encryption at rest, in transit, and key
+    management practices.
+
+    Key areas examined:
+    - Server-side encryption configuration
+    - Customer-managed vs service-managed keys
+    - KMS key policies and access controls
+    - Key rotation settings
+    - TLS/SSL for state transfers
+    - Encryption of state in CI/CD systems
+  why_it_matters: |
+    Terraform state files contain highly sensitive information:
+    - Database passwords and connection strings
+    - API keys and tokens
+    - Private keys and certificates
+    - Resource attributes including IPs and endpoints
+    - Infrastructure topology information
+
+    Without proper encryption, this data is exposed to:
+    - Storage administrators with bucket access
+    - Attackers who compromise storage credentials
+    - Insiders with excessive permissions
+    - Network eavesdroppers during state transfers
+  when_to_run:
+  - During security architecture review
+  - Before compliance audits
+  - When setting up new state backends
+  - After security incidents
+prerequisites:
+  required_artifacts:
+  - type: iac_repository
+    description: Access to infrastructure code with backend configurations
+  - type: kms_access
+    description: Access to KMS key configurations (if applicable)
+  access_requirements:
+  - Read access to IaC repositories
+  - Access to encryption configuration
+  - KMS key policy read access
+discovery:
+  code_patterns:
+  - pattern: encrypt\s*=\s*(true|false)
+    type: regex
+    scope: config
+    purpose: Detect encryption settings
+  - pattern: kms_key_id|kms_key_arn
+    type: regex
+    scope: config
+    purpose: Find KMS key references
+  - pattern: sse_algorithm|server_side_encryption
+    type: regex
+    scope: config
+    purpose: Identify encryption algorithm settings
+  - pattern: aws_kms_key
+    type: regex
+    scope: config
+    purpose: Find KMS key definitions
+  file_patterns:
+  - glob: '**/backend.tf'
+    purpose: Backend encryption configuration
+  - glob: '**/kms.tf'
+    purpose: KMS key definitions
+  - glob: '**/encryption.tf'
+    purpose: Encryption configurations
+knowledge_sources:
+  specifications:
+  - id: terraform-backends
+    name: Terraform Backend Configuration
+    url: https://developer.hashicorp.com/terraform/language/settings/backends
+    offline_cache: true
+    priority: required
+  - id: aws-kms
+    name: AWS Key Management Service
+    url: https://docs.aws.amazon.com/kms/latest/developerguide/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-s3-encryption
+    name: Protecting Data Using Server-Side Encryption
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/serv-side-encryption.html
+    offline_cache: true
+  - id: kms-best-practices
+    name: AWS KMS Best Practices
+    url: https://docs.aws.amazon.com/kms/latest/developerguide/best-practices.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: checkov
+    purpose: Scan for encryption misconfigurations
+    offline_capable: true
+  - tool: tfsec
+    purpose: Check encryption settings
+    offline_capable: true
+  infrastructure_tools:
+  - tool: aws kms
+    purpose: Inspect KMS key configuration
+    command: aws kms describe-key --key-id KEY_ID
+  - tool: aws s3api
+    purpose: Check bucket encryption
+    command: aws s3api get-bucket-encryption --bucket BUCKET_NAME
+signals:
+  critical:
+  - id: IAC-ENC-CRIT-001
+    signal: State encryption disabled
+    evidence_pattern: encrypt\s*=\s*false
+    explanation: |
+      Disabled encryption leaves state files in plaintext, exposing all
+      sensitive infrastructure data to anyone with storage access.
+    remediation: Set encrypt = true in backend configuration
+  - id: IAC-ENC-CRIT-002
+    signal: No encryption configured for state backend
+    evidence_indicators:
+    - S3 backend without encrypt attribute
+    - No default bucket encryption
+    explanation: |
+      Without explicit encryption configuration, state files may be
+      stored unencrypted depending on bucket defaults.
+    remediation: Explicitly configure encryption in backend; don't rely on bucket defaults
+  - id: IAC-ENC-CRIT-003
+    signal: KMS key with overly permissive policy
+    evidence_indicators:
+    - 'Principal: ''*'' in key policy'
+    - No condition keys restricting usage
+    explanation: |
+      Permissive KMS key policies allow unauthorized decryption of
+      state files, negating encryption benefits.
+    remediation: Implement least-privilege key policies with specific principals and conditions
+  high:
+  - id: IAC-ENC-HIGH-001
+    signal: Using service-managed keys instead of customer-managed
+    evidence_indicators:
+    - No kms_key_id in backend configuration
+    - Using SSE-S3 instead of SSE-KMS
+    explanation: |
+      Service-managed keys don't provide:
+      - Audit trails for key usage
+      - Granular access control via key policies
+      - Independent key rotation control
+    remediation: Configure customer-managed KMS key with kms_key_id
+  - id: IAC-ENC-HIGH-002
+    signal: KMS key without automatic rotation
+    evidence_indicators:
+    - enable_key_rotation = false
+    - No rotation configuration
+    explanation: |
+      Without key rotation, compromised keys remain effective indefinitely,
+      and compliance requirements may not be met.
+    remediation: 'Enable automatic key rotation: enable_key_rotation = true'
+  - id: IAC-ENC-HIGH-003
+    signal: State accessible without TLS
+    evidence_indicators:
+    - HTTP endpoints for state access
+    - TLS verification disabled
+    explanation: |
+      Unencrypted transit allows network interception of state data
+      including credentials and infrastructure details.
+    remediation: Ensure all state access uses HTTPS; never disable TLS verification
+  medium:
+  - id: IAC-ENC-MED-001
+    signal: Single KMS key for all environments
+    evidence_indicators:
+    - Same key ARN across dev/staging/prod
+    - No environment separation in key policy
+    remediation: Use separate KMS keys per environment with appropriate access controls
+  - id: IAC-ENC-MED-002
+    signal: No key usage logging
+    evidence_indicators:
+    - CloudTrail not logging KMS events
+    - No monitoring for key usage
+    remediation: Enable CloudTrail logging for KMS API calls
+  - id: IAC-ENC-MED-003
+    signal: Encryption key shared with application workloads
+    evidence_indicators:
+    - Same KMS key for state and application data
+    remediation: Use dedicated keys for infrastructure state separate from application data
+  low:
+  - id: IAC-ENC-LOW-001
+    signal: KMS key alias doesn't indicate purpose
+    evidence_indicators:
+    - Generic alias like 'terraform-key'
+    - No environment or purpose in alias
+    remediation: 'Use descriptive aliases: alias/terraform-state-prod'
+  positive:
+  - id: IAC-ENC-POS-001
+    signal: Comprehensive encryption configuration
+    evidence_indicators:
+    - Customer-managed KMS key
+    - Key rotation enabled
+    - Restrictive key policy
+  - id: IAC-ENC-POS-002
+    signal: Per-environment encryption keys
+    evidence_indicators:
+    - Separate keys for each environment
+    - Environment-specific key policies
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Backend Encryption Analysis
+    description: |
+      Identify encryption configuration in all backend
+      definitions.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find encryption settings
+      command: grep -rn 'encrypt\s*=' --include='*.tf'
+    - purpose: Check for KMS key references
+      command: grep -rn 'kms_key' --include='*.tf'
+    - purpose: Find backends without explicit encryption
+      command: grep -rA20 'backend\s*"s3"' --include='*.tf' | grep -v encrypt
+    expected_findings:
+    - Encryption settings per backend
+    - KMS key usage
+    - Backends without encryption configuration
+  - id: '2'
+    name: KMS Key Configuration Review
+    description: |
+      Examine KMS key definitions and policies for proper
+      configuration.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find KMS key resources
+      command: grep -rA30 'aws_kms_key' --include='*.tf' | head -100
+    - purpose: Check for key rotation
+      command: grep -rn 'enable_key_rotation' --include='*.tf'
+    - purpose: Find key policies
+      command: grep -rA50 'aws_kms_key' --include='*.tf' | grep -A50 'policy'
+    expected_findings:
+    - KMS key definitions
+    - Rotation configuration
+    - Key policy content
+  - id: '3'
+    name: Transport Security Review
+    description: |
+      Verify TLS/SSL configuration for state transfers.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for insecure configurations
+      command: grep -rn 'skip_ssl\|insecure\|https\s*=\s*false' --include='*.tf'
+    - purpose: Find endpoint configurations
+      command: grep -rn 'endpoint\s*=' --include='*.tf'
+    - purpose: Check for TLS settings
+      command: grep -rn 'ssl\|tls\|https' --include='*.tf'
+    expected_findings:
+    - TLS configuration
+    - Insecure settings
+    - Endpoint security
+  - id: '4'
+    name: Key Access Control Analysis
+    description: |
+      Evaluate who has access to encryption keys and
+      under what conditions.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find KMS key aliases
+      command: grep -rn 'aws_kms_alias' --include='*.tf'
+    - purpose: Check IAM policies for KMS
+      command: grep -rn 'kms:' --include='*.tf'
+    - purpose: Find key grants
+      command: grep -rn 'aws_kms_grant' --include='*.tf'
+    expected_findings:
+    - Key alias organization
+    - IAM KMS permissions
+    - Key grants
+  - id: '5'
+    name: Monitoring and Compliance
+    description: |
+      Verify key usage monitoring and compliance with
+      encryption standards.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check CloudTrail for KMS logging
+      command: grep -rA30 'aws_cloudtrail' --include='*.tf' | grep -i kms
+    - purpose: Find CloudWatch alarms for KMS
+      command: grep -rn 'aws_cloudwatch' --include='*.tf' | grep -i kms
+    expected_findings:
+    - KMS audit logging
+    - Monitoring coverage
+    - Compliance alignment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Encryption Configuration Status
+    - Key Management Assessment
+    - Compliance Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct configuration analysis
+    medium: Configuration inference requiring verification
+    low: Based on defaults or assumptions
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-backends
+      priority: required
+    - source_id: aws-kms
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Encryption review requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: enc-001
+  item: State encryption enabled for all backends
+  level: CRITICAL
+  verification: grep -rn 'encrypt\s*=\s*false' --include='*.tf' | wc -l | xargs -I{} test {} -eq 0 &&
+    grep -rn 'encrypt\s*=\s*true' --include='*.tf' | wc -l | xargs -I{} test {} -gt 0 && echo PASS ||
+    echo FAIL
+  expected: PASS
+- id: enc-002
+  item: Customer-managed KMS keys configured
+  level: BLOCKING
+  verification: grep -rn 'kms_key' --include='*.tf' $(grep -rl 'backend\s*"s3"' --include='*.tf') 2>/dev/null
+    | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: enc-003
+  item: KMS key rotation enabled
+  level: BLOCKING
+  verification: grep -rn 'enable_key_rotation\s*=\s*true' --include='*.tf' | wc -l | xargs -I{} test {}
+    -gt 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: enc-004
+  item: No insecure TLS configurations
+  level: CRITICAL
+  verification: grep -rEn 'skip_ssl|insecure\s*=\s*true|https\s*=\s*false' --include='*.tf' | wc -l |
+    xargs -I{} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.7
+  - framework: PCI-DSS
+    controls:
+    - '3.4'
+    - '3.5'
+    - '4.1'
+  - framework: HIPAA
+    controls:
+    - 164.312(a)(2)(iv)
+    - 164.312(e)(2)(ii)
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.state-management.state-backend-security
+  - infrastructure-as-code.security-compliance.secret-handling

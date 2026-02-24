@@ -1,0 +1,281 @@
+audit:
+  id: code-quality.dead-code.unused-function-method
+  name: Unused Function and Method Detection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: dead-code
+  tier: expert
+  estimated_duration: 45 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Identifies functions, methods, and class members that are defined but never
+    called or referenced anywhere in the codebase. This includes private methods,
+    internal functions, exported functions that have no importers, and class
+    methods with no invocations.
+  why_it_matters: |
+    Unused functions represent dead code that increases codebase complexity,
+    slows down builds, and confuses developers. They often indicate abandoned
+    features, incomplete refactoring, or overly speculative design. Removing
+    them reduces maintenance burden and attack surface.
+  when_to_run:
+  - During code reviews
+  - Before major releases
+  - During dependency audits
+  - After removing features
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with complete dependency graph
+  access_requirements:
+  - Read access to source code repository
+  - Access to build system configuration
+discovery:
+  code_patterns:
+  - pattern: ^\s*(function|def|func|fn)\s+(\w+)\s*\(
+    type: regex
+    scope: source
+    purpose: Identify function declarations
+  - pattern: ^\s*(public|private|protected)?\s*(static)?\s*\w+\s+(\w+)\s*\(
+    type: regex
+    scope: source
+    purpose: Identify method declarations
+  - pattern: ^\s*export\s+(function|const|class)
+    type: regex
+    scope: source
+    purpose: Identify exported symbols
+  file_patterns:
+  - glob: '**/*.{js,ts,py,java,go,rb,cs,cpp,c}'
+    purpose: Source code files
+knowledge_sources:
+  specifications:
+  - id: cwe-561
+    name: 'CWE-561: Dead Code'
+    url: https://cwe.mitre.org/data/definitions/561.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: refactoring-catalog
+    name: Martin Fowler - Refactoring Catalog
+    url: https://refactoring.com/catalog/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: ts-prune
+    purpose: TypeScript unused exports detection
+    offline_capable: true
+  - tool: vulture
+    purpose: Python dead code detection
+    offline_capable: true
+  - tool: deadcode
+    purpose: Go unused function detection
+    offline_capable: true
+  - tool: unused
+    purpose: Rust unused code detection
+    offline_capable: true
+  scripts:
+  - id: unused-func-scan
+    language: bash
+    purpose: Detect unused functions
+    source: inline
+    code: |
+      # TypeScript/JavaScript
+      npx ts-prune . 2>/dev/null | grep -v "used in module"
+      # Python
+      vulture . --min-confidence 80 2>/dev/null
+signals:
+  critical:
+  - id: DC-FUNC-CRIT-001
+    signal: Unused security/authentication functions
+    evidence_pattern: (authenticate|authorize|validate|sanitize|encrypt|decrypt).*unused
+    cwe: CWE-561
+    explanation: |
+      Unused security functions may indicate disabled security controls
+      or abandoned security implementations that were never completed.
+    remediation: Review security architecture and either implement or remove
+  - id: DC-FUNC-CRIT-002
+    signal: Unused exported API endpoints
+    evidence_pattern: export.*(handler|controller|endpoint|route).*unused
+    cwe: CWE-561
+    explanation: |
+      Unused API handlers represent potential attack surface that provides
+      no value but may contain vulnerabilities.
+    remediation: Remove unused endpoints from public API
+  high:
+  - id: DC-FUNC-HIGH-001
+    signal: More than 20 unused functions in codebase
+    evidence_pattern: unused_function_count > 20
+    cwe: CWE-561
+    explanation: |
+      Large number of unused functions indicates poor code hygiene and
+      likely significant technical debt.
+    remediation: Conduct systematic dead code removal
+  - id: DC-FUNC-HIGH-002
+    signal: Unused public/exported functions
+    evidence_pattern: export.*function.*unused
+    cwe: CWE-561
+    explanation: |
+      Publicly exported unused functions bloat the API surface and may
+      confuse consumers about intended functionality.
+    remediation: Remove or mark as deprecated
+  medium:
+  - id: DC-FUNC-MED-001
+    signal: Unused private/internal functions
+    evidence_pattern: (private|internal|_).*function.*unused
+    remediation: Remove unused internal functions
+  - id: DC-FUNC-MED-002
+    signal: Unused utility functions
+    evidence_pattern: (util|helper|common).*function.*unused
+    remediation: Remove or move to archive
+  low:
+  - id: DC-FUNC-LOW-001
+    signal: Unused test helper functions
+    evidence_pattern: test.*(helper|fixture|mock).*unused
+    remediation: Remove unused test utilities
+  positive:
+  - id: DC-FUNC-POS-001
+    signal: No unused functions detected
+    evidence_pattern: zero_unused_functions
+  - id: DC-FUNC-POS-002
+    signal: Dead code detection integrated in CI
+    evidence_pattern: ci_config.*dead.*code.*check
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Run Dead Code Analysis Tools
+    description: |
+      Execute language-specific tools to find unused functions
+      and methods across the codebase.
+    duration_estimate: 15 min
+    commands:
+    - purpose: TypeScript unused exports
+      command: |
+        npx ts-prune . 2>/dev/null | head -100
+    - purpose: Python dead code
+      command: |
+        vulture . --min-confidence 70 2>/dev/null | grep -E "unused.*function|def" | head -50
+    expected_findings:
+    - List of unused functions
+    - Confidence levels
+  - id: '2'
+    name: Cross-Reference Analysis
+    description: |
+      For each potentially unused function, search for references
+      to confirm it is truly unused.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Search for function references
+      command: |
+        # For each suspect function, grep for its name
+        grep -rn --include="*.{js,ts,py}" "functionName" . 2>/dev/null
+    expected_findings:
+    - Reference count per function
+    - Confirmation of unused status
+  - id: '3'
+    name: Classify by Risk
+    description: |
+      Categorize unused functions by their potential security
+      and maintenance impact.
+    duration_estimate: 10 min
+    expected_findings:
+    - Security-related unused functions
+    - Public API unused functions
+    - Internal unused functions
+  - id: '4'
+    name: Generate Removal Plan
+    description: |
+      Create prioritized list of functions to remove with
+      dependency considerations.
+    duration_estimate: 5 min
+    expected_findings:
+    - Prioritized removal list
+    - Dependency warnings
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - unused_function_locations
+    - function_type
+    - confidence_level
+    - risk_classification
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Unused Function Inventory
+    - Security Review
+    - Removal Plan
+  confidence_guidance:
+    high: No references found via static analysis and text search
+    medium: Static analysis suggests unused, dynamic usage possible
+    low: May be used via reflection or dynamic dispatch
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-561
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive codebase analysis
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: unused-func-001
+  item: Dead code analysis completed
+  level: BLOCKING
+  verification: |
+    npx ts-prune . 2>/dev/null | wc -l || echo "0"
+  expected: Analysis complete
+- id: unused-func-002
+  item: No unused security-related functions
+  level: CRITICAL
+  verification: |
+    npx ts-prune . 2>/dev/null | grep -iE "auth|security|validate|sanitize" | wc -l
+  expected: '0'
+- id: unused-func-003
+  item: Unused functions documented
+  level: WARNING
+  verification: manual
+  verification_notes: Review audit output for complete inventory
+  expected: All findings documented
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-561
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+relationships:
+  commonly_combined:
+  - code-quality.dead-code.unused-variable
+  - code-quality.dead-code.unused-import
+  - code-quality.dead-code.unreachable-code

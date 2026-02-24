@@ -1,0 +1,288 @@
+audit:
+  id: observability-instrumentation.logging.correlation-id
+  name: Correlation ID Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: logging
+  tier: expert
+  estimated_duration: 45 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the implementation of correlation IDs (also known as request IDs
+    or trace IDs) across the application. Reviews how correlation IDs are
+    generated, propagated across service boundaries, included in log entries,
+    and made available for end-to-end request tracing.
+  why_it_matters: |
+    In distributed systems, a single user request may touch dozens of services.
+    Without correlation IDs, connecting log entries across services to reconstruct
+    a request's journey is nearly impossible. Correlation IDs are essential for
+    debugging production issues, understanding request flow, and measuring
+    end-to-end latency.
+  when_to_run:
+  - Microservices architecture implementation
+  - Observability infrastructure setup
+  - After adding new services to the system
+  - When cross-service debugging becomes difficult
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with logging and HTTP handling
+  - type: configuration_files
+    description: Service communication and logging configuration
+  access_requirements:
+  - Read access to application codebase
+  - Access to inter-service communication code
+discovery:
+  code_patterns:
+  - pattern: correlation.?id|request.?id|trace.?id|x-request-id
+    type: regex
+    scope: source
+    purpose: Find correlation ID implementations
+  - pattern: uuid|uuidv4|nanoid|ulid
+    type: keyword
+    scope: source
+    purpose: Find ID generation code
+  - pattern: context|middleware|interceptor
+    type: keyword
+    scope: source
+    purpose: Find request context propagation
+  - pattern: X-Correlation-ID|X-Request-ID|X-Trace-ID
+    type: keyword
+    scope: source
+    purpose: Find header-based propagation
+  file_patterns:
+  - glob: '**/middleware/*.{js,ts,py,go}'
+    purpose: Request middleware that may set correlation IDs
+  - glob: '**/interceptor*.{js,ts,java}'
+    purpose: HTTP interceptors for ID propagation
+  - glob: '**/context/*.{js,ts,py,go}'
+    purpose: Request context implementations
+knowledge_sources:
+  specifications:
+  - id: w3c-trace-context
+    name: W3C Trace Context
+    url: https://www.w3.org/TR/trace-context/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: distributed-tracing
+    name: Distributed Tracing Best Practices
+    url: https://opentelemetry.io/docs/concepts/signals/traces/
+    offline_cache: true
+  learning_resources:
+  - id: microservices-patterns
+    title: Microservices Patterns
+    type: book
+    reference: Chris Richardson - Chapter on Observability
+tooling:
+  static_analysis:
+  - tool: grep/ripgrep
+    purpose: Find correlation ID patterns
+    offline_capable: true
+  scripts:
+  - id: find-correlation-ids
+    language: bash
+    purpose: Discover correlation ID implementation
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Finding correlation ID patterns ==="
+      rg -i '(correlation|request|trace).?id' --type-add 'code:*.{js,ts,py,go,java,rb}' -t code
+      echo "=== Finding header propagation ==="
+      rg -i 'x-(correlation|request|trace)-id' --type-add 'code:*.{js,ts,py,go,java,rb}' -t code
+      echo "=== Finding context propagation ==="
+      rg -i '(asynclocal|contextvars|context\\.with|thread.?local)' --type-add 'code:*.{js,ts,py,go,java}' -t code
+signals:
+  critical:
+  - id: CORR-ID-CRIT-001
+    signal: No correlation ID implementation found
+    evidence_indicators:
+    - No correlation/request/trace ID patterns in code
+    - Logs lack consistent request identifiers
+    explanation: |
+      Without correlation IDs, tracing a request across services requires
+      manual timestamp correlation, which is error-prone and often impossible
+      during high-throughput periods.
+    remediation: Implement correlation ID generation at ingress and propagation to all services
+  high:
+  - id: CORR-ID-HIGH-001
+    signal: Correlation ID not propagated to downstream services
+    explanation: ID generated but not passed to downstream calls breaks request tracing
+    remediation: Add correlation ID to outgoing HTTP headers and message queue metadata
+  - id: CORR-ID-HIGH-002
+    signal: Correlation ID not included in log entries
+    explanation: ID exists but logs cannot be filtered by it
+    remediation: Add correlation ID to structured log context
+  - id: CORR-ID-HIGH-003
+    signal: New correlation ID generated on each service instead of propagating
+    explanation: Each service creating new IDs defeats cross-service correlation
+    remediation: Extract ID from incoming headers, only generate if absent
+  medium:
+  - id: CORR-ID-MED-001
+    signal: Inconsistent correlation ID header naming
+    remediation: Standardize on a single header name (e.g., X-Correlation-ID)
+  - id: CORR-ID-MED-002
+    signal: Correlation ID not available in async contexts
+    remediation: Use AsyncLocalStorage or context propagation for async operations
+  low:
+  - id: CORR-ID-LOW-001
+    signal: Correlation ID format not standardized (UUID vs custom)
+  positive:
+  - id: CORR-ID-POS-001
+    signal: Correlation ID propagated across all service boundaries
+  - id: CORR-ID-POS-002
+    signal: Correlation ID included in all log entries
+  - id: CORR-ID-POS-003
+    signal: W3C Trace Context or OpenTelemetry implemented
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find correlation ID generation
+    description: |
+      Locate where correlation IDs are generated, typically at the
+      API gateway or ingress controller.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find ID generation code
+      command: rg -i '(correlation|request|trace).?id.*(uuid|generate|create)' --type-add 'code:*.{js,ts,py,go,java}'
+        -t code
+    - purpose: Find incoming header extraction
+      command: rg -i 'header.*(x-correlation|x-request|x-trace)' --type-add 'code:*.{js,ts,py,go,java}'
+        -t code
+    expected_findings:
+    - ID generation location
+    - ID format (UUID, etc.)
+  - id: '2'
+    name: Trace propagation to downstream services
+    description: |
+      Verify that correlation IDs are passed to all downstream service
+      calls via HTTP headers or message metadata.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find outgoing header setting
+      command: rg -i '(setHeader|headers\[|WithHeader).*(correlation|request|trace)' --type-add 'code:*.{js,ts,py,go,java}'
+        -t code
+    - purpose: Find HTTP client configuration
+      command: rg -i '(axios|fetch|http\.Client|requests\.Session)' --type-add 'code:*.{js,ts,py,go}'
+        -t code -A 5
+    expected_findings:
+    - Header propagation in HTTP clients
+    - Message queue metadata propagation
+  - id: '3'
+    name: Verify inclusion in logs
+    description: |
+      Check that correlation IDs are included in structured log entries
+      for filterability.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find correlation ID in log context
+      command: rg -i '(log|logger).*(correlation|request|trace).?id' --type-add 'code:*.{js,ts,py,go,java}'
+        -t code
+    - purpose: Find logger context configuration
+      command: rg -i '(addContext|with|bind).*(correlation|request)' --type-add 'code:*.{js,ts,py,go}'
+        -t code
+    expected_findings:
+    - Log context enrichment patterns
+    - Consistent inclusion verification
+  - id: '4'
+    name: Check async context propagation
+    description: |
+      Verify that correlation IDs remain available across async boundaries
+      like promises, callbacks, or goroutines.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find async context mechanisms
+      command: rg -i '(AsyncLocalStorage|contextvars|context\.WithValue|ThreadLocal)' --type-add 'code:*.{js,ts,py,go,java}'
+        -t code
+    expected_findings:
+    - Async context implementation
+    - Propagation mechanism
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Generation Analysis
+    - Propagation Assessment
+    - Log Integration Review
+    - Recommendations
+  confidence_guidance:
+    high: Correlation ID flow traced through code from generation to logging
+    medium: Patterns suggest implementation but not fully verified
+    low: Partial implementation found without complete flow
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: w3c-trace-context
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: corr-id-001
+  item: Correlation ID generated at ingress
+  level: CRITICAL
+  verification: rg -l '(correlation|request|trace).?id.*(uuid|generate|create|nanoid)' . && echo 'PASS'
+    || echo 'FAIL'
+  expected: PASS
+- id: corr-id-002
+  item: Correlation ID propagated to downstream services
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify HTTP clients and message producers include correlation ID
+  expected: Confirmed by reviewer
+- id: corr-id-003
+  item: Correlation ID included in all log entries
+  level: BLOCKING
+  verification: manual
+  verification_notes: Check logger configuration includes correlation ID in context
+  expected: Confirmed by reviewer
+- id: corr-id-004
+  item: Async context propagation implemented
+  level: WARNING
+  verification: rg -l '(AsyncLocalStorage|contextvars|context\.With)' . && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - distributed-systems
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.2
+relationships:
+  commonly_combined:
+  - observability-instrumentation.distributed-tracing.trace-propagation
+  - observability-instrumentation.logging.structured-logging
+  - observability-instrumentation.logging.log-aggregation

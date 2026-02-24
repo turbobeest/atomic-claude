@@ -1,0 +1,386 @@
+audit:
+  id: cloud-infrastructure.storage.storage-access-patterns
+  name: Storage Access Patterns
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: storage
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes storage access patterns including read/write ratios, request
+    frequency, object size distribution, and temporal access patterns.
+    Identifies optimization opportunities for caching, CDN integration,
+    storage class selection, and access path optimization.
+  why_it_matters: |
+    Understanding access patterns is essential for storage optimization.
+    Frequently accessed data should be in hot tiers or cached; rarely
+    accessed data should be archived. Inefficient access patterns cause
+    unnecessary egress costs, high latency, and poor user experience.
+    Access pattern analysis can reveal 30-60% cost optimization opportunities.
+  when_to_run:
+  - Performance optimization projects
+  - Cost optimization reviews
+  - Architecture design reviews
+  - After significant traffic changes
+prerequisites:
+  required_artifacts:
+  - type: metrics_access
+    description: Access to storage request metrics
+  - type: logging_access
+    description: Access to storage access logs
+  access_requirements:
+  - S3 access logs or CloudWatch metrics
+  - Storage Lens analytics
+  - CDN analytics if applicable
+discovery:
+  metrics_queries:
+  - system: CloudWatch
+    query: |
+      SELECT SUM(GetRequests), SUM(PutRequests), SUM(BytesDownloaded)
+      FROM S3
+      WHERE BucketName = '{bucket}'
+      GROUP BY BucketName
+    purpose: Analyze request patterns per bucket
+    threshold: High GET/PUT ratio suggests caching opportunity
+  - system: S3 Storage Lens
+    query: |
+      SELECT object_size_distribution, access_frequency
+      FROM storage_lens_metrics
+      WHERE bucket_name = '{bucket}'
+    purpose: Understand object size and access distribution
+    threshold: Small frequent objects may benefit from consolidation
+  - system: CloudWatch
+    query: |
+      SELECT AVG(VolumeReadBytes), AVG(VolumeWriteBytes)
+      FROM EBS
+      WHERE VolumeId = '{volume}'
+      GROUP BY VolumeId
+    purpose: Analyze EBS volume access patterns
+    threshold: Read-heavy workloads may benefit from caching
+  file_patterns:
+  - glob: '**/terraform/**/*cloudfront*.tf'
+    purpose: Find CDN configurations
+  - glob: '**/terraform/**/*cache*.tf'
+    purpose: Find caching configurations
+knowledge_sources:
+  specifications:
+  - id: aws-s3-analytics
+    name: AWS S3 Storage Class Analysis
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/analytics-storage-class.html
+    offline_cache: true
+    priority: required
+  - id: aws-storage-lens
+    name: AWS S3 Storage Lens
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage_lens.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-s3-performance
+    name: S3 Performance Optimization
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html
+    offline_cache: true
+  - id: cloudfront-s3
+    name: CloudFront with S3 Best Practices
+    url: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/MigrateS3ToCloudFront.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: S3 Storage Lens
+    purpose: Comprehensive storage analytics
+    command: aws s3control get-storage-lens-configuration --account-id {account_id} --config-id default-account-dashboard
+  - tool: S3 Analytics
+    purpose: Access pattern analysis for tiering
+    command: aws s3api get-bucket-analytics-configuration --bucket {bucket_name} --id {config_id}
+  - tool: CloudWatch
+    purpose: Request metrics
+    command: aws cloudwatch get-metric-statistics --namespace AWS/S3 --metric-name AllRequests --dimensions
+      Name=BucketName,Value={bucket} Name=FilterId,Value=EntireBucket --start-time $(date -d '30 days
+      ago' -u +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 86400 --statistics
+      Sum
+  scripts:
+  - id: access-pattern-analyzer
+    language: bash
+    purpose: Analyze storage access patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Storage Access Pattern Analysis ==="
+
+      BUCKET=$1
+      DAYS=${2:-30}
+      START=$(date -d "$DAYS days ago" -u +%Y-%m-%dT%H:%M:%SZ)
+      END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+      echo "Analyzing bucket: $BUCKET for past $DAYS days"
+      echo ""
+
+      echo "=== Request Metrics ==="
+      for metric in GetRequests PutRequests DeleteRequests ListRequests; do
+        echo "$metric:"
+        aws cloudwatch get-metric-statistics \
+          --namespace AWS/S3 \
+          --metric-name $metric \
+          --dimensions Name=BucketName,Value=$BUCKET Name=FilterId,Value=EntireBucket \
+          --start-time $START --end-time $END \
+          --period 86400 --statistics Sum \
+          --query 'Datapoints[*].Sum' --output text 2>/dev/null || echo "N/A"
+      done
+
+      echo ""
+      echo "=== Data Transfer ==="
+      for metric in BytesDownloaded BytesUploaded; do
+        echo "$metric:"
+        aws cloudwatch get-metric-statistics \
+          --namespace AWS/S3 \
+          --metric-name $metric \
+          --dimensions Name=BucketName,Value=$BUCKET Name=FilterId,Value=EntireBucket \
+          --start-time $START --end-time $END \
+          --period 86400 --statistics Sum \
+          --query 'Datapoints[*].Sum' --output text 2>/dev/null || echo "N/A"
+      done
+signals:
+  critical:
+  - id: ACCESS-CRIT-001
+    signal: High egress costs from direct S3 access without CDN
+    evidence_threshold: BytesDownloaded > 10TB/month without CloudFront
+    explanation: |
+      Direct S3 access for public content incurs full data transfer
+      costs. CDN caching can reduce egress by 80%+ and improve latency
+      for users. At scale, this represents significant cost savings.
+    remediation: Implement CloudFront distribution for frequently accessed public content
+  - id: ACCESS-CRIT-002
+    signal: Massive small object operations causing throttling
+    evidence_indicators:
+    - 503 SlowDown errors in logs
+    - '> 5000 requests/second to single prefix'
+    explanation: |
+      S3 has request rate limits per prefix. Concentrated small object
+      access can hit limits, causing application failures.
+    remediation: Distribute objects across prefixes or implement request rate limiting
+  high:
+  - id: ACCESS-HIGH-001
+    signal: Read-heavy workload without caching layer
+    evidence_threshold: GET requests > 90% of total requests
+    explanation: |
+      Read-heavy workloads with repeated access to same objects
+      benefit significantly from caching. Each cache hit saves
+      request costs and latency.
+    remediation: Implement caching with ElastiCache, CloudFront, or application cache
+  - id: ACCESS-HIGH-002
+    signal: Frequently accessed data in wrong storage class
+    evidence_indicators:
+    - High retrieval requests from Glacier
+    - Access frequency doesn't match storage class
+    explanation: |
+      Accessing archive-tier data frequently incurs retrieval costs
+      and latency. Data should be in appropriate tier for access pattern.
+    remediation: Move frequently accessed data to Standard or Intelligent-Tiering
+  - id: ACCESS-HIGH-003
+    signal: Inefficient object size for workload
+    evidence_indicators:
+    - Many small objects < 128KB with frequent access
+    - Very large objects with partial reads
+    explanation: |
+      Small objects have higher per-request overhead. Large objects
+      with partial reads waste bandwidth. Object size should match
+      access patterns.
+    remediation: Consolidate small objects or use Range requests for large objects
+  medium:
+  - id: ACCESS-MED-001
+    signal: No S3 Analytics configured for access pattern analysis
+    remediation: Enable S3 Analytics for storage class recommendations
+  - id: ACCESS-MED-002
+    signal: Access patterns not reviewed in past 6 months
+    remediation: Implement regular access pattern review process
+  - id: ACCESS-MED-003
+    signal: Cross-region access causing latency
+    remediation: Consider replication to reduce cross-region access
+  low:
+  - id: ACCESS-LOW-001
+    signal: Access logging not enabled for analysis
+    remediation: Enable S3 access logging for detailed analysis
+  positive:
+  - id: ACCESS-POS-001
+    signal: CDN caching for frequently accessed content
+  - id: ACCESS-POS-002
+    signal: Storage class aligned with access frequency
+  - id: ACCESS-POS-003
+    signal: Regular access pattern analysis with optimization
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Request Pattern Collection
+    description: |
+      Collect request metrics for all storage resources including
+      request types, frequencies, and data transfer volumes.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get bucket request metrics
+      command: for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text | head -10);
+        do echo "=== $bucket ==="; aws cloudwatch get-metric-statistics --namespace AWS/S3 --metric-name
+        AllRequests --dimensions Name=BucketName,Value=$bucket Name=FilterId,Value=EntireBucket --start-time
+        $(date -d '7 days ago' -u +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period
+        86400 --statistics Sum --output table 2>/dev/null || echo 'No metrics'; done
+    - purpose: Get data transfer metrics
+      command: for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text | head -10);
+        do echo "=== $bucket ==="; aws cloudwatch get-metric-statistics --namespace AWS/S3 --metric-name
+        BytesDownloaded --dimensions Name=BucketName,Value=$bucket Name=FilterId,Value=EntireBucket --start-time
+        $(date -d '7 days ago' -u +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period
+        86400 --statistics Sum --output table 2>/dev/null || echo 'No metrics'; done
+    expected_findings:
+    - Request volumes per bucket
+    - Data transfer patterns
+  - id: '2'
+    name: Access Frequency Analysis
+    description: |
+      Analyze access frequency to identify hot, warm, and cold data
+      for tiering recommendations.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check S3 Analytics configurations
+      command: for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text); do echo
+        "=== $bucket ==="; aws s3api list-bucket-analytics-configurations --bucket $bucket 2>/dev/null
+        | head -20 || echo 'No analytics'; done
+    expected_findings:
+    - Hot data identification
+    - Cold data identification
+    - Tiering recommendations
+  - id: '3'
+    name: Caching Opportunity Analysis
+    description: |
+      Identify opportunities for caching based on read patterns,
+      content type, and access frequency.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for CloudFront distributions
+      command: aws cloudfront list-distributions --query 'DistributionList.Items[].{ID:Id,Domain:DomainName,Origins:Origins.Items[].DomainName}'
+        --output table
+    questions:
+    - What content is publicly accessible?
+    - What is the cache hit ratio for existing CDN?
+    - Are there read-heavy workloads without caching?
+    expected_findings:
+    - Caching opportunities
+    - CDN optimization needs
+  - id: '4'
+    name: Object Size Analysis
+    description: |
+      Analyze object size distribution to identify optimization
+      opportunities for consolidation or segmentation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Sample object sizes
+      command: for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text | head -5);
+        do echo "=== $bucket ==="; aws s3api list-objects-v2 --bucket $bucket --max-items 100 --query
+        'Contents[].Size' --output text | tr '\t' '\n' | sort -n | awk '{sum+=$1; count++} END {print
+        "Objects:",count,"Avg size:",sum/count,"bytes"}' 2>/dev/null || echo 'Empty or inaccessible';
+        done
+    expected_findings:
+    - Object size distribution
+    - Small object consolidation opportunities
+  - id: '5'
+    name: Optimization Recommendations
+    description: |
+      Generate specific optimization recommendations based on
+      access pattern analysis.
+    duration_estimate: 30 min
+    expected_findings:
+    - Caching recommendations with estimated savings
+    - Tiering recommendations
+    - Architecture optimization suggestions
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Access Pattern Analysis
+    - Caching Opportunities
+    - Tiering Recommendations
+    - Performance Optimization
+  confidence_guidance:
+    high: 30+ days of metrics, access logs analyzed, comprehensive coverage
+    medium: 7-30 days of metrics, sampled analysis
+    low: Limited metrics or short timeframe
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-s3-analytics
+      priority: required
+    - source_id: aws-s3-performance
+      priority: required
+  limitations:
+  - Cannot access live metrics offline
+  - Access log analysis requires runtime access
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires extensive metrics analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: access-001
+  item: Request patterns analyzed for major buckets
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm request metrics collected for buckets > 1TB
+  expected: Confirmed by reviewer
+- id: access-002
+  item: Caching opportunities identified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Document CDN/cache recommendations for high-read workloads
+  expected: Confirmed by reviewer
+- id: access-003
+  item: Storage class alignment reviewed
+  level: WARNING
+  verification: manual
+  verification_notes: Verify storage classes match access frequency
+  expected: Confirmed by reviewer
+- id: access-004
+  item: Optimization savings estimated
+  level: WARNING
+  verification: manual
+  verification_notes: Each recommendation includes estimated impact
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Cost Optimization
+    - Performance Optimization
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.storage.storage-tiering
+  - cloud-infrastructure.storage.storage-cost-optimization
+  - cloud-infrastructure.networking.cdn-configuration

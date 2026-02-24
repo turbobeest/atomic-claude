@@ -1,0 +1,355 @@
+audit:
+  id: reliability-resilience.fault-tolerance.idempotency
+  name: Idempotency Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: fault-tolerance
+  tier: phd
+  estimated_duration: 2.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates idempotency implementations across the system.
+    Idempotent operations produce the same result regardless of how many
+    times they are executed. The audit examines idempotency key usage,
+    deduplication mechanisms, database constraints, message processing
+    guarantees, and API design patterns that ensure safe retry behavior.
+  why_it_matters: |
+    Idempotency is foundational for reliable distributed systems. Network
+    failures, timeouts, and retries can cause duplicate requests. Without
+    idempotency, duplicates cause double charges, duplicate orders, repeated
+    notifications, and data corruption. Financial systems require strict
+    idempotency to prevent revenue loss and customer harm. Idempotency
+    enables safe retries, which enables resilience patterns.
+  when_to_run:
+  - During API design reviews
+  - When implementing payment or financial flows
+  - When adding retry policies
+  - During data integrity assessments
+  - Quarterly reliability audits
+prerequisites:
+  required_artifacts:
+  - type: source-code
+    description: Application source code for idempotency analysis
+  - type: api-specs
+    description: API specifications and documentation
+  access_requirements:
+  - Read access to application source code
+  - Access to database schema definitions
+  - Access to API documentation
+  - Access to message queue configurations
+discovery:
+  code_patterns:
+  - pattern: idempotency.*key|idempotencyKey|Idempotency-Key
+    type: regex
+    scope: source
+    purpose: Idempotency key usage
+  - pattern: ON CONFLICT|UPSERT|INSERT.*IGNORE|MERGE
+    type: regex
+    scope: source
+    purpose: Database upsert/conflict handling
+  - pattern: dedup|deduplicate|duplicate.*check
+    type: regex
+    scope: source
+    purpose: Deduplication logic
+  - pattern: unique.*constraint|UNIQUE|unique_together
+    type: regex
+    scope: source
+    purpose: Database uniqueness constraints
+  - pattern: exactly.once|at.least.once|message.*id
+    type: regex
+    scope: source
+    purpose: Message processing guarantees
+  file_patterns:
+  - glob: '**/src/**/*.{java,go,py,ts,js}'
+    purpose: Application source code
+  - glob: '**/migrations/**/*.sql'
+    purpose: Database schema migrations
+  - glob: '**/api/**/*.yaml'
+    purpose: API specifications
+knowledge_sources:
+  specifications:
+  - id: stripe-idempotency
+    name: Stripe Idempotent Requests
+    url: https://stripe.com/docs/api/idempotent_requests
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-idempotency
+    name: AWS Lambda Idempotency
+    url: https://docs.aws.amazon.com/prescriptive-guidance/latest/lambda-event-driven-architecture/idempotency.html
+    offline_cache: true
+  - id: google-idempotency
+    name: Google API Design - Idempotency
+    url: https://cloud.google.com/apis/design/design_patterns#request_duplication
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  - id: sre-book
+    name: Site Reliability Engineering
+    url: https://sre.google/sre-book/table-of-contents/
+    offline_cache: true
+  learning_resources:
+  - id: designing-data-intensive
+    title: Designing Data-Intensive Applications
+    type: book
+    reference: 'ISBN 978-1449373320 - Chapter 11: Exactly-once message processing'
+tooling:
+  static_analysis:
+  - tool: code-analysis
+    purpose: Find idempotency patterns in code
+    offline_capable: true
+  - tool: schema-analysis
+    purpose: Find unique constraints in database schema
+    offline_capable: true
+  infrastructure_tools:
+  - tool: psql
+    purpose: Check database unique constraints
+    command: |
+      psql -c "SELECT table_name, constraint_name FROM information_schema.table_constraints WHERE constraint_type = 'UNIQUE'"
+signals:
+  critical:
+  - id: IDEM-CRIT-001
+    signal: Payment or financial operation lacks idempotency
+    evidence_pattern: payment.*no.*idempotency|charge.*duplicate.*risk
+    explanation: |
+      Financial operations without idempotency can cause double charges,
+      duplicate transfers, or incorrect balances. Payment APIs must accept
+      idempotency keys and deduplicate requests. This directly impacts
+      customer trust and can have legal/regulatory implications.
+    remediation: Implement idempotency keys for all payment operations with server-side deduplication
+  - id: IDEM-CRIT-002
+    signal: POST/create endpoint lacks idempotency mechanism
+    evidence_pattern: POST.*endpoint.*no.*idempotency|create.*duplicate
+    explanation: |
+      POST/create operations that lack idempotency mechanisms cause
+      duplicate resources when requests are retried. Duplicate orders,
+      accounts, or records cause data corruption and business logic failures.
+    remediation: Accept Idempotency-Key header and deduplicate POST requests
+  high:
+  - id: IDEM-HIGH-001
+    signal: Message consumer lacks deduplication
+    evidence_pattern: consumer.*at.least.once.*no.*dedup
+    explanation: |
+      At-least-once message delivery guarantees message receipt but may
+      deliver duplicates. Consumers must deduplicate based on message ID
+      or implement idempotent processing. Without this, redelivered
+      messages cause duplicate side effects.
+    remediation: Implement message deduplication using message ID tracking or idempotent handlers
+  - id: IDEM-HIGH-002
+    signal: Database operations lack conflict handling
+    evidence_pattern: INSERT.*no.*conflict|create.*IntegrityError
+    explanation: |
+      INSERT operations without ON CONFLICT handling fail on duplicates
+      rather than being idempotent. Use UPSERT patterns or INSERT IGNORE
+      for operations that should be idempotent.
+    remediation: Use ON CONFLICT DO UPDATE/NOTHING or equivalent for idempotent inserts
+  - id: IDEM-HIGH-003
+    signal: Idempotency key stored without TTL
+    evidence_pattern: idempotency.*store.*no.*expiry|key.*forever
+    explanation: |
+      Idempotency keys stored indefinitely consume unbounded storage.
+      Keys should have TTL matching the retry window (typically 24-48 hours).
+      After TTL, operations are treated as new requests.
+    remediation: Configure TTL for idempotency key storage (typically 24-48 hours)
+  medium:
+  - id: IDEM-MED-001
+    signal: Idempotency key not validated for format
+    explanation: |
+      Weak idempotency key validation (any string accepted) can cause
+      collisions or security issues. Keys should be UUIDs or similarly
+      high-entropy identifiers.
+    remediation: Validate idempotency keys are properly formatted (UUID recommended)
+  - id: IDEM-MED-002
+    signal: Idempotency scoped incorrectly
+    explanation: |
+      Idempotency keys should be scoped to the client/user, not global.
+      Global keys allow one client to affect another's operations.
+    remediation: Scope idempotency keys to client/user ID
+  - id: IDEM-MED-003
+    signal: No idempotency for background jobs
+    explanation: |
+      Background jobs may be retried on worker failure. Without idempotency,
+      jobs execute multiple times causing duplicate effects.
+    remediation: Implement job-level idempotency using job ID tracking
+  low:
+  - id: IDEM-LOW-001
+    signal: Idempotency behavior not documented in API
+    explanation: |
+      API documentation should explain idempotency behavior, key requirements,
+      and response format for duplicate requests.
+  positive:
+  - id: IDEM-POS-001
+    signal: Idempotency keys implemented for all mutating operations
+  - id: IDEM-POS-002
+    signal: Database constraints enforce uniqueness
+  - id: IDEM-POS-003
+    signal: Message consumers deduplicate based on message ID
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify operations requiring idempotency
+    description: |
+      Map all operations that have side effects and could be retried,
+      especially financial and data-creating operations.
+    duration_estimate: 25 min
+    questions:
+    - Which operations have side effects?
+    - Which operations involve payments or financial transactions?
+    - Which operations create or modify data?
+    - Which operations are retried automatically?
+    expected_findings:
+    - Operations requiring idempotency
+    - Risk assessment per operation
+  - id: '2'
+    name: Audit idempotency key implementations
+    description: |
+      Review code for idempotency key handling in APIs and services.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find idempotency key usage
+      command: |
+        grep -r "idempotency\|Idempotency\|idempotent" --include="*.java" --include="*.go" --include="*.py" --include="*.ts" src/
+    - purpose: Find API idempotency headers
+      command: |
+        grep -r "Idempotency-Key\|X-Idempotency" --include="*.java" --include="*.go" --include="*.py" src/
+    expected_findings:
+    - Idempotency implementation coverage
+    - Missing idempotency handlers
+  - id: '3'
+    name: Review database constraints
+    description: |
+      Verify database schema enforces uniqueness where needed for
+      idempotency.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find unique constraints
+      command: |
+        grep -r "UNIQUE\|unique_together\|unique.*constraint" --include="*.sql" --include="*.py" migrations/
+    - purpose: Find upsert patterns
+      command: |
+        grep -r "ON CONFLICT\|UPSERT\|INSERT.*IGNORE" --include="*.java" --include="*.go" --include="*.py" src/
+    expected_findings:
+    - Uniqueness constraint coverage
+    - Missing constraints
+  - id: '4'
+    name: Assess message processing idempotency
+    description: |
+      Review message consumers for deduplication and exactly-once
+      processing guarantees.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find message consumers
+      command: |
+        grep -r "consumer\|listener\|subscriber\|@KafkaListener" --include="*.java" --include="*.go" --include="*.py" src/
+    - purpose: Find deduplication logic
+      command: |
+        grep -r "dedup\|deduplicate\|message.*id.*check" --include="*.java" --include="*.go" --include="*.py" src/
+    expected_findings:
+    - Message deduplication status
+    - At-risk consumers
+  - id: '5'
+    name: Verify idempotency storage
+    description: |
+      Review how idempotency keys are stored and their TTL configuration.
+    duration_estimate: 15 min
+    questions:
+    - Where are idempotency keys stored?
+    - What is the TTL for stored keys?
+    - Is storage distributed/replicated?
+    expected_findings:
+    - Storage mechanism assessment
+    - TTL configuration
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Operation Idempotency Assessment
+    - Database Constraint Analysis
+    - Message Processing Review
+    - Recommendations
+  confidence_guidance:
+    high: Code review with database schema and test verification
+    medium: Code review only
+    low: Partial code review
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: stripe-idempotency
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive code analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: idem-001
+  item: Payment operations implement idempotency keys
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify idempotency key acceptance and deduplication for payments
+  expected: Confirmed by reviewer
+- id: idem-002
+  item: POST/create endpoints accept idempotency keys
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify Idempotency-Key header handling for mutating endpoints
+  expected: Confirmed by reviewer
+- id: idem-003
+  item: Database uniqueness constraints prevent duplicates
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify unique constraints on business-critical entities
+  expected: Confirmed by reviewer
+- id: idem-004
+  item: Message consumers deduplicate based on message ID
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify deduplication for at-least-once consumers
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: PCI DSS
+    controls:
+    - 6.5.5
+  - framework: SOC 2
+    controls:
+    - CC6.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.fault-tolerance.retry-policy
+  - reliability-resilience.data-consistency.transaction-integrity
+  - reliability-resilience.fault-tolerance.dependency-failure-handling

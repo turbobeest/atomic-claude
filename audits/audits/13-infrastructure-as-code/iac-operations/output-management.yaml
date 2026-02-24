@@ -1,0 +1,382 @@
+# ============================================================
+# AUDIT: Output Management
+# ============================================================
+# Evaluates how Terraform outputs are defined, used, and
+# secured for cross-module and cross-stack communication.
+
+audit:
+  id: "infrastructure-as-code.iac-operations.output-management"
+  name: "Output Management"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "infrastructure-as-code"
+  category_number: 13
+  subcategory: "iac-operations"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines how Terraform outputs are managed for effective
+    cross-module and cross-stack communication:
+
+    - Output definition completeness and documentation
+    - Sensitive value handling
+    - Output consumption patterns
+    - Remote state data source usage
+    - Output preconditions
+    - Module output contracts
+
+    The focus is on clear, secure, and well-documented outputs that
+    enable reliable infrastructure composition.
+
+  why_it_matters: |
+    Outputs are the interface between Terraform configurations:
+
+    - Poor output documentation causes integration confusion
+    - Exposing sensitive values leaks secrets
+    - Missing outputs require workarounds and tight coupling
+    - Undocumented changes break dependent configurations
+    - No preconditions allow invalid outputs to propagate
+
+    Well-managed outputs create clear contracts between
+    infrastructure components.
+
+  when_to_run:
+    - "During module design review"
+    - "When integrating multiple Terraform configurations"
+    - "After security assessment identifies output concerns"
+    - "When establishing module standards"
+
+prerequisites:
+  required_artifacts:
+    - type: "terraform_configuration"
+      description: "Terraform configurations with outputs"
+
+  access_requirements:
+    - "Read access to Terraform configuration repository"
+
+discovery:
+  code_patterns:
+    - pattern: "output\\s+\"[^\"]+\"\\s+\\{"
+      type: "regex"
+      scope: "source"
+      purpose: "Find output blocks"
+    - pattern: "sensitive\\s*=\\s*true"
+      type: "regex"
+      scope: "source"
+      purpose: "Find sensitive outputs"
+    - pattern: "description\\s*="
+      type: "regex"
+      scope: "source"
+      purpose: "Find documented outputs"
+    - pattern: "terraform_remote_state"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find remote state data sources"
+
+  file_patterns:
+    - glob: "**/outputs.tf"
+      purpose: "Output definitions"
+    - glob: "**/data.tf"
+      purpose: "Remote state data sources"
+    - glob: "**/*.tf"
+      purpose: "All Terraform files"
+
+knowledge_sources:
+  specifications:
+    - id: "terraform-outputs"
+      name: "Terraform Output Values"
+      url: "https://developer.hashicorp.com/terraform/language/values/outputs"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "terraform-remote-state"
+      name: "Terraform Remote State Data Source"
+      url: "https://developer.hashicorp.com/terraform/language/state/remote-state-data"
+      offline_cache: true
+    - id: "terraform-sensitive"
+      name: "Terraform Sensitive Values"
+      url: "https://developer.hashicorp.com/terraform/language/values/outputs#sensitive-suppressing-values-in-cli-output"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "terraform output"
+      purpose: "Display output values"
+      command: "terraform output -json"
+
+  scripts:
+    - id: "output-audit"
+      language: "bash"
+      purpose: "Audit output definitions"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Audit Terraform outputs
+
+        echo "=== All Outputs ==="
+        grep -r 'output\s*"' --include='*.tf' . | head -20
+
+        echo ""
+        echo "=== Outputs without description ==="
+        for f in $(find . -name 'outputs.tf'); do
+          grep -L 'description' "$f" 2>/dev/null
+        done
+
+        echo ""
+        echo "=== Sensitive outputs ==="
+        grep -r -A5 'output\s*"' --include='*.tf' . | grep -B5 'sensitive.*true' | head -20
+
+        echo ""
+        echo "=== Remote state usage ==="
+        grep -r 'terraform_remote_state' --include='*.tf' . | head -10
+
+signals:
+  critical:
+    - id: "IAC-OUT-CRIT-001"
+      signal: "Sensitive value output without sensitive = true"
+      evidence_pattern: "Output containing password, secret, key without sensitive flag"
+      explanation: |
+        Sensitive values without the sensitive flag are displayed in
+        terraform output and logs. This exposes secrets to anyone with
+        access to the state or CI/CD logs.
+      remediation: |
+        Mark sensitive outputs:
+        output "database_password" {
+          value       = aws_db_instance.main.password
+          sensitive   = true
+          description = "Database password - handle securely"
+        }
+
+  high:
+    - id: "IAC-OUT-HIGH-001"
+      signal: "Outputs missing descriptions"
+      evidence_pattern: "output blocks without description attribute"
+      explanation: |
+        Outputs without descriptions create confusion for consumers.
+        Team members and dependent configurations need to understand
+        what the output represents and how to use it.
+      remediation: |
+        Add descriptions to all outputs:
+        output "vpc_id" {
+          value       = aws_vpc.main.id
+          description = "The ID of the VPC created by this module"
+        }
+
+    - id: "IAC-OUT-HIGH-002"
+      signal: "Remote state data source exposes all outputs"
+      evidence_pattern: "terraform_remote_state.*.outputs referenced without specific output"
+      explanation: |
+        Consuming all remote state outputs creates tight coupling.
+        Changes to any output may affect consumers even if they don't
+        use that output.
+      remediation: |
+        Reference specific outputs:
+        # Good
+        vpc_id = data.terraform_remote_state.network.outputs.vpc_id
+
+        # Bad - creates broad coupling
+        network_config = data.terraform_remote_state.network.outputs
+
+  medium:
+    - id: "IAC-OUT-MED-001"
+      signal: "No output preconditions for validation"
+      evidence_pattern: "Outputs without precondition blocks"
+      remediation: |
+        Add preconditions for output validation:
+        output "lb_dns_name" {
+          value = aws_lb.main.dns_name
+          precondition {
+            condition     = aws_lb.main.dns_name != ""
+            error_message = "Load balancer DNS name is empty"
+          }
+        }
+
+    - id: "IAC-OUT-MED-002"
+      signal: "Module outputs not comprehensive"
+      remediation: |
+        Ensure modules expose all commonly needed values:
+        - Resource IDs
+        - ARNs
+        - Endpoints/URLs
+        - Security group IDs
+
+  low:
+    - id: "IAC-OUT-LOW-001"
+      signal: "Output naming not consistent"
+      remediation: "Use consistent naming conventions for outputs"
+
+  positive:
+    - id: "IAC-OUT-POS-001"
+      signal: "All outputs have descriptions"
+    - id: "IAC-OUT-POS-002"
+      signal: "Sensitive values marked appropriately"
+    - id: "IAC-OUT-POS-003"
+      signal: "Output preconditions validate values"
+    - id: "IAC-OUT-POS-004"
+      signal: "Remote state references specific outputs"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory all outputs"
+      description: |
+        Find and catalog all output definitions.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find all outputs"
+          command: "grep -r 'output\\s*\"' --include='*.tf' . | head -30"
+        - purpose: "Count outputs"
+          command: "grep -r -c 'output\\s*\"' --include='*.tf' . | grep -v ':0'"
+
+      expected_findings:
+        - "All output definitions"
+        - "Output distribution"
+
+    - id: "2"
+      name: "Check output documentation"
+      description: |
+        Verify outputs have descriptions.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find outputs with descriptions"
+          command: "grep -r -A5 'output\\s*\"' --include='*.tf' . | grep 'description' | wc -l"
+        - purpose: "Find outputs without descriptions"
+          command: |
+            for f in $(find . -name '*.tf'); do
+              if grep -q 'output\s*"' "$f"; then
+                count_out=$(grep -c 'output\s*"' "$f")
+                count_desc=$(grep -c 'description\s*=' "$f" 2>/dev/null || echo 0)
+                if [ "$count_out" -gt "$count_desc" ]; then
+                  echo "MISSING DESCRIPTIONS: $f"
+                fi
+              fi
+            done | head -10
+
+      expected_findings:
+        - "Documentation coverage"
+        - "Undocumented outputs"
+
+    - id: "3"
+      name: "Review sensitive value handling"
+      description: |
+        Check that sensitive outputs are properly marked.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find sensitive outputs"
+          command: "grep -r -B5 'sensitive.*true' --include='*.tf' . | head -20"
+        - purpose: "Find potentially sensitive outputs"
+          command: "grep -r 'output.*password\\|output.*secret\\|output.*key\\|output.*token' --include='*.tf' . | head -10"
+
+      expected_findings:
+        - "Sensitive output marking"
+        - "Potentially unmarked sensitive outputs"
+
+    - id: "4"
+      name: "Analyze remote state usage"
+      description: |
+        Check how outputs are consumed via remote state.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find remote state data sources"
+          command: "grep -r -A10 'terraform_remote_state' --include='*.tf' . | head -40"
+        - purpose: "Check output references"
+          command: "grep -r 'terraform_remote_state.*outputs' --include='*.tf' . | head -20"
+
+      expected_findings:
+        - "Remote state patterns"
+        - "Output reference granularity"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Output Documentation Review"
+        - "Sensitive Value Assessment"
+        - "Remote State Usage"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "All outputs reviewed and classified"
+    medium: "Pattern matching completed"
+    low: "Only presence confirmed"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "terraform-outputs"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "Quick pattern matching"
+    full:
+      included: true
+      priority: 3
+
+closeout_checklist:
+  - id: "output-001"
+    item: "Sensitive outputs marked with sensitive = true"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify passwords/secrets/keys have sensitive flag"
+    expected: "Confirmed by reviewer"
+
+  - id: "output-002"
+    item: "All outputs have descriptions"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify description present on all outputs"
+    expected: "Confirmed by reviewer"
+
+  - id: "output-003"
+    item: "Remote state references specific outputs"
+    level: "WARNING"
+    verification: "grep -r 'terraform_remote_state.*\\.outputs\\.' --include='*.tf' . | wc -l"
+    expected: ">0"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "infrastructure-as-code.iac-operations.dependency-management"
+    - "infrastructure-as-code.iac-operations.workspace-strategy"

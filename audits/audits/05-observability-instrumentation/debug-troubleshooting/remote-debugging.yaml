@@ -1,0 +1,343 @@
+audit:
+  id: observability-instrumentation.debug-troubleshooting.remote-debugging
+  name: Remote Debugging Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: debug-troubleshooting
+  tier: phd
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses remote debugging capabilities for non-production
+    environments and evaluates security controls preventing
+    unauthorized debugging in production. Reviews debugger
+    attachment mechanisms, access controls, and alternatives
+    to live debugging for production troubleshooting.
+  why_it_matters: |
+    Remote debugging concerns include:
+    - Security risk if enabled in production environments
+    - Inability to reproduce complex issues without debugging
+    - Extended debugging sessions impacting application performance
+    - Lack of debugging capability slowing development velocity
+    - Unauthorized access through debug ports
+    - Need for safe debugging alternatives in production
+  when_to_run:
+  - Security audits of debugging capabilities
+  - When establishing debugging standards
+  - After security incidents involving debug access
+  - During developer environment setup
+prerequisites:
+  required_artifacts:
+  - type: application_configuration
+    description: Access to application deployment configurations
+  - type: network_configuration
+    description: Network policies and firewall rules
+  optional_artifacts:
+  - type: debugging_procedures
+    description: Documented debugging guidelines
+  - type: security_policies
+    description: Security policies for debugging
+  access_requirements:
+  - Deployment configuration access
+  - Network policy access
+  - Security policy documentation
+discovery:
+  code_patterns:
+  - pattern: (agentlib:jdwp|Xdebug|debug.*port)
+    type: regex
+    scope: config
+    purpose: Find debug configurations
+  - pattern: (JAVA_DEBUG|DEBUG_PORT|REMOTE_DEBUG)
+    type: regex
+    scope: config
+    purpose: Find debug environment variables
+  file_patterns:
+  - glob: '**/deployment*.yaml'
+    purpose: Kubernetes deployment configurations
+  - glob: '**/*debug*.{yaml,yml,json}'
+    purpose: Debug configuration files
+knowledge_sources:
+  guides:
+  - id: java-remote-debugging
+    name: Java Remote Debugging
+    url: https://docs.oracle.com/javase/8/docs/technotes/guides/jpda/conninv.html
+    offline_cache: true
+    priority: required
+  - id: kubernetes-debugging
+    name: Kubernetes Debugging Strategies
+    url: https://kubernetes.io/docs/tasks/debug/
+    offline_cache: true
+    priority: recommended
+  specifications:
+  - id: jpda
+    name: Java Platform Debugger Architecture
+    url: https://docs.oracle.com/javase/8/docs/technotes/guides/jpda/
+    offline_cache: true
+    priority: recommended
+tooling:
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: Check debug port exposure
+    command: kubectl get pods -o json | jq '.items[].spec.containers[].ports[]'
+  - tool: nmap
+    purpose: Scan for exposed debug ports
+    command: nmap -p 5005,8000 $TARGET
+  scripts:
+  - id: remote-debug-check
+    language: bash
+    purpose: Check for remote debugging configuration
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check for remote debugging configuration
+
+      echo "=== Remote Debugging Configuration Check ==="
+
+      # Check for JDWP in deployments
+      echo ""
+      echo "Checking for JDWP debug agents in deployments:"
+      kubectl get deployments -A -o json | jq -r '
+        .items[] |
+        select(.spec.template.spec.containers[].env[]?.value | contains?("jdwp") or contains?("Xdebug")) |
+        "\(.metadata.namespace)/\(.metadata.name)"'
+
+      # Check for debug ports
+      echo ""
+      echo "Checking for common debug ports (5005, 8000, 9229):"
+      kubectl get services -A -o json | jq -r '
+        .items[] |
+        select(.spec.ports[]?.port == 5005 or .spec.ports[]?.port == 8000 or .spec.ports[]?.port == 9229) |
+        "\(.metadata.namespace)/\(.metadata.name): \(.spec.ports[].port)"'
+
+      # Check network policies
+      echo ""
+      echo "Checking for network policies restricting debug ports:"
+      kubectl get networkpolicies -A -o json | jq -r '
+        .items[] |
+        select(.spec.ingress[]?.ports[]?.port == 5005) |
+        "\(.metadata.namespace)/\(.metadata.name)"'
+signals:
+  critical:
+  - id: REMOTEDEBUG-CRIT-001
+    signal: Debug ports exposed in production
+    evidence_indicators:
+    - JDWP port (5005) accessible in production
+    - Node.js debug port (9229) exposed
+    - No network policy restricting debug ports
+    explanation: |
+      Debug ports allow arbitrary code execution and memory
+      inspection. Exposure in production is a critical security
+      vulnerability enabling complete application compromise.
+    remediation: |
+      - Remove debug agent configuration from production
+      - Block debug ports in network policies
+      - Audit all production deployments for debug flags
+      - Implement network segmentation
+  - id: REMOTEDEBUG-CRIT-002
+    signal: Debug configuration hard-coded and always enabled
+    evidence_indicators:
+    - Debug flags in base configuration
+    - No environment-specific override
+    explanation: |
+      If debug configuration is always enabled, it will be
+      present in production regardless of intent.
+    remediation: |
+      Make debug configuration environment-specific.
+      Default to disabled; require explicit enablement.
+  high:
+  - id: REMOTEDEBUG-HIGH-001
+    signal: No network policy for debug ports
+    explanation: |
+      Without network policies, debug ports may be accidentally
+      exposed through misconfigurations.
+    remediation: |
+      Create explicit NetworkPolicy blocking ingress to
+      common debug ports (5005, 8000, 9229).
+  - id: REMOTEDEBUG-HIGH-002
+    signal: Debug ports exposed on public interfaces
+    explanation: |
+      Debug ports should never be accessible outside the
+      cluster or network boundary.
+    remediation: |
+      Ensure debug services use ClusterIP only.
+      Never expose via LoadBalancer or NodePort.
+  medium:
+  - id: REMOTEDEBUG-MED-001
+    signal: No debugging capability in staging
+    remediation: |
+      Enable debugging in staging/development environments
+      to reproduce and diagnose issues safely.
+  - id: REMOTEDEBUG-MED-002
+    signal: No debugging alternatives for production
+    remediation: |
+      Implement production-safe alternatives:
+      - Dynamic log levels
+      - Feature flags for debug mode
+      - Tracing and profiling
+  - id: REMOTEDEBUG-MED-003
+    signal: Debug access not audited
+    remediation: |
+      Log and audit when debugging is enabled and by whom.
+  low:
+  - id: REMOTEDEBUG-LOW-001
+    signal: No documentation on debugging procedures
+    remediation: |
+      Document approved debugging methods for each environment.
+  positive:
+  - id: REMOTEDEBUG-POS-001
+    signal: Debug ports blocked in production by network policy
+  - id: REMOTEDEBUG-POS-002
+    signal: Debugging enabled only in development environments
+  - id: REMOTEDEBUG-POS-003
+    signal: Production-safe debugging alternatives implemented
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Production Debug Configuration Scan
+    description: |
+      Check production deployments for debug configurations.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find JDWP configurations
+      command: kubectl get deployments -n production -o json | grep -i 'jdwp\|debug'
+    - purpose: Check for debug ports in services
+      command: kubectl get services -n production -o json | jq '.items[].spec.ports[] | select(.port ==
+        5005 or .port == 9229)'
+    expected_findings:
+    - Debug configuration presence
+    - Exposed debug ports
+  - id: '2'
+    name: Network Policy Review
+    description: |
+      Verify network policies prevent debug port access.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List network policies
+      command: kubectl get networkpolicies -A -o yaml
+    expected_findings:
+    - Network policy coverage
+    - Debug port restrictions
+  - id: '3'
+    name: Non-Production Debug Capability
+    description: |
+      Verify debugging is available in development environments.
+    duration_estimate: 15 min
+    questions:
+    - Is debugging enabled in staging?
+    - Can developers attach debuggers locally?
+    - Are debug procedures documented?
+    expected_findings:
+    - Development debugging capability
+    - Documentation status
+  - id: '4'
+    name: Production Debugging Alternatives
+    description: |
+      Review alternatives to live debugging for production.
+    duration_estimate: 15 min
+    questions:
+    - What alternatives exist to live debugging?
+    - Can issues be reproduced in lower environments?
+    - Are dynamic log levels available?
+    expected_findings:
+    - Available alternatives
+    - Gap analysis
+output:
+  deliverables:
+  - type: remote_debugging_assessment
+    format: structured
+    description: Analysis of remote debugging configuration
+  - type: security_finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Production Security Status
+    - Development Capability
+    - Recommendations
+  confidence_guidance:
+    high: Direct configuration and network scan
+    medium: Configuration file analysis
+    low: Documentation review
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: java-remote-debugging
+      priority: required
+  degradation:
+  - feature: Live port scanning
+    impact: Cannot verify actual exposure
+    mitigation: Review configurations and policies
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires security-focused analysis
+    full:
+      included: true
+      priority: 10
+    security:
+      included: true
+      priority: 5
+closeout_checklist:
+- id: remotedebug-001
+  item: No debug ports exposed in production
+  level: CRITICAL
+  verification: |
+    kubectl get services -n production -o json | jq '[.items[].spec.ports[] | select(.port == 5005 or .port == 9229)] | length == 0'
+  expected: 'true'
+- id: remotedebug-002
+  item: Network policies block debug ports
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify NetworkPolicy denies ingress to debug ports
+  expected: Confirmed by reviewer
+- id: remotedebug-003
+  item: Debugging available in development environment
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify developers can debug locally and in staging
+  expected: Confirmed by reviewer
+- id: remotedebug-004
+  item: Production debugging alternatives documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify alternatives to live debugging are documented
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.6
+  - framework: PCI-DSS
+    controls:
+    - 2.2.5
+    - '11.3'
+relationships:
+  commonly_combined:
+  - security-trust.network-security.network-segmentation
+  - observability-instrumentation.debug-troubleshooting.debug-logging
+  - observability-instrumentation.debug-troubleshooting.profiling-capability

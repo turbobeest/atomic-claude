@@ -1,0 +1,393 @@
+# ============================================================
+# AUDIT: Input Constraint Assessment
+# ============================================================
+# Evaluates the use of input constraints to prevent user errors
+# before they occur through appropriate field restrictions.
+# ============================================================
+
+audit:
+  id: "usability-interaction.error-prevention.input-constraint"
+
+  name: "Input Constraint Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "usability-interaction"
+  category_number: 14
+  subcategory: "error-prevention"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+# ============================================================
+# EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    This audit evaluates how effectively input constraints are used to
+    prevent errors before they occur. It examines input masks, character
+    limits, numeric ranges, date restrictions, dropdown vs freetext choices,
+    and other mechanisms that constrain user input to valid values.
+
+  why_it_matters: |
+    Error prevention is more user-friendly than error correction. When
+    constraints prevent invalid input, users avoid the frustration of
+    validation errors. Well-designed constraints guide users toward
+    correct input without being overly restrictive or confusing.
+
+  when_to_run:
+    - "When designing new form inputs"
+    - "When form validation error rates are high"
+    - "During usability audits"
+    - "When reviewing user feedback about form difficulties"
+
+# ============================================================
+# PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Form input implementations"
+    - type: "data_schema"
+      description: "Data validation requirements"
+
+  access_requirements:
+    - "Access to form component source"
+    - "Understanding of valid data formats"
+    - "Running application for testing"
+
+# ============================================================
+# DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "maxLength|minLength|max=|min="
+      type: "regex"
+      scope: "source"
+      purpose: "Find length and range constraints"
+    - pattern: "pattern=|mask|inputMask"
+      type: "regex"
+      scope: "source"
+      purpose: "Find input masks and patterns"
+    - pattern: "disabled|readonly|readOnly"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find disabled input states"
+    - pattern: "select|Select|dropdown|Dropdown"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find constrained choice inputs"
+
+  file_patterns:
+    - glob: "**/*form*"
+      purpose: "Find form components"
+    - glob: "**/*input*"
+      purpose: "Find input components"
+    - glob: "**/validation*"
+      purpose: "Find validation logic"
+
+# ============================================================
+# KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  specifications:
+    - id: "nielsen-error-prevention"
+      name: "Nielsen Norman Group - Error Prevention Heuristic"
+      url: "https://www.nngroup.com/articles/ten-usability-heuristics/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "nngroup-constraints"
+      name: "Nielsen Norman Group - Input Constraints"
+      url: "https://www.nngroup.com/articles/slips/"
+      offline_cache: true
+    - id: "baymard-input"
+      name: "Baymard Institute - Input Field Usability"
+      url: "https://baymard.com/blog/input-field-usability"
+      offline_cache: true
+
+# ============================================================
+# TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  scripts:
+    - id: "constraint-finder"
+      language: "bash"
+      purpose: "Find input constraint patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Length Constraints ==="
+        grep -rn "maxLength\|minLength" --include="*.jsx" --include="*.tsx" | head -15
+
+        echo "=== Range Constraints ==="
+        grep -rn "min=\|max=" --include="*.jsx" --include="*.tsx" | head -15
+
+        echo "=== Input Masks ==="
+        grep -rn "mask\|pattern=" --include="*.jsx" --include="*.tsx" | head -15
+
+        echo "=== Select/Dropdown Usage ==="
+        grep -rn "<select\|<Select\|Dropdown" --include="*.jsx" --include="*.tsx" | wc -l
+
+# ============================================================
+# SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "CONSTRAINT-CRIT-001"
+      signal: "Critical field accepts any input when specific format required"
+      evidence_indicators:
+        - "Phone number field without format constraint"
+        - "Date field as free text without picker"
+        - "Credit card field without mask"
+      explanation: |
+        Fields requiring specific formats that accept any text
+        lead to validation errors and data quality issues.
+      remediation: "Add input masks or constrained input types for formatted data"
+
+  high:
+    - id: "CONSTRAINT-HIGH-001"
+      signal: "No character limit on fields with known maximums"
+      evidence_pattern: "Text fields without maxLength where data has limits"
+      explanation: |
+        Users can enter more text than will be accepted, leading
+        to truncation or validation errors on submit.
+      remediation: "Add maxLength attribute matching data model constraints"
+    - id: "CONSTRAINT-HIGH-002"
+      signal: "Free text used where finite options exist"
+      evidence_indicators:
+        - "Text input for country/state when dropdown feasible"
+        - "Free text for status or category fields"
+      explanation: |
+        Free text for finite choice sets leads to data inconsistency
+        and requires users to guess valid values.
+      remediation: "Use dropdown, autocomplete, or radio buttons for finite choices"
+    - id: "CONSTRAINT-HIGH-003"
+      signal: "Numeric field accepts non-numeric input"
+      evidence_pattern: "type='text' for numeric-only fields"
+      explanation: |
+        Users can enter letters in numeric fields, leading to
+        validation errors.
+      remediation: "Use type='number' or inputmode='numeric' with appropriate constraints"
+
+  medium:
+    - id: "CONSTRAINT-MED-001"
+      signal: "Date field without range constraints"
+      evidence_pattern: "Date input accepting invalid dates (future birthdays, past appointments)"
+      remediation: "Add min/max date constraints appropriate to the field"
+    - id: "CONSTRAINT-MED-002"
+      signal: "No input mask for formatted data"
+      evidence_indicators:
+        - "Phone numbers without format guidance"
+        - "Credit card numbers without grouping"
+      remediation: "Add input masks to guide format entry"
+    - id: "CONSTRAINT-MED-003"
+      signal: "Character counter missing for limited fields"
+      evidence_pattern: "Field with maxLength but no visible counter"
+      remediation: "Show character counter for fields with limits"
+
+  low:
+    - id: "CONSTRAINT-LOW-001"
+      signal: "Constraints could be tighter without harming usability"
+      remediation: "Review if additional constraints would help users"
+    - id: "CONSTRAINT-LOW-002"
+      signal: "Format hints not shown for constrained fields"
+      remediation: "Add placeholder or helper text showing expected format"
+
+  positive:
+    - id: "CONSTRAINT-POS-001"
+      signal: "Appropriate input types used (date, number, email)"
+    - id: "CONSTRAINT-POS-002"
+      signal: "Input masks guide formatted entry"
+    - id: "CONSTRAINT-POS-003"
+      signal: "Dropdowns used for finite choice sets"
+    - id: "CONSTRAINT-POS-004"
+      signal: "Character limits visible to users"
+
+# ============================================================
+# EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Input Constraints"
+      description: |
+        Search the codebase for existing input constraint patterns
+        to understand current practices.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find length constraints"
+          command: "grep -rn 'maxLength\\|minLength' --include='*.jsx' --include='*.tsx' src/"
+        - purpose: "Find range constraints"
+          command: "grep -rn 'min=\\|max=' --include='*.jsx' --include='*.tsx' src/"
+        - purpose: "Find input masks"
+          command: "grep -rn 'mask\\|pattern=' --include='*.jsx' --include='*.tsx' src/"
+      expected_findings:
+        - "Current constraint patterns"
+        - "Constraint coverage"
+
+    - id: "2"
+      name: "Map Inputs to Data Requirements"
+      description: |
+        Compare form inputs against data model requirements to
+        identify constraint gaps.
+      duration_estimate: "30 min"
+      questions:
+        - "Which fields have database length limits?"
+        - "Which fields require specific formats?"
+        - "Which fields have valid value sets?"
+      expected_findings:
+        - "Fields needing constraints"
+        - "Format requirements"
+
+    - id: "3"
+      name: "Test Constraint Effectiveness"
+      description: |
+        Test form inputs to verify constraints prevent invalid
+        input effectively.
+      duration_estimate: "30 min"
+      questions:
+        - "Can invalid data be entered in constrained fields?"
+        - "Do constraints guide users or frustrate them?"
+        - "Are constraint messages clear?"
+      expected_findings:
+        - "Constraint effectiveness"
+        - "Usability impact"
+
+    - id: "4"
+      name: "Evaluate Choice Fields"
+      description: |
+        Review fields that could benefit from constrained choices
+        (dropdown, radio, autocomplete).
+      duration_estimate: "25 min"
+      questions:
+        - "Are there text fields for finite choice sets?"
+        - "Would autocomplete improve constrained text fields?"
+        - "Are radio buttons used appropriately for small sets?"
+      expected_findings:
+        - "Choice field optimization opportunities"
+
+# ============================================================
+# OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Constraint Inventory"
+        - "Gap Analysis"
+        - "Effectiveness Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Issues verified through code review and functional testing"
+    medium: "Issues identified through code review only"
+    low: "Potential issues requiring data model verification"
+
+# ============================================================
+# OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "nielsen-error-prevention"
+        priority: "required"
+
+# ============================================================
+# PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed field-by-field analysis"
+    full:
+      included: true
+      priority: 2
+
+# ============================================================
+# CLOSEOUT CHECKLIST
+# ============================================================
+
+closeout_checklist:
+  - id: "constraint-001"
+    item: "Critical fields have appropriate constraints"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Phone, date, credit card fields constrained appropriately"
+    expected: "Confirmed by reviewer"
+
+  - id: "constraint-002"
+    item: "Length limits match data model"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Text fields have maxLength matching database limits"
+    expected: "Confirmed by reviewer"
+
+  - id: "constraint-003"
+    item: "Finite choices use appropriate inputs"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Dropdowns/radios used where options are limited"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "mobile-application", "saas"]
+
+# ============================================================
+# RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "usability-interaction.forms-input.input-type-appropriateness"
+    - "usability-interaction.forms-input.validation-message"
+    - "usability-interaction.error-prevention.error-message-clarity"

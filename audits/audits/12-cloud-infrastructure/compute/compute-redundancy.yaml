@@ -1,0 +1,386 @@
+audit:
+  id: cloud-infrastructure.compute.compute-redundancy
+  name: Compute Redundancy
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: compute
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates compute redundancy configurations including multi-AZ deployments,
+    regional distribution, failover mechanisms, and health check configurations.
+    Examines whether compute infrastructure can survive component, AZ, or
+    regional failures while maintaining service availability.
+  why_it_matters: |
+    Single points of failure in compute infrastructure lead to service outages
+    when components fail. Cloud providers experience AZ-level failures multiple
+    times per year and regional issues occasionally. Without proper redundancy,
+    a single AZ failure can cause complete service outages. Proper redundancy
+    ensures continued service availability during infrastructure failures.
+  when_to_run:
+  - Architecture reviews
+  - Before major traffic events
+  - After availability incidents
+  - When expanding to new regions
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to compute and load balancer configurations
+  - type: architecture_docs
+    description: System architecture documentation
+  access_requirements:
+  - EC2/Compute instance inventory access
+  - Load balancer and target group access
+  - Auto Scaling Group configurations
+  - Health check configurations
+discovery:
+  metrics_queries:
+  - system: CloudWatch
+    query: |
+      SELECT COUNT(InstanceId) as instance_count
+      FROM EC2
+      GROUP BY AvailabilityZone
+    purpose: Identify instance distribution across AZs
+    threshold: All AZs should have similar counts for redundancy
+  - system: Prometheus
+    query: |
+      count(kube_node_info) by (topology_kubernetes_io_zone)
+    purpose: Check Kubernetes node distribution
+    threshold: Nodes should be distributed across zones
+  file_patterns:
+  - glob: '**/terraform/**/*.tf'
+    purpose: Find infrastructure as code definitions
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: Find CloudFormation templates
+  - glob: '**/k8s/**/*.yaml'
+    purpose: Find Kubernetes deployment configurations
+knowledge_sources:
+  specifications:
+  - id: aws-ha-docs
+    name: AWS High Availability Architecture
+    url: https://docs.aws.amazon.com/whitepapers/latest/real-time-communication-on-aws/high-availability-and-scalability-on-aws.html
+    offline_cache: true
+    priority: required
+  - id: aws-multi-az
+    name: AWS Multi-AZ Deployments
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-regions-availability-zones.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-reliability-pillar
+    name: AWS Well-Architected Reliability Pillar
+    url: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/
+    offline_cache: true
+  - id: gcp-ha-design
+    name: GCP High Availability Design
+    url: https://cloud.google.com/architecture/framework/reliability/design-scale-high-availability
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: Check instance AZ distribution
+    command: aws ec2 describe-instances --query 'Reservations[].Instances[].{ID:InstanceId,AZ:Placement.AvailabilityZone,State:State.Name}'
+      --output table
+  - tool: AWS CLI
+    purpose: Check ASG AZ configuration
+    command: aws autoscaling describe-auto-scaling-groups --query 'AutoScalingGroups[].{Name:AutoScalingGroupName,AZs:AvailabilityZones}'
+  - tool: kubectl
+    purpose: Check pod distribution
+    command: kubectl get pods -o wide --all-namespaces | awk '{print $8}' | sort | uniq -c
+  monitoring_queries:
+  - system: CloudWatch
+    query: |
+      aws elbv2 describe-target-health
+      --target-group-arn {tg_arn}
+    purpose: Check target health across AZs
+  scripts:
+  - id: redundancy-analyzer
+    language: bash
+    purpose: Analyze compute redundancy configuration
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Compute Redundancy Analysis ==="
+
+      # Instance distribution by AZ
+      echo "Instance Distribution by AZ:"
+      aws ec2 describe-instances \
+        --filters "Name=instance-state-name,Values=running" \
+        --query 'Reservations[].Instances[].Placement.AvailabilityZone' \
+        --output text | tr '\t' '\n' | sort | uniq -c
+
+      # ASG AZ configuration
+      echo "ASG AZ Configuration:"
+      aws autoscaling describe-auto-scaling-groups \
+        --query 'AutoScalingGroups[].{Name:AutoScalingGroupName,AZCount:length(AvailabilityZones),MinSize:MinSize}' \
+        --output table
+
+      # Load balancer AZ configuration
+      echo "Load Balancer AZ Configuration:"
+      aws elbv2 describe-load-balancers \
+        --query 'LoadBalancers[].{Name:LoadBalancerName,AZs:AvailabilityZones[].ZoneName}' \
+        --output table
+signals:
+  critical:
+  - id: REDUNDANCY-CRIT-001
+    signal: Single instance running critical production workload
+    evidence_indicators:
+    - ASG with MinSize=MaxSize=1
+    - Single EC2 instance without redundancy
+    - No failover instance available
+    explanation: |
+      A single instance represents a complete single point of failure.
+      Any instance failure results in total service unavailability.
+      This violates basic high availability principles.
+    remediation: Deploy minimum 2 instances across multiple AZs with load balancing
+  - id: REDUNDANCY-CRIT-002
+    signal: All compute deployed in single availability zone
+    evidence_pattern: All instances in single AZ
+    explanation: |
+      Single-AZ deployment fails completely during AZ outages.
+      Cloud providers recommend multi-AZ for any production workload.
+      AZ failures occur multiple times per year.
+    remediation: Distribute compute across minimum 2 AZs, preferably 3
+  - id: REDUNDANCY-CRIT-003
+    signal: Load balancer not configured for cross-AZ
+    evidence_indicators:
+    - ALB/NLB with single AZ enabled
+    - Cross-zone load balancing disabled
+    explanation: |
+      Single-AZ load balancers cannot route to healthy instances
+      in other AZs during failures, defeating multi-AZ deployment.
+    remediation: Enable cross-zone load balancing across all AZs
+  high:
+  - id: REDUNDANCY-HIGH-001
+    signal: Uneven instance distribution across availability zones
+    evidence_threshold: AZ instance count variance > 50%
+    explanation: |
+      Uneven distribution means some AZs have insufficient capacity
+      to handle full load if another AZ fails.
+    remediation: Balance instance distribution across AZs
+  - id: REDUNDANCY-HIGH-002
+    signal: Health checks not configured or too lenient
+    evidence_indicators:
+    - Health check interval > 60 seconds
+    - Unhealthy threshold > 3 checks
+    - No application-level health checks
+    explanation: |
+      Lenient health checks delay failover, extending outage duration.
+      Application-level checks catch issues that TCP checks miss.
+    remediation: Configure aggressive health checks with application-level endpoints
+  - id: REDUNDANCY-HIGH-003
+    signal: No automated failover mechanism
+    evidence_indicators:
+    - Manual intervention required for failover
+    - No Route53 health checks for DNS failover
+    - No automatic unhealthy instance replacement
+    explanation: |
+      Manual failover extends outage duration and requires on-call response.
+      Automated failover reduces MTTR significantly.
+    remediation: Implement automated failover with health-based routing
+  medium:
+  - id: REDUNDANCY-MED-001
+    signal: Only 2 AZs used when 3+ available
+    remediation: Expand to 3 AZs for improved resilience
+  - id: REDUNDANCY-MED-002
+    signal: No regional failover capability
+    remediation: Consider multi-region deployment for critical workloads
+  - id: REDUNDANCY-MED-003
+    signal: Anti-affinity rules not configured for Kubernetes
+    remediation: Configure pod anti-affinity for zone distribution
+  low:
+  - id: REDUNDANCY-LOW-001
+    signal: Redundancy not tested with chaos engineering
+    remediation: Implement regular failure testing
+  positive:
+  - id: REDUNDANCY-POS-001
+    signal: Multi-AZ deployment with balanced distribution
+  - id: REDUNDANCY-POS-002
+    signal: Automated failover with aggressive health checks
+  - id: REDUNDANCY-POS-003
+    signal: Regular failure testing validates redundancy
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Compute Inventory
+    description: |
+      Create complete inventory of compute resources and their
+      availability zone distribution.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Map instance distribution across AZs
+      command: aws ec2 describe-instances --filters 'Name=instance-state-name,Values=running' --query
+        'Reservations[].Instances[].{ID:InstanceId,Type:InstanceType,AZ:Placement.AvailabilityZone,Name:Tags[?Key==`Name`].Value|[0]}'
+        --output table
+    - purpose: List ASG configurations
+      command: aws autoscaling describe-auto-scaling-groups --query 'AutoScalingGroups[].{Name:AutoScalingGroupName,Min:MinSize,Max:MaxSize,Desired:DesiredCapacity,AZs:AvailabilityZones}'
+        --output yaml
+    expected_findings:
+    - Complete compute inventory
+    - AZ distribution mapping
+  - id: '2'
+    name: Load Balancer Analysis
+    description: |
+      Examine load balancer configurations for cross-AZ
+      capabilities and health check settings.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List load balancers with AZ configuration
+      command: aws elbv2 describe-load-balancers --query 'LoadBalancers[].{Name:LoadBalancerName,Type:Type,Scheme:Scheme,AZs:AvailabilityZones[].ZoneName}'
+        --output table
+    - purpose: Check target group health
+      command: for arn in $(aws elbv2 describe-target-groups --query 'TargetGroups[].TargetGroupArn' --output
+        text); do echo "=== $arn ==="; aws elbv2 describe-target-health --target-group-arn $arn --output
+        table; done
+    expected_findings:
+    - Load balancer AZ coverage
+    - Target health status
+  - id: '3'
+    name: Health Check Review
+    description: |
+      Review health check configurations for appropriate
+      thresholds and application-level coverage.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get health check settings
+      command: aws elbv2 describe-target-groups --query 'TargetGroups[].{Name:TargetGroupName,Protocol:Protocol,HealthPath:HealthCheckPath,Interval:HealthCheckIntervalSeconds,Timeout:HealthCheckTimeoutSeconds,Threshold:UnhealthyThresholdCount}'
+        --output table
+    - purpose: Check ASG health check type
+      command: aws autoscaling describe-auto-scaling-groups --query 'AutoScalingGroups[].{Name:AutoScalingGroupName,HealthCheckType:HealthCheckType,GracePeriod:HealthCheckGracePeriod}'
+        --output table
+    expected_findings:
+    - Health check intervals and thresholds
+    - Application-level health check coverage
+  - id: '4'
+    name: Failover Mechanism Review
+    description: |
+      Examine automated failover mechanisms including
+      DNS failover and instance replacement.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check Route53 health checks
+      command: aws route53 list-health-checks --query 'HealthChecks[].{ID:Id,Type:HealthCheckConfig.Type,FQDN:HealthCheckConfig.FullyQualifiedDomainName}'
+        --output table
+    questions:
+    - What is the expected failover time during AZ failure?
+    - Are unhealthy instances automatically replaced?
+    - Is there multi-region failover capability?
+    expected_findings:
+    - Failover mechanisms documented
+    - Expected failover times
+  - id: '5'
+    name: Redundancy Testing Review
+    description: |
+      Assess whether redundancy configurations have been
+      validated through testing or real failures.
+    duration_estimate: 30 min
+    questions:
+    - When was redundancy last tested?
+    - Have AZ failovers been validated?
+    - Is chaos engineering practiced?
+    expected_findings:
+    - Testing history and results
+    - Confidence in failover procedures
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Redundancy Architecture Review
+    - Single Points of Failure
+    - Recommendations
+  - type: diagram
+    format: text
+    contents: AZ distribution and failover paths
+  confidence_guidance:
+    high: Full config access, testing history available, recent failure data
+    medium: Config access with limited testing history
+    low: Partial config access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-ha-docs
+      priority: required
+    - source_id: aws-reliability-pillar
+      priority: required
+  limitations:
+  - Cannot access live configurations offline
+  - Health check status requires runtime access
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Critical for availability assessment
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: redundancy-001
+  item: Compute distribution across AZs verified
+  level: CRITICAL
+  verification: aws ec2 describe-instances --filters 'Name=instance-state-name,Values=running' --query
+    'Reservations[].Instances[].Placement.AvailabilityZone' --output text | tr '\t' '\n' | sort | uniq
+    | wc -l | xargs -I{} test {} -ge 2 && echo PASS || echo FAIL
+  expected: PASS
+- id: redundancy-002
+  item: Load balancer cross-AZ configuration verified
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm load balancers span multiple AZs
+  expected: Confirmed by reviewer
+- id: redundancy-003
+  item: Health checks properly configured
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify health check intervals and thresholds
+  expected: Confirmed by reviewer
+- id: redundancy-004
+  item: Single points of failure documented
+  level: WARNING
+  verification: manual
+  verification_notes: All SPOFs identified with mitigation plans
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.5
+    - CC7.4
+  - framework: ISO 27001
+    controls:
+    - A.17.1.1
+    - A.17.2.1
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.compute.auto-scaling-config
+  - cloud-infrastructure.networking.load-balancer-config
+  - cloud-infrastructure.storage.storage-replication

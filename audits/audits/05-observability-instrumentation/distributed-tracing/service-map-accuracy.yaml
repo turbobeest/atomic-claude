@@ -1,0 +1,252 @@
+audit:
+  id: observability-instrumentation.distributed-tracing.service-map-accuracy
+  name: Service Map Accuracy Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: distributed-tracing
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews service dependency maps generated from trace data to verify
+    they accurately reflect actual service relationships. Compares traced
+    dependencies against known architecture and identifies missing or
+    incorrect service connections.
+  why_it_matters: |
+    Service maps are critical for understanding system architecture,
+    impact analysis, and incident response. Inaccurate maps lead to
+    missed dependencies during change management, incorrect blast radius
+    assessment, and delayed incident resolution.
+  when_to_run:
+  - Quarterly architecture review
+  - Before major changes
+  - After service topology changes
+  - When maps don't match reality
+prerequisites:
+  required_artifacts:
+  - type: service_map
+    description: Current service dependency visualization
+  - type: architecture_docs
+    description: Known architecture documentation
+  access_requirements:
+  - Tracing backend dependency view
+  - Service catalog access
+  - Infrastructure documentation
+discovery:
+  metrics_queries:
+  - system: Jaeger
+    query: dependencies
+    purpose: Get traced service dependencies
+    threshold: All known dependencies present
+  - system: Prometheus
+    query: count by (source, destination) (service_dependency_calls_total)
+    purpose: Count inter-service calls
+    threshold: Complete dependency coverage
+  code_patterns:
+  - pattern: peer\.service|net\.peer\.name|http\.url
+    type: regex
+    scope: source
+    purpose: Identify dependency attributes
+  file_patterns:
+  - glob: '**/architecture*.{md,yaml,json}'
+    purpose: Architecture documentation
+  - glob: '**/service-catalog*.yaml'
+    purpose: Service registry
+knowledge_sources:
+  specifications:
+  - id: otel-semantic-conventions
+    name: OpenTelemetry Semantic Conventions
+    url: https://opentelemetry.io/docs/specs/semconv/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: jaeger-dependencies
+    name: Jaeger Dependencies
+    url: https://www.jaegertracing.io/docs/features/#service-dependencies
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: jaeger
+    purpose: Query dependency graph
+    command: curl -s 'http://jaeger:16686/api/dependencies?endTs=$(date +%s000)&lookback=86400000'
+  - tool: graphviz
+    purpose: Visualize dependencies
+    command: curl -s 'http://jaeger:16686/api/dependencies' | jq -r '.data[] | "\(.parent) -> \(.child)"'
+  monitoring_queries:
+  - system: Prometheus
+    query: count(count by (client, server) (rpc_client_duration_bucket))
+    purpose: Count unique service pairs
+signals:
+  critical:
+  - id: SVCMAP-CRIT-001
+    signal: Critical dependencies missing from map
+    evidence_pattern: Database, cache, or external API connections not shown
+    explanation: |
+      Missing critical dependencies create blind spots in impact analysis.
+      Changes to untracked dependencies can cause unexpected outages
+      because their relationships aren't understood.
+    remediation: Add peer.service attributes to all client spans
+  - id: SVCMAP-CRIT-002
+    signal: Orphan services in map
+    evidence_pattern: Services with no incoming or outgoing connections
+    explanation: |
+      Orphan services indicate broken context propagation or missing
+      instrumentation. These services are invisible in the dependency
+      graph and cannot be analyzed for impact.
+    remediation: Verify context propagation and add missing instrumentation
+  high:
+  - id: SVCMAP-HIGH-001
+    signal: External dependencies not tracked
+    evidence_pattern: Third-party APIs missing from map
+    explanation: |
+      External dependencies often cause incidents. Without tracking,
+      external service degradation appears as internal failures.
+    remediation: Instrument HTTP clients with peer.service for external calls
+  - id: SVCMAP-HIGH-002
+    signal: Database dependencies missing
+    evidence_pattern: No database nodes in service map
+    explanation: |
+      Databases are critical dependencies that cause many incidents.
+      Missing database relationships hides this critical dependency.
+    remediation: Add database instrumentation with db.system attribute
+  medium:
+  - id: SVCMAP-MED-001
+    signal: Inconsistent service naming
+    evidence_pattern: Same service appearing with different names
+    remediation: Standardize service.name attribute across deployments
+  - id: SVCMAP-MED-002
+    signal: Async dependencies not visible
+    evidence_pattern: Queue-based communication missing
+    remediation: Add messaging.system attributes to queue operations
+  low:
+  - id: SVCMAP-LOW-001
+    signal: Call direction not clear
+    remediation: Ensure span kind (client/server) is properly set
+  positive:
+  - id: SVCMAP-POS-001
+    signal: Complete and accurate service map
+    evidence_pattern: All known dependencies present with correct directions
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Export traced dependencies
+    description: |
+      Retrieve the current service dependency map from the tracing
+      backend and document all traced relationships.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Get Jaeger dependencies
+      command: curl -s 'http://jaeger:16686/api/dependencies?endTs=$(date +%s000)&lookback=604800000'
+        | jq '.data'
+    - purpose: List unique service pairs
+      command: |
+        curl -s 'http://jaeger:16686/api/dependencies?endTs=$(date +%s000)&lookback=604800000' | jq -r '.data[] | "\(.parent) -> \(.child): \(.callCount) calls"'
+    expected_findings:
+    - Traced dependency list
+    - Call counts between services
+  - id: '2'
+    name: Compare against known architecture
+    description: |
+      Compare the traced service map against documented architecture
+      and known service relationships to identify gaps.
+    duration_estimate: 40 min
+    commands:
+    - purpose: List Kubernetes services
+      command: kubectl get services -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}'
+    expected_findings:
+    - Missing dependencies
+    - Unexpected dependencies
+    - Coverage gaps
+  - id: '3'
+    name: Verify dependency attributes
+    description: |
+      Check that spans include proper dependency attributes for
+      accurate service map generation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check span attributes
+      command: curl -s 'http://jaeger:16686/api/traces?service=api&limit=50' | jq '[.data[].spans[].tags[]
+        | select(.key | test("peer|net.peer|http.url|db.system"))] | unique'
+    expected_findings:
+    - Attribute completeness
+    - Naming consistency
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Dependency Map Analysis
+    - Coverage Gaps
+    - Accuracy Assessment
+  confidence_guidance:
+    high: Full comparison against documented architecture
+    medium: Traced dependencies review only
+    low: Visual inspection of service map
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: otel-semantic-conventions
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires architecture comparison
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: svcmap-001
+  item: Traced dependencies exported
+  level: CRITICAL
+  verification: curl -sf 'http://jaeger:16686/api/dependencies' | jq -e '.data | length > 0' && echo PASS
+    || echo FAIL
+  expected: PASS
+- id: svcmap-002
+  item: Gap analysis completed
+  level: BLOCKING
+  verification: manual
+  expected: Known vs traced comparison documented
+- id: svcmap-003
+  item: Missing dependencies documented
+  level: WARNING
+  verification: manual
+  expected: Gap list with remediation plan
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - System Understanding
+relationships:
+  commonly_combined:
+  - observability-instrumentation.distributed-tracing.trace-coverage
+  - observability-instrumentation.distributed-tracing.span-context-propagation
+  - observability-instrumentation.distributed-tracing.critical-path-analysis

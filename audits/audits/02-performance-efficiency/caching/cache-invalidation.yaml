@@ -1,0 +1,323 @@
+# ============================================================
+# CACHE INVALIDATION AUDIT
+# ============================================================
+# Evaluates cache invalidation strategies for correctness,
+# consistency, and prevention of stale data issues.
+
+audit:
+  id: "performance-efficiency.caching.cache-invalidation"
+  name: "Cache Invalidation Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "caching"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes cache invalidation mechanisms to ensure data consistency
+    between cached values and source-of-truth data stores. Reviews
+    invalidation triggers, propagation delays, and edge cases that
+    could lead to serving stale data.
+
+  why_it_matters: |
+    "There are only two hard things in Computer Science: cache invalidation
+    and naming things." Incorrect invalidation causes users to see stale data,
+    financial discrepancies, security vulnerabilities (stale auth tokens),
+    and cascading data corruption across dependent systems.
+
+  when_to_run:
+    - "Data consistency issues reported"
+    - "After cache layer changes"
+    - "New entity types added to cache"
+    - "Multi-region deployment changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with caching logic"
+    - type: "cache_infrastructure"
+      description: "Access to cache configuration"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Cache infrastructure access"
+    - "Database trigger/event configurations"
+
+discovery:
+  code_patterns:
+    - pattern: "cache\\.delete|cache\\.invalidate|cache\\.clear|cache\\.flush"
+      type: "regex"
+      scope: "source"
+      purpose: "Find explicit invalidation calls"
+
+    - pattern: "cache\\.set.*expire|setex|SETEX"
+      type: "regex"
+      scope: "source"
+      purpose: "Find TTL-based expiration"
+
+    - pattern: "@cache_invalidate|@invalidates|after_commit.*cache"
+      type: "regex"
+      scope: "source"
+      purpose: "Find decorator-based invalidation"
+
+    - pattern: "publish.*invalidate|PUBLISH.*cache"
+      type: "regex"
+      scope: "source"
+      purpose: "Find pub/sub based invalidation"
+
+  file_patterns:
+    - glob: "**/cache*.{py,rb,js,ts,java,go}"
+      purpose: "Cache implementation files"
+    - glob: "**/signals*.py"
+      purpose: "Django signals for cache invalidation"
+    - glob: "**/listeners/*.{php,java}"
+      purpose: "Event listeners for cache invalidation"
+
+knowledge_sources:
+  guides:
+    - id: "cache-aside-pattern"
+      name: "Cache-Aside Pattern"
+      url: "https://docs.microsoft.com/en-us/azure/architecture/patterns/cache-aside"
+      offline_cache: true
+
+    - id: "write-through-cache"
+      name: "Write-Through Cache Pattern"
+      url: "https://redis.io/docs/manual/patterns/write-through/"
+      offline_cache: true
+
+  papers:
+    - id: "facebook-memcache"
+      title: "Scaling Memcache at Facebook"
+      url: "https://www.usenix.org/system/files/conference/nsdi13/nsdi13-final170_update.pdf"
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Find invalidation patterns in code"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "redis-cli"
+      purpose: "Monitor invalidation events"
+      command: "redis-cli MONITOR | grep -E 'DEL|EXPIRE|UNLINK'"
+
+    - tool: "redis-cli PUBSUB"
+      purpose: "Check pub/sub invalidation channels"
+      command: "redis-cli PUBSUB CHANNELS '*invalidat*'"
+
+signals:
+  critical:
+    - id: "CACHE-INV-CRIT-001"
+      signal: "No invalidation mechanism for mutable cached data"
+      evidence_pattern: "cache\\.set(?!.*expire)(?!.*ttl)"
+      explanation: |
+        Cached data without any invalidation mechanism will become stale
+        indefinitely. This leads to data corruption, incorrect business
+        logic execution, and user trust erosion.
+      remediation: "Implement explicit invalidation on data mutation or mandatory TTLs"
+
+    - id: "CACHE-INV-CRIT-002"
+      signal: "Race condition between write and invalidation"
+      evidence_pattern: "update.*then.*invalidate|save.*cache\\.delete"
+      explanation: |
+        If invalidation occurs before the database commit, a concurrent read
+        can repopulate the cache with stale data. Classic cache-aside race.
+      remediation: "Use write-through caching or invalidate after transaction commit"
+
+  high:
+    - id: "CACHE-INV-HIGH-001"
+      signal: "Missing invalidation for related/dependent entities"
+      evidence_pattern: "Cached aggregates without cascade invalidation"
+      explanation: |
+        When entity A is cached and depends on entity B, changes to B must
+        invalidate A's cache. Missing cascade invalidation causes stale aggregates.
+      remediation: "Map cache dependencies and implement cascade invalidation"
+
+    - id: "CACHE-INV-HIGH-002"
+      signal: "Inconsistent invalidation across cache layers"
+      evidence_pattern: "Multiple cache layers with independent invalidation"
+      explanation: |
+        Multi-layer caches (L1/L2, CDN/origin) must invalidate consistently.
+        Partial invalidation leaves stale data in outer layers.
+      remediation: "Implement coordinated invalidation across all cache layers"
+
+  medium:
+    - id: "CACHE-INV-MED-001"
+      signal: "Manual cache clear required for deployments"
+      evidence_pattern: "Deployment docs mention cache flush"
+      remediation: "Implement versioned cache keys or automatic deployment invalidation"
+
+    - id: "CACHE-INV-MED-002"
+      signal: "No monitoring for invalidation failures"
+      evidence_pattern: "No error handling around cache.delete"
+      remediation: "Add alerting for invalidation operation failures"
+
+  low:
+    - id: "CACHE-INV-LOW-001"
+      signal: "Inefficient bulk invalidation patterns"
+      evidence_pattern: "Loop with individual cache.delete calls"
+      remediation: "Use batch delete operations or pattern-based invalidation"
+
+  positive:
+    - id: "CACHE-INV-POS-001"
+      signal: "Event-driven invalidation with transaction coordination"
+
+    - id: "CACHE-INV-POS-002"
+      signal: "Versioned cache keys for safe deployments"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map cache write locations"
+      description: |
+        Identify all locations where data is written to cache and catalog
+        the corresponding invalidation mechanisms.
+      duration_estimate: "45 min"
+
+      commands:
+        - purpose: "Find cache write operations"
+          command: "rg -n 'cache\\.(set|put|store|write)' --type py --type js --type java"
+        - purpose: "Find cache delete operations"
+          command: "rg -n 'cache\\.(delete|remove|invalidate|clear)' --type py --type js --type java"
+
+      expected_findings:
+        - "Cache write locations mapped"
+        - "Corresponding invalidation calls identified"
+
+    - id: "2"
+      name: "Trace mutation-to-invalidation paths"
+      description: |
+        For each data entity type, trace the path from mutation (create/update/delete)
+        to cache invalidation. Identify gaps.
+      duration_estimate: "60 min"
+
+      commands:
+        - purpose: "Find data mutation operations"
+          command: "rg -n '\\.(save|update|create|delete)\\(' --type py --type js --type java"
+
+      expected_findings:
+        - "Mutation to invalidation mapping"
+        - "Missing invalidation paths"
+
+    - id: "3"
+      name: "Analyze transaction boundaries"
+      description: |
+        Verify that cache invalidation occurs at the correct point relative
+        to database transactions to prevent race conditions.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find transaction boundaries"
+          command: "rg -n 'transaction|commit|after_commit|post_save' --type py --type java"
+
+      expected_findings:
+        - "Transaction boundary awareness"
+        - "Race condition risks"
+
+    - id: "4"
+      name: "Review multi-layer invalidation"
+      description: |
+        Examine how invalidation propagates across cache layers (local/distributed,
+        CDN, browser caches).
+      duration_estimate: "30 min"
+
+      expected_findings:
+        - "Layer coordination assessment"
+        - "Propagation delay analysis"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Invalidation Coverage Map"
+        - "Race Condition Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct code path analysis with transaction tracing"
+    medium: "Pattern matching without full path verification"
+    low: "Inferred from documentation or naming conventions"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "cache-aside-pattern"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed code path analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cache-inv-001"
+    item: "All cached entities have invalidation mechanisms"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms each cache write has corresponding invalidation"
+    expected: "Confirmed by reviewer"
+
+  - id: "cache-inv-002"
+    item: "No race conditions between writes and invalidation"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Invalidation occurs after transaction commit"
+    expected: "Confirmed by reviewer"
+
+  - id: "cache-inv-003"
+    item: "Multi-layer caches invalidate consistently"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "All cache layers receive invalidation signals"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Data Integrity"
+      controls: ["Consistency Guarantees"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.caching.cache-hit-rate"
+    - "performance-efficiency.caching.distributed-cache-consistency"
+    - "performance-efficiency.caching.multi-layer-cache"

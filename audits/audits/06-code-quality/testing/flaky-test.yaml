@@ -1,0 +1,372 @@
+# ============================================================
+# AUDIT FILE - Flaky Test Detection v1.0
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "code-quality.testing.flaky-test"
+
+  name: "Flaky Test Detection"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "testing"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "high"
+
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Identifies flaky tests that intermittently pass or fail without
+    code changes. Analyzes test history, identifies root causes of
+    flakiness (timing, ordering, shared state, external dependencies),
+    and assesses impact on CI reliability.
+
+  why_it_matters: |
+    Flaky tests erode trust in the test suite, leading developers to
+    ignore failures or disable tests. They waste time on investigation,
+    create false alarms, and can mask real bugs. Flaky tests defeat
+    the purpose of continuous integration.
+
+  when_to_run:
+    - "When CI failures are frequently retried"
+    - "After test reliability complaints"
+    - "Periodic test health assessment"
+    - "Before important releases"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "test_suite"
+      description: "Test suite with execution history"
+    - type: "ci_logs"
+      description: "Historical CI/CD execution logs"
+
+  access_requirements:
+    - "Access to CI/CD execution history"
+    - "Ability to run tests multiple times"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "sleep\\(|setTimeout|wait|retry"
+      type: "regex"
+      scope: "source"
+      purpose: "Timing-based test patterns"
+    - pattern: "\\.skip\\(|\\.only\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Disabled or focused tests"
+    - pattern: "flaky|intermittent|unstable"
+      type: "keyword"
+      scope: "source"
+      purpose: "Comments marking known flaky tests"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "flaky-tests-google"
+      name: "Google Testing Blog - Flaky Tests"
+      url: "https://testing.googleblog.com/2016/05/flaky-tests-at-google-and-how-we.html"
+      offline_cache: true
+
+    - id: "xunit-patterns"
+      name: "xUnit Test Patterns: Refactoring Test Code"
+      url: "https://www.amazon.com/xUnit-Test-Patterns-Refactoring-Code/dp/0131495054"
+      offline_cache: false
+
+    - id: "working-effectively-legacy"
+      name: "Working Effectively with Legacy Code"
+      url: "https://www.oreilly.com/library/view/working-effectively-with/0131177052/"
+      offline_cache: false
+
+  papers:
+    - id: "flaky-research"
+      title: "An Empirical Analysis of Flaky Tests"
+      url: "https://mir.cs.illinois.edu/lamyaa/publications/fse14.pdf"
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  static_analysis:
+    - tool: "jest --repeat"
+      purpose: "Run tests multiple times to detect flakiness"
+      offline_capable: true
+    - tool: "pytest-repeat"
+      purpose: "Python test repetition"
+      offline_capable: true
+    - tool: "flaky (pytest plugin)"
+      purpose: "Mark and track flaky tests"
+      offline_capable: true
+
+  scripts:
+    - id: "flaky-detection"
+      language: "bash"
+      purpose: "Run tests multiple times"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        for i in {1..5}; do
+          echo "=== Run $i ==="
+          npm test 2>&1 | tail -5
+        done
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "FLAKY-CRIT-001"
+      signal: "More than 5% of tests are flaky"
+      evidence_pattern: "High percentage of tests with variable results"
+      explanation: |
+        A high flaky test rate makes CI unreliable and forces
+        developers to ignore test failures.
+      remediation: "Quarantine flaky tests; fix root causes systematically"
+
+  high:
+    - id: "FLAKY-HIGH-001"
+      signal: "Flaky tests in critical paths block deployments"
+      evidence_pattern: "Deploy failures from known flaky tests"
+      explanation: |
+        Flaky critical path tests create deployment uncertainty
+        and may lead to skipping tests entirely.
+      remediation: "Fix critical path flaky tests immediately"
+
+    - id: "FLAKY-HIGH-002"
+      signal: "Tests depend on execution order"
+      evidence_pattern: "Tests pass individually but fail in suite"
+      explanation: |
+        Order-dependent tests indicate shared state pollution
+        that can cause hard-to-diagnose failures.
+      remediation: "Ensure test isolation; reset state between tests"
+
+  medium:
+    - id: "FLAKY-MED-001"
+      signal: "Tests with hardcoded timing assumptions"
+      remediation: "Use polling/waitFor instead of fixed delays"
+
+    - id: "FLAKY-MED-002"
+      signal: "Tests depending on external services"
+      remediation: "Mock external dependencies; use test doubles"
+
+  low:
+    - id: "FLAKY-LOW-001"
+      signal: "Occasional flakiness in non-critical tests"
+
+  positive:
+    - id: "FLAKY-POS-001"
+      signal: "No flaky tests detected"
+    - id: "FLAKY-POS-002"
+      signal: "Flaky test monitoring in place"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze CI history"
+      description: |
+        Review CI/CD execution history to identify tests that
+        have failed intermittently.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Tests with variable pass/fail history"
+        - "Retry patterns"
+
+    - id: "2"
+      name: "Run repeated test execution"
+      description: |
+        Execute the test suite multiple times to detect
+        flakiness not visible in single runs.
+      duration_estimate: "Variable"
+      commands:
+        - purpose: "Run tests 5 times"
+          command: "for i in {1..5}; do npm test 2>&1 | grep -E 'passed|failed'; done"
+      expected_findings:
+        - "Tests with inconsistent results"
+        - "Failure patterns"
+
+    - id: "3"
+      name: "Identify flakiness patterns"
+      description: |
+        Categorize flaky tests by root cause: timing, order,
+        shared state, or external dependencies.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Root cause categories"
+        - "Common patterns"
+
+    - id: "4"
+      name: "Check for timing-based code"
+      description: |
+        Search for timing-sensitive patterns in tests that
+        may cause flakiness.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find sleep/timeout usage in tests"
+          command: "grep -rn 'sleep\\|setTimeout\\|wait' . --include='*.test.*' --include='*.spec.*' 2>/dev/null | head -20"
+      expected_findings:
+        - "Timing-based test patterns"
+        - "Hardcoded delays"
+
+    - id: "5"
+      name: "Assess shared state issues"
+      description: |
+        Look for tests that share state or don't properly
+        clean up after execution.
+      duration_estimate: "25 min"
+      expected_findings:
+        - "Shared state patterns"
+        - "Missing cleanup"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Flaky Test Inventory"
+        - "Root Cause Analysis"
+        - "Remediation Plan"
+
+    - type: "metrics"
+      format: "table"
+      fields:
+        - "total_tests"
+        - "flaky_test_count"
+        - "flaky_percentage"
+        - "ci_retry_rate"
+
+  confidence_guidance:
+    high: "Multiple runs analyzed, CI history reviewed"
+    medium: "Single analysis pass, limited history"
+    low: "Estimated from code patterns"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "flaky-tests-google"
+        priority: "recommended"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Flaky detection requires multiple test runs"
+    full:
+      included: true
+      priority: 2
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "flaky-test-001"
+    item: "Flaky tests identified and documented"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "List known flaky tests with root causes"
+    expected: "Confirmed by reviewer"
+
+  - id: "flaky-test-002"
+    item: "Flaky rate below 5%"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Calculate flaky percentage from analysis"
+    expected: "Confirmed by reviewer"
+
+  - id: "flaky-test-003"
+    item: "No hardcoded sleeps in tests"
+    level: "WARNING"
+    verification: "grep -rq 'sleep([0-9]' . --include='*.test.*' && echo FAIL || echo PASS"
+    expected: "PASS"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Reliability", "Testability"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "code-quality.testing.test-isolation"
+    - "code-quality.testing.test-execution-time"

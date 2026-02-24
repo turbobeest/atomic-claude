@@ -1,0 +1,362 @@
+# ============================================================
+# AUDIT FILE: Pipeline Access Control
+# ============================================================
+# Evaluates access controls and permissions for CI/CD pipelines
+# to prevent unauthorized modifications and deployments.
+# ============================================================
+
+audit:
+  id: "devops-ci-cd.pipeline-security.pipeline-access-control"
+  name: "Pipeline Access Control Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "pipeline-security"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "security"
+
+  default_profiles:
+    - "full"
+    - "security"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines access controls for CI/CD pipelines including
+    who can modify pipeline configurations, trigger builds, access
+    secrets, and deploy to environments. It evaluates principle of
+    least privilege and segregation of duties.
+
+  why_it_matters: |
+    Overly permissive pipeline access enables unauthorized deployments,
+    secret exfiltration, and supply chain attacks. Proper access control
+    ensures only authorized personnel can modify pipelines and deploy
+    to production environments.
+
+  when_to_run:
+    - "When establishing pipeline security"
+    - "After unauthorized deployment incidents"
+    - "During security audits"
+    - "Quarterly access reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "ci_cd_config"
+      description: "CI/CD platform configurations"
+    - type: "access_policies"
+      description: "Access control policies"
+
+  access_requirements:
+    - "Read access to CI/CD platform settings"
+    - "Access to user and role configurations"
+    - "Permission to view audit logs"
+
+discovery:
+  file_patterns:
+    - glob: "**/.github/workflows/*.yaml"
+      purpose: "GitHub Actions workflows"
+    - glob: "**/CODEOWNERS"
+      purpose: "Code ownership definitions"
+    - glob: "**/permissions*"
+      purpose: "Permission configurations"
+
+  code_patterns:
+    - pattern: "permissions:|write|admin|deploy"
+      type: "regex"
+      scope: "config"
+      purpose: "Permission declarations"
+    - pattern: "GITHUB_TOKEN|secrets\\."
+      type: "regex"
+      scope: "config"
+      purpose: "Secret access patterns"
+    - pattern: "pull-requests:\\s*write|contents:\\s*write"
+      type: "regex"
+      scope: "config"
+      purpose: "Write permission grants"
+
+knowledge_sources:
+  guides:
+    - id: "github-security"
+      name: "GitHub Actions Security Hardening"
+      url: "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions"
+      offline_cache: true
+    - id: "gitlab-security"
+      name: "GitLab CI/CD Security"
+      url: "https://docs.gitlab.com/ee/ci/pipelines/cicd_security.html"
+      offline_cache: true
+
+  specifications:
+    - id: "nist-ac"
+      name: "NIST Access Control"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final"
+      offline_cache: true
+      priority: "required"
+    - id: "nsa-cicd-security"
+      name: "NSA/CISA: Defending CI/CD Environments"
+      url: "https://media.defense.gov/2023/Jun/28/2003249466/-1/-1/0/CSI_DEFENDING_CI_CD_ENVIRONMENTS.PDF"
+      offline_cache: true
+      priority: "required"
+    - id: "nsa-supply-chain"
+      name: "NSA: Securing the Software Supply Chain"
+      url: "https://media.defense.gov/2022/Sep/01/2003068942/-1/-1/0/ESF_SECURING_THE_SOFTWARE_SUPPLY_CHAIN_DEVELOPERS.PDF"
+      offline_cache: true
+      priority: "required"
+    - id: "nist-800-218"
+      name: "NIST SP 800-218: SSDF"
+      url: "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-218.pdf"
+      offline_cache: true
+      priority: "required"
+
+tooling:
+  infrastructure_tools:
+    - tool: "gh"
+      purpose: "Review GitHub Actions permissions"
+      command: "gh api repos/{owner}/{repo}/actions/permissions"
+    - tool: "glab"
+      purpose: "Review GitLab CI permissions"
+      command: "glab api projects/:id/members"
+
+  scripts:
+    - id: "permission-check"
+      language: "bash"
+      purpose: "Find permission configurations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check for permission configurations
+        echo "=== Workflow Permissions ==="
+        grep -ri 'permissions:' --include='*.yaml' --include='*.yml' \
+          .github/workflows/ 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "PIPAC-CRIT-001"
+      signal: "Workflows run with write-all permissions by default"
+      evidence_pattern: "permissions:.*write-all|contents: write"
+      explanation: |
+        Excessive default permissions enable compromised workflows to
+        modify repository contents, exfiltrate secrets, and perform
+        unauthorized actions.
+      remediation: "Set minimal permissions at workflow level; grant specific permissions per job"
+
+    - id: "PIPAC-CRIT-002"
+      signal: "Any contributor can modify pipeline configuration"
+      evidence_indicators:
+        - "No CODEOWNERS for workflow files"
+        - "Branch protection not requiring reviews for workflow changes"
+      explanation: |
+        Unprotected pipeline configurations enable malicious contributors
+        to inject code execution into the build process.
+      remediation: "Require reviews from security team for workflow changes"
+
+  high:
+    - id: "PIPAC-HIGH-001"
+      signal: "Secrets accessible to all workflows and jobs"
+      evidence_pattern: "secrets\\..*|\\$\\{\\{.*secrets"
+      explanation: |
+        Overly broad secret access increases exposure risk if any
+        workflow is compromised.
+      remediation: "Scope secrets to specific environments and jobs"
+
+    - id: "PIPAC-HIGH-002"
+      signal: "External contributors can trigger pipeline execution"
+      evidence_pattern: "pull_request:|issue_comment:"
+      explanation: |
+        Allowing external trigger enables attackers to execute
+        code in your CI environment.
+      remediation: "Use pull_request_target with caution; require approval for first-time contributors"
+
+  medium:
+    - id: "PIPAC-MED-001"
+      signal: "No distinction between CI and CD permissions"
+      remediation: "Separate build and deploy permissions with different access levels"
+
+    - id: "PIPAC-MED-002"
+      signal: "Pipeline access not regularly reviewed"
+      remediation: "Implement quarterly access reviews with documented approvals"
+
+  low:
+    - id: "PIPAC-LOW-001"
+      signal: "Access control documentation incomplete"
+
+  positive:
+    - id: "PIPAC-POS-001"
+      signal: "Minimal permissions with job-level scoping"
+    - id: "PIPAC-POS-002"
+      signal: "CODEOWNERS enforced for workflow files"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory pipeline access"
+      description: |
+        Document who has access to modify pipeline configurations
+        and trigger builds.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check CODEOWNERS"
+          command: "cat CODEOWNERS 2>/dev/null || echo 'No CODEOWNERS file'"
+        - purpose: "Find workflow files"
+          command: "find . -name '*.yaml' -path '*github/workflows*' -o -name '.gitlab-ci.yml' 2>/dev/null | head -10"
+      expected_findings:
+        - "Access inventory"
+        - "Protection status"
+
+    - id: "2"
+      name: "Review workflow permissions"
+      description: |
+        Examine permission declarations in workflows and identify
+        overly permissive configurations.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Extract permissions blocks"
+          command: "grep -rA5 'permissions:' --include='*.yaml' .github/workflows/ 2>/dev/null | head -30"
+      expected_findings:
+        - "Permission configuration assessment"
+        - "Overly permissive workflows"
+
+    - id: "3"
+      name: "Evaluate secret access"
+      description: |
+        Review how secrets are accessed and whether access is
+        appropriately scoped.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find secret references"
+          command: "grep -rE 'secrets\\.|\\$\\{\\{.*secrets' --include='*.yaml' . 2>/dev/null | head -25"
+      expected_findings:
+        - "Secret access patterns"
+        - "Scoping assessment"
+
+    - id: "4"
+      name: "Review trigger configurations"
+      description: |
+        Examine what events can trigger pipeline execution and
+        who can initiate those events.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find trigger configurations"
+          command: "grep -rE '^on:|workflow_dispatch|repository_dispatch' --include='*.yaml' .github/workflows/ 2>/dev/null | head -20"
+      expected_findings:
+        - "Trigger configuration assessment"
+        - "External trigger risks"
+
+    - id: "5"
+      name: "Test access controls"
+      description: |
+        Verify that access controls are technically enforced
+        and cannot be bypassed.
+      duration_estimate: "30 min"
+      questions:
+        - "Can workflow files be modified without review?"
+        - "Can secrets be accessed from unauthorized workflows?"
+        - "Are permission restrictions enforced by the platform?"
+      expected_findings:
+        - "Enforcement verification"
+        - "Bypass vulnerability assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Access Control Analysis"
+        - "Permission Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct testing of access controls with platform verification"
+    medium: "Configuration analysis with sample testing"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "github-security"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive security review"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "pipac-001"
+    item: "Workflows use minimal required permissions"
+    level: "CRITICAL"
+    verification: "grep -r 'permissions:' --include='*.yaml' .github/workflows/ 2>/dev/null | head -5 && echo 'REVIEW' || echo 'MISSING'"
+    expected: "REVIEW"
+
+  - id: "pipac-002"
+    item: "CODEOWNERS protects workflow files"
+    level: "CRITICAL"
+    verification: "grep -q '.github/workflows' CODEOWNERS 2>/dev/null && echo 'PASS' || echo 'FAIL'"
+    expected: "PASS"
+
+  - id: "pipac-003"
+    item: "Secrets scoped to appropriate environments"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify secrets are not globally accessible"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC6.3"]
+    - framework: "ISO27001"
+      controls: ["A.9.2.3", "A.9.4.1"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.pipeline-security.secrets-in-pipeline"
+    - "devops-ci-cd.pipeline-security.branch-protection"
+
+  # Multi-platform CI/CD access control checks:
+  # GitHub Actions:
+  #   gh api repos/{owner}/{repo}/actions/permissions
+  #   gh api repos/{owner}/{repo}/environments
+  # GitLab CI:
+  #   glab api projects/:id/protected_branches
+  #   glab api projects/:id/members
+  # Jenkins:
+  #   curl -s ${JENKINS_URL}/api/json?tree=jobs[name,permissions]
+  # Azure DevOps:
+  #   az devops security permission list --id ${PROJECT_ID}
+  # CircleCI:
+  #   circleci context list
+  #   circleci orb list

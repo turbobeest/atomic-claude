@@ -1,0 +1,342 @@
+# ============================================================
+# AUDIT FILE: Artifact Versioning
+# ============================================================
+# Evaluates artifact versioning practices for traceability
+# and reproducibility of builds.
+# ============================================================
+
+audit:
+  id: "devops-ci-cd.artifact-management.artifact-versioning"
+  name: "Artifact Versioning Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "artifact-management"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines artifact versioning practices including version
+    schemes, immutability, traceability to source code, and consistency
+    across artifact types. It evaluates whether artifacts can be uniquely
+    identified and traced back to their source.
+
+  why_it_matters: |
+    Poor artifact versioning makes debugging difficult, enables version
+    confusion attacks, and breaks reproducibility. Proper versioning
+    enables incident investigation, compliance audits, and confident
+    rollbacks.
+
+  when_to_run:
+    - "When establishing artifact pipelines"
+    - "After incidents involving artifact confusion"
+    - "During compliance audits"
+    - "Quarterly process reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "ci_cd_config"
+      description: "CI/CD pipeline configurations"
+    - type: "artifact_registry"
+      description: "Access to artifact registries"
+
+  access_requirements:
+    - "Read access to CI/CD configurations"
+    - "Access to artifact registries"
+    - "Permission to view build metadata"
+
+discovery:
+  file_patterns:
+    - glob: "**/.github/workflows/*.yaml"
+      purpose: "CI/CD workflow definitions"
+    - glob: "**/Dockerfile"
+      purpose: "Docker image build files"
+    - glob: "**/docker-compose*.yaml"
+      purpose: "Docker compose configurations"
+    - glob: "**/cloudbuild.yaml"
+      purpose: "Google Cloud Build config"
+
+  code_patterns:
+    - pattern: "tag:|image:.*:|version:"
+      type: "regex"
+      scope: "config"
+      purpose: "Artifact version specifications"
+    - pattern: "\\$\\{.*SHA\\}|\\$\\{.*VERSION\\}|git.*rev-parse"
+      type: "regex"
+      scope: "config"
+      purpose: "Dynamic versioning patterns"
+    - pattern: ":latest|:master|:main"
+      type: "regex"
+      scope: "config"
+      purpose: "Mutable tag usage"
+
+knowledge_sources:
+  guides:
+    - id: "oci-image-spec"
+      name: "OCI Image Specification"
+      url: "https://github.com/opencontainers/image-spec"
+      offline_cache: true
+    - id: "docker-tagging"
+      name: "Docker Image Tagging Best Practices"
+      url: "https://docs.docker.com/develop/dev-best-practices/"
+      offline_cache: true
+
+  specifications:
+    - id: "semver"
+      name: "Semantic Versioning 2.0.0"
+      url: "https://semver.org/"
+      offline_cache: true
+      priority: "required"
+    - id: "nsa-supply-chain"
+      name: "NSA: Securing the Software Supply Chain"
+      url: "https://media.defense.gov/2022/Sep/01/2003068942/-1/-1/0/ESF_SECURING_THE_SOFTWARE_SUPPLY_CHAIN_DEVELOPERS.PDF"
+      offline_cache: true
+      priority: "required"
+
+tooling:
+  infrastructure_tools:
+    - tool: "docker"
+      purpose: "Inspect image metadata"
+      command: "docker inspect --format='{{.RepoDigests}}' image:tag"
+    - tool: "skopeo"
+      purpose: "Inspect remote images"
+      command: "skopeo inspect docker://registry/image:tag"
+
+  scripts:
+    - id: "artifact-version-check"
+      language: "bash"
+      purpose: "Find artifact versioning patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check for mutable tags
+        echo "=== Checking for :latest tags ==="
+        grep -rE ':latest|:main|:master' \
+          --include='*.yaml' --include='*.yml' --include='Dockerfile' \
+          . 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "ARTVER-CRIT-001"
+      signal: "Production artifacts use mutable tags (latest, main)"
+      evidence_pattern: ":latest|:main|:master"
+      explanation: |
+        Mutable tags mean the same reference can point to different
+        content over time, breaking reproducibility and enabling
+        supply chain attacks.
+      remediation: "Use immutable tags (SHA digests, semantic versions) for all production artifacts"
+
+    - id: "ARTVER-CRIT-002"
+      signal: "Artifact versions cannot be traced to source commits"
+      evidence_indicators:
+        - "No commit SHA in artifact metadata"
+        - "Build provenance not recorded"
+      explanation: |
+        Without source traceability, debugging production issues
+        becomes guesswork and security audits cannot verify content.
+      remediation: "Embed source commit SHA and build metadata in all artifacts"
+
+  high:
+    - id: "ARTVER-HIGH-001"
+      signal: "Artifact versions can be overwritten"
+      evidence_indicators:
+        - "Registry allows pushing to existing tags"
+        - "No immutability protection configured"
+      explanation: |
+        Mutable artifacts can be silently replaced, enabling supply
+        chain attacks and breaking rollback capability.
+      remediation: "Enable tag immutability in artifact registries"
+
+    - id: "ARTVER-HIGH-002"
+      signal: "Inconsistent versioning across artifact types"
+      evidence_indicators:
+        - "Container images use different version scheme than packages"
+        - "Version drift between related artifacts"
+      explanation: |
+        Inconsistent versioning creates confusion and makes it
+        difficult to identify matching artifacts.
+      remediation: "Standardize versioning scheme across all artifact types"
+
+  medium:
+    - id: "ARTVER-MED-001"
+      signal: "Build metadata not included in artifact labels"
+      evidence_pattern: "LABEL|labels:"
+      remediation: "Add standard labels for build time, commit, and pipeline info"
+
+    - id: "ARTVER-MED-002"
+      signal: "No automated version generation in CI/CD"
+      remediation: "Automate version generation based on git tags and commits"
+
+  low:
+    - id: "ARTVER-LOW-001"
+      signal: "Version scheme not documented"
+
+  positive:
+    - id: "ARTVER-POS-001"
+      signal: "All artifacts use SHA-based immutable tags"
+    - id: "ARTVER-POS-002"
+      signal: "Full build provenance recorded with SLSA compliance"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory artifact types"
+      description: |
+        Identify all artifact types produced by the CI/CD pipeline
+        and their versioning schemes.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find Dockerfile and build configs"
+          command: "find . -name 'Dockerfile*' -o -name '*build*.yaml' -o -name 'cloudbuild.yaml' 2>/dev/null | head -15"
+        - purpose: "Check for image tagging patterns"
+          command: "grep -rE 'tag:|image:' --include='*.yaml' --include='*.yml' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Artifact type inventory"
+        - "Versioning scheme per artifact type"
+
+    - id: "2"
+      name: "Evaluate tag immutability"
+      description: |
+        Verify that artifact versions are immutable and cannot
+        be overwritten.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check for mutable tag usage"
+          command: "grep -rE ':latest|:main|:master' --include='*.yaml' --include='Dockerfile' . 2>/dev/null | head -15"
+      expected_findings:
+        - "Immutability configuration status"
+        - "Mutable tag identification"
+
+    - id: "3"
+      name: "Verify source traceability"
+      description: |
+        Confirm that artifacts can be traced back to their
+        source commit and build.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check for commit SHA in builds"
+          command: "grep -rE 'SHA|COMMIT|GIT_SHA|GITHUB_SHA' --include='*.yaml' --include='Dockerfile' . 2>/dev/null | head -15"
+      expected_findings:
+        - "Traceability mechanism assessment"
+        - "Metadata coverage"
+
+    - id: "4"
+      name: "Review version automation"
+      description: |
+        Examine how artifact versions are generated and ensure
+        automation is in place.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find version generation"
+          command: "grep -rE 'version|tag' --include='*.yaml' .github/workflows/ 2>/dev/null | head -20"
+      expected_findings:
+        - "Version automation coverage"
+        - "Manual versioning risks"
+
+    - id: "5"
+      name: "Check cross-artifact consistency"
+      description: |
+        Verify that related artifacts share consistent version
+        references.
+      duration_estimate: "30 min"
+      questions:
+        - "Do all artifacts from the same build share version identifiers?"
+        - "Can related artifacts be identified by version?"
+        - "Is there a manifest linking artifact versions?"
+      expected_findings:
+        - "Version consistency assessment"
+        - "Coordination gaps"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Artifact Inventory"
+        - "Versioning Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct inspection of artifacts with metadata verification"
+    medium: "Configuration analysis with sample verification"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "semver"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive artifact analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "artver-001"
+    item: "No mutable tags in production configurations"
+    level: "CRITICAL"
+    verification: "grep -rE ':latest|:main|:master' --include='*.yaml' k8s/ 2>/dev/null && echo 'FAIL' || echo 'PASS'"
+    expected: "PASS"
+
+  - id: "artver-002"
+    item: "Artifacts traceable to source commits"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify artifacts contain commit SHA in metadata"
+    expected: "Confirmed by reviewer"
+
+  - id: "artver-003"
+    item: "Tag immutability configured in registries"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify artifact registries have immutability enabled"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC8.1"]
+    - framework: "SLSA"
+      controls: ["Build L1", "Build L2"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.release-management.version-numbering"
+    - "devops-ci-cd.artifact-management.artifact-signing"

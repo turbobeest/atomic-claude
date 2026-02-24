@@ -1,0 +1,249 @@
+audit:
+  id: observability-instrumentation.alerting.alert-runbook-linking
+  name: Alert Runbook Linking Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: alerting
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: operations
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews alert configurations to verify they include links to relevant
+    runbooks, documentation, and remediation guides. Validates that linked
+    runbooks exist and are current.
+  why_it_matters: |
+    Responders facing unfamiliar alerts need immediate access to remediation
+    guidance. Missing or broken runbook links force responders to search for
+    documentation during incidents, increasing MTTR and stress. Linked
+    runbooks enable faster, more consistent incident response.
+  when_to_run:
+  - New alert creation review
+  - Quarterly runbook audit
+  - After runbook reorganization
+  - When MTTR indicates investigation delays
+prerequisites:
+  required_artifacts:
+  - type: alert_rules
+    description: Alert rule configurations
+  - type: runbook_repository
+    description: Runbook documentation system
+  access_requirements:
+  - Alert rule configuration
+  - Runbook repository access
+  - Documentation system API
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: count(ALERTS{runbook_url!=''})
+    purpose: Count alerts with runbook links
+    threshold: 100% of critical alerts
+  code_patterns:
+  - pattern: runbook_url|documentation|wiki|confluence
+    type: regex
+    scope: alert_rules
+    purpose: Identify runbook annotations
+  file_patterns:
+  - glob: '**/alerts*.yaml'
+    purpose: Alert rule files
+  - glob: '**/runbooks/*.md'
+    purpose: Runbook documentation
+  - glob: '**/docs/alerts/*.md'
+    purpose: Alert documentation
+knowledge_sources:
+  specifications:
+  - id: prometheus-annotations
+    name: Prometheus Alert Annotations
+    url: https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/#alerting-rules
+    offline_cache: true
+    priority: required
+  guides:
+  - id: runbook-practices
+    name: Runbook Best Practices
+    url: https://sre.google/sre-book/managing-incidents/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Validate runbook URLs
+    command: curl -sI {runbook_url} | head -1
+  - tool: promtool
+    purpose: List alert annotations
+    command: promtool query rules http://prometheus:9090 | jq '.data.groups[].rules[] | select(.annotations.runbook_url)'
+  monitoring_queries:
+  - system: Prometheus
+    query: count by (alertname) (ALERTS{runbook_url=''})
+    purpose: Find alerts missing runbook links
+signals:
+  critical:
+  - id: ALERT-RUNBOOK-CRIT-001
+    signal: Critical alerts without runbook links
+    evidence_pattern: severity=critical AND runbook_url missing
+    explanation: |
+      Critical alerts require immediate action. Without runbook links,
+      responders must search for documentation while systems are down,
+      significantly extending incident duration.
+    remediation: Add runbook_url annotation to all critical alerts
+  - id: ALERT-RUNBOOK-CRIT-002
+    signal: Runbook links return 404
+    evidence_pattern: runbook_url returns HTTP 404
+    explanation: |
+      Broken links are worse than no links - responders waste time
+      following dead ends during incidents.
+    remediation: Fix or update broken runbook URLs
+  high:
+  - id: ALERT-RUNBOOK-HIGH-001
+    signal: High severity alerts without runbooks
+    evidence_threshold: '> 20% high severity alerts missing runbooks'
+    explanation: |
+      High severity alerts indicate significant issues that benefit
+      from documented remediation steps.
+    remediation: Create runbooks for all high severity alerts
+  - id: ALERT-RUNBOOK-HIGH-002
+    signal: Runbooks significantly outdated
+    evidence_pattern: Runbook last updated > 6 months ago
+    explanation: |
+      Outdated runbooks may contain incorrect procedures that worsen
+      incidents rather than help resolve them.
+    remediation: Review and update stale runbooks
+  medium:
+  - id: ALERT-RUNBOOK-MED-001
+    signal: Runbooks lack specific remediation steps
+    evidence_pattern: Runbook contains only description, no actions
+    remediation: Add actionable remediation steps
+  - id: ALERT-RUNBOOK-MED-002
+    signal: Inconsistent runbook format
+    evidence_pattern: Runbooks use different formats/structures
+    remediation: Standardize runbook template
+  low:
+  - id: ALERT-RUNBOOK-LOW-001
+    signal: Low severity alerts without runbooks
+    remediation: Create runbooks for commonly triggered alerts
+  positive:
+  - id: ALERT-RUNBOOK-POS-001
+    signal: All alerts linked to current, actionable runbooks
+    evidence_pattern: 100% runbook coverage with recent updates
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory alert runbook links
+    description: |
+      Extract all alerts and their runbook URL annotations,
+      identifying coverage gaps.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List alerts with runbook annotations
+      command: 'curl -s ''http://prometheus:9090/api/v1/rules'' | jq ''.data.groups[].rules[] | select(.type=="alerting")
+        | {name: .name, runbook: .annotations.runbook_url, severity: .labels.severity}'''
+    - purpose: Count missing runbooks
+      command: curl -s 'http://prometheus:9090/api/v1/rules' | jq '[.data.groups[].rules[] | select(.type=="alerting"
+        and (.annotations.runbook_url == null or .annotations.runbook_url == ""))] | length'
+    expected_findings:
+    - Runbook coverage percentage
+    - Missing runbook list
+  - id: '2'
+    name: Validate runbook URLs
+    description: |
+      Test all runbook URLs to verify they resolve to
+      valid, accessible documentation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Extract unique runbook URLs
+      command: curl -s 'http://prometheus:9090/api/v1/rules' | jq -r '.data.groups[].rules[].annotations.runbook_url
+        // empty' | sort -u
+    - purpose: Test URL accessibility
+      command: 'for url in $(curl -s ''http://prometheus:9090/api/v1/rules'' | jq -r ''.data.groups[].rules[].annotations.runbook_url
+        // empty'' | sort -u); do echo -n "$url: "; curl -sI "$url" | head -1; done'
+    expected_findings:
+    - Broken link count
+    - Inaccessible runbooks
+  - id: '3'
+    name: Assess runbook quality
+    description: |
+      Review sample runbooks for completeness, currency,
+      and actionable content.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check runbook last modified
+      command: ls -la /docs/runbooks/*.md | head -20
+    expected_findings:
+    - Runbook age distribution
+    - Quality assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coverage Analysis
+    - Link Validation
+    - Quality Assessment
+  confidence_guidance:
+    high: Full link validation with runbook review
+    medium: Coverage analysis with sample validation
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: prometheus-annotations
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runbook validation
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: alert-runbook-001
+  item: Runbook coverage calculated
+  level: CRITICAL
+  verification: manual
+  expected: Coverage percentage documented
+- id: alert-runbook-002
+  item: Critical alert runbooks verified
+  level: CRITICAL
+  verification: manual
+  expected: 100% critical alert coverage
+- id: alert-runbook-003
+  item: Broken links identified
+  level: BLOCKING
+  verification: manual
+  expected: Zero broken links
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Incident Documentation
+relationships:
+  commonly_combined:
+  - observability-instrumentation.alerting.alert-routing
+  - observability-instrumentation.alerting.alert-escalation
+  - observability-instrumentation.alerting.alert-fatigue

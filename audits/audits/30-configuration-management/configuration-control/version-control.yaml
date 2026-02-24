@@ -1,0 +1,454 @@
+audit:
+  id: configuration-management.configuration-control.version-control
+  name: Configuration Version Control Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: configuration-management
+  category_number: 30
+  subcategory: configuration-control
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines version control practices for configuration items
+    across the software stack. It evaluates:
+    - All configurations stored in version control
+    - Meaningful commit messages for config changes
+    - Branch strategies for configuration changes
+    - Tag usage for configuration versions
+    - Configuration history accessibility
+    - Diff and comparison capabilities
+    - Integration with CI/CD for config deployment
+  why_it_matters: |
+    Version control is foundational to configuration management:
+    - 12-factor app Factor III requires config stored outside code, but
+      Factor I requires version control for all assets
+    - Version control provides audit trail required by SOC 2, ISO 27001
+    - History enables understanding when, why, and who changed configs
+    - Diff capability enables change review and impact assessment
+    - Tags enable reproducible deployments and rollbacks
+    - Branch strategies enable parallel development and testing
+    - Without version control, configuration state is unpredictable
+  when_to_run:
+  - When establishing configuration management practices
+  - After configuration-related incidents
+  - During compliance audits
+  - When onboarding new repositories
+  - Quarterly process reviews
+prerequisites:
+  required_artifacts:
+  - type: git_repository
+    description: Configuration repository with history
+  - type: documentation
+    description: Version control policies and procedures
+  access_requirements:
+  - Read access to configuration repositories
+  - Access to commit history and tags
+discovery:
+  code_patterns:
+  - pattern: version:\s*['"]?[0-9]+\.[0-9]+
+    type: regex
+    scope: config
+    purpose: Detect versioned configurations
+  - pattern: v[0-9]+\.[0-9]+\.[0-9]+
+    type: regex
+    scope: tags
+    purpose: Detect semantic version tags
+  - pattern: '(feat|fix|chore|config)\(.*\):'
+    type: regex
+    scope: commits
+    purpose: Detect conventional commits
+  file_patterns:
+  - glob: '**/.gitignore'
+    purpose: Git ignore configurations
+  - glob: '**/.gitattributes'
+    purpose: Git attributes for config files
+  - glob: '**/VERSION*'
+    purpose: Version files
+  - glob: '**/CHANGELOG*'
+    purpose: Change logs
+knowledge_sources:
+  specifications:
+  - id: 12factor-codebase
+    name: '12-Factor App: Factor I - Codebase'
+    url: https://12factor.net/codebase
+    offline_cache: true
+    priority: required
+  - id: semver
+    name: Semantic Versioning
+    url: https://semver.org/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: conventional-commits
+    name: Conventional Commits
+    url: https://www.conventionalcommits.org/
+    offline_cache: true
+  - id: gitops
+    name: GitOps Principles
+    url: https://www.gitops.tech/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: git
+    purpose: Version control operations
+    offline_capable: true
+  - tool: commitlint
+    purpose: Validate commit message format
+    offline_capable: true
+  scripts:
+  - id: version-control-audit
+    language: bash
+    purpose: Audit configuration version control
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Configuration Version Control Audit ==="
+      echo ""
+      echo "=== Git Status ==="
+      git status --porcelain 2>/dev/null | head -20
+      echo ""
+      echo "=== Untracked Config Files ==="
+      git status --porcelain 2>/dev/null | grep "^??" | \
+        grep -E "\.(yaml|yml|json|env|tf|conf|ini)$" | head -20
+      echo ""
+      echo "=== Recent Config Commits ==="
+      git log --oneline -30 -- "*.yaml" "*.json" "*.tf" "*.env*" 2>/dev/null
+      echo ""
+      echo "=== Release Tags ==="
+      git tag -l --sort=-creatordate 2>/dev/null | head -20
+signals:
+  critical:
+  - id: VCTL-CRIT-001
+    signal: Configuration files not in version control
+    evidence_indicators:
+    - Config files in .gitignore
+    - Untracked configuration files
+    - Configuration stored outside repository
+    explanation: |
+      12-factor app and ITIL require version-controlled configurations.
+      Unversioned configs lack history, cannot be audited, and are
+      prone to undocumented changes and loss.
+    remediation: |
+      - Add all configuration files to version control
+      - Remove configs from .gitignore
+      - Use secret management for sensitive values only
+      - Migrate external configs to repository
+    cwe: CWE-1059
+  - id: VCTL-CRIT-002
+    signal: Configuration history not preserved
+    evidence_indicators:
+    - Force pushes removing history
+    - Squashed commits losing config change detail
+    - Repository recreated without history
+    explanation: |
+      Configuration history is essential for audit trails and
+      understanding changes. Lost history prevents investigation
+      of when and why changes were made.
+    remediation: |
+      - Protect branches from force push
+      - Preserve commit history for config files
+      - Avoid excessive squashing of config changes
+      - Maintain audit-complete history
+  high:
+  - id: VCTL-HIGH-001
+    signal: No tagging strategy for configuration releases
+    evidence_indicators:
+    - No tags in repository
+    - Tags not aligned with deployments
+    - Inconsistent tag naming
+    explanation: |
+      Tags mark specific versions for deployment and rollback.
+      Without tags, identifying which configuration version is
+      deployed or rolling back to a known version is difficult.
+    remediation: |
+      - Implement tagging for configuration releases
+      - Use semantic versioning for tags
+      - Tag at each production deployment
+      - Document tag naming conventions
+  - id: VCTL-HIGH-002
+    signal: Configuration changes lack meaningful commit messages
+    evidence_indicators:
+    - Generic commit messages (fix, update, change)
+    - No explanation of change purpose
+    - No reference to change requests
+    explanation: |
+      Commit messages document why changes were made. Without
+      meaningful messages, understanding change rationale requires
+      external investigation, slowing incident response.
+    remediation: |
+      - Require descriptive commit messages
+      - Use conventional commit format
+      - Reference change request or ticket
+      - Enable commit message validation
+  - id: VCTL-HIGH-003
+    signal: Branch protection not enabled
+    evidence_indicators:
+    - Direct commits to main/master allowed
+    - No pull request requirement
+    - No required reviews
+    explanation: |
+      Branch protection ensures changes go through proper review.
+      Without protection, configurations can be changed directly
+      without oversight or audit trail beyond commit history.
+    remediation: |
+      - Enable branch protection for main branch
+      - Require pull requests for changes
+      - Configure required reviewers
+      - Prevent direct pushes
+  medium:
+  - id: VCTL-MED-001
+    signal: No branch strategy for configuration changes
+    evidence_indicators:
+    - All changes on main branch
+    - No feature branches for config changes
+    - Inconsistent branch usage
+    explanation: |
+      Branch strategies enable parallel work and proper review.
+      Without branches, changes cannot be staged, reviewed, and
+      tested before merging to main configuration.
+    remediation: |
+      - Define branch strategy for configurations
+      - Use feature branches for changes
+      - Require branch review before merge
+      - Document branch naming conventions
+  - id: VCTL-MED-002
+    signal: Configuration diffs difficult to review
+    evidence_indicators:
+    - Large configs in single files
+    - Generated content mixed with authored content
+    - No diff-friendly formatting
+    explanation: |
+      Reviewable diffs are essential for change assessment.
+      Difficult-to-review diffs lead to rubber-stamping and
+      missed issues in configuration changes.
+    remediation: |
+      - Split large configs into logical files
+      - Separate generated from authored content
+      - Use consistent formatting
+      - Consider YAML anchors for reuse
+  - id: VCTL-MED-003
+    signal: No changelog maintained
+    evidence_indicators:
+    - No CHANGELOG file
+    - Change history only in commits
+    - No release notes for config changes
+    explanation: |
+      Changelogs provide accessible summary of changes. While
+      commit history has details, changelogs provide overview
+      for stakeholders who don't review every commit.
+    remediation: |
+      - Maintain CHANGELOG for configurations
+      - Document significant changes
+      - Include in release process
+      - Consider automated changelog generation
+  low:
+  - id: VCTL-LOW-001
+    signal: Git attributes not configured for config files
+    evidence_indicators:
+    - No .gitattributes file
+    - Config files not marked for diff
+    - Inconsistent line endings
+    explanation: |
+      Git attributes improve handling of configuration files.
+      Proper attributes ensure consistent line endings and
+      appropriate diff rendering.
+    remediation: |
+      - Create .gitattributes file
+      - Mark config files appropriately
+      - Configure line ending handling
+      - Enable appropriate diff drivers
+  positive:
+  - id: VCTL-POS-001
+    signal: Comprehensive version control for configurations
+    evidence_indicators:
+    - All configs in version control
+    - Meaningful commit messages
+    - Protected branches with review
+  - id: VCTL-POS-002
+    signal: GitOps practices implemented
+    evidence_indicators:
+    - Declarative configurations
+    - Git as single source of truth
+    - Automated sync from repository
+procedure:
+  context:
+    cognitive_mode: methodical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Version Control Coverage Assessment
+    description: |
+      Assess whether all configurations are properly version controlled.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for untracked config files
+      command: |
+        git status --porcelain 2>/dev/null | grep "^??" | \
+          grep -E "\.(yaml|yml|json|env|tf|conf|ini|properties)$" | head -30
+    - purpose: Check gitignore for config exclusions
+      command: |
+        grep -E "\.(yaml|yml|json|env|tf|conf|ini)" .gitignore 2>/dev/null
+    - purpose: Count version-controlled config files
+      command: |
+        git ls-files 2>/dev/null | \
+          grep -E "\.(yaml|yml|json|tf|env|conf|ini)$" | wc -l
+    expected_findings:
+    - Untracked configurations
+    - Gitignore exclusions
+    - Version control coverage
+  - id: '2'
+    name: Commit History Quality Analysis
+    description: |
+      Analyze commit message quality for configuration changes.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Review recent config commit messages
+      command: |
+        git log --oneline -50 -- "*.yaml" "*.json" "*.tf" "*.env*" 2>/dev/null
+    - purpose: Find generic commit messages
+      command: |
+        git log --oneline -50 2>/dev/null | \
+          grep -iE "^[a-f0-9]+ (update|fix|change|modify)$" | head -20
+    - purpose: Check for ticket references
+      command: |
+        git log --oneline -50 2>/dev/null | \
+          grep -E "(#[0-9]+|\[.*\]|JIRA-|TICKET-)" | wc -l
+    expected_findings:
+    - Commit message patterns
+    - Generic messages count
+    - Ticket reference rate
+  - id: '3'
+    name: Tag and Release Assessment
+    description: |
+      Evaluate tagging practices for configuration releases.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List release tags
+      command: |
+        git tag -l --sort=-creatordate 2>/dev/null | head -30
+    - purpose: Check tag format consistency
+      command: |
+        git tag -l 2>/dev/null | head -30 | \
+          grep -E "^v?[0-9]+\.[0-9]+\.[0-9]+" | wc -l
+    - purpose: Find recent tag dates
+      command: |
+        git for-each-ref --sort=-creatordate --format='%(creatordate:short) %(refname:short)' \
+          refs/tags 2>/dev/null | head -10
+    expected_findings:
+    - Tag inventory
+    - Version format compliance
+    - Tagging frequency
+  - id: '4'
+    name: Branch Protection Review
+    description: |
+      Review branch protection and merge requirements.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for branch protection config
+      command: |
+        cat .github/settings.yml 2>/dev/null | \
+          grep -A 20 "branches:" || echo "No settings.yml found"
+    - purpose: Verify default branch
+      command: |
+        git symbolic-ref --short HEAD 2>/dev/null
+    - purpose: Check for merge commits
+      command: |
+        git log --oneline --merges -20 2>/dev/null
+    expected_findings:
+    - Branch protection settings
+    - Merge practices
+    - Review requirements
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Version Control Coverage
+    - History Quality Assessment
+    - Recommendations
+  - type: coverage_report
+    format: table
+    description: Configuration version control coverage by type
+  confidence_guidance:
+    high: Version control status directly verified
+    medium: Patterns suggest version control usage
+    low: Status requires manual verification
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: 12factor-codebase
+      priority: required
+    - source_id: semver
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: vctl-001
+  item: All configurations in version control
+  level: CRITICAL
+  verification: |
+    git status --porcelain 2>/dev/null | grep "^??" | \
+      grep -E "\.(yaml|yml|json|env|tf)$" | wc -l | \
+      xargs -I{} test {} -eq 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: vctl-002
+  item: Branch protection enabled
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify main branch requires PR and review
+  expected: Confirmed by reviewer
+- id: vctl-003
+  item: Release tags used
+  level: WARNING
+  verification: |
+    git tag -l 2>/dev/null | wc -l | \
+      xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: 12-Factor App
+    controls:
+    - Factor I
+  - framework: SOC 2
+    controls:
+    - CC8.1
+  - framework: ISO 27001
+    controls:
+    - A.8.32
+  - framework: CMMI
+    controls:
+    - CM SP 2.1
+relationships:
+  commonly_combined:
+  - configuration-management.configuration-control.change-control
+  - configuration-management.configuration-status.change-tracking

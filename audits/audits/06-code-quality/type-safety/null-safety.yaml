@@ -1,0 +1,310 @@
+audit:
+  id: code-quality.type-safety.null-safety
+  name: Null Safety Analysis Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: type-safety
+  tier: expert
+  estimated_duration: 35 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the codebase for proper handling of null/None/undefined values.
+    Identifies potential null pointer exceptions, missing null checks,
+    unsafe optional access, and improper use of nullable types. Assesses
+    the use of Optional types, null coalescing operators, and safe navigation.
+  why_it_matters: |
+    Null pointer exceptions are one of the most common runtime errors,
+    responsible for an estimated 40% of all crashes in production systems.
+    Tony Hoare called null references his "billion dollar mistake." Proper
+    null safety through type systems and defensive coding prevents crashes,
+    security vulnerabilities (CWE-476), and unexpected behavior.
+  when_to_run:
+  - Code reviews
+  - Security audits
+  - Before releases
+  - Bug investigation
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code
+discovery:
+  code_patterns:
+  - pattern: \.\w+\s*\(
+    type: regex
+    scope: source
+    purpose: Method calls that might be on null
+  - pattern: if\s+\w+\s*(is|==)\s*(None|null|undefined)
+    type: regex
+    scope: source
+    purpose: Explicit null checks
+  - pattern: Optional\[|\|\s*None|\?\.
+    type: regex
+    scope: source
+    purpose: Optional type usage
+  - pattern: \.get\(|getattr\(|\[\w+\]
+    type: regex
+    scope: source
+    purpose: Dictionary/attribute access
+  file_patterns:
+  - glob: '**/*.{py,js,ts,java,go,cs,kt}'
+    purpose: Source code files
+knowledge_sources:
+  specifications:
+  - id: cwe-476
+    name: 'CWE-476: NULL Pointer Dereference'
+    url: https://cwe.mitre.org/data/definitions/476.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: typescript-strict
+    name: TypeScript Strict Null Checks
+    url: https://www.typescriptlang.org/tsconfig#strictNullChecks
+    offline_cache: true
+  - id: kotlin-null-safety
+    name: Kotlin Null Safety
+    url: https://kotlinlang.org/docs/null-safety.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: mypy
+    purpose: Python null safety analysis (--strict)
+    offline_capable: true
+  - tool: typescript
+    purpose: TypeScript strict null checks
+    offline_capable: true
+  - tool: spotbugs
+    purpose: Java null pointer detection
+    offline_capable: true
+  - tool: cppcheck
+    purpose: C/C++ null pointer detection
+    offline_capable: true
+  scripts:
+  - id: null-safety-scan
+    language: bash
+    purpose: Detect null safety issues
+    source: inline
+    code: |
+      # Find potential null access without checks
+      grep -rn --include="*.py" "\.\w\+\s*(" . 2>/dev/null | grep -v "if.*None\|is not None" | head -20
+      # Find Optional usage
+      grep -rn --include="*.py" "Optional\[" . 2>/dev/null | wc -l
+      # Find direct None returns
+      grep -rn --include="*.py" "return None" . 2>/dev/null | wc -l
+signals:
+  critical:
+  - id: NS-CRIT-001
+    signal: Unchecked null dereference in error handling paths
+    evidence_pattern: Exception handler accessing potentially null
+    cwe: CWE-476
+    explanation: |
+      Null dereferences in error handling paths often go untested and
+      can cause cascading failures when the original error triggers
+      a null pointer exception in the handler.
+    remediation: Add defensive null checks in all error handlers
+  - id: NS-CRIT-002
+    signal: User input used without null validation
+    evidence_pattern: Request parameters accessed directly
+    cwe: CWE-476
+    explanation: |
+      User input may be null/missing, and using it without validation
+      can cause crashes or security vulnerabilities through null
+      injection attacks.
+    remediation: Validate all user input for null before use
+  high:
+  - id: NS-HIGH-001
+    signal: Function returns null without Optional type annotation
+    evidence_pattern: return None without -> Optional
+    cwe: CWE-476
+    explanation: |
+      Functions that can return null without indicating this in their
+      type signature cause unexpected crashes in calling code that
+      assumes a value is always returned.
+    remediation: Add Optional return type or raise exception instead
+  - id: NS-HIGH-002
+    signal: Chained method calls without null safety
+    evidence_pattern: a.b.c.method() chains
+    cwe: CWE-476
+    explanation: |
+      Long method chains fail silently at any null point in the chain,
+      making it hard to identify which access failed. Each step could
+      potentially return null.
+    remediation: Use safe navigation operators or explicit checks
+  medium:
+  - id: NS-MED-001
+    signal: Dictionary access without default value
+    evidence_pattern: dict[key] without .get()
+    remediation: Use .get() with default or check key existence
+  - id: NS-MED-002
+    signal: Missing null check after type narrowing
+    evidence_pattern: Reassignment after null check
+    remediation: Maintain null safety through control flow
+  low:
+  - id: NS-LOW-001
+    signal: Implicit null in default parameter values
+    evidence_pattern: def foo(x=None)
+    remediation: Consider explicit Optional type annotation
+  positive:
+  - id: NS-POS-001
+    signal: Strict null checking enabled in type system
+  - id: NS-POS-002
+    signal: Consistent use of Optional types
+  - id: NS-POS-003
+    signal: Safe navigation operators used appropriately
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Analyze Null Return Patterns
+    description: |
+      Identify functions that return null and verify they have
+      appropriate type annotations.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find functions returning None
+      command: |
+        grep -rn --include="*.py" "return None" . 2>/dev/null | wc -l
+    - purpose: Find Optional annotations
+      command: |
+        grep -rn --include="*.py" "Optional\[" . 2>/dev/null | wc -l
+    - purpose: Find functions with None return but no Optional
+      command: |
+        grep -rln --include="*.py" "return None" . 2>/dev/null | xargs -I{} sh -c 'grep -q "Optional\|-> None" "{}" || echo "{}"' 2>/dev/null | head -10
+    expected_findings:
+    - Null return count
+    - Optional usage count
+    - Missing annotations
+  - id: '2'
+    name: Check Null Guard Patterns
+    description: |
+      Identify how null values are checked throughout the code
+      and find inconsistencies.
+    duration_estimate: 8 min
+    commands:
+    - purpose: Find null checks
+      command: |
+        grep -rn --include="*.py" "is None\|is not None\|== None\|!= None" . 2>/dev/null | wc -l
+    - purpose: Find unsafe access patterns
+      command: |
+        grep -rn --include="*.py" "\.\w\+\s*(" . 2>/dev/null | head -20
+    expected_findings:
+    - Null check patterns
+    - Unsafe access locations
+  - id: '3'
+    name: Analyze Dictionary and Attribute Access
+    description: |
+      Find places where dictionaries or attributes are accessed
+      without safe access patterns.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find direct dict access
+      command: |
+        grep -rn --include="*.py" "\[['\"][^'\"]*['\"]\]" . 2>/dev/null | grep -v "\.get\|if.*in" | head -20
+    - purpose: Find getattr usage
+      command: |
+        grep -rn --include="*.py" "getattr(" . 2>/dev/null | head -15
+    - purpose: Find .get() usage
+      command: |
+        grep -rn --include="*.py" "\.get(" . 2>/dev/null | wc -l
+    expected_findings:
+    - Unsafe dict access
+    - Safe access patterns
+  - id: '4'
+    name: Check Type System Configuration
+    description: |
+      Verify that type checkers are configured for strict
+      null checking.
+    duration_estimate: 7 min
+    commands:
+    - purpose: Check mypy strict mode
+      command: |
+        grep -r "strict\|no_implicit_optional" mypy.ini pyproject.toml 2>/dev/null
+    - purpose: Check TypeScript strict null checks
+      command: |
+        grep "strictNullChecks" tsconfig.json 2>/dev/null
+    expected_findings:
+    - Type checker configuration
+    - Strict mode status
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - null_return_without_optional
+    - unsafe_access_patterns
+    - missing_null_checks
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Null Safety Analysis
+    - Risk Areas
+    - Recommendations
+  confidence_guidance:
+    high: Full type checker analysis with strict mode
+    medium: Pattern-based analysis
+    low: Grep-based sampling
+offline:
+  capability: full
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ns-001
+  item: No critical null safety issues
+  level: CRITICAL
+  verification: |
+    grep -rln --include="*.py" "return None" . 2>/dev/null | wc -l | awk '{print ($1 < 50) ? "PASS" : "FAIL"}'
+  expected: PASS
+- id: ns-002
+  item: Optional types used appropriately
+  level: WARNING
+  verification: |
+    grep -rn --include="*.py" "Optional\[" . 2>/dev/null | wc -l | awk '{print ($1 > 0) ? "PASS" : "FAIL"}'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-476
+  - framework: ISO 25010
+    controls:
+    - Reliability
+relationships:
+  commonly_combined:
+  - code-quality.type-safety.type-coverage
+  - code-quality.type-safety.exhaustiveness-checking
+  - security.input-validation.input-sanitization

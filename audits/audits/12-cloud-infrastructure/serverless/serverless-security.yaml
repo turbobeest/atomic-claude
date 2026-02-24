@@ -1,0 +1,392 @@
+audit:
+  id: cloud-infrastructure.serverless.serverless-security
+  name: Serverless Security
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: serverless
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: security
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates serverless function security including IAM execution roles,
+    resource-based policies, VPC configuration, secrets management,
+    environment variable security, and code signing. Examines whether
+    functions follow least-privilege principles and security best practices.
+  why_it_matters: |
+    Serverless functions often have overly permissive IAM roles, creating
+    significant attack surface. Compromised functions with broad permissions
+    can access sensitive data across the AWS account. Environment variables
+    may contain secrets in plain text. Proper serverless security is
+    essential for defense in depth.
+  when_to_run:
+  - Security assessments
+  - Compliance audits
+  - After deploying new functions
+  - Regular security reviews
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to Lambda and IAM configurations
+  - type: security_requirements
+    description: Security policies and standards
+  access_requirements:
+  - Lambda function configuration access
+  - IAM role and policy access
+  - Secrets Manager/Parameter Store access
+discovery:
+  code_patterns:
+  - pattern: arn:aws:iam::.*:policy/AdministratorAccess|Action.*\*.*Resource.*\*
+    type: regex
+    scope: config
+    purpose: Find overly permissive policies
+  - pattern: password|secret|api_key|token
+    type: regex
+    scope: config
+    purpose: Find potential secrets in environment variables
+  file_patterns:
+  - glob: '**/serverless.yml'
+    purpose: Find Serverless Framework configurations
+  - glob: '**/terraform/**/*lambda*.tf'
+    purpose: Find Terraform Lambda configurations
+  - glob: '**/sam.yaml'
+    purpose: Find SAM templates
+knowledge_sources:
+  specifications:
+  - id: aws-lambda-security
+    name: AWS Lambda Security
+    url: https://docs.aws.amazon.com/lambda/latest/dg/lambda-security.html
+    offline_cache: true
+    priority: required
+  - id: aws-lambda-permissions
+    name: AWS Lambda Permissions
+    url: https://docs.aws.amazon.com/lambda/latest/dg/lambda-permissions.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: lambda-security-best-practices
+    name: Lambda Security Best Practices
+    url: https://docs.aws.amazon.com/lambda/latest/operatorguide/security-best-practices.html
+    offline_cache: true
+  - id: owasp-serverless
+    name: OWASP Serverless Top 10
+    url: https://owasp.org/www-project-serverless-top-10/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: List function IAM roles
+    command: aws lambda list-functions --query 'Functions[].{Name:FunctionName,Role:Role}'
+  - tool: AWS CLI
+    purpose: Get role policies
+    command: aws iam list-attached-role-policies --role-name {role_name}
+  - tool: AWS CLI
+    purpose: Check function resource policies
+    command: aws lambda get-policy --function-name {function_name}
+  scripts:
+  - id: serverless-security-analyzer
+    language: bash
+    purpose: Analyze serverless security configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Serverless Security Analysis ==="
+
+      # List functions with roles
+      echo "Function IAM Roles:"
+      aws lambda list-functions \
+        --query 'Functions[].{Name:FunctionName,Role:Role}' \
+        --output table
+
+      # Check for overly permissive roles
+      echo ""
+      echo "Checking for Admin/PowerUser Policies..."
+      for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text | head -20); do
+        role=$(aws lambda get-function-configuration --function-name $func --query 'Role' --output text)
+        role_name=$(echo $role | rev | cut -d'/' -f1 | rev)
+        policies=$(aws iam list-attached-role-policies --role-name $role_name --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null)
+        if echo "$policies" | grep -qE "AdministratorAccess|PowerUserAccess"; then
+          echo "OVERLY PERMISSIVE: $func ($role_name)"
+        fi
+      done
+
+      # Check environment variables for potential secrets
+      echo ""
+      echo "Environment Variables (check for secrets):"
+      for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text | head -10); do
+        vars=$(aws lambda get-function-configuration --function-name $func --query 'Environment.Variables' --output json 2>/dev/null | jq -r 'keys[]' 2>/dev/null)
+        if echo "$vars" | grep -qiE "password|secret|key|token|credential"; then
+          echo "POTENTIAL SECRETS in $func: $(echo $vars | grep -iE 'password|secret|key|token|credential')"
+        fi
+      done
+
+      # Check VPC configuration
+      echo ""
+      echo "Functions with VPC Configuration:"
+      aws lambda list-functions \
+        --query 'Functions[?VpcConfig.VpcId!=`null`].{Name:FunctionName,VPC:VpcConfig.VpcId}' \
+        --output table
+
+      # Check for public access
+      echo ""
+      echo "Checking for Public Resource Policies..."
+      for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text | head -10); do
+        policy=$(aws lambda get-policy --function-name $func 2>/dev/null | jq -r '.Policy' | jq '.')
+        if echo "$policy" | grep -q '"Principal": "\*"'; then
+          echo "PUBLIC ACCESS: $func"
+        fi
+      done
+signals:
+  critical:
+  - id: SERVERLESS-SEC-CRIT-001
+    signal: Lambda execution role with AdministratorAccess
+    evidence_pattern: Role attached to AdministratorAccess policy
+    explanation: |
+      Functions with admin access can perform any action on any
+      resource if compromised. This is a severe violation of
+      least-privilege principle.
+    remediation: Replace with least-privilege role scoped to required resources
+  - id: SERVERLESS-SEC-CRIT-002
+    signal: Secrets stored in plaintext environment variables
+    evidence_indicators:
+    - Environment variables containing 'password', 'secret', 'key'
+    - Hardcoded credentials in configuration
+    explanation: |
+      Environment variables are logged and visible in console.
+      Secrets should be retrieved from Secrets Manager or
+      Parameter Store at runtime.
+    remediation: Move secrets to Secrets Manager; use IAM for service access
+  - id: SERVERLESS-SEC-CRIT-003
+    signal: Public resource policy allowing any AWS account
+    evidence_pattern: 'Principal: ''*'' without condition restrictions'
+    explanation: |
+      Public invoke permissions allow anyone to trigger the function,
+      potentially causing unauthorized access or denial of service.
+    remediation: Restrict resource policy to specific principals
+  high:
+  - id: SERVERLESS-SEC-HIGH-001
+    signal: IAM role with wildcard Resource permissions
+    evidence_pattern: 'Action: [...], Resource: ''*'''
+    explanation: |
+      Wildcard resources allow actions on any resource of that type,
+      not just those the function needs.
+    remediation: Scope Resource to specific ARNs
+  - id: SERVERLESS-SEC-HIGH-002
+    signal: Function not in VPC when accessing VPC resources
+    evidence_indicators:
+    - No VpcConfig but accessing RDS/ElastiCache
+    - Database connections over public endpoints
+    explanation: |
+      Functions accessing VPC resources should be in VPC to use
+      private endpoints rather than public internet.
+    remediation: Configure VPC settings for functions accessing VPC resources
+  - id: SERVERLESS-SEC-HIGH-003
+    signal: No code signing configured for production functions
+    evidence_pattern: 'CodeSigningConfigArn: null'
+    explanation: |
+      Without code signing, unauthorized code could be deployed
+      to Lambda functions.
+    remediation: Enable code signing for production functions
+  medium:
+  - id: SERVERLESS-SEC-MED-001
+    signal: Reserved concurrency not configured (DoS risk)
+    remediation: Set reserved concurrency to prevent resource exhaustion
+  - id: SERVERLESS-SEC-MED-002
+    signal: Function URL without IAM authentication
+    remediation: Enable IAM auth or implement alternative authentication
+  - id: SERVERLESS-SEC-MED-003
+    signal: Dead letter queue not configured
+    remediation: Configure DLQ for failed invocations
+  low:
+  - id: SERVERLESS-SEC-LOW-001
+    signal: Execution role permissions not documented
+    remediation: Document required permissions for each function
+  positive:
+  - id: SERVERLESS-SEC-POS-001
+    signal: Least-privilege IAM roles with specific resources
+  - id: SERVERLESS-SEC-POS-002
+    signal: Secrets managed via Secrets Manager
+  - id: SERVERLESS-SEC-POS-003
+    signal: Code signing enabled for deployments
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: IAM Role Analysis
+    description: |
+      Analyze Lambda execution roles for over-permissive policies
+      and least-privilege compliance.
+    duration_estimate: 45 min
+    commands:
+    - purpose: List functions with roles
+      command: aws lambda list-functions --query 'Functions[].{Name:FunctionName,Role:Role}' --output
+        table
+    - purpose: Check attached policies
+      command: for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text
+        | head -10); do role=$(aws lambda get-function-configuration --function-name $func --query 'Role'
+        --output text); role_name=${role##*/}; echo "=== $func ($role_name) ==="; aws iam list-attached-role-policies
+        --role-name $role_name --output table 2>/dev/null; done
+    expected_findings:
+    - Role to function mapping
+    - Overly permissive policies
+  - id: '2'
+    name: Environment Variable Security
+    description: |
+      Review environment variables for potential secrets
+      stored in plaintext.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check environment variables
+      command: for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text
+        | head -20); do echo "=== $func ==="; aws lambda get-function-configuration --function-name $func
+        --query 'Environment.Variables' --output yaml 2>/dev/null | head -20 || echo 'No env vars'; done
+    expected_findings:
+    - Potential secrets in env vars
+    - Secrets Manager/SSM usage
+  - id: '3'
+    name: Resource Policy Review
+    description: |
+      Review function resource-based policies for public
+      or overly permissive access.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check resource policies
+      command: for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text
+        | head -20); do echo "=== $func ==="; aws lambda get-policy --function-name $func 2>/dev/null
+        | jq -r '.Policy' | jq '.' || echo 'No resource policy'; done
+    expected_findings:
+    - Public access grants
+    - Cross-account permissions
+  - id: '4'
+    name: VPC and Network Security
+    description: |
+      Review VPC configuration for functions that need
+      network isolation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check VPC configuration
+      command: aws lambda list-functions --query 'Functions[].{Name:FunctionName,VPC:VpcConfig.VpcId,Subnets:VpcConfig.SubnetIds,SGs:VpcConfig.SecurityGroupIds}'
+        --output yaml
+    expected_findings:
+    - VPC connectivity status
+    - Security group assignments
+  - id: '5'
+    name: Additional Security Controls
+    description: |
+      Review code signing, reserved concurrency, and
+      other security controls.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check code signing
+      command: aws lambda list-functions --query 'Functions[].{Name:FunctionName,CodeSigning:CodeSigningConfigArn}'
+        --output table
+    - purpose: Check reserved concurrency
+      command: 'for func in $(aws lambda list-functions --query ''Functions[].FunctionName'' --output
+        text | head -20); do rc=$(aws lambda get-function-concurrency --function-name $func 2>/dev/null
+        | jq ''.ReservedConcurrentExecutions // "not set"''); echo "$func: $rc"; done'
+    expected_findings:
+    - Code signing status
+    - Concurrency controls
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - IAM Role Analysis
+    - Secrets Management
+    - Access Control Review
+    - Recommendations
+  confidence_guidance:
+    high: Full access to Lambda and IAM configurations
+    medium: Lambda access without full IAM policy details
+    low: Limited access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-lambda-security
+      priority: required
+    - source_id: owasp-serverless
+      priority: required
+  limitations:
+  - Cannot access live configurations offline
+  - IAM policy analysis requires API access
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Critical security assessment
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: serverless-sec-001
+  item: No admin access execution roles
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify no functions use AdministratorAccess
+  expected: Confirmed by reviewer
+- id: serverless-sec-002
+  item: No plaintext secrets in environment variables
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify secrets use Secrets Manager/SSM
+  expected: Confirmed by reviewer
+- id: serverless-sec-003
+  item: Resource policies reviewed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify no unintended public access
+  expected: Confirmed by reviewer
+- id: serverless-sec-004
+  item: Least privilege IAM verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify roles scoped to required resources
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.3
+  - framework: OWASP
+    controls:
+    - Serverless Top 10
+  - framework: CIS AWS
+    controls:
+    - Lambda security controls
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.serverless.serverless-monitoring
+  - security.iam.least-privilege
+  - security.secrets-management

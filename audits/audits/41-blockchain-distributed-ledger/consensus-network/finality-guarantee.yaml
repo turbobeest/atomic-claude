@@ -1,0 +1,250 @@
+audit:
+  id: blockchain-distributed-ledger.consensus-network.finality-guarantee
+  name: Finality Guarantee Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: blockchain-distributed-ledger
+  category_number: 41
+  subcategory: consensus-network
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - blockchain
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates blockchain finality guarantees to ensure
+    applications correctly handle transaction confirmation. It examines:
+    - Finality type (probabilistic vs. deterministic)
+    - Confirmation requirements
+    - Reorg depth handling
+    - Finality timing
+    - Application finality assumptions
+    - User communication of finality
+  why_it_matters: |
+    Finality determines when transactions are irreversible:
+    - Probabilistic finality can be reversed
+    - Too few confirmations enable attacks
+    - Applications may assume premature finality
+    - User experience depends on finality timing
+    - High-value transactions need strong finality
+
+    Correct finality handling prevents double-spend attacks.
+  when_to_run:
+  - Application development
+  - Payment integration
+  - Exchange integration
+  - Security review
+prerequisites:
+  required_artifacts:
+  - type: documentation
+    description: Chain finality documentation
+  - type: source_code
+    description: Application transaction handling
+  access_requirements:
+  - Chain specifications
+  - Application source code
+discovery:
+  code_patterns:
+  - pattern: (finality|confirmation|confirmed)
+    type: regex
+    scope: source
+    purpose: Detect finality handling
+  - pattern: (block.*number|receipt|pending)
+    type: regex
+    scope: source
+    purpose: Detect transaction handling
+  file_patterns:
+  - glob: '**/*.{js,ts,sol,py}'
+    purpose: Application code
+  - glob: '**/*.md'
+    purpose: Documentation
+signals:
+  critical:
+  - id: FINAL-CRIT-001
+    signal: Acting on unconfirmed transactions
+    evidence_indicators:
+    - Zero confirmation acceptance
+    - Pending transaction treated as final
+    - No confirmation waiting
+    explanation: |
+      Unconfirmed transactions can be replaced or reverted.
+      Acting on them enables double-spend attacks.
+    remediation: |
+      - Require confirmations before action
+      - Set appropriate confirmation depth
+      - Use finalized block for queries
+      - Document confirmation requirements
+    cwe: CWE-362
+  - id: FINAL-CRIT-002
+    signal: Insufficient confirmation depth
+    evidence_indicators:
+    - 1-2 confirmations for high value
+    - Reorg probability too high
+    - Confirmation depth doesn't match value
+    explanation: |
+      Low confirmation depths can be attacked with relatively
+      low cost, especially for high-value transactions.
+    remediation: |
+      - Calculate attack cost vs. value
+      - Use chain-appropriate confirmation depth
+      - Scale confirmations with value
+      - Consider finality mechanisms
+  high:
+  - id: FINAL-HIGH-001
+    signal: Reorg handling missing
+    evidence_indicators:
+    - No reorg event subscription
+    - State not updated on reorg
+    - Reverted transactions not detected
+    explanation: |
+      Chain reorganizations can revert transactions. Applications
+      must detect and handle reorgs to maintain consistency.
+    remediation: |
+      - Subscribe to reorg events
+      - Re-validate after reorg
+      - Update state for reverted txs
+      - Alert on deep reorgs
+  - id: FINAL-HIGH-002
+    signal: Finality assumptions incorrect
+    evidence_indicators:
+    - Treating probabilistic as deterministic
+    - Wrong finality type assumed
+    - Finality time misunderstood
+    explanation: |
+      Wrong finality assumptions can lead to premature action
+      on reversible transactions.
+    remediation: |
+      - Verify chain's finality type
+      - Document finality guarantees
+      - Use appropriate confirmation strategy
+      - Test with reorg scenarios
+  medium:
+  - id: FINAL-MED-001
+    signal: Finality UX confusing
+    evidence_indicators:
+    - Users shown unconfirmed as complete
+    - Confirmation progress not shown
+    - Finality status unclear
+    explanation: |
+      Confusing finality UX leads users to believe transactions
+      are complete before they're final.
+    remediation: |
+      - Show confirmation progress
+      - Clearly indicate finality
+      - Explain waiting periods
+      - Update status in real-time
+  - id: FINAL-MED-002
+    signal: Variable confirmation not implemented
+    evidence_indicators:
+    - Same confirmations for all values
+    - No value-based scaling
+    - High-value same as low-value
+    explanation: |
+      Higher value transactions warrant more confirmations
+      as attack incentive is higher.
+    remediation: |
+      - Scale confirmations with value
+      - Define value-confirmation tiers
+      - Document confirmation policy
+      - Implement dynamic confirmation
+  low:
+  - id: FINAL-LOW-001
+    signal: Finality documentation missing
+    evidence_indicators:
+    - Confirmation requirements unclear
+    - Finality guarantees not stated
+    - User guidance absent
+    explanation: |
+      Missing finality documentation leaves users and integrators
+      uncertain about confirmation requirements.
+    remediation: |
+      - Document finality guarantees
+      - State confirmation requirements
+      - Explain reorg handling
+      - Provide integration guidance
+  positive:
+  - id: FINAL-POS-001
+    signal: Robust finality handling
+    evidence_indicators:
+    - Appropriate confirmations
+    - Reorg handling implemented
+    - Clear UX
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: blockchain-developer
+  steps:
+  - id: '1'
+    name: Finality Analysis
+    description: |
+      Analyze finality handling implementation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find confirmation handling
+      command: |
+        grep -rniE "(confirm|finality|block.*number)" \
+          --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | head -30
+    - purpose: Find receipt handling
+      command: |
+        grep -rniE "(receipt|waitFor|pending)" \
+          --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - Confirmation handling
+    - Finality assumptions
+    - Reorg handling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Finality Analysis
+    - Confirmation Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 2
+    blockchain:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: final-001
+  item: Confirmation depth appropriate
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify confirmation depth matches value at risk
+  expected: Confirmed by reviewer
+- id: final-002
+  item: Reorg handling implemented
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify reorg events are handled
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - blockchain
+    - payment
+    - exchange
+    - defi
+relationships:
+  commonly_combined:
+  - blockchain.consensus-network.consensus-mechanism
+  - blockchain.consensus-network.fork-handling
+  - blockchain.integration.indexer-reliability

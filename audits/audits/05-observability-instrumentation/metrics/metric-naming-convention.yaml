@@ -1,0 +1,319 @@
+audit:
+  id: observability-instrumentation.metrics.metric-naming-convention
+  name: Metric Naming Convention Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: metrics
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Validates that metric names across the codebase follow established
+    conventions (Prometheus, OpenMetrics, or organization-specific standards).
+    This audit checks naming patterns, unit suffixes, prefixes, case conventions,
+    and consistency across services to ensure metrics are discoverable,
+    understandable, and correctly interpreted by tooling.
+  why_it_matters: |
+    Inconsistent metric naming creates confusion, breaks dashboards and alerts,
+    and makes metrics difficult to discover. Tools expect specific conventions
+    (e.g., _total suffix for counters, _seconds for duration). Violations cause
+    incorrect aggregations, misleading visualizations, and wasted time during
+    incidents. Consistent naming enables automated documentation and reduces
+    cognitive load across teams.
+  when_to_run:
+  - Code review for new metrics
+  - Service instrumentation standardization
+  - Metrics platform migration
+  - Cross-team observability alignment
+prerequisites:
+  required_artifacts:
+  - type: source-code
+    description: Access to service source code with metric definitions
+  - type: naming-standard
+    description: Documented metric naming conventions (or use Prometheus defaults)
+  access_requirements:
+  - Source code repository access
+discovery:
+  code_patterns:
+  - pattern: prometheus\.NewCounter|prometheus\.NewGauge|prometheus\.NewHistogram
+    type: regex
+    scope: source
+    purpose: Find Go Prometheus metric definitions
+  - pattern: name:\s*['"][^'"]+['"]
+    type: regex
+    scope: source
+    purpose: Extract metric names from definitions
+  - pattern: _total$|_count$|_sum$|_bucket$
+    type: regex
+    scope: source
+    purpose: Verify counter naming conventions
+  - pattern: _seconds$|_bytes$|_ratio$|_percent$
+    type: regex
+    scope: source
+    purpose: Verify unit suffix conventions
+  file_patterns:
+  - glob: '**/metrics.go'
+    purpose: Go metrics definitions
+  - glob: '**/metrics.py'
+    purpose: Python metrics definitions
+  - glob: '**/prometheus.yaml'
+    purpose: Recording rule definitions
+knowledge_sources:
+  specifications:
+  - id: prometheus-naming
+    name: Prometheus Metric Naming Best Practices
+    url: https://prometheus.io/docs/practices/naming/
+    offline_cache: true
+    priority: required
+  - id: openmetrics-spec
+    name: OpenMetrics Specification
+    url: https://openmetrics.io/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: naming-guide
+    name: Metric Naming Guidelines
+    url: https://prometheus.io/docs/instrumenting/writing_exporters/#naming
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: promtool
+    purpose: Validate metric names
+    offline_capable: true
+  - tool: custom-linter
+    purpose: Enforce naming conventions
+    offline_capable: true
+  scripts:
+  - id: naming-validator
+    language: python
+    purpose: Validate metric names against conventions
+    source: inline
+    code: |
+      import re
+
+      CONVENTIONS = {
+          'counter_suffix': r'_total$',
+          'histogram_suffixes': r'(_bucket|_sum|_count)$',
+          'seconds_unit': r'_seconds(_total|_bucket|_sum|_count)?$',
+          'bytes_unit': r'_bytes(_total)?$',
+          'snake_case': r'^[a-z][a-z0-9_]*$',
+          'no_double_underscore': r'(?!.*__)',
+          'valid_prefix': r'^[a-z]+_',
+      }
+
+      def validate_metric_name(name, metric_type):
+          violations = []
+
+          # Check snake_case
+          if not re.match(CONVENTIONS['snake_case'], name):
+              violations.append(f"Not snake_case: {name}")
+
+          # Check counter suffix
+          if metric_type == 'counter' and not re.search(CONVENTIONS['counter_suffix'], name):
+              violations.append(f"Counter missing _total suffix: {name}")
+
+          # Check for double underscores
+          if '__' in name:
+              violations.append(f"Contains double underscore: {name}")
+
+          return violations
+signals:
+  critical:
+  - id: NAME-CRIT-001
+    signal: Counter metric missing _total suffix
+    evidence_pattern: Counter without _total or _count suffix
+    explanation: |
+      Prometheus and related tools expect counters to end in _total.
+      Missing this suffix causes rate() and increase() to produce
+      unexpected results and breaks convention-based dashboards.
+    remediation: Rename counter to include _total suffix
+  high:
+  - id: NAME-HIGH-001
+    signal: Duration metric not using _seconds suffix
+    evidence_pattern: latency|duration|time metric without _seconds
+    explanation: |
+      Using non-standard units (milliseconds, microseconds) without
+      clear suffixes causes aggregation errors. Prometheus conventions
+      expect base units (seconds, bytes) for consistency.
+    remediation: Use _seconds suffix and convert to base units
+  - id: NAME-HIGH-002
+    signal: Metric name not in snake_case
+    evidence_pattern: camelCase or PascalCase metric names
+    explanation: |
+      Prometheus conventions require snake_case. Mixed casing breaks
+      queries and reduces discoverability.
+    remediation: Convert to snake_case
+  medium:
+  - id: NAME-MED-001
+    signal: Missing or inconsistent prefix
+    evidence_pattern: Metrics without service/subsystem prefix
+    remediation: 'Add consistent prefix: {service}_{subsystem}_{metric}'
+  - id: NAME-MED-002
+    signal: Ambiguous unit in metric name
+    evidence_pattern: _time without unit clarification
+    remediation: 'Use explicit unit suffix: _seconds, _milliseconds'
+  - id: NAME-MED-003
+    signal: Reserved suffix used incorrectly
+    evidence_pattern: _total used on gauge metric
+    remediation: Reserve _total, _count, _sum, _bucket for their intended types
+  low:
+  - id: NAME-LOW-001
+    signal: Verbose or unclear metric names
+    remediation: Simplify names while maintaining clarity
+  positive:
+  - id: NAME-POS-001
+    signal: Consistent naming across service fleet
+  - id: NAME-POS-002
+    signal: All metrics follow Prometheus conventions
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Extract all metric names
+    description: |
+      Scan source code to find all metric definitions and extract
+      their names and types.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find Go metric definitions
+      command: grep -rn 'prometheus\.New' --include='*.go' /path/to/services
+    - purpose: Find Python metric definitions
+      command: grep -rn 'Counter\|Gauge\|Histogram\|Summary' --include='*.py' /path/to/services
+    expected_findings:
+    - Complete metric inventory
+    - Metric types identified
+  - id: '2'
+    name: Validate counter naming
+    description: |
+      Check that all counter metrics end in _total or _count as
+      required by Prometheus conventions.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find counters without _total
+      command: grep -rn 'NewCounter' --include='*.go' | grep -v '_total'
+    expected_findings:
+    - Counters violating naming convention
+  - id: '3'
+    name: Validate unit suffixes
+    description: |
+      Verify duration metrics use _seconds and size metrics use
+      _bytes as their unit suffix.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find duration metrics
+      command: grep -rn 'duration\|latency\|time' --include='*.go' | grep -i 'metric\|counter\|histogram'
+    expected_findings:
+    - Duration metrics with incorrect units
+  - id: '4'
+    name: Check case conventions
+    description: |
+      Verify all metric names use snake_case as required by
+      Prometheus conventions.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find non-snake_case metrics
+      command: grep -rn 'Name:' --include='*.go' | grep '[A-Z]'
+    expected_findings:
+    - Metrics with incorrect casing
+  - id: '5'
+    name: Verify prefix consistency
+    description: |
+      Check that metrics use consistent prefixes across the
+      organization or service.
+    duration_estimate: 20 min
+    questions:
+    - Is there a documented prefix standard?
+    - Do all metrics from same service share a prefix?
+    expected_findings:
+    - Prefix patterns and inconsistencies
+  - id: '6'
+    name: Document violations
+    description: |
+      Compile all naming violations with remediation guidance
+      and prioritization.
+    duration_estimate: 15 min
+    expected_findings:
+    - Violation list with remediation
+    - Migration plan for fixes
+output:
+  deliverables:
+  - type: violation_report
+    format: structured
+    description: List of naming violations by severity
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Naming Compliance Score
+    - Violations by Category
+    - Remediation Guide
+  confidence_guidance:
+    high: Static analysis of source code
+    medium: Runtime metric scrape analysis
+    low: Documentation review only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: prometheus-naming
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Automatable static analysis
+      priority: 3
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: naming-001
+  item: All counters end in _total
+  level: CRITICAL
+  verification: grep -rn 'NewCounter' --include='*.go' | grep -v '_total' | wc -l
+  expected: '0'
+- id: naming-002
+  item: All duration metrics use _seconds suffix
+  level: BLOCKING
+  verification: manual
+  verification_notes: Check duration/latency metrics for unit suffix
+  expected: Confirmed by reviewer
+- id: naming-003
+  item: All metric names are snake_case
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify no camelCase or PascalCase names
+  expected: Confirmed by reviewer
+- id: naming-004
+  item: Consistent prefix used across services
+  level: WARNING
+  verification: manual
+  verification_notes: Check prefix patterns match organizational standard
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+relationships:
+  commonly_combined:
+  - observability-instrumentation.metrics.metric-label-design
+  - observability-instrumentation.metrics.custom-metric-coverage

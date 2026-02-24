@@ -1,0 +1,348 @@
+# ============================================================
+# BACKPRESSURE HANDLING AUDIT
+# ============================================================
+# Evaluates how systems handle load when downstream components
+# cannot keep up with incoming requests.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.concurrency-parallelism.backpressure-handling"
+  name: "Backpressure Handling Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "concurrency-parallelism"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines how the system handles situations where producers generate data
+    faster than consumers can process it. Reviews queue configurations, flow
+    control mechanisms, rate limiting, circuit breakers, and graceful
+    degradation strategies.
+
+  why_it_matters: |
+    Without proper backpressure handling, systems can experience unbounded
+    queue growth leading to memory exhaustion, cascading failures, and
+    complete system collapse. Proper backpressure propagates load information
+    upstream, allowing graceful degradation rather than catastrophic failure.
+
+  when_to_run:
+    - "When designing producer-consumer systems"
+    - "Before deploying message queue consumers"
+    - "When experiencing memory growth under load"
+    - "After production incidents involving queue overflow"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code with async/queued processing"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Understanding of data flow patterns"
+
+discovery:
+  code_patterns:
+    - pattern: "LinkedBlockingQueue\\(\\)|unbounded|unlimited"
+      type: "regex"
+      scope: "source"
+      purpose: "Find unbounded queues"
+
+    - pattern: "chan\\s+\\w+(?!\\[)|make\\(chan.*\\)(?!.*[0-9])"
+      type: "regex"
+      scope: "source"
+      purpose: "Find unbuffered or unbounded channels in Go"
+
+    - pattern: "subscribe|consumer|listener|handler"
+      type: "regex"
+      scope: "source"
+      purpose: "Find message consumers"
+
+    - pattern: "rate.*limit|RateLimiter|throttle"
+      type: "regex"
+      scope: "source"
+      purpose: "Find rate limiting implementations"
+
+    - pattern: "circuit.*breaker|CircuitBreaker"
+      type: "regex"
+      scope: "source"
+      purpose: "Find circuit breaker patterns"
+
+  file_patterns:
+    - glob: "**/*.java"
+      purpose: "Java source files"
+    - glob: "**/*.go"
+      purpose: "Go source files"
+    - glob: "**/*.py"
+      purpose: "Python source files"
+
+knowledge_sources:
+  guides:
+    - id: "reactive-streams"
+      name: "Reactive Streams Specification"
+      url: "https://www.reactive-streams.org/"
+      offline_cache: true
+
+    - id: "backpressure-patterns"
+      name: "Backpressure Patterns"
+      url: "https://mechanical-sympathy.blogspot.com/2012/05/apply-back-pressure-when-overloaded.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "designing-data-intensive"
+      title: "Designing Data-Intensive Applications"
+      type: "book"
+      reference: "ISBN 978-1449373320"
+
+tooling:
+  static_analysis:
+    - tool: "grep"
+      purpose: "Find queue and flow control patterns"
+      offline_capable: true
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "queue_size{name='processing'}"
+      purpose: "Monitor queue depth"
+      threshold: "Should not grow unboundedly"
+
+    - system: "Prometheus"
+      query: "rate(rejected_requests_total[5m])"
+      purpose: "Track rejection rate"
+      threshold: "Indicates backpressure activation"
+
+  scripts:
+    - id: "find-unbounded-queues"
+      language: "bash"
+      purpose: "Identify unbounded queue configurations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find unbounded queues in Java
+        grep -rn "LinkedBlockingQueue()" --include="*.java" .
+        grep -rn "newCachedThreadPool" --include="*.java" .
+        # Find unbuffered channels in Go
+        grep -rn "make(chan" --include="*.go" . | grep -v "[0-9])"
+
+signals:
+  critical:
+    - id: "BACKPRESS-CRIT-001"
+      signal: "Unbounded queue without rejection policy"
+      evidence_pattern: "LinkedBlockingQueue\\(\\)|Queue.*unlimited|unbounded.*queue"
+      explanation: |
+        Unbounded queues can grow without limit, consuming all available
+        memory until the system crashes. Under load spikes, memory exhaustion
+        can happen within minutes.
+      remediation: "Use bounded queues with explicit rejection/drop policy"
+
+    - id: "BACKPRESS-CRIT-002"
+      signal: "Fire-and-forget producer without flow control"
+      evidence_pattern: "submit\\(|offer\\(|send\\((?!.*block|wait|timeout)"
+      explanation: |
+        Producers that send without any feedback about consumer capacity
+        will continue producing during overload, worsening the problem.
+        This leads to unbounded growth or silent message loss.
+      remediation: "Implement flow control: blocking sends, rate limiting, or explicit backpressure"
+
+  high:
+    - id: "BACKPRESS-HIGH-001"
+      signal: "Consumer without rate limiting"
+      evidence_pattern: "while.*poll|for.*receive(?!.*RateLimiter)"
+      explanation: |
+        Consumers that process as fast as possible without rate limiting
+        can overwhelm downstream systems, propagating overload.
+      remediation: "Add rate limiting to consumers to prevent downstream overload"
+
+    - id: "BACKPRESS-HIGH-002"
+      signal: "No circuit breaker for external calls"
+      evidence_pattern: "http\\.Get|httpClient\\.execute(?!.*circuitBreaker)"
+      explanation: |
+        Without circuit breakers, calls to failing downstream services
+        accumulate, consuming resources (threads, connections) and
+        causing cascading failures.
+      remediation: "Implement circuit breakers for external service calls"
+
+    - id: "BACKPRESS-HIGH-003"
+      signal: "Async processing without queue depth monitoring"
+      evidence_pattern: "CompletableFuture|async(?!.*queue.*metric|monitor)"
+      explanation: |
+        Async operations without queue monitoring hide backlog growth.
+        By the time problems are visible, the system may be close to failure.
+      remediation: "Add metrics for queue depth, processing rate, and rejection rate"
+
+  medium:
+    - id: "BACKPRESS-MED-001"
+      signal: "Drop policy without logging/metrics"
+      evidence_pattern: "DiscardPolicy|drop.*message(?!.*log|metric)"
+      remediation: "Log and emit metrics when messages are dropped for visibility"
+
+    - id: "BACKPRESS-MED-002"
+      signal: "Timeout too long for backpressure propagation"
+      evidence_pattern: "timeout.*[0-9]{2,}.*MINUTES|timeout.*3600"
+      remediation: "Use shorter timeouts to fail fast and propagate backpressure"
+
+  low:
+    - id: "BACKPRESS-LOW-001"
+      signal: "Buffered channel size not tuned"
+      evidence_pattern: "make\\(chan.*,\\s*100\\)|buffer.*=.*100"
+      remediation: "Tune buffer sizes based on measured throughput characteristics"
+
+  positive:
+    - id: "BACKPRESS-POS-001"
+      signal: "Proper reactive streams implementation"
+      evidence_pattern: "Flux|Mono|Observable|Publisher.*request"
+
+    - id: "BACKPRESS-POS-002"
+      signal: "Circuit breaker configured"
+      evidence_pattern: "CircuitBreaker|Resilience4j|Hystrix"
+
+    - id: "BACKPRESS-POS-003"
+      signal: "Bounded queue with rejection handler"
+      evidence_pattern: "ArrayBlockingQueue|CallerRunsPolicy|RejectedExecutionHandler"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map data flow"
+      description: |
+        Identify all producer-consumer relationships and async boundaries.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find queue usage"
+          command: "grep -rn 'Queue\\|Channel\\|Buffer\\|Stream' --include='*.java' --include='*.go' ."
+        - purpose: "Find async boundaries"
+          command: "grep -rn 'async\\|CompletableFuture\\|goroutine' --include='*.java' --include='*.go' ."
+      expected_findings:
+        - "Data flow diagram"
+        - "Async boundaries identified"
+
+    - id: "2"
+      name: "Check queue configurations"
+      description: |
+        Examine all queues for bounded size and rejection policies.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find queue configurations"
+          command: "grep -rn 'BlockingQueue\\|make.*chan' --include='*.java' --include='*.go' ."
+      expected_findings:
+        - "Queue size configurations"
+        - "Rejection/drop policies"
+
+    - id: "3"
+      name: "Verify flow control mechanisms"
+      description: |
+        Check for rate limiters, circuit breakers, and backpressure propagation.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find rate limiting"
+          command: "grep -rn 'RateLimiter\\|throttle\\|rate.*limit' --include='*.java' --include='*.go' ."
+        - purpose: "Find circuit breakers"
+          command: "grep -rn 'CircuitBreaker\\|circuit' --include='*.java' --include='*.go' ."
+      expected_findings:
+        - "Flow control mechanisms"
+        - "Gaps in protection"
+
+    - id: "4"
+      name: "Review monitoring"
+      description: |
+        Ensure queue depth and rejection rates are monitored.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find queue metrics"
+          command: "grep -rn 'queue.*size\\|queue.*depth\\|pending.*count' --include='*.java' --include='*.go' ."
+      expected_findings:
+        - "Monitoring coverage"
+        - "Alerting thresholds"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Data Flow Analysis"
+        - "Backpressure Mechanisms"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear unbounded queue or missing flow control in critical path"
+    medium: "Potential backpressure issue based on configuration"
+    low: "Possible improvement opportunity"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "reactive-streams"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires data flow analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "backpressure-001"
+    item: "No unbounded queues in critical paths"
+    level: "CRITICAL"
+    verification: "grep -rn 'LinkedBlockingQueue()' --include='*.java' . | wc -l"
+    expected: "0"
+
+  - id: "backpressure-002"
+    item: "External calls protected by circuit breakers"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms circuit breakers on external service calls"
+    expected: "Confirmed by reviewer"
+
+  - id: "backpressure-003"
+    item: "Queue depth metrics available"
+    level: "WARNING"
+    verification: "grep -rn 'queue.*metric\\|queue.*gauge' --include='*.java' --include='*.go' . | wc -l"
+    expected: "> 0"
+
+governance:
+  applicable_to:
+    archetypes: ["api", "service", "queue-consumer"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.concurrency-parallelism.worker-pool-sizing"
+    - "performance-efficiency.concurrency-parallelism.async-await-efficiency"

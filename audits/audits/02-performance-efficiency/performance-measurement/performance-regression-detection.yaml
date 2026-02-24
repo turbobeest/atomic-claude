@@ -1,0 +1,359 @@
+# ============================================================
+# AUDIT: Performance Regression Detection Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.performance-measurement.performance-regression-detection"
+  name: "Performance Regression Detection Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "performance-measurement"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "process"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the organization's capability to detect performance regressions
+    before they impact production users. Analyzes CI/CD pipeline integration
+    for performance testing, benchmark automation, alerting thresholds, and
+    the speed at which regressions are identified and attributed to specific
+    changes.
+
+  why_it_matters: |
+    Performance regressions accumulate silently until user experience degrades
+    significantly. Google's DORA research shows high-performing teams detect
+    regressions within hours while low performers take weeks. Early detection
+    (in CI) costs 10x less to fix than production detection. LinkedIn reduced
+    regression escape rate by 80% with automated performance gates.
+
+  when_to_run:
+    - "CI/CD pipeline reviews"
+    - "After regression incidents"
+    - "Process improvement initiatives"
+    - "Quarterly engineering reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "ci_config"
+      description: "CI/CD pipeline configuration"
+    - type: "testing_framework"
+      description: "Performance test suite configuration"
+
+  access_requirements:
+    - "CI/CD pipeline configuration access"
+    - "Performance test suite"
+    - "Alerting system configuration"
+
+discovery:
+  file_patterns:
+    - glob: "**/.github/workflows/*.yaml"
+      purpose: "GitHub Actions workflow configuration"
+    - glob: "**/Jenkinsfile"
+      purpose: "Jenkins pipeline configuration"
+    - glob: "**/*benchmark*"
+      purpose: "Benchmark configuration"
+    - glob: "**/*perf*.yaml"
+      purpose: "Performance test configuration"
+
+  code_patterns:
+    - pattern: "lighthouse|k6|artillery|gatling|locust"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find performance testing tools"
+    - pattern: "benchmark|perf-test|performance-test"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find performance test jobs"
+
+knowledge_sources:
+  guides:
+    - id: "dora-metrics"
+      name: "DORA Metrics - Accelerate"
+      url: "https://www.devops-research.com/research.html"
+      offline_cache: true
+    - id: "k6-ci"
+      name: "k6 CI/CD Integration"
+      url: "https://k6.io/docs/integrations/ci-cd-tools/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "accelerate-book"
+      title: "Accelerate: The Science of Lean Software"
+      type: "book"
+      reference: "Nicole Forsgren, Jez Humble, Gene Kim"
+
+tooling:
+  static_analysis:
+    - tool: "k6"
+      purpose: "Load testing in CI"
+      offline_capable: true
+    - tool: "lighthouse-ci"
+      purpose: "Frontend performance in CI"
+      offline_capable: false
+
+  scripts:
+    - id: "regression-detector"
+      language: "bash"
+      purpose: "Compare performance across commits"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Performance Regression Check ==="
+
+        # Run benchmark and compare to baseline
+        CURRENT=$(k6 run --out json=current.json script.js 2>/dev/null | grep 'http_req_duration' | jq '.avg')
+        BASELINE=$(cat baseline.json | jq '.http_req_duration.avg')
+
+        CHANGE=$(echo "scale=2; ($CURRENT - $BASELINE) / $BASELINE * 100" | bc)
+
+        if (( $(echo "$CHANGE > 10" | bc -l) )); then
+          echo "REGRESSION DETECTED: ${CHANGE}% slower"
+          exit 1
+        else
+          echo "PASS: ${CHANGE}% change (within threshold)"
+        fi
+
+signals:
+  critical:
+    - id: "REGRESS-CRIT-001"
+      signal: "No automated performance testing in CI/CD pipeline"
+      evidence_pattern: "CI config lacks performance test jobs"
+      explanation: |
+        Without CI performance tests, regressions are only detected after
+        reaching production. By then, the change may be buried under many
+        commits, making root cause analysis difficult. CI performance tests
+        catch issues when the change is fresh in the developer's mind.
+      remediation: "Add performance test stage to CI pipeline with pass/fail thresholds"
+
+    - id: "REGRESS-CRIT-002"
+      signal: "Performance alerts have no attribution to commits/deploys"
+      evidence_pattern: "Alerts lack deploy markers or commit correlation"
+      explanation: |
+        When performance degrades, teams need to quickly identify which
+        change caused it. Without deployment markers in metrics and alerts
+        correlating to commits, debugging becomes guesswork. This extends
+        MTTR significantly.
+      remediation: "Add deployment annotations to metrics, include commit SHA in alerts"
+
+  high:
+    - id: "REGRESS-HIGH-001"
+      signal: "Performance tests don't block PR merge"
+      evidence_pattern: "Performance jobs marked as allow_failure or non-required"
+      explanation: |
+        Performance tests that don't block merges are often ignored. When
+        deadlines loom, developers merge despite warnings. Blocking gates
+        force immediate attention and prevent regression accumulation.
+      remediation: "Configure performance tests as required checks for PR merge"
+
+    - id: "REGRESS-HIGH-002"
+      signal: "No baseline comparison in performance tests"
+      evidence_pattern: "Tests report absolute values without comparison"
+      explanation: |
+        Absolute values are hard to interpret without context. A p99 of 200ms
+        might be fine for one endpoint but terrible for another. Comparison
+        to baselines or previous runs makes regression detection automatic.
+      remediation: "Store and compare against historical baselines for each test"
+
+  medium:
+    - id: "REGRESS-MED-001"
+      signal: "Performance tests only run on main branch"
+      evidence_pattern: "Tests triggered only on merge, not on PR"
+      remediation: "Run performance tests on PR branches to catch issues before merge"
+
+    - id: "REGRESS-MED-002"
+      signal: "No alert deduplication for regression alerts"
+      evidence_pattern: "Multiple alerts for same regression event"
+      remediation: "Implement alert aggregation with clear incident creation"
+
+  low:
+    - id: "REGRESS-LOW-001"
+      signal: "Regression alerts lack runbook links"
+
+  positive:
+    - id: "REGRESS-POS-001"
+      signal: "Performance tests in CI with blocking gates"
+    - id: "REGRESS-POS-002"
+      signal: "Automatic baseline comparison with statistical significance"
+    - id: "REGRESS-POS-003"
+      signal: "Deploy annotations in metrics for correlation"
+    - id: "REGRESS-POS-004"
+      signal: "Regression alerts route to commit author"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Audit CI Pipeline Configuration"
+      description: |
+        Review CI/CD configuration for performance testing stages,
+        including when they run and whether they block deployment.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find CI configuration files"
+          command: "find . -name '*.yaml' -path '*/.github/*' -o -name 'Jenkinsfile' -o -name '.gitlab-ci.yml' | head -10"
+        - purpose: "Search for performance test jobs"
+          command: "grep -rn 'performance\\|benchmark\\|k6\\|lighthouse\\|load-test' --include='*.yaml' .github/ 2>/dev/null"
+        - purpose: "Check if jobs are required"
+          command: "grep -A10 'performance' .github/workflows/*.yaml 2>/dev/null | grep -E 'if:|continue-on-error'"
+
+      expected_findings:
+        - "Performance test job exists"
+        - "Job is required (blocking)"
+
+    - id: "2"
+      name: "Review Performance Test Configuration"
+      description: |
+        Examine performance test setup including thresholds,
+        baseline comparison, and test coverage.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find test configuration"
+          command: "find . -name '*k6*' -o -name '*lighthouse*' -o -name '*artillery*' | head -10"
+        - purpose: "Check for threshold definitions"
+          command: "grep -rn 'threshold\\|assertion\\|max.*ms\\|p99' --include='*.js' --include='*.yaml' tests/"
+        - purpose: "Find baseline storage"
+          command: "find . -name '*baseline*' -o -name '*benchmark*.json'"
+
+      expected_findings:
+        - "Defined thresholds for pass/fail"
+        - "Baseline comparison logic"
+
+    - id: "3"
+      name: "Verify Alerting Configuration"
+      description: |
+        Review alerting setup for performance degradation including
+        thresholds, routing, and incident creation.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find alert definitions"
+          command: "find . -name '*alert*' -o -name '*prometheus*rules*' | head -10"
+        - purpose: "Check for latency alerts"
+          command: "grep -rn 'latency\\|duration\\|response_time' --include='*.yaml' --include='*.rules' ."
+        - purpose: "Find deployment annotations"
+          command: "grep -rn 'annotation\\|deploy.*marker\\|event.*deploy' --include='*.yaml' ."
+
+      expected_findings:
+        - "Latency threshold alerts defined"
+        - "Deploy markers in metrics"
+
+    - id: "4"
+      name: "Test Regression Detection Workflow"
+      description: |
+        Verify the end-to-end workflow from code change to
+        regression detection works correctly.
+      duration_estimate: "40 min"
+
+      questions:
+        - "How long does it take to detect a 20% latency regression?"
+        - "Can you trace a regression to the specific commit?"
+        - "Are developers notified of regressions on their PRs?"
+        - "What is the mean time to detect (MTTD) for regressions?"
+
+      expected_findings:
+        - "Detection within hours, not days"
+        - "Clear commit attribution"
+        - "Developer notification workflow"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "CI/CD Integration Analysis"
+        - "Alerting Configuration Review"
+        - "Detection Workflow Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct CI/CD configuration review"
+    medium: "Partial configuration access"
+    low: "Interview-based assessment"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "dora-metrics"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive CI/CD review"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "regression-001"
+    item: "Performance tests exist in CI pipeline"
+    level: "CRITICAL"
+    verification: |
+      CI_PERF=$(grep -rn 'performance\|benchmark\|k6\|lighthouse' .github/workflows/*.yaml 2>/dev/null | wc -l)
+      if [ "$CI_PERF" -gt 0 ]; then echo "PASS"; else echo "FAIL: No performance tests in CI"; fi
+    expected: "PASS"
+
+  - id: "regression-002"
+    item: "Performance tests are required (blocking)"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify performance tests are required checks, not allow_failure"
+    expected: "Confirmed by reviewer"
+
+  - id: "regression-003"
+    item: "Baseline comparison implemented"
+    level: "BLOCKING"
+    verification: |
+      BASELINE=$(find . -name '*baseline*.json' -o -name '*benchmark*.json' | wc -l)
+      if [ "$BASELINE" -gt 0 ]; then echo "PASS"; else echo "FAIL: No baseline storage"; fi
+    expected: "PASS"
+
+  - id: "regression-004"
+    item: "Deploy markers in metrics for correlation"
+    level: "WARNING"
+    verification: |
+      MARKERS=$(grep -rn 'annotation\|deploy.*event' --include='*.yaml' . | wc -l)
+      if [ "$MARKERS" -gt 0 ]; then echo "PASS"; else echo "FAIL: No deploy markers"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.performance-measurement.performance-baseline"
+    - "performance-efficiency.performance-measurement.load-test-coverage"

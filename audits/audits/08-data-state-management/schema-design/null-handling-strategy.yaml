@@ -1,0 +1,284 @@
+audit:
+  id: data-state-management.schema-design.null-handling-strategy
+  name: Null Handling Strategy
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: data-state-management
+  category_number: 8
+  subcategory: schema-design
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: data
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates the strategy for handling null values across database
+    schemas and application code. It examines whether null semantics are
+    clearly defined, consistently applied, and properly handled in queries.
+    The audit identifies ambiguous null usage, missing null checks, and
+    null propagation issues.
+  why_it_matters: |
+    Inconsistent null handling is a leading cause of bugs and data quality
+    issues. Nulls can represent missing data, unknown values, or inapplicable
+    fields, and conflating these meanings causes confusion. Null propagation
+    in calculations corrupts results, and missing null checks cause runtime
+    errors. A clear null strategy prevents entire classes of bugs.
+  when_to_run:
+  - During database schema design
+  - When null-related bugs are discovered
+  - Before data integration projects
+  - During code quality reviews
+prerequisites:
+  required_artifacts:
+  - type: database-schema
+    description: Database schema with nullability definitions
+  - type: application-code
+    description: Application code handling database queries
+  access_requirements:
+  - Read access to database schemas
+  - Access to application query code
+  - Data quality documentation
+discovery:
+  code_patterns:
+  - pattern: IS NULL|IS NOT NULL|COALESCE|NULLIF|IFNULL
+    type: regex
+    scope: source
+    purpose: Identify null handling in queries
+  - pattern: 'NULL|nullable|Optional<|\?:'
+    type: regex
+    scope: source
+    purpose: Identify nullable fields and optional types
+  - pattern: NullPointerException|null check|\?\.|\.\?|!\.
+    type: regex
+    scope: source
+    purpose: Identify null safety patterns in code
+  file_patterns:
+  - glob: '**/migrations/**/*.sql'
+    purpose: Database migration files
+  - glob: '**/models/**/*'
+    purpose: ORM model definitions
+  - glob: '**/repositories/**/*'
+    purpose: Data access layer code
+knowledge_sources:
+  guides:
+  - id: null-handling-patterns
+    name: Null Handling Best Practices
+    url: https://www.postgresql.org/docs/current/functions-comparison.html
+    offline_cache: true
+  learning_resources:
+  - id: null-references-billion-dollar-mistake
+    title: 'Null References: The Billion Dollar Mistake'
+    type: article
+    reference: Tony Hoare, QCon 2009
+tooling:
+  static_analysis:
+  - tool: eslint-plugin-no-null
+    purpose: Detect null usage patterns in JavaScript/TypeScript
+    offline_capable: true
+  - tool: NullAway
+    purpose: Null safety analysis for Java
+    offline_capable: true
+  scripts:
+  - id: find-null-patterns
+    language: bash
+    purpose: Identify null handling patterns in codebase
+    source: inline
+    code: |
+      grep -riE '(IS NULL|COALESCE|NULLIF|\\?\\?|\\?\\.)' \
+        --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null
+signals:
+  critical:
+  - id: NULL-CRIT-001
+    signal: Null values used for multiple semantic meanings
+    evidence_pattern: Same nullable column representing both 'unknown' and 'not applicable'
+    explanation: |
+      Using null for multiple meanings (missing, unknown, N/A) creates
+      ambiguity that leads to incorrect business logic. When null means
+      different things in different contexts, code cannot handle it correctly.
+    remediation: Use separate columns or sentinel values to distinguish different null semantics
+  - id: NULL-CRIT-002
+    signal: Missing null checks in aggregation queries
+    explanation: |
+      Aggregation functions handle nulls differently (COUNT(*) vs COUNT(col)).
+      Missing null awareness leads to incorrect calculations. SUM of nulls
+      returns null, corrupting totals.
+    remediation: Use COALESCE, COUNT(column), or filter nulls explicitly in aggregations
+    evidence_description: SUM(), AVG(), COUNT(*) without null handling
+  high:
+  - id: NULL-HIGH-001
+    signal: Nullable columns without documented semantics
+    evidence_pattern: Nullable columns without comments explaining when null is valid
+    explanation: |
+      Without documented null semantics, developers must guess what null
+      means for each column. This leads to inconsistent handling and bugs
+      when assumptions differ.
+    remediation: Document null semantics for all nullable columns (when null is valid and what it means)
+  - id: NULL-HIGH-002
+    signal: Nullable foreign keys creating orphan potential
+    evidence_pattern: Foreign key columns with NULL allowed
+    explanation: |
+      Nullable foreign keys allow orphaned records and ambiguous
+      relationships. The null might mean 'no parent' or 'parent unknown',
+      and the difference matters for business logic.
+    remediation: Consider NOT NULL with default parent, or document nullable FK semantics clearly
+  medium:
+  - id: NULL-MED-001
+    signal: Inconsistent null handling across similar queries
+    evidence_pattern: Some queries use COALESCE, others don't for same column
+    remediation: Standardize null handling patterns in data access layer
+  - id: NULL-MED-002
+    signal: String columns using empty string and null interchangeably
+    evidence_pattern: WHERE col = '' OR col IS NULL or COALESCE(col, '')
+    remediation: Standardize on either null or empty string; don't mix meanings
+  low:
+  - id: NULL-LOW-001
+    signal: Excessive nullable columns in entity
+  positive:
+  - id: NULL-POS-001
+    signal: Clear null handling strategy with documented semantics
+  - id: NULL-POS-002
+    signal: Consistent use of null safety patterns (Optional, nullish coalescing)
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Nullability Inventory
+    description: |
+      Identify all nullable columns and their purposes, documenting
+      where null is allowed and what it means.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find nullable columns (missing NOT NULL)
+      command: grep -riE '^\s+\w+\s+(VARCHAR|TEXT|INT|INTEGER|BIGINT|TIMESTAMP|DATE)' --include='*.sql'
+        . 2>/dev/null | grep -v 'NOT NULL' | head -50
+    - purpose: Find explicitly nullable fields
+      command: grep -riE 'NULL|nullable.*true|\?:|Optional' --include='*.sql' --include='*.prisma' --include='*.ts'
+        --include='*.java' . 2>/dev/null | head -50
+    - purpose: Find NOT NULL columns for comparison
+      command: grep -riE 'NOT NULL' --include='*.sql' --include='*.prisma' . 2>/dev/null | wc -l
+    expected_findings:
+    - Nullable column inventory
+    - Ratio of nullable to non-nullable columns
+  - id: '2'
+    name: Null Handling Pattern Analysis
+    description: |
+      Identify how null values are handled in queries and
+      application code.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find COALESCE usage
+      command: grep -riE 'COALESCE|IFNULL|NVL|ISNULL\(' --include='*.sql' --include='*.ts' --include='*.py'
+        . 2>/dev/null | head -30
+    - purpose: Find IS NULL checks
+      command: grep -riE 'IS NULL|IS NOT NULL' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null
+        | head -40
+    - purpose: Find nullish coalescing in code
+      command: grep -riE '\?\?|\?\.|!\.' --include='*.ts' --include='*.js' . 2>/dev/null | head -30
+    expected_findings:
+    - Null handling patterns in use
+    - Consistency of null handling
+  - id: '3'
+    name: Aggregation Query Analysis
+    description: |
+      Review aggregation queries for proper null handling
+      to prevent calculation errors.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find aggregation functions
+      command: grep -riE '(SUM|AVG|COUNT|MIN|MAX)\s*\(' --include='*.sql' --include='*.ts' --include='*.py'
+        . 2>/dev/null | head -40
+    - purpose: Check for null handling in aggregations
+      command: grep -riE '(SUM|AVG).*COALESCE|(SUM|AVG).*NULLIF' --include='*.sql' --include='*.ts' .
+        2>/dev/null | head -20
+    expected_findings:
+    - Aggregation query null handling
+    - Potential calculation errors
+  - id: '4'
+    name: Semantic Analysis
+    description: |
+      Analyze whether null semantics are documented and
+      consistently applied.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find null-related comments
+      command: grep -riE '(--|/\*|#|//).*null' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null
+        | head -30
+    - purpose: Find documentation about null handling
+      command: find . -name '*.md' -exec grep -l -i 'null' {} \; 2>/dev/null | head -10
+    expected_findings:
+    - Documented null semantics
+    - Documentation gaps
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Nullability Inventory
+    - Handling Pattern Analysis
+    - Semantic Clarity Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Clear evidence of inconsistent null handling or missing checks
+    medium: Patterns suggest issues, semantic verification needed
+    low: Potential issues based on nullable column prevalence
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: null-handling-patterns
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed semantic analysis
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: null-001
+  item: Nullable columns inventoried with purposes
+  level: CRITICAL
+  verification: grep -riE 'NULL|nullable' --include='*.sql' --include='*.prisma' . 2>/dev/null | wc -l
+    | xargs -I{} echo PASS
+  expected: PASS
+- id: null-002
+  item: Null handling patterns identified in queries
+  level: BLOCKING
+  verification: grep -riE 'COALESCE|IS NULL|IFNULL' --include='*.sql' --include='*.ts' . 2>/dev/null |
+    wc -l | xargs -I{} echo PASS
+  expected: PASS
+- id: null-003
+  item: Null semantics documented for nullable columns
+  level: WARNING
+  verification: manual
+  verification_notes: Reviewer should verify nullable columns have documented semantics
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: Data Quality Standards
+    controls:
+    - DQ-006
+    - DQ-007
+relationships:
+  commonly_combined:
+  - data-state-management.schema-design.constraint-definition
+  - data-state-management.schema-design.data-modeling-quality

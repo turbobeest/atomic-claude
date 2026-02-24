@@ -1,0 +1,269 @@
+audit:
+  id: performance-efficiency.latency.api-response-time
+  name: API Response Time Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: latency
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures the time taken by API endpoints to process
+    requests and return responses. It examines server-side processing
+    time excluding network latency, focusing on application performance.
+    The audit analyzes response time distributions, identifies slow
+    endpoints, and verifies compliance with API SLOs.
+  why_it_matters: |
+    API response time is a key indicator of application health and
+    directly affects user experience. Slow APIs cause poor frontend
+    performance, timeout errors in client applications, and can trigger
+    cascading failures in microservices architectures. Fast, consistent
+    API response times are essential for building reliable systems.
+  when_to_run:
+  - After API changes or new endpoint deployment
+  - During performance regression testing
+  - When investigating user-reported slowness
+  - As part of regular SLO compliance reviews
+prerequisites:
+  required_artifacts:
+  - type: api_endpoints
+    description: List of API endpoints to audit
+  - type: metrics_system
+    description: Prometheus/metrics collection for response time histograms
+  access_requirements:
+  - Network access to API endpoints
+  - Read access to API metrics dashboards
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: http_server_request_duration_seconds_bucket
+    purpose: Verify response time metrics are being collected
+    threshold: Metrics present for all endpoints
+  - system: Prometheus
+    query: |
+      topk(10,
+        histogram_quantile(0.95,
+          sum(rate(http_server_request_duration_seconds_bucket[5m])) by (le, handler)
+        )
+      )
+    purpose: Identify slowest endpoints by P95
+    threshold: < 500ms for most endpoints
+  file_patterns:
+  - glob: '**/openapi*.yaml'
+    purpose: Identify documented API endpoints
+  - glob: '**/swagger*.json'
+    purpose: Find API specifications
+knowledge_sources:
+  guides:
+  - id: aws-api-gateway-best-practices
+    name: AWS API Gateway Performance Best Practices
+    url: https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-performance.html
+    offline_cache: true
+  - id: google-api-design
+    name: Google API Design Guide
+    url: https://cloud.google.com/apis/design
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Measure individual endpoint response time
+    command: |
+      curl -w "DNS: %{time_namelookup}s, Connect: %{time_connect}s, TTFB: %{time_starttransfer}s, Total: %{time_total}s\n" \
+        -o /dev/null -s https://api.example.com/v1/users
+  - tool: hey
+    purpose: Load test API endpoint
+    command: hey -n 1000 -c 20 -m GET https://api.example.com/v1/users
+  - tool: ab
+    purpose: Apache Bench for concurrent request testing
+    command: ab -n 1000 -c 50 https://api.example.com/v1/users
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.99,
+        sum(rate(http_server_request_duration_seconds_bucket{handler=~\"/api/.*\"}[5m])) by (le, handler, method)
+      )
+    purpose: P99 response time by API endpoint and method
+signals:
+  critical:
+  - id: API-CRIT-001
+    signal: API endpoint P99 response time exceeds 10 seconds
+    evidence_threshold: P99 > 10s
+    explanation: |
+      Response times this high will cause client timeouts, user
+      abandonment, and likely indicate a severe performance issue
+      such as database deadlocks or infinite loops.
+    remediation: Immediate investigation; consider taking endpoint offline if causing cascading failures
+  - id: API-CRIT-002
+    signal: No response time metrics collected for API endpoints
+    evidence_indicators:
+    - http_server_request_duration metric missing
+    - No latency data in APM system
+    explanation: |
+      Without response time metrics, performance degradation goes
+      undetected until users report issues. This is a critical
+      observability gap.
+    remediation: Implement middleware/instrumentation to capture response times
+  high:
+  - id: API-HIGH-001
+    signal: P95 response time exceeds 1 second for frequently-used endpoints
+    evidence_threshold: P95 > 1s AND request_rate > 10/min
+    explanation: |
+      High-traffic endpoints with slow response times significantly
+      impact overall user experience and system resource consumption.
+    remediation: Profile endpoint performance; optimize database queries, add caching
+  - id: API-HIGH-002
+    signal: Response time variance exceeds 5x between P50 and P99
+    evidence_threshold: P99/P50 > 5
+    explanation: |
+      High variance indicates inconsistent performance, often caused
+      by cold caches, GC pauses, or periodic batch operations
+      impacting API performance.
+    remediation: Investigate tail latency causes; implement cache warming
+  medium:
+  - id: API-MED-001
+    signal: No response time SLOs defined for API endpoints
+    remediation: Define SLOs based on endpoint criticality and user expectations
+  - id: API-MED-002
+    signal: Response time metrics not labeled by endpoint
+    remediation: Add handler/endpoint labels to metrics for granular analysis
+  low:
+  - id: API-LOW-001
+    signal: Response time percentiles not visualized in dashboards
+  positive:
+  - id: API-POS-001
+    signal: All endpoints meeting P99 < 200ms SLO
+  - id: API-POS-002
+    signal: Response time metrics include method, status code, and endpoint labels
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Enumerate API Endpoints
+    description: |
+      Identify all API endpoints to be audited from documentation,
+      code, or traffic analysis.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find API routes in codebase
+      command: grep -rn '@app.route\|@router\|@GetMapping\|@PostMapping' --include='*.py' --include='*.java'
+        .
+    - purpose: Check for OpenAPI specification
+      command: find . -name 'openapi*.yaml' -o -name 'swagger*.json' 2>/dev/null | head -5
+    expected_findings:
+    - List of all API endpoints
+    - API specification if available
+  - id: '2'
+    name: Measure Current Response Times
+    description: |
+      Run load tests against identified endpoints to measure
+      response time distributions.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Quick single-request measurement
+      command: curl -w '%{time_total}' -o /dev/null -s https://api.example.com/health
+    - purpose: Load test critical endpoint
+      command: hey -n 500 -c 10 -m GET https://api.example.com/v1/resource
+    expected_findings:
+    - P50, P95, P99 response times for each endpoint
+    - Error rates under load
+  - id: '3'
+    name: Analyze Slow Endpoints
+    description: |
+      For endpoints exceeding SLOs, analyze the causes of slow
+      response times.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query slowest endpoints from Prometheus
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=topk(5,histogram_quantile(0.95,sum(rate(http_server_request_duration_seconds_bucket[5m]))by(le,handler)))'
+    expected_findings:
+    - Identification of slowest endpoints
+    - Root cause indicators (DB, external calls, computation)
+  - id: '4'
+    name: Verify SLO Compliance
+    description: |
+      Compare measured response times against defined SLOs and
+      document compliance status.
+    duration_estimate: 10 min
+    questions:
+    - What are the response time SLOs for each endpoint tier?
+    - What percentage of requests are meeting SLOs?
+    - Are there alerting rules for SLO violations?
+    expected_findings:
+    - SLO compliance percentage per endpoint
+    - Alerting configuration status
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Endpoint Response Time Analysis
+    - SLO Compliance Status
+    - Recommendations
+  confidence_guidance:
+    high: Load test results with >500 requests per endpoint
+    medium: Sample measurements with <100 requests
+    low: Single-request measurements only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-api-design
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: api-response-001
+  item: Response time metrics are being collected for all API endpoints
+  level: CRITICAL
+  verification: curl -s http://prometheus:9090/api/v1/label/handler/values | jq 'length > 0'
+  expected: 'true'
+- id: api-response-002
+  item: P99 response time under 1 second for all endpoints
+  level: BLOCKING
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(http_server_request_duration_seconds_bucket[5m]))by(le))' | \
+      jq '.data.result[0].value[1] | tonumber < 1'
+  threshold: < 1.0s
+- id: api-response-003
+  item: Response time SLOs are documented
+  level: WARNING
+  verification: manual
+  verification_notes: Review API documentation for SLO definitions
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - api-service
+    - microservice
+    - backend
+relationships:
+  commonly_combined:
+  - performance-efficiency.latency.end-to-end-latency
+  - performance-efficiency.latency.percentile-latency

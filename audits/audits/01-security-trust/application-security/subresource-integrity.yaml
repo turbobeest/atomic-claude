@@ -1,0 +1,387 @@
+audit:
+  id: security-trust.application-security.subresource-integrity
+  name: Subresource Integrity Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: application-security
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines Subresource Integrity (SRI) implementation for
+    external resources loaded from CDNs and third-party sources. It verifies
+    that scripts and stylesheets include integrity attributes with valid
+    cryptographic hashes and proper crossorigin attributes.
+  why_it_matters: |
+    SRI protects against compromised CDNs and third-party script injection.
+    The Magecart attacks demonstrated real-world impact of CDN compromise.
+    Without SRI, if a CDN is breached, attackers can inject malicious code
+    into all sites using that resource. SRI ensures browsers only execute
+    resources matching expected hashes, providing supply chain security.
+  when_to_run:
+  - New external resource additions
+  - Security assessment
+  - After dependency updates
+  - Third-party library audits
+  - Compliance reviews
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: HTML/template files with script/link tags
+  - type: dependency_list
+    description: List of external CDN resources
+  access_requirements:
+  - Source code access
+  - Running application for verification
+discovery:
+  code_patterns:
+  - pattern: <script.*src=.*cdn|<link.*href=.*cdn
+    type: regex
+    scope: source
+    purpose: Identify CDN resource loads
+  - pattern: integrity=|integrity =
+    type: regex
+    scope: source
+    purpose: Identify SRI implementation
+  - pattern: crossorigin=|crossorigin =
+    type: regex
+    scope: source
+    purpose: Identify CORS attribute for SRI
+  file_patterns:
+  - glob: '**/*.html'
+    purpose: HTML files with resource includes
+  - glob: '**/index.html'
+    purpose: Main HTML entry points
+  - glob: '**/*.hbs'
+    purpose: Handlebars templates
+  - glob: '**/*.ejs'
+    purpose: EJS templates
+knowledge_sources:
+  specifications:
+  - id: sri-spec
+    name: W3C Subresource Integrity Specification
+    url: https://www.w3.org/TR/SRI/
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-sri
+    name: OWASP Subresource Integrity
+    url: https://owasp.org/www-community/controls/SubresourceIntegrity
+    offline_cache: true
+  - id: mdn-sri
+    name: MDN Subresource Integrity
+    url: https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity
+    offline_cache: true
+  - id: owasp-3rdparty-js
+    name: OWASP Third Party JavaScript Management
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Third_Party_Javascript_Management_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: grep
+    purpose: Find external resources without SRI
+    offline_capable: true
+  scripts:
+  - id: sri-checker
+    language: bash
+    purpose: Find CDN resources missing SRI
+    source: inline
+    code: |
+      #!/bin/bash
+      # Find script tags with CDN URLs missing integrity
+      grep -rn '<script.*src=.*https://' "$1" | \
+        grep -v 'integrity=' | \
+        grep -E 'cdn|unpkg|jsdelivr|cloudflare|googleapis'
+      # Find link tags with CDN URLs missing integrity
+      grep -rn '<link.*href=.*https://' "$1" | \
+        grep -v 'integrity=' | \
+        grep -E 'cdn|unpkg|jsdelivr|cloudflare|googleapis'
+  - id: sri-generator
+    language: bash
+    purpose: Generate SRI hash for URL
+    source: inline
+    code: |
+      #!/bin/bash
+      URL=$1
+      curl -s "$URL" | openssl dgst -sha384 -binary | openssl base64 -A
+      echo
+signals:
+  critical:
+  - id: SRI-CRIT-001
+    signal: External scripts without SRI
+    cwe_id: CWE-830
+    evidence_pattern: <script.*src=.*https://.*(?!.*integrity)
+    explanation: |
+      Scripts loaded from external CDNs without SRI can be modified by
+      attackers who compromise the CDN. This enables script injection
+      affecting all users of the application.
+    remediation: Add integrity attribute with SHA-384 or SHA-512 hash
+  - id: SRI-CRIT-002
+    signal: Payment/sensitive scripts without SRI
+    cwe_id: CWE-830
+    evidence_indicators:
+    - Payment library without SRI
+    - Analytics script without SRI
+    - Authentication library without SRI
+    explanation: |
+      Payment, analytics, and auth scripts handle sensitive data. CDN
+      compromise of these scripts has maximum impact, as seen in
+      Magecart attacks.
+    remediation: Prioritize SRI for all sensitive third-party scripts
+  high:
+  - id: SRI-HIGH-001
+    signal: Missing crossorigin attribute with SRI
+    cwe_id: CWE-830
+    evidence_pattern: integrity=.*(?!.*crossorigin)
+    explanation: |
+      SRI requires the crossorigin attribute to be set for cross-origin
+      resources. Without it, the integrity check may not be performed
+      correctly.
+    remediation: Add crossorigin="anonymous" to all SRI-enabled external resources
+  - id: SRI-HIGH-002
+    signal: Weak hash algorithm (SHA-256)
+    cwe_id: CWE-328
+    evidence_pattern: integrity.*sha256
+    explanation: |
+      While SHA-256 is still secure, SHA-384 or SHA-512 are recommended
+      for better collision resistance. OWASP recommends SHA-384 minimum.
+    remediation: Upgrade to SHA-384 or SHA-512 hashes
+  - id: SRI-HIGH-003
+    signal: External stylesheets without SRI
+    cwe_id: CWE-830
+    evidence_pattern: <link.*href=.*https://.*(?!.*integrity)
+    explanation: |
+      Stylesheets can execute scripts via CSS injection techniques.
+      CDN compromise of stylesheets can enable data exfiltration.
+    remediation: Add integrity attribute to external stylesheets
+  medium:
+  - id: SRI-MED-001
+    signal: SRI not enforced by CSP
+    cwe_id: CWE-16
+    evidence_indicators:
+    - SRI used but CSP doesn't require it
+    - No require-sri-for directive
+    explanation: |
+      CSP can enforce SRI via require-sri-for directive. Without this,
+      resources without SRI will still load, reducing effectiveness.
+    remediation: 'Add require-sri-for script style to CSP (Note: deprecated, use as defense in depth)'
+  - id: SRI-MED-002
+    signal: Self-hosted scripts from untrusted build
+    cwe_id: CWE-830
+    evidence_indicators:
+    - Minified scripts without source verification
+    - Scripts copied from CDN without hash verification
+    - No build integrity verification
+    explanation: |
+      Even self-hosted scripts should have integrity verification in
+      the build process to detect supply chain attacks during build.
+    remediation: Implement integrity verification in CI/CD pipeline
+  - id: SRI-MED-003
+    signal: Dynamic script loading without SRI
+    cwe_id: CWE-830
+    evidence_pattern: createElement.*script|appendChild.*script
+    explanation: |
+      Dynamically loaded scripts often bypass SRI. If scripts are loaded
+      via JavaScript, SRI must be set programmatically.
+    remediation: Set integrity attribute when dynamically loading scripts
+  low:
+  - id: SRI-LOW-001
+    signal: SRI hash outdated after dependency update
+    evidence_indicators:
+    - Script version changed but hash same
+    - SRI causing load failures
+    explanation: |
+      SRI hashes must be updated when dependencies are updated. Outdated
+      hashes will cause resources to fail to load.
+    remediation: Update SRI hashes in dependency update process
+  positive:
+  - id: SRI-POS-001
+    signal: All external scripts have SRI with SHA-384+
+    explanation: Comprehensive SRI protection for supply chain security
+  - id: SRI-POS-002
+    signal: SRI verification in CI/CD pipeline
+    explanation: Automated verification of SRI hashes during builds
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify External Resources
+    description: |
+      Find all scripts and stylesheets loaded from external sources
+      including CDNs, third-party services, and external domains.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find external script tags
+      command: grep -rn '<script.*src=.*https://' src/ templates/ public/
+    - purpose: Find external link tags
+      command: grep -rn '<link.*href=.*https://' src/ templates/ public/
+    - purpose: Find dynamically loaded scripts
+      command: grep -rn 'createElement.*script' src/
+    expected_findings:
+    - List of all external resources
+    - CDN and third-party sources
+  - id: '2'
+    name: Check SRI Implementation
+    description: |
+      Verify that external resources have integrity attributes with
+      proper hash values.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find resources without SRI
+      command: grep -rn '<script.*src=.*https://' src/ | grep -v 'integrity='
+    - purpose: Check crossorigin attribute
+      command: grep -rn 'integrity=' src/ | grep -v 'crossorigin='
+    - purpose: Check hash algorithm
+      command: grep -rn 'integrity=' src/ | grep -oE 'sha(256|384|512)'
+    expected_findings:
+    - Resources missing SRI
+    - Missing crossorigin attributes
+    - Hash algorithms used
+  - id: '3'
+    name: Validate SRI Hashes
+    description: |
+      Verify that SRI hashes are correct by regenerating and comparing.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Generate hash for a resource
+      command: curl -s 'https://cdn.example.com/lib.js' | openssl dgst -sha384 -binary | openssl base64
+        -A
+    - purpose: Use SRI Hash Generator
+      command: echo 'Visit https://www.srihash.org/ to generate hashes'
+    expected_findings:
+    - Hash validation results
+    - Mismatched or outdated hashes
+  - id: '4'
+    name: Test SRI Enforcement
+    description: |
+      Verify that the browser actually blocks resources with invalid
+      hashes.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Open browser console and check for SRI errors
+      command: echo 'Open DevTools > Console > Look for SRI violation messages'
+    - purpose: Test with modified hash (should fail)
+      command: echo 'Temporarily modify a hash and verify resource fails to load'
+    expected_findings:
+    - Browser enforces SRI
+    - Invalid hashes blocked
+  - id: '5'
+    name: Review CSP Integration
+    description: |
+      Check if CSP is configured to require or support SRI.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check CSP for SRI directives
+      command: curl -sI https://target | grep -i 'content-security-policy' | grep -o 'require-sri-for'
+    expected_findings:
+    - CSP SRI requirements
+    - Integration status
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - External Resource Inventory
+    - SRI Coverage Analysis
+    - Recommendations
+  confidence_guidance:
+    high: All resources verified, hashes validated
+    medium: Resources identified, some hashes not verified
+    low: Based on source code grep only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-sri
+      priority: required
+    - source_id: mdn-sri
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: SRI audit requires resource inventory
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: sri-001
+  item: All external scripts have integrity attribute
+  level: CRITICAL
+  verification: grep -rn '<script.*src=.*https://' src/ templates/ 2>/dev/null | grep -v 'integrity='
+    | wc -l | grep -q '^0' && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: sri-002
+  item: All SRI resources have crossorigin attribute
+  level: BLOCKING
+  verification: grep -rn 'integrity=' src/ templates/ 2>/dev/null | grep -v 'crossorigin=' | wc -l | grep
+    -q '^0' && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: sri-003
+  item: External stylesheets have SRI
+  level: BLOCKING
+  verification: grep -rn '<link.*href=.*https://.*\.css' src/ templates/ 2>/dev/null | grep -v 'integrity='
+    | wc -l | grep -q '^0' && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: sri-004
+  item: SHA-384 or SHA-512 used
+  level: WARNING
+  verification: grep -rn 'integrity=' src/ templates/ 2>/dev/null | grep -qE 'sha(384|512)' && echo 'PASS'
+    || echo 'FAIL'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP-ASVS
+    controls:
+    - 14.2.3
+  - framework: PCI-DSS
+    controls:
+    - 6.5.6
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-6
+relationships:
+  commonly_combined:
+  - security-trust.application-security.content-security-policy
+  - security-trust.application-security.security-headers

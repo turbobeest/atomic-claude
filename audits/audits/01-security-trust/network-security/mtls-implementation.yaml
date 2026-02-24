@@ -1,0 +1,442 @@
+audit:
+  id: security-trust.network-security.mtls-implementation
+  name: mTLS Implementation Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: network-security
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines mutual TLS (mTLS) implementation for service-to-service
+    authentication. It evaluates certificate authority design, certificate
+    lifecycle management, trust boundary configuration, and integration with
+    service meshes. The audit covers both infrastructure-level mTLS and
+    application-level client certificate authentication.
+  why_it_matters: |
+    mTLS is foundational to zero trust architectures, providing bidirectional
+    authentication that prevents man-in-the-middle attacks and unauthorized
+    service access. In microservices environments, mTLS ensures that only
+    authorized services can communicate. Without proper mTLS, compromised
+    services can impersonate other services or intercept traffic between
+    legitimate services.
+  when_to_run:
+  - Zero trust implementation
+  - Service mesh deployment
+  - Microservices architecture review
+  - After PKI changes
+  - Annual security review
+prerequisites:
+  required_artifacts:
+  - type: service_inventory
+    description: List of services requiring mTLS
+  - type: pki_documentation
+    description: Certificate authority and PKI documentation
+  - type: network_diagram
+    description: Service communication patterns
+  access_requirements:
+  - Certificate authority access
+  - Service mesh configuration access
+  - Service configuration access
+  - Network policy access
+discovery:
+  code_patterns:
+  - pattern: clientAuth|client.?certificate|mutual.?tls|mtls
+    type: regex
+    scope: config
+    purpose: Identify mTLS configurations
+  - pattern: ssl_verify_client|SSLVerifyClient|verify.?peer
+    type: regex
+    scope: config
+    purpose: Identify client certificate verification settings
+  - pattern: PeerAuthentication|DestinationRule|ClientTLSSettings
+    type: regex
+    scope: config
+    purpose: Identify Istio mTLS configurations
+  file_patterns:
+  - glob: '**/peer-authentication*.yaml'
+    purpose: Istio PeerAuthentication resources
+  - glob: '**/destination-rule*.yaml'
+    purpose: Istio DestinationRule resources
+  - glob: '**/ssl/*.conf'
+    purpose: SSL/TLS server configurations
+  - glob: '**/ca/*.pem'
+    purpose: Certificate authority files
+knowledge_sources:
+  specifications:
+  - id: nist-sp-800-207
+    name: NIST SP 800-207 - Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-network-infrastructure
+    name: NSA Network Infrastructure Security Guide
+    url: https://media.defense.gov/2022/Jun/15/2003018261/-1/-1/0/CTR_NSA_NETWORK_INFRASTRUCTURE_SECURITY_GUIDE_20220615.PDF
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: cloudflare-mtls
+    name: Cloudflare mTLS Guide
+    url: https://www.cloudflare.com/learning/access-management/what-is-mutual-tls/
+    offline_cache: true
+  - id: istio-mtls
+    name: Istio Security - mTLS
+    url: https://istio.io/latest/docs/concepts/security/
+    offline_cache: true
+  - id: ejbca-mtls-zerotrust
+    name: Understanding mTLS and Zero Trust
+    url: https://www.ejbca.org/resources/understanding-mtls-and-its-role-in-zero-trust-security/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: openssl
+    purpose: Test mTLS connections
+    command: openssl s_client -connect host:443 -cert client.pem -key client-key.pem
+  - tool: istioctl
+    purpose: Analyze Istio mTLS configuration
+    command: istioctl analyze
+  - tool: curl
+    purpose: Test mTLS endpoint
+    command: curl --cert client.pem --key client-key.pem https://service:443
+  scripts:
+  - id: mtls-connectivity-test
+    language: bash
+    purpose: Test mTLS connectivity between services
+    source: inline
+    code: |
+      #!/bin/bash
+      # Test mTLS connection with client certificate
+      openssl s_client -connect $1:443 \
+        -cert /path/to/client.pem \
+        -key /path/to/client-key.pem \
+        -CAfile /path/to/ca.pem \
+        -verify_return_error 2>&1 | \
+        grep -E 'Verify return code|SSL-Session'
+signals:
+  critical:
+  - id: MTLS-CRIT-001
+    signal: mTLS disabled or optional for service-to-service communication
+    cwe_id: CWE-295
+    evidence_pattern: mtls.*DISABLE|mode.*PERMISSIVE|ssl_verify_client.*off
+    explanation: |
+      Optional or disabled mTLS allows services to communicate without
+      mutual authentication. Attackers can impersonate services or
+      intercept traffic. Zero trust requires mTLS in STRICT mode.
+    remediation: Enable mTLS in STRICT mode for all service-to-service communication
+  - id: MTLS-CRIT-002
+    signal: Self-signed certificates used in production
+    cwe_id: CWE-295
+    evidence_indicators:
+    - Self-signed certificates without proper CA
+    - No certificate chain validation
+    - Trust all certificates
+    explanation: |
+      Self-signed certificates without proper PKI infrastructure cannot
+      be properly validated. Any attacker can generate matching certificates
+      to impersonate services.
+    remediation: Implement proper PKI with internal CA; all certificates signed by trusted CA
+  - id: MTLS-CRIT-003
+    signal: Weak certificate validation
+    cwe_id: CWE-295
+    evidence_pattern: verify.*none|insecure|skip.?verify|ssl_verify_depth.*0
+    explanation: |
+      Disabling certificate validation or accepting any certificate
+      completely negates the security benefits of mTLS. Man-in-the-middle
+      attacks become trivial.
+    remediation: Enable strict certificate validation with proper chain verification
+  high:
+  - id: MTLS-HIGH-001
+    signal: Certificate rotation not automated
+    cwe_id: CWE-324
+    evidence_indicators:
+    - Manual certificate deployment process
+    - Certificates with long validity (>1 year)
+    - No certificate management system
+    explanation: |
+      Manual certificate rotation is error-prone and often delayed.
+      Long-lived certificates increase the window of opportunity if
+      a certificate is compromised.
+    remediation: Implement automated certificate rotation (e.g., cert-manager, Vault)
+  - id: MTLS-HIGH-002
+    signal: No certificate revocation checking
+    cwe_id: CWE-299
+    evidence_indicators:
+    - OCSP checking disabled
+    - CRL not configured
+    - No revocation infrastructure
+    explanation: |
+      Without revocation checking, compromised certificates remain valid
+      until expiration. This extends the attack window significantly.
+    remediation: Configure OCSP stapling or CRL distribution points
+  - id: MTLS-HIGH-003
+    signal: Root CA private key not protected
+    cwe_id: CWE-522
+    evidence_indicators:
+    - Root CA key stored in plain files
+    - No HSM for root CA
+    - Root CA key accessible to multiple administrators
+    explanation: |
+      Compromise of the root CA private key allows attackers to issue
+      certificates for any service. Root CA keys require maximum protection.
+    remediation: Store root CA key in HSM; use offline root CA with intermediate CAs
+  - id: MTLS-HIGH-004
+    signal: Single trust domain for all services
+    cwe_id: CWE-284
+    evidence_indicators:
+    - All services trust the same CA
+    - No service-level trust boundaries
+    - Any valid certificate accepted by all services
+    explanation: |
+      A single trust domain means any compromised service can communicate
+      with any other service. Trust boundaries should limit blast radius.
+    remediation: Implement trust domains with separate CAs or certificate constraints
+  medium:
+  - id: MTLS-MED-001
+    signal: Certificate common name not validated
+    cwe_id: CWE-295
+    evidence_indicators:
+    - CN/SAN validation disabled
+    - Any valid certificate accepted regardless of identity
+    explanation: |
+      Without identity validation, any client with a valid certificate
+      can access any service, defeating the purpose of service-specific
+      authentication.
+    remediation: Validate certificate CN/SAN matches expected service identity
+  - id: MTLS-MED-002
+    signal: No certificate pinning for critical services
+    cwe_id: CWE-295
+    evidence_indicators:
+    - Trust entire CA for critical connections
+    - No SPIFFE/SPIRE integration
+    explanation: |
+      Certificate pinning provides additional protection for critical
+      services by limiting accepted certificates beyond CA trust.
+    remediation: Implement certificate pinning for high-value service connections
+  - id: MTLS-MED-003
+    signal: mTLS not enforced at network policy level
+    evidence_indicators:
+    - Network allows plaintext between pods
+    - No NetworkPolicy enforcing encrypted traffic
+    - mTLS only at application layer
+    explanation: |
+      Application-level mTLS can be bypassed if network policies don't
+      enforce encryption. Defense in depth requires network-level enforcement.
+    remediation: Implement network policies that deny non-mTLS traffic
+  low:
+  - id: MTLS-LOW-001
+    signal: Certificate monitoring not implemented
+    evidence_indicators:
+    - No alerting for certificate expiration
+    - No visibility into certificate inventory
+    explanation: |
+      Without monitoring, certificate issues may not be detected until
+      they cause service outages.
+    remediation: Implement certificate monitoring and expiration alerts
+  positive:
+  - id: MTLS-POS-001
+    signal: STRICT mTLS mode enabled cluster-wide
+    explanation: Mandatory mTLS ensures all service communication is authenticated
+  - id: MTLS-POS-002
+    signal: Automated certificate rotation with short validity
+    explanation: Short-lived certificates with automatic rotation minimize compromise window
+  - id: MTLS-POS-003
+    signal: SPIFFE/SPIRE identity management
+    explanation: Workload identity with SPIFFE provides strong service authentication
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory mTLS-Protected Services
+    description: |
+      Document all services that should be protected by mTLS and their
+      current mTLS configuration status.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List Istio PeerAuthentication policies
+      command: kubectl get peerauthentication --all-namespaces -o yaml
+    - purpose: Check mTLS mode in Istio
+      command: istioctl proxy-config cluster -n default svc/productpage --direction outbound
+    expected_findings:
+    - Service inventory with mTLS status
+    - Services without mTLS protection
+  - id: '2'
+    name: Review PKI Architecture
+    description: |
+      Examine the certificate authority hierarchy, trust boundaries,
+      and certificate issuance process.
+    duration_estimate: 30 min
+    commands:
+    - purpose: View Istio CA certificate
+      command: kubectl get secret istio-ca-secret -n istio-system -o yaml
+    - purpose: List cert-manager certificates
+      command: kubectl get certificates --all-namespaces
+    - purpose: Check certificate chain
+      command: openssl s_client -connect service:443 -showcerts
+    expected_findings:
+    - CA hierarchy documentation
+    - Trust boundary mapping
+  - id: '3'
+    name: Test mTLS Enforcement
+    description: |
+      Verify that mTLS is enforced in STRICT mode and plaintext connections
+      are rejected.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test plaintext connection (should fail)
+      command: curl -v http://service.default:80 2>&1 | grep -E 'reset|refused|error'
+    - purpose: Test mTLS connection (should succeed)
+      command: curl --cacert ca.pem --cert client.pem --key key.pem https://service:443
+    - purpose: Check for PERMISSIVE mode
+      command: kubectl get peerauthentication -A -o yaml | grep -A5 'mtls:' | grep mode
+    expected_findings:
+    - Plaintext connections rejected
+    - mTLS connections successful
+    - No PERMISSIVE mode policies
+  - id: '4'
+    name: Validate Certificate Properties
+    description: |
+      Check certificate validity periods, key sizes, signature algorithms,
+      and extension configurations.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check certificate details
+      command: openssl x509 -in cert.pem -noout -text | grep -E 'Not|Signature|Public-Key'
+    - purpose: Verify certificate chain
+      command: openssl verify -CAfile ca.pem -untrusted intermediate.pem cert.pem
+    expected_findings:
+    - Certificate validity periods
+    - Key sizes and algorithms
+    - Chain validation status
+  - id: '5'
+    name: Review Certificate Lifecycle
+    description: |
+      Examine certificate rotation automation, revocation procedures,
+      and expiration monitoring.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check cert-manager issuers
+      command: kubectl get issuers,clusterissuers --all-namespaces
+    - purpose: Check certificate renewal
+      command: kubectl get certificates -A -o custom-columns='NAME:.metadata.name,READY:.status.conditions[0].status,RENEWAL:.status.renewalTime'
+    expected_findings:
+    - Automated rotation status
+    - Expiration monitoring configuration
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - mTLS Coverage Assessment
+    - PKI Architecture Review
+    - Certificate Lifecycle
+    - Recommendations
+  confidence_guidance:
+    high: Direct testing of mTLS enforcement with configuration review
+    medium: Configuration review without connectivity testing
+    low: Based on documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: nist-sp-800-207
+      priority: required
+    - source_id: istio-mtls
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: mTLS audit requires comprehensive PKI and service testing
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: mtls-001
+  item: mTLS enabled in STRICT mode for all services
+  level: CRITICAL
+  verification: 'kubectl get peerauthentication -A -o yaml 2>/dev/null | grep -q ''mode: STRICT'' && echo
+    ''PASS'' || echo ''FAIL'''
+  expected: PASS
+- id: mtls-002
+  item: No self-signed certificates in production
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify all certificates are signed by trusted internal CA
+  expected: Confirmed by reviewer
+- id: mtls-003
+  item: Certificate validation enabled
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify ssl_verify_client or equivalent is enabled with proper depth
+  expected: Confirmed by reviewer
+- id: mtls-004
+  item: Automated certificate rotation configured
+  level: BLOCKING
+  verification: kubectl get certificates -A 2>/dev/null | grep -q True && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: mtls-005
+  item: Root CA key protected
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify root CA key stored in HSM or equivalent secure storage
+  expected: Confirmed by reviewer
+- id: mtls-006
+  item: Certificate monitoring implemented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify certificate expiration alerting is configured
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST-CSF
+    controls:
+    - PR.AC-1
+    - PR.DS-2
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.7
+  - framework: PCI-DSS
+    controls:
+    - '4.1'
+    - '4.2'
+relationships:
+  commonly_combined:
+  - security-trust.network-security.tls-configuration
+  - security-trust.network-security.service-mesh-security
+  - security-trust.cryptography.certificate-management

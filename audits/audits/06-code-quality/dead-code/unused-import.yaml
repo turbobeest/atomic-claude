@@ -1,0 +1,271 @@
+audit:
+  id: code-quality.dead-code.unused-import
+  name: Unused Import Detection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: dead-code
+  tier: expert
+  estimated_duration: 20 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Identifies import statements that bring in modules, functions, or classes
+    that are never used in the file. This includes ES6 imports, CommonJS requires,
+    Python imports, Java imports, and Go imports.
+  why_it_matters: |
+    Unused imports increase bundle sizes, slow down compilation, create
+    unnecessary dependencies, and can mask dependency version conflicts.
+    They clutter code and may indicate incomplete refactoring. In bundled
+    applications, they can significantly impact load time and performance.
+  when_to_run:
+  - During code reviews
+  - Before production builds
+  - During dependency audits
+  - As part of CI pipeline
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: ^import\s+.*from\s+['"]
+    type: regex
+    scope: source
+    purpose: Identify ES6 imports
+  - pattern: ^(const|let|var)\s+.*=\s*require\s*\(
+    type: regex
+    scope: source
+    purpose: Identify CommonJS requires
+  - pattern: ^from\s+\w+\s+import
+    type: regex
+    scope: source
+    purpose: Identify Python imports
+  - pattern: ^import\s+[a-z]
+    type: regex
+    scope: source
+    purpose: Identify Java/Go imports
+  file_patterns:
+  - glob: '**/*.{js,ts,tsx,jsx,py,java,go}'
+    purpose: Source code files with imports
+knowledge_sources:
+  specifications:
+  - id: cwe-561
+    name: 'CWE-561: Dead Code'
+    url: https://cwe.mitre.org/data/definitions/561.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: eslint-no-unused
+    name: ESLint no-unused-vars Rule
+    url: https://eslint.org/docs/latest/rules/no-unused-vars
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: eslint
+    purpose: JavaScript/TypeScript unused import detection
+    offline_capable: true
+  - tool: pylint
+    purpose: Python unused import detection (W0611)
+    offline_capable: true
+  - tool: goimports
+    purpose: Go unused import detection and removal
+    offline_capable: true
+  - tool: checkstyle
+    purpose: Java unused import detection
+    offline_capable: true
+  scripts:
+  - id: unused-import-scan
+    language: bash
+    purpose: Detect unused imports
+    source: inline
+    code: |
+      # ESLint check
+      npx eslint --rule 'no-unused-vars: [error, {varsIgnorePattern: "^_"}]' . 2>/dev/null
+      # Pylint check
+      pylint --disable=all --enable=W0611 . 2>/dev/null
+signals:
+  critical:
+  - id: DC-IMPORT-CRIT-001
+    signal: Unused imports of known vulnerable packages
+    evidence_pattern: import.*vulnerable-package.*unused
+    cwe: CWE-561
+    explanation: |
+      Importing vulnerable packages that are not used still adds them to
+      the dependency tree and may expose the application to security risks.
+    remediation: Remove unused imports of vulnerable packages immediately
+  - id: DC-IMPORT-CRIT-002
+    signal: Unused imports increasing attack surface
+    evidence_pattern: import.*(exec|spawn|eval|shell).*unused
+    cwe: CWE-561
+    explanation: |
+      Importing dangerous modules (exec, eval, shell) even if unused
+      signals potential security issues and increases audit burden.
+    remediation: Remove dangerous unused imports
+  high:
+  - id: DC-IMPORT-HIGH-001
+    signal: More than 50 files with unused imports
+    evidence_pattern: files_with_unused_imports > 50
+    cwe: CWE-561
+    explanation: |
+      Widespread unused imports indicate systemic code hygiene issues
+      and likely inflated bundle sizes.
+    remediation: Run automated import cleanup across codebase
+  - id: DC-IMPORT-HIGH-002
+    signal: Heavy unused dependencies (large bundle impact)
+    evidence_pattern: import.*(lodash|moment|rxjs).*unused
+    explanation: |
+      Unused imports of large libraries significantly impact bundle
+      size and application performance.
+    remediation: Remove unused heavy dependencies
+  medium:
+  - id: DC-IMPORT-MED-001
+    signal: Unused type-only imports
+    evidence_pattern: import\s+type.*unused
+    remediation: Remove unused type imports
+  - id: DC-IMPORT-MED-002
+    signal: Unused namespace imports
+    evidence_pattern: import\s+\*\s+as.*unused
+    remediation: Switch to named imports or remove
+  low:
+  - id: DC-IMPORT-LOW-001
+    signal: Unused imports in test files
+    evidence_pattern: test.*import.*unused
+    remediation: Clean up test file imports
+  positive:
+  - id: DC-IMPORT-POS-001
+    signal: No unused imports detected
+    evidence_pattern: zero_unused_imports
+  - id: DC-IMPORT-POS-002
+    signal: Auto-import cleanup configured
+    evidence_pattern: organize-imports|sort-imports
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Run Import Analysis
+    description: |
+      Execute linters configured to detect unused imports across
+      the codebase.
+    duration_estimate: 10 min
+    commands:
+    - purpose: ESLint unused imports
+      command: |
+        npx eslint --rule 'no-unused-vars: [warn, {varsIgnorePattern: "^_"}]' . 2>/dev/null | grep "import" | head -100
+    - purpose: Pylint unused imports
+      command: |
+        pylint --disable=all --enable=W0611 **/*.py 2>/dev/null | head -50
+    expected_findings:
+    - List of files with unused imports
+    - Specific unused import names
+  - id: '2'
+    name: Assess Bundle Impact
+    description: |
+      Identify which unused imports have the largest impact on
+      bundle size and build time.
+    duration_estimate: 5 min
+    commands:
+    - purpose: Find heavy unused imports
+      command: |
+        grep -rn --include="*.{js,ts}" "import.*from ['\"]lodash\|moment\|rxjs" . 2>/dev/null
+    expected_findings:
+    - Heavy libraries imported but unused
+    - Estimated bundle impact
+  - id: '3'
+    name: Generate Cleanup Script
+    description: |
+      Create automated cleanup commands to remove unused imports
+      safely.
+    duration_estimate: 5 min
+    expected_findings:
+    - Cleanup commands
+    - Files to modify
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - unused_import_locations
+    - import_source
+    - bundle_impact
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Unused Import Inventory
+    - Bundle Impact Analysis
+    - Cleanup Recommendations
+  confidence_guidance:
+    high: Static analysis confirms import is never referenced
+    medium: Import appears unused in analyzed scope
+    low: Side-effect imports may be intentional
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-561
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: unused-import-001
+  item: Import analysis completed for all source files
+  level: BLOCKING
+  verification: |
+    npx eslint --rule 'no-unused-vars: warn' . 2>&1 | grep -c "import" || echo "0"
+  expected: Analysis complete
+- id: unused-import-002
+  item: No unused imports of security-sensitive modules
+  level: CRITICAL
+  verification: |
+    npx eslint . 2>&1 | grep -iE "unused.*import.*(exec|spawn|eval)" | wc -l
+  expected: '0'
+- id: unused-import-003
+  item: Heavy unused imports identified
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts}" "import.*lodash\|moment" . 2>/dev/null | wc -l
+  expected: Documented
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-561
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+    - Performance Efficiency
+relationships:
+  commonly_combined:
+  - code-quality.dead-code.unused-variable
+  - code-quality.dead-code.unused-function-method
+  - code-quality.technical-debt.dependency-bloat

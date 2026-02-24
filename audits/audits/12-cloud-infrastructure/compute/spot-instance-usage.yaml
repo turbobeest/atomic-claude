@@ -1,0 +1,362 @@
+audit:
+  id: cloud-infrastructure.compute.spot-instance-usage
+  name: Spot Instance Usage
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: compute
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the use of spot instances (AWS), preemptible VMs (GCP), or
+    spot VMs (Azure) for cost optimization. Examines workload suitability,
+    interruption handling, diversification strategies, and cost savings
+    realization compared to on-demand pricing.
+  why_it_matters: |
+    Spot instances offer 60-90% cost savings over on-demand pricing but
+    require proper architecture for interruption handling. Without proper
+    implementation, spot interruptions cause service outages. Conversely,
+    not using spot for suitable workloads means significant cost waste.
+    Proper spot strategy can reduce compute costs by 50%+ for appropriate
+    workloads.
+  when_to_run:
+  - Cost optimization reviews
+  - After workload architecture changes
+  - When expanding to new regions
+  - After spot interruption incidents
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to EC2/compute configurations
+  - type: billing_access
+    description: Access to cost and usage reports
+  access_requirements:
+  - EC2 Spot Fleet/Instance access
+  - Cost Explorer or billing dashboard access
+  - Spot interruption notification logs
+discovery:
+  metrics_queries:
+  - system: CloudWatch
+    query: |
+      SELECT COUNT(*) as interruptions
+      FROM SpotInterruptionEvents
+      WHERE Timestamp > NOW() - INTERVAL '30 days'
+    purpose: Track spot interruption frequency
+    threshold: High interruption rate may indicate poor diversification
+  - system: Cost Explorer
+    query: |
+      aws ce get-cost-and-usage
+      --time-period Start=YYYY-MM-01,End=YYYY-MM-DD
+      --granularity MONTHLY
+      --metrics BlendedCost
+      --group-by Type=DIMENSION,Key=PURCHASE_TYPE
+    purpose: Compare spot vs on-demand spending
+    threshold: Identify opportunity for spot adoption
+  file_patterns:
+  - glob: '**/terraform/**/*spot*.tf'
+    purpose: Find Terraform spot configurations
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: Find CloudFormation spot fleet definitions
+  - glob: '**/k8s/**/*spot*.yaml'
+    purpose: Find Kubernetes spot node configurations
+knowledge_sources:
+  specifications:
+  - id: aws-spot-docs
+    name: AWS EC2 Spot Instances Documentation
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-spot-instances.html
+    offline_cache: true
+    priority: required
+  - id: gcp-preemptible
+    name: GCP Preemptible VMs Documentation
+    url: https://cloud.google.com/compute/docs/instances/preemptible
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-spot-best-practices
+    name: AWS Spot Instance Best Practices
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-best-practices.html
+    offline_cache: true
+  - id: karpenter-spot
+    name: Karpenter Spot Instance Guide
+    url: https://karpenter.sh/docs/concepts/nodepools/#spot
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: Inspect spot fleet configurations
+    command: aws ec2 describe-spot-fleet-requests
+  - tool: AWS CLI
+    purpose: Check spot interruption history
+    command: aws ec2 describe-spot-instance-requests --query 'SpotInstanceRequests[?Status.Code==`instance-terminated-by-user`
+      || Status.Code==`instance-terminated-by-spot-interruption`]'
+  - tool: Spot Placement Score
+    purpose: Evaluate spot availability
+    command: aws ec2 get-spot-placement-scores --instance-types m5.large m5.xlarge --target-capacity 10
+      --region-names us-east-1 us-west-2
+  monitoring_queries:
+  - system: CloudWatch Events
+    query: |
+      aws events describe-rule --name SpotInterruptionWarning
+    purpose: Verify interruption handling is configured
+  scripts:
+  - id: spot-analysis
+    language: bash
+    purpose: Analyze spot instance usage and savings
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Spot Instance Analysis ==="
+
+      # Current spot instances
+      echo "Active Spot Instances:"
+      aws ec2 describe-instances \
+        --filters "Name=instance-lifecycle,Values=spot" \
+        --query 'Reservations[].Instances[].{ID:InstanceId,Type:InstanceType,AZ:Placement.AvailabilityZone}' \
+        --output table
+
+      # Spot fleet configurations
+      echo "Spot Fleet Requests:"
+      aws ec2 describe-spot-fleet-requests \
+        --query 'SpotFleetRequestConfigs[].{ID:SpotFleetRequestId,State:SpotFleetRequestState,Capacity:TargetCapacity}' \
+        --output table
+
+      # Recent interruptions
+      echo "Recent Spot Interruptions (if any):"
+      aws ec2 describe-spot-instance-requests \
+        --query 'SpotInstanceRequests[?Status.Code==`instance-terminated-by-spot-interruption`].{ID:InstanceId,Time:Status.UpdateTime}' \
+        --output table
+signals:
+  critical:
+  - id: SPOT-CRIT-001
+    signal: No interruption handling mechanism for spot instances
+    evidence_indicators:
+    - No EventBridge rule for spot interruption warnings
+    - No graceful shutdown scripts configured
+    - Spot instances running stateful workloads without checkpointing
+    explanation: |
+      Without interruption handling, spot terminations cause immediate
+      workload failures, data loss, and user-visible outages. Spot instances
+      provide only 2-minute warning before termination.
+    remediation: Implement EventBridge-based interruption handling with graceful shutdown
+  - id: SPOT-CRIT-002
+    signal: Production-critical stateful workloads on spot instances
+    evidence_indicators:
+    - Databases running on spot instances
+    - Message queues with persistence on spot
+    - Single-instance stateful services on spot
+    explanation: |
+      Stateful workloads without replication should never run on spot
+      due to data loss risk during interruption.
+    remediation: Move stateful workloads to on-demand or reserved instances
+  high:
+  - id: SPOT-HIGH-001
+    signal: Single instance type/AZ for spot fleet without diversification
+    evidence_pattern: LaunchTemplateConfigs with single InstanceType
+    explanation: |
+      Lack of diversification increases interruption risk as spot prices
+      for specific instance types can spike or capacity can be exhausted.
+    remediation: Configure multiple instance types and AZs in spot fleet
+  - id: SPOT-HIGH-002
+    signal: High spot interruption rate affecting availability
+    evidence_threshold: Interruption rate > 10% of instances per week
+    explanation: |
+      Frequent interruptions indicate poor instance type selection or
+      insufficient diversification strategy.
+    remediation: Use Spot Placement Score to select better instance pools
+  - id: SPOT-HIGH-003
+    signal: No on-demand fallback for critical workloads
+    evidence_pattern: Spot-only ASG without mixed instances policy
+    explanation: |
+      Without on-demand fallback, capacity cannot be guaranteed during
+      spot capacity shortages.
+    remediation: Implement mixed instances policy with on-demand base capacity
+  medium:
+  - id: SPOT-MED-001
+    signal: Spot savings not tracked or measured
+    remediation: Implement cost tracking for spot vs on-demand comparison
+  - id: SPOT-MED-002
+    signal: Suitable workloads not using spot instances
+    remediation: Identify stateless, fault-tolerant workloads for spot migration
+  - id: SPOT-MED-003
+    signal: Spot bid price set instead of using capacity-optimized
+    remediation: Use capacity-optimized allocation strategy instead of price bidding
+  low:
+  - id: SPOT-LOW-001
+    signal: Spot instance metrics not integrated with main dashboards
+    remediation: Add spot utilization and interruption metrics to dashboards
+  positive:
+  - id: SPOT-POS-001
+    signal: Diversified spot fleet with multiple instance types and AZs
+  - id: SPOT-POS-002
+    signal: Automated interruption handling with graceful shutdown
+  - id: SPOT-POS-003
+    signal: Mixed instances policy with on-demand base capacity
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Current Spot Usage Discovery
+    description: |
+      Identify all current spot instance usage including spot fleets,
+      spot ASGs, and individual spot instances.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all spot instances
+      command: aws ec2 describe-instances --filters 'Name=instance-lifecycle,Values=spot' --query 'Reservations[].Instances[].{ID:InstanceId,Type:InstanceType,AZ:Placement.AvailabilityZone,State:State.Name}'
+        --output table
+    - purpose: List spot fleet requests
+      command: aws ec2 describe-spot-fleet-requests --query 'SpotFleetRequestConfigs[].{ID:SpotFleetRequestId,State:SpotFleetRequestState,Capacity:TargetCapacity,Type:Type}'
+        --output table
+    expected_findings:
+    - Complete inventory of spot resources
+    - Current spot capacity and configurations
+  - id: '2'
+    name: Diversification Analysis
+    description: |
+      Examine spot fleet configurations for proper diversification
+      across instance types, availability zones, and pools.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check spot fleet launch configurations
+      command: aws ec2 describe-spot-fleet-requests --query 'SpotFleetRequestConfigs[].LaunchTemplateConfigs'
+        --output yaml
+    expected_findings:
+    - Instance type diversity per fleet
+    - AZ distribution strategy
+    - Allocation strategy (capacity-optimized vs lowest-price)
+  - id: '3'
+    name: Interruption Handling Review
+    description: |
+      Verify interruption handling mechanisms are properly configured
+      including EventBridge rules, graceful shutdown, and checkpointing.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for spot interruption event rules
+      command: aws events list-rules --query 'Rules[?contains(Name, `spot`) || contains(Name, `Spot`)]'
+        --output table
+    - purpose: Check instance metadata service for interruption notices
+      command: echo 'Verify application checks http://169.254.169.254/latest/meta-data/spot/instance-action'
+    expected_findings:
+    - EventBridge rules for interruption handling
+    - Graceful shutdown procedures
+  - id: '4'
+    name: Cost Savings Analysis
+    description: |
+      Calculate actual cost savings from spot usage compared to
+      on-demand pricing and identify additional opportunities.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get spot vs on-demand cost breakdown
+      command: aws ce get-cost-and-usage --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date
+        +%Y-%m-%d) --granularity MONTHLY --metrics BlendedCost --group-by Type=DIMENSION,Key=PURCHASE_TYPE
+        --output table
+    expected_findings:
+    - Current spot savings percentage
+    - Potential additional savings opportunities
+  - id: '5'
+    name: Workload Suitability Assessment
+    description: |
+      Evaluate which additional workloads could benefit from spot
+      and which current spot workloads may be unsuitable.
+    duration_estimate: 45 min
+    questions:
+    - Which workloads are stateless and fault-tolerant?
+    - What is the interruption tolerance for each workload?
+    - Are there batch or processing workloads suitable for spot?
+    expected_findings:
+    - Additional spot migration candidates
+    - Workloads that should be moved off spot
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Current Spot Usage Analysis
+    - Interruption Risk Assessment
+    - Cost Optimization Opportunities
+    - Recommendations
+  confidence_guidance:
+    high: Full access to spot configs, 30+ days of interruption history, cost data
+    medium: Config access with limited history
+    low: Partial config access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-spot-docs
+      priority: required
+    - source_id: aws-spot-best-practices
+      priority: required
+  limitations:
+  - Cannot access live spot configurations offline
+  - Spot pricing history requires API access
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed cost and configuration analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: spot-001
+  item: All spot resources inventoried
+  level: CRITICAL
+  verification: aws ec2 describe-instances --filters 'Name=instance-lifecycle,Values=spot' --query 'length(Reservations)'
+    2>/dev/null | grep -qE '[0-9]+' && echo PASS || echo FAIL
+  expected: PASS
+- id: spot-002
+  item: Interruption handling verified
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm EventBridge rules and graceful shutdown procedures exist
+  expected: Confirmed by reviewer
+- id: spot-003
+  item: Diversification strategy assessed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify multiple instance types and AZs configured
+  expected: Confirmed by reviewer
+- id: spot-004
+  item: Cost savings quantified
+  level: WARNING
+  verification: manual
+  verification_notes: Document actual vs potential spot savings
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Cost Optimization
+    - Rate Optimization
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.compute.instance-right-sizing
+  - cloud-infrastructure.compute.reserved-capacity
+  - cloud-infrastructure.compute.auto-scaling-config

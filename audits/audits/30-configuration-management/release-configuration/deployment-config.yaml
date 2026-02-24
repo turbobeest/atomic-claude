@@ -1,0 +1,179 @@
+# ============================================================
+# AUDIT: Deployment Configuration
+# Category: 30 - Configuration Management
+# Subcategory: release-configuration
+# ============================================================
+# Configuration for deployment processes including resource
+# allocation, health checks, and deployment parameters.
+# ============================================================
+
+audit:
+  id: "configuration-management.release-configuration.deployment-config"
+  name: "Deployment Configuration Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "configuration-management"
+  category_number: 30
+  subcategory: "release-configuration"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+  default_profiles: ["full", "production"]
+
+description:
+  what: |
+    This audit examines deployment configuration parameters including
+    resource requests/limits, health checks, replica counts, and
+    deployment strategies. It ensures deployments are configured for
+    reliability and appropriate resource utilization.
+
+  why_it_matters: |
+    Deployment configuration directly impacts application reliability
+    and resource costs. Misconfigured health checks cause bad rollouts,
+    incorrect resource limits cause OOM kills or waste, and wrong
+    replica counts affect availability.
+
+  when_to_run:
+    - "When creating new deployments"
+    - "During performance reviews"
+    - "After deployment issues"
+    - "For cost optimization"
+
+discovery:
+  code_patterns:
+    - pattern: "(Deployment|StatefulSet|DaemonSet)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect Kubernetes workloads"
+    - pattern: "(resources|limits|requests)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect resource configuration"
+
+  file_patterns:
+    - glob: "**/deployment*.yaml"
+      purpose: "Deployment manifests"
+    - glob: "**/k8s/**"
+      purpose: "Kubernetes configurations"
+    - glob: "**/manifests/**"
+      purpose: "Manifest directories"
+
+signals:
+  critical:
+    - id: "DPLY-CRIT-001"
+      signal: "No health checks configured"
+      evidence_indicators:
+        - "No liveness probe"
+        - "No readiness probe"
+        - "Traffic sent to unhealthy pods"
+      explanation: "Without health checks, unhealthy instances receive traffic."
+      remediation: "Configure liveness and readiness probes."
+
+    - id: "DPLY-CRIT-002"
+      signal: "No resource limits configured"
+      evidence_indicators:
+        - "Memory limits missing"
+        - "CPU limits missing"
+        - "Unbounded resource usage"
+      explanation: "Unlimited resources can cause node instability."
+      remediation: "Set appropriate resource limits for all workloads."
+
+  high:
+    - id: "DPLY-HIGH-001"
+      signal: "Single replica for production workloads"
+      evidence_indicators:
+        - "replicas: 1 in production"
+        - "No redundancy"
+        - "Single point of failure"
+      explanation: "Single replicas cannot provide high availability."
+      remediation: "Configure multiple replicas for production."
+
+    - id: "DPLY-HIGH-002"
+      signal: "Health check thresholds too aggressive"
+      evidence_indicators:
+        - "Very short timeout"
+        - "Low failure threshold"
+        - "Frequent false positives"
+      explanation: "Aggressive thresholds cause unnecessary restarts."
+      remediation: "Tune health check parameters appropriately."
+
+  medium:
+    - id: "DPLY-MED-001"
+      signal: "Resource requests significantly lower than limits"
+      evidence_indicators:
+        - "Large gap between request and limit"
+        - "Overcommitment risk"
+        - "Unpredictable scheduling"
+      explanation: "Large gaps lead to resource contention."
+      remediation: "Keep requests closer to limits for predictability."
+
+    - id: "DPLY-MED-002"
+      signal: "No pod disruption budget"
+      evidence_indicators:
+        - "No PDB configured"
+        - "All pods can be evicted"
+        - "Maintenance can cause outage"
+      explanation: "PDBs protect availability during maintenance."
+      remediation: "Configure pod disruption budgets."
+
+  low:
+    - id: "DPLY-LOW-001"
+      signal: "No resource requests specified"
+      evidence_indicators:
+        - "Requests not set"
+        - "Scheduler cannot optimize"
+        - "Best effort QoS class"
+      explanation: "Requests help scheduler place pods appropriately."
+      remediation: "Specify resource requests for all containers."
+
+procedure:
+  steps:
+    - id: "1"
+      name: "Deployment Config Review"
+      description: "Review deployment configuration parameters."
+      commands:
+        - purpose: "Find deployment manifests"
+          command: |
+            find . -name "*.yaml" -exec grep -l "kind: Deployment" {} \; 2>/dev/null | head -20
+        - purpose: "Check health probe configuration"
+          command: |
+            grep -rn "livenessProbe\|readinessProbe" --include="*.yaml" . 2>/dev/null | head -30
+
+    - id: "2"
+      name: "Resource Configuration Analysis"
+      description: "Analyze resource configuration."
+      commands:
+        - purpose: "Check resource limits"
+          command: |
+            grep -A5 "resources:" --include="*.yaml" -r . 2>/dev/null | head -40
+        - purpose: "Check replica counts"
+          command: |
+            grep -rn "replicas:" --include="*.yaml" . 2>/dev/null | head -20
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+    - type: "resource_inventory"
+      format: "table"
+
+profiles:
+  membership:
+    full: {included: true, priority: 1}
+    production: {included: true, priority: 1}
+
+governance:
+  applicable_to:
+    archetypes: ["all"]

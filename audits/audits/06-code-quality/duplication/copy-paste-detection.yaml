@@ -1,0 +1,304 @@
+audit:
+  id: code-quality.duplication.copy-paste-detection
+  name: Copy-Paste Code Detection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: duplication
+  tier: expert
+  estimated_duration: 30 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Detects exact and near-exact code duplication resulting from copy-paste
+    programming. Identifies clones where code blocks have been copied with
+    minimal or no modification, creating Type-1 (exact) and Type-2 (renamed
+    identifiers) clones that increase maintenance burden and bug propagation
+    risk.
+  why_it_matters: |
+    Copy-paste code is a major source of technical debt and bugs. Research
+    shows that 5-20% of typical codebases consist of duplicated code, and
+    bugs in duplicated code must be fixed in multiple locations. Studies
+    indicate that duplicated code has 7x higher defect density than unique
+    code, and forgotten patches to clones are a leading source of security
+    vulnerabilities.
+  when_to_run:
+  - Code review processes
+  - Technical debt assessments
+  - Before major refactoring
+  - Regular codebase health checks
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code
+discovery:
+  code_patterns:
+  - pattern: identical code blocks 10+ lines
+    type: ast
+    scope: source
+    purpose: Type-1 exact clones
+  - pattern: similar structure different identifiers
+    type: ast
+    scope: source
+    purpose: Type-2 renamed clones
+  file_patterns:
+  - glob: '**/*.{js,ts,jsx,tsx,py,java,go,rb,cs,cpp,c}'
+    purpose: Source code files
+  - glob: '!**/node_modules/**'
+    purpose: Exclude dependencies
+  - glob: '!**/vendor/**'
+    purpose: Exclude vendored code
+knowledge_sources:
+  specifications:
+  - id: clone-taxonomy
+    name: Code Clone Taxonomy (Roy & Cordy)
+    url: https://www.sciencedirect.com/science/article/pii/S0167642309000367
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: dry-principle
+    name: DRY Principle - Don't Repeat Yourself
+    url: https://en.wikipedia.org/wiki/Don%27t_repeat_yourself
+    offline_cache: true
+  - id: refactoring-fowler
+    name: Martin Fowler - Refactoring
+    url: https://refactoring.com/
+    offline_cache: false
+  - id: refactoring-catalog
+    name: Refactoring Catalog
+    url: https://refactoring.com/catalog/
+    offline_cache: false
+  - id: clean-code
+    name: Robert C. Martin - Clean Code
+    url: https://www.oreilly.com/library/view/clean-code-a/9780136083238/
+    offline_cache: false
+  papers:
+  - id: clone-bugs
+    title: An Empirical Study of Code Clone Genealogies
+    url: https://dl.acm.org/doi/10.1145/1041685.1029782
+tooling:
+  static_analysis:
+  - tool: jscpd
+    purpose: Multi-language copy-paste detection
+    offline_capable: true
+  - tool: pmd-cpd
+    purpose: Copy-paste detector for multiple languages
+    offline_capable: true
+  - tool: duplo
+    purpose: Duplicate code finder
+    offline_capable: true
+  - tool: simian
+    purpose: Similarity analyzer
+    offline_capable: true
+  scripts:
+  - id: clone-scan
+    language: bash
+    purpose: Run clone detection analysis
+    source: inline
+    code: |
+      # Using jscpd for cross-language clone detection
+      npx jscpd --min-lines 10 --min-tokens 50 --reporters console . 2>/dev/null || echo "Install jscpd: npm install -g jscpd"
+      # Alternative: find repeated functions
+      grep -roh --include="*.py" "def [a-z_][a-z0-9_]*" . 2>/dev/null | sort | uniq -c | sort -rn | awk '$1 > 1 {print}' | head -20
+signals:
+  critical:
+  - id: CPD-CRIT-001
+    signal: Security-critical code duplicated across modules
+    evidence_pattern: Auth/crypto/validation code copied
+    cwe: CWE-1041
+    explanation: |
+      When security-critical code like authentication, encryption, or input
+      validation is duplicated, fixes to security bugs may not be applied
+      to all copies, leaving vulnerabilities in forgotten clones.
+    remediation: Consolidate into single, well-tested security module
+  - id: CPD-CRIT-002
+    signal: Large code blocks (50+ lines) duplicated exactly
+    evidence_pattern: 50+ line exact matches
+    cwe: CWE-1041
+    explanation: |
+      Large exact duplicates indicate systematic copy-paste that creates
+      massive maintenance burden. Any change must be made in multiple
+      places, and divergence over time creates inconsistent behavior.
+    remediation: Extract to shared function or module
+  high:
+  - id: CPD-HIGH-001
+    signal: Multiple functions with identical implementation
+    evidence_pattern: Same function body, different names
+    explanation: |
+      Functions that do the same thing but have different names indicate
+      failure to recognize and extract common functionality. This leads
+      to inconsistent behavior when one is updated but not others.
+    remediation: Merge into single function with clear naming
+  - id: CPD-HIGH-002
+    signal: Clone ratio exceeds 10% of codebase
+    evidence_pattern: jscpd reports >10% duplication
+    explanation: |
+      High overall duplication percentage indicates systemic failure to
+      apply DRY principles. This exponentially increases maintenance
+      effort and bug propagation risk.
+    remediation: Prioritize clone elimination in refactoring backlog
+  medium:
+  - id: CPD-MED-001
+    signal: Similar code blocks with only variable renames
+    evidence_pattern: Type-2 clones detected
+    remediation: Parameterize and extract to common function
+  - id: CPD-MED-002
+    signal: Duplicated boilerplate code patterns
+    evidence_pattern: Repeated setup/teardown patterns
+    remediation: Create shared utilities or use decorators
+  low:
+  - id: CPD-LOW-001
+    signal: Small duplications (3-10 lines)
+    evidence_pattern: Minor clone clusters
+    remediation: Consider extraction if pattern repeats often
+  positive:
+  - id: CPD-POS-001
+    signal: Clone ratio below 3%
+  - id: CPD-POS-002
+    signal: Clone detection integrated in CI
+  - id: CPD-POS-003
+    signal: Shared utilities actively maintained
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Run Clone Detection Tool
+    description: |
+      Execute automated clone detection to identify all instances
+      of duplicated code in the codebase.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Run jscpd clone detection
+      command: |
+        npx jscpd --min-lines 10 --min-tokens 50 --reporters console,json --output .jscpd-report . 2>/dev/null || echo "jscpd not available"
+    - purpose: 'Alternative: PMD CPD'
+      command: |
+        pmd cpd --minimum-tokens 50 --dir . --language python 2>/dev/null || echo "PMD not available"
+    expected_findings:
+    - Clone clusters
+    - Duplication percentage
+  - id: '2'
+    name: Analyze Clone Distribution
+    description: |
+      Examine where clones are located and which modules have
+      the highest duplication.
+    duration_estimate: 8 min
+    commands:
+    - purpose: Count duplicated function names
+      command: |
+        grep -roh --include="*.py" "def [a-z_][a-z0-9_]*" . 2>/dev/null | sort | uniq -c | sort -rn | awk '$1 > 1 {print}' | head -20
+    - purpose: Find duplicate import patterns
+      command: |
+        grep -roh --include="*.py" "^from.*import\|^import" . 2>/dev/null | sort | uniq -c | sort -rn | head -20
+    expected_findings:
+    - Duplicate function names
+    - Common duplication patterns
+  - id: '3'
+    name: Identify Critical Clones
+    description: |
+      Focus on clones in security-sensitive, business-critical,
+      and frequently modified areas.
+    duration_estimate: 7 min
+    commands:
+    - purpose: Find auth-related duplication
+      command: |
+        grep -rln --include="*.py" "auth\|password\|token\|session" . 2>/dev/null | xargs -I{} sh -c 'echo "=== {} ===" && grep -n "def\|class" "{}"' 2>/dev/null | head -30
+    - purpose: Find validation duplication
+      command: |
+        grep -rn --include="*.py" "def\s*validate" . 2>/dev/null | head -15
+    expected_findings:
+    - Security code duplication
+    - Critical clone locations
+  - id: '4'
+    name: Calculate Clone Metrics
+    description: |
+      Compute overall duplication statistics for the codebase.
+    duration_estimate: 5 min
+    commands:
+    - purpose: Count total lines
+      command: |
+        find . -name "*.py" -type f -exec wc -l {} + 2>/dev/null | tail -1
+    - purpose: Review jscpd report if available
+      command: |
+        cat .jscpd-report/jscpd-report.json 2>/dev/null | head -50 || echo "No jscpd report"
+    expected_findings:
+    - Duplication percentage
+    - Largest clone clusters
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - clone_clusters
+    - duplication_percentage
+    - critical_clones
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Clone Analysis
+    - Risk Assessment
+    - Remediation Priorities
+  confidence_guidance:
+    high: Full clone detection with tooling
+    medium: Partial analysis or sampling
+    low: Manual review only
+offline:
+  capability: full
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cpd-001
+  item: Clone detection analysis completed
+  level: BLOCKING
+  verification: |
+    npx jscpd --min-lines 10 . 2>/dev/null | grep -q "duplications" && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cpd-002
+  item: Duplication under 15%
+  level: WARNING
+  verification: |
+    npx jscpd --min-lines 10 . 2>/dev/null | grep -oE "[0-9.]+%" | head -1 | awk -F% '{print ($1 < 15) ? "PASS" : "FAIL"}'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-1041
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+relationships:
+  commonly_combined:
+  - code-quality.duplication.near-duplicate-code
+  - code-quality.duplication.abstraction-opportunity
+  - code-quality.technical-debt.debt-assessment

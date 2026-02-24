@@ -1,0 +1,355 @@
+# ============================================================
+# AUDIT: Config Externalization
+# ============================================================
+# Evaluates separation of configuration from application code
+
+audit:
+  id: "devops-ci-cd.configuration-management.config-externalization"
+  name: "Config Externalization"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "configuration-management"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Assesses how well application configuration is externalized from
+    code. Evaluates whether environment-specific values, feature flags,
+    connection strings, and operational parameters are managed separately
+    from application binaries, enabling deployment of the same artifact
+    across environments.
+
+  why_it_matters: |
+    Hardcoded configuration couples code to specific environments,
+    requiring separate builds for dev/staging/production. This violates
+    12-factor app principles, makes debugging harder, and increases
+    deployment risk. Externalized configuration enables environment
+    promotion without rebuilding and simplifies operational changes.
+
+  when_to_run:
+    - "Initial architecture review"
+    - "Before implementing multi-environment deployment"
+    - "When troubleshooting environment-specific issues"
+    - "During 12-factor app compliance review"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+    - type: "deployment_configuration"
+      description: "Deployment manifests and configuration"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Deployment configuration access"
+
+discovery:
+  code_patterns:
+    - pattern: "localhost|127\\.0\\.0\\.1|production|staging"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect hardcoded environment values"
+
+    - pattern: "process\\.env|os\\.environ|getenv|Environment\\."
+      type: "regex"
+      scope: "source"
+      purpose: "Identify environment variable usage"
+
+    - pattern: "ConfigMap|config\\.|Settings\\."
+      type: "regex"
+      scope: "source"
+      purpose: "Configuration access patterns"
+
+  file_patterns:
+    - glob: "**/.env*"
+      purpose: "Environment files"
+
+    - glob: "**/config/**"
+      purpose: "Configuration directories"
+
+    - glob: "**/appsettings*.json"
+      purpose: ".NET configuration files"
+
+    - glob: "**/application*.yml"
+      purpose: "Spring Boot configuration"
+
+knowledge_sources:
+  guides:
+    - id: "12factor-config"
+      name: "12-Factor App - Config"
+      url: "https://12factor.net/config"
+      offline_cache: true
+
+    - id: "k8s-configmaps"
+      name: "Kubernetes ConfigMaps"
+      url: "https://kubernetes.io/docs/concepts/configuration/configmap/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "gitleaks"
+      purpose: "Detect hardcoded secrets and config"
+      offline_capable: true
+
+  scripts:
+    - id: "check-hardcoded-config"
+      language: "bash"
+      purpose: "Find hardcoded environment-specific values"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Potential hardcoded URLs ==="
+        grep -rn 'https\?://[a-z]*\.' src/ app/ --include='*.ts' --include='*.js' --include='*.py' 2>/dev/null | \
+          grep -v 'example\|localhost\|test' | head -20
+        echo "=== Hardcoded environment names ==="
+        grep -rn '"production"\|"staging"\|"development"' src/ app/ --include='*.ts' --include='*.js' 2>/dev/null | head -10
+
+signals:
+  critical:
+    - id: "CICD-CONFIG-CRIT-001"
+      signal: "Production credentials hardcoded in source code"
+      evidence_pattern: "Connection strings, API keys, or passwords in code"
+      explanation: |
+        Hardcoded credentials in source code are visible to anyone with
+        repository access, persist in git history, and cannot be rotated
+        without code changes and redeployment.
+      remediation: "Move credentials to secret management system"
+
+    - id: "CICD-CONFIG-CRIT-002"
+      signal: "Environment-specific URLs hardcoded in compiled code"
+      evidence_pattern: "Production URLs in source files"
+      explanation: |
+        Hardcoded URLs require rebuilding the application to change
+        environments. The same artifact cannot be promoted from staging
+        to production.
+      remediation: "Externalize URLs to environment variables or config files"
+
+  high:
+    - id: "CICD-CONFIG-HIGH-001"
+      signal: "Different builds required for different environments"
+      evidence_pattern: "Build-time environment injection, separate builds per env"
+      explanation: |
+        If each environment requires a separate build, you cannot verify
+        in staging that the exact artifact works, then deploy it to
+        production.
+      remediation: "Use runtime configuration injection, build once deploy anywhere"
+
+    - id: "CICD-CONFIG-HIGH-002"
+      signal: "Configuration embedded in container images"
+      evidence_pattern: "COPY config.prod.json in Dockerfile"
+      explanation: |
+        Environment-specific configuration in images requires separate
+        images per environment, increasing complexity and risk.
+      remediation: "Mount configuration at runtime via ConfigMaps or environment"
+
+  medium:
+    - id: "CICD-CONFIG-MED-001"
+      signal: "No centralized configuration management"
+      evidence_pattern: "Configuration scattered across multiple sources"
+      remediation: "Consolidate configuration in centralized system"
+
+    - id: "CICD-CONFIG-MED-002"
+      signal: "Default values reference specific environments"
+      evidence_pattern: "Default database host = 'prod-db.internal'"
+      remediation: "Use neutral defaults that fail safely"
+
+  low:
+    - id: "CICD-CONFIG-LOW-001"
+      signal: "Configuration documentation incomplete"
+
+    - id: "CICD-CONFIG-LOW-002"
+      signal: "No config schema validation"
+
+  positive:
+    - id: "CICD-CONFIG-POS-001"
+      signal: "All environment-specific config externalized"
+
+    - id: "CICD-CONFIG-POS-002"
+      signal: "Single build artifact deployed to all environments"
+
+    - id: "CICD-CONFIG-POS-003"
+      signal: "Configuration validated at startup"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Scan for hardcoded values"
+      description: |
+        Search codebase for hardcoded environment-specific
+        values like URLs, hostnames, and credentials.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find hardcoded URLs"
+          command: |
+            grep -rn 'https\?://[a-z]*\.' src/ app/ lib/ --include='*.ts' --include='*.js' --include='*.py' --include='*.go' 2>/dev/null | grep -v test | head -30
+
+        - purpose: "Find hardcoded IPs"
+          command: |
+            grep -rn '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' src/ app/ --include='*.ts' --include='*.js' 2>/dev/null | head -20
+
+      expected_findings:
+        - "List of potentially hardcoded values"
+
+    - id: "2"
+      name: "Review configuration access patterns"
+      description: |
+        Examine how the application accesses configuration.
+        Identify if it uses environment variables, files, or services.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find environment variable usage"
+          command: |
+            grep -rn 'process\.env\|os\.environ\|getenv\|Environment\.' src/ app/ --include='*.ts' --include='*.js' --include='*.py' --include='*.cs' 2>/dev/null | head -30
+
+      expected_findings:
+        - "Configuration access patterns"
+
+    - id: "3"
+      name: "Check build process"
+      description: |
+        Determine if the build process injects environment-specific
+        configuration.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check Dockerfile for config copying"
+          command: |
+            grep -n 'COPY.*config\|ENV.*PRODUCTION' Dockerfile Dockerfile.* 2>/dev/null
+
+        - purpose: "Check build scripts for environment injection"
+          command: |
+            grep -rn 'build.*prod\|--env\|NODE_ENV' .github/workflows/ package.json 2>/dev/null | head -20
+
+      expected_findings:
+        - "Build-time configuration injection"
+
+    - id: "4"
+      name: "Review deployment configuration"
+      description: |
+        Examine how configuration is provided at deployment
+        time (ConfigMaps, env vars, mounted files).
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find Kubernetes ConfigMaps"
+          command: |
+            grep -r 'ConfigMap\|envFrom\|configMapRef' k8s/ helm/ --include='*.yaml' 2>/dev/null | head -20
+
+        - purpose: "Check for environment-specific deployments"
+          command: |
+            find k8s/ helm/ deploy/ -name '*prod*' -o -name '*staging*' 2>/dev/null | head -10
+
+      expected_findings:
+        - "Runtime configuration injection patterns"
+
+    - id: "5"
+      name: "Verify single artifact deployment"
+      description: |
+        Confirm the same build artifact is used across
+        environments with only configuration differences.
+      duration_estimate: "15 min"
+
+      questions:
+        - "Is the same container image used in all environments?"
+        - "Can configuration be changed without rebuilding?"
+        - "How are environment differences handled?"
+
+      expected_findings:
+        - "Artifact promotion assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Hardcoded Configuration Findings"
+        - "Externalization Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full codebase scan with deployment config review"
+    medium: "Code scan completed, deployment config partially reviewed"
+    low: "Based on sampling and pattern search"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "12factor-config"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "config-externalization-001"
+    item: "No production credentials in source code"
+    level: "CRITICAL"
+    verification: |
+      grep -rE 'password\s*=\s*"[^"$]+"' src/ app/ --include='*.ts' --include='*.js' --include='*.py' 2>/dev/null | grep -v test && echo "FAIL" || echo "PASS"
+    expected: "PASS"
+
+  - id: "config-externalization-002"
+    item: "Environment variables used for config"
+    level: "CRITICAL"
+    verification: |
+      grep -rE 'process\.env|os\.environ|getenv' src/ app/ 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "config-externalization-003"
+    item: "Same build artifact for all environments"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify single image promoted through environments"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "12-Factor"
+      controls: ["III. Config"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.configuration-management.secrets-injection"
+    - "devops-ci-cd.configuration-management.environment-config"

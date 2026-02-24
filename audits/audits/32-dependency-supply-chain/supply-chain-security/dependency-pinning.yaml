@@ -1,0 +1,240 @@
+audit:
+  id: dependency-supply-chain.supply-chain-security.dependency-pinning
+  name: Dependency Pinning Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: supply-chain-security
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: dependencies
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates dependency pinning from a supply chain security
+    perspective, focusing on hash verification, integrity checking, and
+    protection against dependency substitution attacks. It goes beyond
+    version pinning to include cryptographic verification.
+  why_it_matters: |
+    Version pinning alone doesn't prevent supply chain attacks. A compromised
+    registry could serve different content for the same version. Hash
+    pinning and integrity verification ensure you get exactly the same
+    bytes every time, preventing substitution attacks.
+  when_to_run:
+  - During security hardening
+  - When implementing supply chain controls
+  - After supply chain incidents
+  - For high-security projects
+prerequisites:
+  required_artifacts:
+  - type: lock_file
+    description: package-lock.json, poetry.lock, etc. with hashes
+  - type: dependency_manifest
+    description: Dependency declarations
+  access_requirements:
+  - Read access to lock files
+  - Understanding of package manager integrity features
+discovery:
+  file_patterns:
+  - glob: '**/package-lock.json'
+    purpose: Check npm lock with integrity
+  - glob: '**/yarn.lock'
+    purpose: Check yarn lock with integrity
+  - glob: '**/requirements.txt'
+    purpose: Check for pip hash mode
+  - glob: '**/Pipfile.lock'
+    purpose: Check Pipfile lock hashes
+  - glob: '**/poetry.lock'
+    purpose: Check Poetry lock hashes
+knowledge_sources:
+  guides:
+  - id: npm-lockfile
+    name: npm Lock File Integrity
+    url: https://docs.npmjs.com/cli/v9/configuring-npm/package-lock-json#package-integrity
+  - id: pip-hash-checking
+    name: pip Hash Checking
+    url: https://pip.pypa.io/en/stable/topics/secure-installs/#hash-checking-mode
+  standards:
+  - id: slsa-hermetic
+    name: SLSA Hermetic Builds
+    relevance: Reproducible dependency resolution
+tooling:
+  analysis_tools:
+  - tool: npm ci
+    purpose: Integrity-checked install
+  - tool: pip-tools
+    purpose: Generate requirements with hashes
+  - tool: poetry
+    purpose: Lock file with hashes
+signals:
+  critical:
+  - id: DEP-HPIN-CRIT-001
+    signal: Lock file doesn't include integrity hashes
+    evidence_indicators:
+    - No sha512/sha256 in lock file
+    - Integrity field missing
+    explanation: |
+      Without hashes, package managers can't verify they received
+      the same content as before. Registry compromise or MITM attacks
+      could substitute malicious packages.
+    remediation: Regenerate lock file with integrity hashes enabled
+  - id: DEP-HPIN-CRIT-002
+    signal: Integrity verification disabled
+    evidence_indicators:
+    - --no-verify-integrity flag used
+    - Integrity checking turned off
+    remediation: Enable integrity verification; remove bypass flags
+  high:
+  - id: DEP-HPIN-HIGH-001
+    signal: Some packages lack integrity hashes
+    evidence_indicators:
+    - Partial hash coverage
+    - Old packages without hashes
+    remediation: Regenerate lock file to include all hashes
+  - id: DEP-HPIN-HIGH-002
+    signal: Git dependencies without commit hash
+    evidence_indicators:
+    - Git URLs with branch names
+    - Floating git references
+    remediation: Pin git deps to specific commit hashes
+  medium:
+  - id: DEP-HPIN-MED-001
+    signal: URL dependencies without checksum
+    evidence_indicators:
+    - Direct URL downloads
+    - No integrity verification for URLs
+    remediation: Add checksums for URL dependencies
+  - id: DEP-HPIN-MED-002
+    signal: Docker base images not pinned by digest
+    evidence_indicators:
+    - FROM image:tag without @sha256
+    - Floating container versions
+    remediation: Pin containers to digest (image@sha256:...)
+  low:
+  - id: DEP-HPIN-LOW-001
+    signal: Weak hash algorithms used
+    evidence_indicators:
+    - sha1 instead of sha256/sha512
+    - MD5 hashes
+    remediation: Upgrade to SHA-256 or SHA-512
+  positive:
+  - id: DEP-HPIN-POS-001
+    signal: All dependencies have integrity hashes
+  - id: DEP-HPIN-POS-002
+    signal: npm ci used for reproducible installs
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Check npm Lock Integrity
+    description: Verify npm lock file has integrity hashes
+    commands:
+    - purpose: Check for integrity field
+      command: grep -c '"integrity":' package-lock.json 2>/dev/null || echo 'No package-lock.json or no
+        integrity'
+    - purpose: Sample integrity hash
+      command: cat package-lock.json 2>/dev/null | jq '.packages[""].dependencies | to_entries[0].value.integrity
+        // "no deps"' || echo 'Could not check'
+  - id: '2'
+    name: Check Python Hash Mode
+    description: Verify requirements have hash verification
+    commands:
+    - purpose: Check for hashes in requirements
+      command: grep -c '\-\-hash=' requirements.txt 2>/dev/null || echo 'No hash mode in requirements.txt'
+    - purpose: Check Pipfile.lock hashes
+      command: cat Pipfile.lock 2>/dev/null | jq '.default | to_entries[0].value.hashes // "no hashes"'
+        || echo 'No Pipfile.lock'
+  - id: '3'
+    name: Check Git Dependencies
+    description: Verify git deps use commit hashes
+    commands:
+    - purpose: Find git dependencies
+      command: cat package.json 2>/dev/null | jq '.dependencies + .devDependencies | to_entries[] | select(.value
+        | contains("git"))' | head -20 || echo 'No git deps found'
+  - id: '4'
+    name: Check Docker Pinning
+    description: Verify Dockerfile uses digest pinning
+    commands:
+    - purpose: Check for digest in FROM
+      command: 'grep ''^FROM'' Dockerfile* 2>/dev/null | grep -v ''@sha256:'' && echo ''WARNING: Some
+        images not pinned by digest'' || echo ''Images use digest or no Dockerfiles'''
+  - id: '5'
+    name: Verify CI Uses Integrity Install
+    description: Check that CI respects lock file integrity
+    commands:
+    - purpose: Check for npm ci
+      command: grep -rE 'npm ci|yarn --frozen-lockfile' .github/workflows/ 2>/dev/null || echo 'Check
+        CI for integrity-preserving install commands'
+  - id: '6'
+    name: Generate Missing Hashes
+    description: Create requirements with hashes
+    commands:
+    - purpose: Show pip-compile hash command
+      command: |-
+        echo 'Generate requirements with hashes:
+        pip-compile --generate-hashes requirements.in -o requirements.txt'
+output:
+  deliverables:
+  - type: integrity_assessment
+    format: structured
+    description: Evaluation of integrity hash coverage
+  - type: pinning_gaps
+    format: list
+    description: Dependencies without proper pinning
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Hash Coverage Analysis
+    - Git Dependency Review
+    - Container Pinning
+    - Recommendations
+closeout_checklist:
+- id: dep-hpin-001
+  item: Lock files contain integrity hashes
+  level: CRITICAL
+  verification: grep for integrity fields
+- id: dep-hpin-002
+  item: CI uses integrity-preserving install
+  level: CRITICAL
+  verification: npm ci or equivalent used
+- id: dep-hpin-003
+  item: Git deps pinned to commits
+  level: REQUIRED
+  verification: No branch references
+- id: dep-hpin-004
+  item: Docker images pinned by digest
+  level: REQUIRED
+  verification: FROM uses @sha256
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SLSA
+    control: Build L2
+    description: Hermetic build requirements
+  - framework: SOC 2
+    control: CC6.6
+    description: Restricting access by components
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.dependency-inventory.version-pinning
+  depends_on:
+  - dependency-supply-chain.dependency-inventory.version-pinning
+  feeds_into:
+  - dependency-supply-chain.supply-chain-security.artifact-integrity

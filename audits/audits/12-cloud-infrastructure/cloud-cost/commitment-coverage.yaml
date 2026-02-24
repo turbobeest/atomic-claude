@@ -1,0 +1,354 @@
+# ============================================================
+# AUDIT FILE: Commitment Coverage
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.cloud-cost.commitment-coverage"
+  name: "Commitment Coverage"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "cloud-cost"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates cloud commitment utilization including Reserved Instances,
+    Savings Plans, committed use discounts, and other commitment-based
+    pricing. Examines commitment coverage, utilization rates, expiring
+    commitments, and opportunities for new commitments based on stable
+    workload patterns.
+
+  why_it_matters: |
+    Commitments (RIs, Savings Plans) can save 30-72% compared to on-demand
+    pricing but require upfront commitment. Unused commitments are wasted
+    money, while insufficient coverage means paying premium on-demand rates.
+    Proper commitment management maximizes savings while maintaining
+    flexibility.
+
+  when_to_run:
+    - "Quarterly commitment reviews"
+    - "Before commitment renewals or purchases"
+    - "When workload patterns change significantly"
+    - "During annual budget planning"
+
+prerequisites:
+  required_artifacts:
+    - type: "cloud-account"
+      description: "Access to reservation and savings plan data"
+    - type: "usage-data"
+      description: "Historical usage patterns for analysis"
+
+  access_requirements:
+    - "Cost Explorer reservation access"
+    - "Savings Plans API access"
+    - "EC2 Reserved Instance access"
+
+discovery:
+  file_patterns:
+    - glob: "**/reserved*.tf"
+      purpose: "Reserved instance configurations"
+    - glob: "**/savings-plan*.yaml"
+      purpose: "Savings plan configurations"
+
+  code_patterns:
+    - pattern: "aws_ec2_capacity_reservation"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find capacity reservation definitions"
+
+knowledge_sources:
+  specifications:
+    - id: "aws-savings-plans"
+      name: "AWS Savings Plans"
+      url: "https://docs.aws.amazon.com/savingsplans/latest/userguide/"
+      offline_cache: true
+      priority: "required"
+    - id: "aws-reserved"
+      name: "AWS Reserved Instances"
+      url: "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-reserved-instances.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "finops-commitment"
+      name: "FinOps Commitment Based Discounts"
+      url: "https://www.finops.org/framework/capabilities/commitment-based-discounts/"
+      offline_cache: true
+    - id: "aws-ri-best"
+      name: "AWS RI Best Practices"
+      url: "https://docs.aws.amazon.com/whitepapers/latest/cost-optimization-reservation-models/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Query commitment data"
+      command: "aws ce get-reservation-utilization --time-period Start=<start>,End=<end>"
+    - tool: "cost-explorer"
+      purpose: "Commitment coverage analysis"
+      command: "aws ce get-savings-plans-coverage --time-period Start=<start>,End=<end>"
+
+  scripts:
+    - id: "commitment-audit"
+      language: "bash"
+      purpose: "Audit commitment coverage"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Reserved Instance Coverage ==="
+        aws ce get-reservation-coverage --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) --granularity MONTHLY --query 'CoveragesByTime[0].Total'
+        echo "=== Reserved Instance Utilization ==="
+        aws ce get-reservation-utilization --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) --granularity MONTHLY --query 'UtilizationsByTime[0].Total'
+        echo "=== Savings Plans Coverage ==="
+        aws ce get-savings-plans-coverage --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) --granularity MONTHLY --query 'SavingsPlansCoverages[0].Coverage'
+        echo "=== Savings Plans Utilization ==="
+        aws ce get-savings-plans-utilization --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) --granularity MONTHLY --query 'SavingsPlansUtilizationsByTime[0].Utilization'
+
+signals:
+  critical:
+    - id: "COMMIT-CRIT-001"
+      signal: "Commitment utilization below 80%"
+      evidence_pattern: "RI or Savings Plan utilization < 80%"
+      explanation: |
+        Low utilization means paying for commitments not being used.
+        This is direct waste - money paid for unused capacity.
+      remediation: "Analyze underutilization cause, modify or sell commitments"
+    - id: "COMMIT-CRIT-002"
+      signal: "Commitments expiring without renewal plan"
+      evidence_pattern: "Commitments expiring within 30 days, no renewal"
+      explanation: |
+        Expiring commitments without renewal planning can result in
+        significant cost increases when workloads revert to on-demand.
+      remediation: "Plan commitment renewals before expiration"
+
+  high:
+    - id: "COMMIT-HIGH-001"
+      signal: "Low commitment coverage on stable workloads"
+      evidence_pattern: "Coverage < 60% with stable usage patterns"
+      explanation: |
+        Stable workloads are ideal for commitments. Low coverage means
+        paying on-demand rates when savings are available.
+      remediation: "Purchase commitments for stable baseline workloads"
+    - id: "COMMIT-HIGH-002"
+      signal: "Mismatched commitment types"
+      evidence_pattern: "RIs for variable workloads, Savings Plans for fixed"
+      explanation: |
+        Wrong commitment type can reduce flexibility or savings. Match
+        commitment type to workload characteristics.
+      remediation: "Review and optimize commitment type selection"
+    - id: "COMMIT-HIGH-003"
+      signal: "No commitment purchase recommendations reviewed"
+      evidence_pattern: "Cost Explorer recommendations not analyzed"
+      explanation: |
+        AWS provides data-driven recommendations that identify optimal
+        commitments. Not reviewing them misses easy savings.
+      remediation: "Review and act on commitment recommendations"
+
+  medium:
+    - id: "COMMIT-MED-001"
+      signal: "Commitment portfolio not diversified"
+      evidence_pattern: "All commitments same term or payment option"
+      remediation: "Diversify commitment terms based on workload stability"
+    - id: "COMMIT-MED-002"
+      signal: "No automated commitment management"
+      evidence_pattern: "Manual commitment tracking and renewal"
+      remediation: "Implement automated commitment monitoring"
+    - id: "COMMIT-MED-003"
+      signal: "Regional vs zonal optimization needed"
+      evidence_pattern: "Zonal RIs where regional would provide flexibility"
+      remediation: "Convert to regional RIs for multi-AZ workloads"
+
+  low:
+    - id: "COMMIT-LOW-001"
+      signal: "Convertible RI exchange opportunities"
+      remediation: "Review convertible RIs for optimization exchanges"
+    - id: "COMMIT-LOW-002"
+      signal: "No commitment governance process"
+      remediation: "Establish commitment purchase approval workflow"
+
+  positive:
+    - id: "COMMIT-POS-001"
+      signal: "Commitment utilization above 95%"
+    - id: "COMMIT-POS-002"
+      signal: "Appropriate coverage for stable workloads"
+    - id: "COMMIT-POS-003"
+      signal: "Renewal planning in place"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze commitment utilization"
+      description: |
+        Review utilization rates for all commitments to identify waste.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Get RI utilization"
+          command: "aws ce get-reservation-utilization --time-period Start=<start>,End=<end> --granularity MONTHLY"
+        - purpose: "Get SP utilization"
+          command: "aws ce get-savings-plans-utilization --time-period Start=<start>,End=<end> --granularity MONTHLY"
+      expected_findings:
+        - "Utilization rates"
+        - "Underutilized commitments"
+
+    - id: "2"
+      name: "Assess commitment coverage"
+      description: |
+        Evaluate coverage levels and identify opportunities for new
+        commitments.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Get RI coverage"
+          command: "aws ce get-reservation-coverage --time-period Start=<start>,End=<end> --granularity MONTHLY"
+        - purpose: "Get SP coverage"
+          command: "aws ce get-savings-plans-coverage --time-period Start=<start>,End=<end> --granularity MONTHLY"
+      expected_findings:
+        - "Coverage levels"
+        - "Coverage gaps"
+
+    - id: "3"
+      name: "Review expiring commitments"
+      description: |
+        Identify commitments expiring soon and renewal planning status.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List RIs with expiration"
+          command: "aws ec2 describe-reserved-instances --query 'ReservedInstances[*].[ReservedInstancesId,InstanceType,End,State]'"
+        - purpose: "List Savings Plans with expiration"
+          command: "aws savingsplans describe-savings-plans --query 'savingsPlans[*].[savingsPlanId,end,state]'"
+      expected_findings:
+        - "Expiration timeline"
+        - "Renewal planning status"
+
+    - id: "4"
+      name: "Evaluate recommendations"
+      description: |
+        Review AWS-provided purchase recommendations.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Get RI recommendations"
+          command: "aws ce get-reservation-purchase-recommendation --service EC2 --term-in-years ONE_YEAR --payment-option NO_UPFRONT"
+        - purpose: "Get SP recommendations"
+          command: "aws ce get-savings-plans-purchase-recommendation --savings-plans-type COMPUTE_SP --term-in-years ONE_YEAR --payment-option NO_UPFRONT --lookback-period-in-days SIXTY_DAYS"
+      expected_findings:
+        - "Savings opportunities"
+        - "Recommended purchases"
+
+    - id: "5"
+      name: "Calculate savings potential"
+      description: |
+        Estimate potential savings from optimizing commitments.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Get on-demand equivalent"
+          command: "aws ce get-cost-and-usage --time-period Start=<start>,End=<end> --granularity MONTHLY --metrics UnblendedCost --filter '{\"Dimensions\": {\"Key\": \"PURCHASE_TYPE\", \"Values\": [\"On Demand\"]}}'"
+      expected_findings:
+        - "Savings calculation"
+        - "ROI projection"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Utilization Analysis"
+        - "Coverage Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct utilization and coverage API data"
+    medium: "Recommendation analysis"
+    low: "Estimated based on patterns"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-savings-plans"
+        priority: "required"
+      - source_id: "aws-reserved"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive commitment analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "commitment-coverage-001"
+    item: "Commitment utilization above 80%"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check RI and SP utilization rates"
+    expected: "Confirmed by reviewer"
+  - id: "commitment-coverage-002"
+    item: "No commitments expiring without renewal plan"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review expiring commitments and renewal status"
+    expected: "Confirmed by reviewer"
+  - id: "commitment-coverage-003"
+    item: "Coverage appropriate for stable workloads"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Compare coverage to stable usage baseline"
+    expected: "Confirmed by reviewer"
+  - id: "commitment-coverage-004"
+    item: "Purchase recommendations reviewed"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify Cost Explorer recommendations have been analyzed"
+    expected: "Confirmed by reviewer"
+  - id: "commitment-coverage-005"
+    item: "Commitment governance process in place"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify approval process for commitment purchases"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "FinOps"
+      controls: ["Commitment Based Discounts", "Rate Optimization"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.cloud-cost.cost-allocation"
+    - "cloud-infrastructure.cloud-cost.budget-monitoring"
+    - "cloud-infrastructure.cloud-cost.unused-resource-detection"

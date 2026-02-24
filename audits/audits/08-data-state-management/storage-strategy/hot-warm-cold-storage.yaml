@@ -1,0 +1,382 @@
+# ============================================================
+# AUDIT: Hot-Warm-Cold Storage
+# ============================================================
+
+audit:
+  id: "data-state-management.storage-strategy.hot-warm-cold-storage"
+  name: "Hot-Warm-Cold Storage Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "storage-strategy"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "cost"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the implementation of tiered storage strategies that place data
+    on appropriate storage tiers based on access patterns. Hot storage for
+    frequently accessed data, warm for occasional access, and cold/archive
+    for rarely accessed data. Analyzes data lifecycle policies, transition
+    triggers, and retrieval strategies.
+
+  why_it_matters: |
+    Without tiered storage, all data sits on expensive high-performance storage
+    regardless of access frequency. This wastes money and can impact performance
+    as hot data competes with cold data for resources. Proper tiering can reduce
+    storage costs by 60-80% while maintaining performance for active data.
+
+  when_to_run:
+    - "Cost optimization reviews"
+    - "Storage capacity planning"
+    - "Data lifecycle policy reviews"
+    - "Before large data growth periods"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with data archival logic"
+    - type: "infrastructure_config"
+      description: "Storage tier configurations"
+    - type: "data_access_logs"
+      description: "Data access patterns and frequencies"
+
+  access_requirements:
+    - "Read access to application source code"
+    - "Access to storage configurations"
+    - "Access to data access metrics"
+
+discovery:
+  code_patterns:
+    - pattern: "archive|archival|glacier|cold.*storage|lifecycle"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect archival logic"
+
+    - pattern: "StorageClass|storage.*tier|S3.*transition|blob.*tier"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect storage tier configuration"
+
+    - pattern: "retention|expire|ttl|age.*days"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect lifecycle policies"
+
+  file_patterns:
+    - glob: "**/lifecycle/**"
+      purpose: "Lifecycle policy definitions"
+    - glob: "**/*-lifecycle*.yaml"
+      purpose: "Lifecycle configurations"
+    - glob: "**/archive/**"
+      purpose: "Archival modules"
+
+knowledge_sources:
+  guides:
+    - id: "s3-storage-classes"
+      name: "Amazon S3 Storage Classes"
+      url: "https://aws.amazon.com/s3/storage-classes/"
+      offline_cache: true
+
+    - id: "azure-blob-tiers"
+      name: "Azure Blob Storage Tiers"
+      url: "https://docs.microsoft.com/en-us/azure/storage/blobs/storage-blob-storage-tiers"
+      offline_cache: true
+
+    - id: "elasticsearch-ilm"
+      name: "Elasticsearch Index Lifecycle Management"
+      url: "https://www.elastic.co/guide/en/elasticsearch/reference/current/index-lifecycle-management.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws s3api"
+      purpose: "Analyze S3 lifecycle policies"
+      command: "aws s3api get-bucket-lifecycle-configuration --bucket BUCKET"
+
+    - tool: "az storage"
+      purpose: "Analyze Azure storage policies"
+      command: "az storage blob service-properties show"
+
+  scripts:
+    - id: "storage-tier-scan"
+      language: "bash"
+      purpose: "Identify storage tiering configuration"
+      source: "inline"
+      code: |
+        echo "=== Storage Tier Analysis ==="
+        echo "--- Lifecycle policies ---"
+        grep -rn "lifecycle\|transition\|expiration\|archive\|glacier" \
+          --include="*.yaml" --include="*.json" --include="*.tf" . 2>/dev/null | head -30
+
+        echo "--- Storage class references ---"
+        grep -rn "StorageClass\|STANDARD_IA\|GLACIER\|DEEP_ARCHIVE\|Cool\|Archive" \
+          --include="*.yaml" --include="*.json" --include="*.tf" --include="*.ts" . 2>/dev/null | head -20
+
+        echo "--- Retention policies ---"
+        grep -rn "retention\|expire\|ttl\|days_until" \
+          --include="*.yaml" --include="*.json" --include="*.tf" . 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "HWC-CRIT-001"
+      signal: "All data on single storage tier regardless of age"
+      evidence_pattern: "No lifecycle policies, all data on standard storage"
+      explanation: |
+        Without tiered storage, cold data occupies expensive high-performance
+        storage. For systems with TB+ of data, this can mean tens of thousands
+        of dollars wasted monthly.
+      remediation: "Implement lifecycle policies to transition cold data to cheaper tiers"
+
+    - id: "HWC-CRIT-002"
+      signal: "Archive retrieval blocking production operations"
+      evidence_pattern: "Synchronous Glacier retrieval in request path"
+      explanation: |
+        Cold storage retrieval can take hours. If production code paths
+        block on archive retrieval, users experience severe latency or
+        timeouts.
+      remediation: "Use async retrieval with notification patterns for cold data"
+
+  high:
+    - id: "HWC-HIGH-001"
+      signal: "No data access pattern analysis"
+      evidence_pattern: "Lifecycle policies not based on actual access metrics"
+      explanation: |
+        Arbitrary lifecycle policies (e.g., archive after 90 days) may not
+        match actual access patterns. Data that is accessed after 90 days
+        will incur retrieval costs; data never accessed could archive sooner.
+      remediation: "Analyze access patterns and tune lifecycle policies"
+
+    - id: "HWC-HIGH-002"
+      signal: "Frequently accessed data on cold storage"
+      evidence_pattern: "Retrieval requests from archive tier in access logs"
+      explanation: |
+        When frequently accessed data ends up on cold storage, retrieval
+        costs and latency accumulate. This indicates misconfigured
+        lifecycle policies.
+      remediation: "Adjust lifecycle rules or exclude high-access patterns"
+
+    - id: "HWC-HIGH-003"
+      signal: "No minimum storage duration consideration"
+      evidence_pattern: "Short-lived objects transitioned to Glacier"
+      explanation: |
+        Cold storage tiers have minimum storage durations (e.g., 90 days
+        for Glacier). Transitioning short-lived objects incurs charges
+        for the full minimum period even if deleted early.
+      remediation: "Only transition long-lived objects to cold storage"
+
+  medium:
+    - id: "HWC-MED-001"
+      signal: "Database historical data not partitioned"
+      evidence_pattern: "All records in same table regardless of age"
+      remediation: "Implement table partitioning with cold partition archival"
+
+    - id: "HWC-MED-002"
+      signal: "No intelligent tiering for unpredictable access"
+      evidence_pattern: "Fixed lifecycle rules for variable access patterns"
+      remediation: "Use intelligent tiering for unpredictable workloads"
+
+    - id: "HWC-MED-003"
+      signal: "Index lifecycle not matching data lifecycle"
+      evidence_pattern: "Search indices keep data longer than primary storage"
+      remediation: "Align index lifecycle with data retention policies"
+
+  low:
+    - id: "HWC-LOW-001"
+      signal: "Storage tiering not documented"
+      evidence_pattern: "No documentation of tier thresholds and policies"
+      remediation: "Document storage tier policies and rationale"
+
+    - id: "HWC-LOW-002"
+      signal: "No cost monitoring per storage tier"
+      evidence_pattern: "Storage costs not broken down by tier"
+      remediation: "Implement per-tier cost tracking and reporting"
+
+  positive:
+    - id: "HWC-POS-001"
+      signal: "Comprehensive lifecycle policies based on access patterns"
+      evidence_pattern: "Data tiered based on measured access frequency"
+
+    - id: "HWC-POS-002"
+      signal: "Async retrieval for cold data with graceful degradation"
+      evidence_pattern: "Cold data retrieval doesn't block hot path"
+
+    - id: "HWC-POS-003"
+      signal: "Cost optimization metrics tracked"
+      evidence_pattern: "Dashboard showing storage costs by tier"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Storage Systems"
+      description: |
+        Catalog all storage systems and their tier capabilities.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find storage configurations"
+          command: |
+            grep -rn "s3\|blob\|gcs\|storage" \
+              --include="*.tf" --include="*.yaml" --include="*.json" . 2>/dev/null | \
+              grep -i "bucket\|container\|storage" | head -30
+        - purpose: "Find lifecycle configurations"
+          command: |
+            grep -rn "lifecycle\|transition\|expiration" \
+              --include="*.tf" --include="*.yaml" --include="*.json" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Storage system inventory"
+        - "Current tier configurations"
+
+    - id: "2"
+      name: "Analyze Lifecycle Policies"
+      description: |
+        Review existing data lifecycle policies.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find lifecycle rules"
+          command: |
+            grep -rn -A10 "lifecycle" --include="*.tf" --include="*.yaml" . 2>/dev/null | head -50
+        - purpose: "Find retention configurations"
+          command: |
+            grep -rn "retention\|expire\|ttl" \
+              --include="*.yaml" --include="*.json" --include="*.tf" . 2>/dev/null | head -30
+
+      expected_findings:
+        - "Lifecycle policy details"
+        - "Transition timing"
+
+    - id: "3"
+      name: "Review Data Access Patterns"
+      description: |
+        Understand how data is accessed over time.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find access pattern code"
+          command: |
+            grep -rn "lastAccessed\|access_time\|modified_at" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Access pattern characteristics"
+        - "Hot vs cold data distribution"
+
+    - id: "4"
+      name: "Assess Retrieval Strategies"
+      description: |
+        Verify cold data retrieval doesn't impact hot paths.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find archive retrieval code"
+          command: |
+            grep -rn "restore\|retrieve\|glacier\|archive" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Retrieval patterns"
+        - "Sync vs async retrieval"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "storage_inventory"
+        - "lifecycle_analysis"
+        - "cost_optimization_opportunities"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Storage Tier Assessment"
+        - "Lifecycle Policy Review"
+        - "Cost Optimization"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of missing tiering or misconfiguration"
+    medium: "Tiering exists but may not match access patterns"
+    low: "Requires access metrics to confirm optimization potential"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "s3-storage-classes"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure analysis"
+    full:
+      included: true
+      priority: 2
+    cost:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "hwc-001"
+    item: "Lifecycle policies defined for object storage"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "lifecycle\|transition" --include="*.tf" --include="*.yaml" . 2>/dev/null | \
+        wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "hwc-002"
+    item: "Cold data retrieval is asynchronous"
+    level: "BLOCKING"
+    verification: |
+      grep -rn "glacier\|archive.*restore" --include="*.ts" --include="*.py" . 2>/dev/null | \
+        grep -v "async\|await\|callback" | wc -l | xargs -I {} test {} -lt 3 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "hwc-003"
+    item: "Storage costs monitored by tier"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify cost dashboards break down storage by tier"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["data-intensive", "enterprise"]
+
+  compliance_frameworks:
+    - framework: "FinOps"
+      controls: ["Cost Optimization"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.storage-strategy.storage-cost-optimization"
+    - "data-state-management.data-lineage-provenance.change-history"
+    - "reliability-resilience.backup-recovery.backup-strategy"

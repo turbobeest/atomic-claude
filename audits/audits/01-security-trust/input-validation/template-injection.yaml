@@ -1,0 +1,439 @@
+audit:
+  id: security-trust.input-validation.template-injection
+  name: Template Injection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit examines the codebase for Server-Side Template Injection (SSTI)
+    vulnerabilities (CWE-1336). It identifies patterns where user input is
+    concatenated into template strings or used to dynamically generate templates,
+    allowing attackers to execute arbitrary code on the server.
+  why_it_matters: |
+    SSTI is included in OWASP Top 10 under Injection. It can lead to Remote
+    Code Execution (RCE), allowing complete server compromise. Unlike XSS which
+    runs in the browser, SSTI executes on the server with the application's
+    privileges. Attackers can read files, execute commands, and pivot to other
+    systems.
+  when_to_run:
+  - Initial security audit of template-based applications
+  - Code review for template handling changes
+  - Before production deployment
+  - When adding user-customizable templates
+  - When implementing email templates with user data
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code with template engine usage
+  access_requirements:
+  - Read access to source code repositories
+discovery:
+  code_patterns:
+  - pattern: from_string\s*\(.*\+|from_string\s*\(.*format|Template\s*\(.*\+
+    type: regex
+    scope: source
+    purpose: Detect Jinja2 from_string with concatenation
+  - pattern: Environment\(\).*from_string|jinja2\.Template\s*\(.*user
+    type: regex
+    scope: source
+    purpose: Detect Jinja2 Template with user input
+  - pattern: \.render\s*\(.*\+|render_template_string\s*\(.*\+
+    type: regex
+    scope: source
+    purpose: Detect render with concatenation
+  - pattern: render_template_string\s*\(.*request|render_template_string\s*\(.*user
+    type: regex
+    scope: source
+    purpose: Detect Flask render_template_string with user input
+  - pattern: Template\s*\(.*request|Template\s*\(.*\+
+    type: regex
+    scope: source
+    purpose: Detect Django Template with user input
+  - pattern: mako\.template|Template\s*\(.*text.*request
+    type: regex
+    scope: source
+    purpose: Detect Mako template with user input
+  - pattern: tornado\.template|Template\s*\(.*loader
+    type: regex
+    scope: source
+    purpose: Detect Tornado template usage
+  - pattern: (ejs|pug|handlebars|nunjucks)\.render.*req\.|compile\s*\(.*req\.
+    type: regex
+    scope: source
+    purpose: Detect Node.js template render with request
+  - pattern: Twig.*createTemplate|twig.*render.*\$_
+    type: regex
+    scope: source
+    purpose: Detect Twig template with user input
+  - pattern: Template\s*\(.*String|processTemplate.*request
+    type: regex
+    scope: source
+    purpose: Detect Freemarker with user input
+  - pattern: StandardExpressionParser|processExpression.*request
+    type: regex
+    scope: source
+    purpose: Detect Thymeleaf expression processing
+  - pattern: template.*=.*request|user.*template|template.*user
+    type: regex
+    scope: source
+    purpose: Detect user-controlled template content
+  - pattern: render_template\s*\(["'][^"']+["']|render\s*\(["'][^"']+["']
+    type: regex
+    scope: source
+    purpose: Detect safe template file rendering (positive)
+  file_patterns:
+  - glob: '**/*.py'
+    purpose: Python template code
+  - glob: '**/*.java'
+    purpose: Java template code
+  - glob: '**/*.js'
+    purpose: JavaScript template code
+  - glob: '**/*.php'
+    purpose: PHP template code
+  - glob: '**/views/*.py'
+    purpose: View modules
+  - glob: '**/controllers/*.py'
+    purpose: Controller modules
+  - glob: '**/templates/*.html'
+    purpose: Template files
+knowledge_sources:
+  specifications:
+  - id: cwe-1336
+    name: 'CWE-1336: Improper Neutralization of Special Elements Used in a Template Engine'
+    url: https://cwe.mitre.org/data/definitions/1336.html
+    offline_cache: true
+    priority: required
+  - id: cwe-94
+    name: 'CWE-94: Improper Control of Generation of Code (''Code Injection'')'
+    url: https://cwe.mitre.org/data/definitions/94.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-ssti
+    name: OWASP Testing for Server-Side Template Injection
+    url: https://owasp.org/www-project-web-security-testing-guide/v41/4-Web_Application_Security_Testing/07-Input_Validation_Testing/18-Testing_for_Server_Side_Template_Injection
+    offline_cache: true
+  - id: portswigger-ssti
+    name: PortSwigger Server-Side Template Injection
+    url: https://portswigger.net/web-security/server-side-template-injection
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect SSTI patterns
+    offline_capable: true
+  - tool: bandit
+    purpose: Python security linting including template injection
+    offline_capable: true
+  - tool: tplmap
+    purpose: Automated SSTI detection and exploitation tool
+    offline_capable: false
+  scripts:
+  - id: detect-ssti
+    language: bash
+    purpose: Detect potential SSTI vulnerabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== SSTI Detection ==="
+
+      echo "--- Jinja2 from_string with concatenation ---"
+      grep -rn --include="*.py" -E "from_string\s*\(.*\+|Template\s*\(.*\+" . 2>/dev/null | head -20
+
+      echo "--- render_template_string usage ---"
+      grep -rn --include="*.py" "render_template_string" . 2>/dev/null | head -20
+
+      echo "--- User input in template ---"
+      grep -rn --include="*.py" --include="*.js" --include="*.php" \
+        -E "(template|Template).*request|request.*(template|Template)" . 2>/dev/null | head -20
+
+      echo "--- Node.js template with request ---"
+      grep -rn --include="*.js" -E "(ejs|pug|handlebars)\.render.*req" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: SSTI-CRIT-001
+    signal: User input concatenated into template string
+    cwe: CWE-1336
+    evidence_pattern: (from_string|Template)\s*\(.*\+.*request|(from_string|Template)\s*\(.*\+.*user
+    explanation: |
+      Concatenating user input into a template string allows attackers to
+      inject template syntax. In Jinja2, payload like {{7*7}} executes
+      arithmetic, and {{config}} leaks configuration. More advanced payloads
+      achieve Remote Code Execution.
+    remediation: |
+      Never concatenate user input into templates. Pass data as parameters:
+      - BAD: Template('Hello ' + name).render()
+      - GOOD: render_template('hello.html', name=name)
+      Use predefined template files with variable placeholders.
+  - id: SSTI-CRIT-002
+    signal: render_template_string with user input
+    cwe: CWE-1336
+    evidence_pattern: render_template_string\s*\(.*request|render_template_string.*\+.*user
+    explanation: |
+      Flask's render_template_string() creates templates from strings.
+      If user input reaches this function, SSTI is possible. Attackers
+      can execute {{''.__class__.__mro__[2].__subclasses__()}} to access
+      Python internals and achieve RCE.
+    remediation: |
+      Use render_template() with template files instead:
+      - BAD: render_template_string(request.args.get('template'))
+      - GOOD: render_template('page.html', content=user_content)
+  - id: SSTI-CRIT-003
+    signal: User-controlled template file path
+    cwe: CWE-1336
+    evidence_pattern: render_template\s*\(.*request|render\s*\(.*user.*template
+    explanation: |
+      Allowing users to specify template file paths can lead to arbitrary
+      template inclusion and potentially SSTI if combined with file upload.
+    remediation: |
+      Use allowlist of permitted template names:
+      allowed = ['page1.html', 'page2.html']
+      if template_name in allowed:
+          render_template(template_name)
+  - id: SSTI-CRIT-004
+    signal: Dynamic template creation from user content
+    cwe: CWE-1336
+    evidence_pattern: Environment\(\).*from_string.*user|jinja2\.Template.*user
+    explanation: |
+      Creating templates dynamically from user content is inherently
+      dangerous. Even with sandboxing, Jinja2 sandbox escapes exist.
+    remediation: |
+      Avoid dynamic template creation. If absolutely necessary, use
+      logic-less templates (Mustache, Handlebars without helpers) that
+      cannot execute code.
+  high:
+  - id: SSTI-HIGH-001
+    signal: Template engine with user data in expression context
+    cwe: CWE-1336
+    evidence_pattern: \{\{.*request|\{%.*request|\$\{.*request
+    explanation: |
+      User data directly in template expression context ({{ }}) may be
+      exploitable depending on the template engine and escaping.
+    remediation: |
+      Pass user data as template variables, not directly in expressions.
+      Ensure auto-escaping is enabled for the context.
+  - id: SSTI-HIGH-002
+    signal: Email template with user content
+    cwe: CWE-1336
+    evidence_pattern: email.*template.*user|template.*mail.*request
+    explanation: |
+      Email templates that incorporate user content can be SSTI vectors
+      if the template is rendered server-side with user data in the
+      template string.
+    remediation: |
+      Use predefined email templates with placeholders. Never allow
+      users to define template structure, only provide data values.
+  - id: SSTI-HIGH-003
+    signal: Jinja2 sandbox may be bypassable
+    evidence_pattern: SandboxedEnvironment|sandboxed.*jinja
+    explanation: |
+      Jinja2's SandboxedEnvironment has known bypass techniques. While
+      it adds some protection, it should not be relied upon as sole defense.
+    remediation: |
+      Avoid user-controlled templates even with sandboxing. If required,
+      use logic-less template engines and restrict available variables.
+  medium:
+  - id: SSTI-MED-001
+    signal: Template string built from multiple sources
+    cwe: CWE-1336
+    evidence_pattern: template.*\+=|template.*=.*template.*\+
+    explanation: |
+      Building templates by concatenating strings from multiple sources
+      increases the risk that user input reaches the template string.
+    remediation: |
+      Use template files with clear separation of structure and data.
+      Review all sources contributing to template construction.
+  - id: SSTI-MED-002
+    signal: Custom template filters with user input
+    evidence_pattern: add_filter|register_filter|custom_filter
+    explanation: |
+      Custom template filters that process user input could introduce
+      injection points if not carefully implemented.
+    remediation: |
+      Audit custom filters for injection vulnerabilities. Ensure filters
+      escape output appropriately for the context.
+  low:
+  - id: SSTI-LOW-001
+    signal: Template error messages may leak information
+    evidence_pattern: TemplateSyntaxError|UndefinedError
+    explanation: |
+      Template error messages may reveal template engine details or
+      file paths that help attackers craft SSTI payloads.
+    remediation: |
+      Use generic error messages in production. Log detailed errors
+      server-side only.
+  positive:
+  - id: SSTI-POS-001
+    signal: render_template with file path used
+    evidence_pattern: render_template\s*\(["'][^"']+\.html["']
+    explanation: |
+      Using render_template() with predefined template files is the
+      safe pattern for template rendering.
+  - id: SSTI-POS-002
+    signal: Logic-less template engine in use
+    evidence_pattern: (mustache|Mustache|handlebars|Handlebars)
+    explanation: |
+      Logic-less template engines like Mustache have minimal attack
+      surface as they cannot execute arbitrary code.
+  - id: SSTI-POS-003
+    signal: Template autoescaping enabled
+    evidence_pattern: autoescape\s*=\s*True|autoescape.*select
+    explanation: |
+      Auto-escaping provides defense-in-depth against template injection.
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find all template rendering
+    description: |
+      Identify all locations where templates are rendered.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find template rendering calls
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.php" \
+          -E "(render_template|render|Template\s*\(|from_string)" . 2>/dev/null | head -50
+    expected_findings:
+    - Inventory of template rendering operations
+    - Classification by rendering method
+  - id: '2'
+    name: Identify dangerous template patterns
+    description: |
+      Find patterns where user input reaches template construction.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find concatenation in templates
+      command: |
+        grep -rn --include="*.py" -E "(Template|from_string)\s*\(.*\+" . 2>/dev/null | head -30
+    - purpose: Find render_template_string
+      command: |
+        grep -rn --include="*.py" "render_template_string" . 2>/dev/null | head -20
+    expected_findings:
+    - Dangerous template patterns
+    - User input paths to templates
+  - id: '3'
+    name: Run static analysis
+    description: |
+      Execute security-focused static analysis for SSTI.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Run Semgrep SSTI rules
+      command: |
+        semgrep --config=p/template-injection . 2>/dev/null | head -100 || echo "Semgrep not available"
+    - purpose: Run Bandit for Python
+      command: |
+        bandit -r . -f json 2>/dev/null | jq '.results[] | select(.test_id | contains("B701") or contains("B702"))' | head -50 || echo "Bandit not available"
+    expected_findings:
+    - Static analysis SSTI findings
+    - Additional patterns from tooling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - SSTI Vulnerabilities
+    - Template Rendering Assessment
+    - Remediation Roadmap
+  confidence_guidance:
+    high: Direct evidence of user input in template string construction
+    medium: Template construction patterns, user input source unclear
+    low: Template code present, needs detailed data flow analysis
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-1336
+      priority: required
+    - source_id: owasp-ssti
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: SSTI is less common, not needed in quick scan
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ssti-001
+  item: No user input concatenated into template strings
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" "(Template|from_string)\s*\(.*\+.*request" . 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: ssti-002
+  item: No render_template_string with user input
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" "render_template_string.*request" . 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: ssti-003
+  item: render_template used with file paths
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.py" "render_template\s*\([\"']" . 2>/dev/null && echo "PASS" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: ssti-004
+  item: Template auto-escaping enabled
+  level: WARNING
+  verification: |
+    grep -rn --include="*.py" "autoescape.*True" . 2>/dev/null && echo "PASS" || echo "NEEDS_REVIEW"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A03:2021 - Injection
+  - framework: CWE
+    controls:
+    - CWE-1336
+    - CWE-94
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.xss-prevention
+  - security-trust.input-validation.command-injection
+  - security-trust.input-validation.path-traversal

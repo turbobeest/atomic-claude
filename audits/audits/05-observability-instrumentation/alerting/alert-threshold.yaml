@@ -1,0 +1,256 @@
+audit:
+  id: observability-instrumentation.alerting.alert-threshold
+  name: Alert Threshold Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: alerting
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews alert threshold configurations to verify they are appropriately
+    calibrated to detect real problems while avoiding false positives.
+    Examines static thresholds, percentage-based thresholds, rate-of-change
+    thresholds, and their alignment with SLOs.
+  why_it_matters: |
+    Poorly calibrated thresholds cause either alert fatigue from too many
+    false positives or missed incidents from thresholds set too high.
+    Both scenarios reduce on-call effectiveness and can lead to prolonged
+    outages or desensitized responders.
+  when_to_run:
+  - After alert fatigue complaints
+  - When incidents were not alerted
+  - Quarterly alert hygiene review
+  - After significant traffic changes
+prerequisites:
+  required_artifacts:
+  - type: alert_rules
+    description: Alert rule configurations
+  - type: alert_history
+    description: Historical alert firing data
+  access_requirements:
+  - Prometheus/AlertManager configuration
+  - Alert history and metrics
+  - SLO definitions
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: ALERTS{alertstate='firing'}
+    purpose: Current firing alerts
+    threshold: Only actionable alerts firing
+  - system: Prometheus
+    query: increase(ALERTS_total[7d])
+    purpose: Alert frequency over past week
+    threshold: Reasonable alert volume
+  code_patterns:
+  - pattern: threshold|>|<|==|!=|rate|increase
+    type: regex
+    scope: alerting_rules
+    purpose: Identify threshold expressions
+  file_patterns:
+  - glob: '**/alerts*.yaml'
+    purpose: Alert rule files
+  - glob: '**/rules/*.yaml'
+    purpose: Prometheus rule files
+  - glob: '**/alertmanager*.yaml'
+    purpose: AlertManager configuration
+knowledge_sources:
+  specifications:
+  - id: prometheus-alerting
+    name: Prometheus Alerting Rules
+    url: https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: sre-alerting
+    name: Google SRE Book - Alerting
+    url: https://sre.google/sre-book/monitoring-distributed-systems/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: promtool
+    purpose: Validate alert rules
+    command: promtool check rules /etc/prometheus/rules/*.yaml
+  - tool: amtool
+    purpose: Check AlertManager config
+    command: amtool check-config /etc/alertmanager/alertmanager.yaml
+  monitoring_queries:
+  - system: Prometheus
+    query: count by (alertname) (ALERTS{alertstate='firing'})
+    purpose: Count alerts by name
+signals:
+  critical:
+  - id: ALERT-THRESH-CRIT-001
+    signal: Alert thresholds not based on SLOs
+    evidence_pattern: Arbitrary thresholds with no SLO correlation
+    explanation: |
+      Alerts should fire when SLOs are threatened, not at arbitrary
+      thresholds. Without SLO alignment, alerts may fire for non-impactful
+      issues while missing actual customer-facing problems.
+    remediation: Derive alert thresholds from SLO error budgets
+  - id: ALERT-THRESH-CRIT-002
+    signal: Critical alerts using single data point
+    evidence_pattern: 'for: 0s or no for clause on critical alerts'
+    explanation: |
+      Alerting on single data points causes false positives from
+      temporary spikes. Critical alerts need sustained conditions
+      to avoid waking on-call for transient blips.
+    remediation: Add appropriate 'for' duration to critical alerts
+  high:
+  - id: ALERT-THRESH-HIGH-001
+    signal: Static thresholds on variable workloads
+    evidence_pattern: Fixed thresholds without traffic normalization
+    explanation: |
+      Static thresholds fail for variable traffic patterns. High
+      traffic periods trigger false alerts while low traffic
+      periods mask real problems.
+    remediation: Use rate-based or percentage thresholds
+  - id: ALERT-THRESH-HIGH-002
+    signal: Thresholds set at maximum observed values
+    evidence_pattern: Threshold equals historical peak
+    explanation: |
+      Thresholds at historical maximums only fire when new records
+      are set, missing degradations that stay below the peak.
+    remediation: Base thresholds on percentiles or SLO targets
+  medium:
+  - id: ALERT-THRESH-MED-001
+    signal: No headroom in thresholds
+    evidence_pattern: Thresholds at exact SLO boundaries
+    remediation: Add buffer for warning before SLO breach
+  - id: ALERT-THRESH-MED-002
+    signal: Inconsistent threshold methodology
+    evidence_pattern: Mix of static, percentage, rate thresholds
+    remediation: Standardize threshold approach per alert type
+  low:
+  - id: ALERT-THRESH-LOW-001
+    signal: Threshold rationale not documented
+    remediation: Add threshold documentation to alert rules
+  positive:
+  - id: ALERT-THRESH-POS-001
+    signal: SLO-aligned thresholds with appropriate durations
+    evidence_pattern: Thresholds derived from error budgets
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory alert thresholds
+    description: |
+      Extract all alert rules and document their threshold
+      configurations including values, durations, and expressions.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all alert rules
+      command: kubectl get prometheusrules -A -o yaml | grep -A 20 'alert:'
+    - purpose: Extract threshold expressions
+      command: 'curl -s ''http://prometheus:9090/api/v1/rules'' | jq ''.data.groups[].rules[] | select(.type=="alerting")
+        | {name: .name, expr: .query, for: .duration}'''
+    expected_findings:
+    - Alert rule inventory
+    - Threshold expressions
+  - id: '2'
+    name: Analyze alert firing history
+    description: |
+      Review alert firing frequency to identify noisy alerts
+      and silent alerts that should have fired.
+    duration_estimate: 40 min
+    commands:
+    - purpose: Get alert firing counts
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=sum%20by%20(alertname)%20(increase(ALERTS_total[30d]))'
+        | jq '.data.result | sort_by(-.value[1] | tonumber)'
+    - purpose: Check never-fired alerts
+      command: curl -s 'http://prometheus:9090/api/v1/rules' | jq '.data.groups[].rules[] | select(.type=="alerting"
+        and .lastEvaluation == null) | .name'
+    expected_findings:
+    - Alert frequency distribution
+    - Noisy alert identification
+  - id: '3'
+    name: Validate SLO alignment
+    description: |
+      Verify that critical alerts are derived from SLO definitions
+      and fire before SLO breaches become critical.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Compare alerts to SLOs
+      command: diff <(cat /etc/prometheus/rules/alerts.yaml | grep 'alert:') <(cat /etc/prometheus/rules/slo.yaml
+        | grep 'alert:')
+    expected_findings:
+    - SLO coverage
+    - Alignment gaps
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Threshold Analysis
+    - SLO Alignment
+    - Recommendations
+  confidence_guidance:
+    high: Historical analysis with incident correlation
+    medium: Rule review with limited history
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: prometheus-alerting
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires historical analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: alert-thresh-001
+  item: Alert rules inventoried
+  level: CRITICAL
+  verification: promtool check rules /etc/prometheus/rules/*.yaml && echo PASS || echo FAIL
+  expected: PASS
+- id: alert-thresh-002
+  item: Noisy alerts identified
+  level: BLOCKING
+  verification: manual
+  expected: Top noisy alerts documented
+- id: alert-thresh-003
+  item: SLO alignment verified
+  level: WARNING
+  verification: manual
+  expected: SLO-alert mapping documented
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Alert Quality
+relationships:
+  commonly_combined:
+  - observability-instrumentation.alerting.alert-fatigue
+  - observability-instrumentation.alerting.alert-slo-alignment
+  - observability-instrumentation.alerting.anomaly-detection

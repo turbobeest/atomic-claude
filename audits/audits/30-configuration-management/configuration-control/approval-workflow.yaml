@@ -1,0 +1,445 @@
+audit:
+  id: configuration-management.configuration-control.approval-workflow
+  name: Configuration Approval Workflow Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: configuration-management
+  category_number: 30
+  subcategory: configuration-control
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the approval workflows implemented for configuration
+    changes. It evaluates:
+    - Multi-level approval requirements based on change risk
+    - Approval routing and escalation paths
+    - Approval automation and integration with CI/CD
+    - Time-bound approvals and expiration
+    - Delegation and out-of-office handling
+    - Approval audit trails and documentation
+    - Emergency approval procedures
+  why_it_matters: |
+    Approval workflows ensure appropriate oversight for changes:
+    - ITIL requires appropriate authorization for changes based on risk
+    - SOC 2 requires documented approval for changes
+    - Proper approval prevents unauthorized or erroneous changes
+    - Multi-level approval scales oversight to change impact
+    - Automated approval routing reduces delays
+    - Audit trails demonstrate compliance to regulators
+    - Clear escalation paths prevent process bottlenecks
+  when_to_run:
+  - When implementing or updating change management
+  - After approval workflow failures
+  - During compliance audits
+  - When onboarding new approvers
+  - Quarterly process reviews
+prerequisites:
+  required_artifacts:
+  - type: workflow_definitions
+    description: Approval workflow configurations
+  - type: documentation
+    description: Change management policies
+  access_requirements:
+  - Access to change management system
+  - Access to approval workflow configurations
+  - Read access to PR/MR approval settings
+discovery:
+  code_patterns:
+  - pattern: (approval|approve|authorized)[-_](required|workflow|gate)
+    type: regex
+    scope: config
+    purpose: Detect approval configuration
+  - pattern: required[-_](reviewers|approvers|approvals)
+    type: regex
+    scope: config
+    purpose: Detect required approvers
+  - pattern: (CAB|change[-_]advisory[-_]board)
+    type: regex
+    scope: config
+    purpose: Detect CAB references
+  - pattern: (escalat|delegate|fallback)[-_](to|path|approver)
+    type: regex
+    scope: config
+    purpose: Detect escalation configuration
+  file_patterns:
+  - glob: '**/.github/workflows/*.yaml'
+    purpose: GitHub Actions workflows
+  - glob: '**/approval*.yaml'
+    purpose: Approval workflow definitions
+  - glob: '**/.gitlab-ci.yml'
+    purpose: GitLab CI configuration
+  - glob: '**/CODEOWNERS'
+    purpose: Code ownership for approvals
+knowledge_sources:
+  specifications:
+  - id: itil-change-authorization
+    name: ITIL Change Authorization
+    url: https://www.axelos.com/best-practice-solutions/itil
+    offline_cache: true
+    priority: required
+  - id: soc2-cc61
+    name: SOC 2 CC6.1 - Logical Access
+    url: https://www.aicpa.org/soc
+    offline_cache: true
+    priority: required
+  guides:
+  - id: github-environments
+    name: GitHub Environments and Approvals
+    url: https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: workflow-analyzer
+    purpose: Analyze approval workflows
+    offline_capable: true
+  scripts:
+  - id: approval-workflow-audit
+    language: bash
+    purpose: Audit approval workflow configuration
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Approval Workflow Audit ==="
+      echo ""
+      echo "=== GitHub Workflow Approvals ==="
+      grep -rn "environment:" --include="*.yaml" --include="*.yml" \
+        .github/workflows/ 2>/dev/null | head -20
+      echo ""
+      echo "=== Required Reviewers ==="
+      grep -rn "required_reviewers\|required_approving" \
+        --include="*.yaml" --include="*.yml" . 2>/dev/null | head -20
+      echo ""
+      echo "=== CODEOWNERS Configuration ==="
+      cat CODEOWNERS .github/CODEOWNERS 2>/dev/null | head -30
+signals:
+  critical:
+  - id: APPR-CRIT-001
+    signal: No approval workflow for production changes
+    evidence_indicators:
+    - Production deployments without approval gates
+    - No environment protection for production
+    - Self-service production changes
+    explanation: |
+      Production changes require explicit approval to prevent
+      unauthorized modifications. Without approval workflows,
+      any authorized user can deploy to production, increasing
+      risk of outages and security incidents.
+    remediation: |
+      - Implement approval gates for production
+      - Configure environment protection rules
+      - Require designated approvers for production
+      - Enable approval audit logging
+    cwe: CWE-284
+  - id: APPR-CRIT-002
+    signal: Approval can be bypassed
+    evidence_indicators:
+    - Override permissions too widely granted
+    - Bypass options available without justification
+    - Approval requirements not enforced
+    explanation: |
+      Approval bypass defeats the purpose of workflow controls.
+      If approval can be circumvented without strong justification
+      and audit trail, the control provides false confidence.
+    remediation: |
+      - Remove or restrict bypass capabilities
+      - Require documented justification for bypass
+      - Alert on approval bypass events
+      - Audit bypass usage regularly
+  high:
+  - id: APPR-HIGH-001
+    signal: Single approver for all changes
+    evidence_indicators:
+    - One person can approve all change types
+    - No escalation to senior approvers
+    - Risk-based approval levels not implemented
+    explanation: |
+      Single-approver models create bottlenecks and concentration
+      risk. High-impact changes should require senior or multiple
+      approvers. Risk-based approval scales oversight appropriately.
+    remediation: |
+      - Implement risk-based approval levels
+      - Require multiple approvers for high-risk changes
+      - Define approval authority by role
+      - Create escalation paths for exceptions
+  - id: APPR-HIGH-002
+    signal: Approval delegation uncontrolled
+    evidence_indicators:
+    - Delegated authority not documented
+    - Delegation without time limits
+    - Sub-delegation permitted
+    explanation: |
+      Uncontrolled delegation may result in unqualified approvers.
+      Delegation should be documented, time-bound, and limited
+      to appropriate personnel.
+    remediation: |
+      - Document delegation requirements
+      - Implement time-bound delegation
+      - Prohibit sub-delegation
+      - Track and audit delegations
+  - id: APPR-HIGH-003
+    signal: No approval expiration
+    evidence_indicators:
+    - Approvals valid indefinitely
+    - Stale approvals can be used later
+    - No time limit on approved changes
+    explanation: |
+      Approvals should have expiration to ensure currency.
+      An approval from weeks ago may not reflect current
+      understanding of the change or its context.
+    remediation: |
+      - Implement approval expiration (24-72 hours typical)
+      - Require re-approval for stale changes
+      - Configure expiration in tooling
+      - Document expiration policies
+  medium:
+  - id: APPR-MED-001
+    signal: Approval routing manual
+    evidence_indicators:
+    - Manual identification of approvers
+    - No automatic routing based on change type
+    - Approval requests sent manually
+    explanation: |
+      Manual routing is slow and error-prone. Automated routing
+      based on change type, risk, and ownership ensures appropriate
+      approvers are engaged efficiently.
+    remediation: |
+      - Implement automated approval routing
+      - Use CODEOWNERS for automatic assignment
+      - Configure routing rules by change type
+      - Integrate with notification systems
+  - id: APPR-MED-002
+    signal: No escalation path defined
+    evidence_indicators:
+    - Blocked changes when approver unavailable
+    - No fallback approvers defined
+    - No time-based escalation
+    explanation: |
+      Lack of escalation creates bottlenecks and delays.
+      Time-based escalation ensures changes are not blocked
+      indefinitely when primary approvers are unavailable.
+    remediation: |
+      - Define backup approvers for each area
+      - Implement time-based escalation
+      - Configure out-of-office delegation
+      - Document escalation procedures
+  - id: APPR-MED-003
+    signal: Approval requirements inconsistent
+    evidence_indicators:
+    - Different requirements for similar changes
+    - No documented approval criteria
+    - Ad-hoc approval decisions
+    explanation: |
+      Inconsistent requirements create confusion and potential
+      gaps. Clear, documented criteria ensure appropriate
+      scrutiny for all change types.
+    remediation: |
+      - Document approval criteria by change type
+      - Standardize requirements in policy
+      - Configure consistent rules in tooling
+      - Train teams on requirements
+  low:
+  - id: APPR-LOW-001
+    signal: Approval comments not required
+    evidence_indicators:
+    - Approvals without justification
+    - No comment requirement in workflow
+    - Silent approvals permitted
+    explanation: |
+      Approval comments document rationale and any conditions.
+      Silent approvals make it difficult to understand the
+      basis for approval during audits or reviews.
+    remediation: |
+      - Require comments for approvals
+      - Provide comment templates
+      - Include comments in audit trail
+      - Review comment quality periodically
+  positive:
+  - id: APPR-POS-001
+    signal: Risk-based approval workflow implemented
+    evidence_indicators:
+    - Approval requirements scale with risk
+    - Multiple approvers for high-risk changes
+    - Automated routing and escalation
+  - id: APPR-POS-002
+    signal: Approval automation integrated
+    evidence_indicators:
+    - CI/CD enforces approval requirements
+    - Automated approval routing
+    - Time-based escalation active
+procedure:
+  context:
+    cognitive_mode: methodical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Approval Workflow Configuration Review
+    description: |
+      Review approval workflow configurations in CI/CD and version control.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find GitHub environment configurations
+      command: |
+        grep -rn "environment:" --include="*.yaml" \
+          .github/workflows/ 2>/dev/null | head -30
+    - purpose: Find approval requirements in configs
+      command: |
+        grep -rn "required_reviewers\|required_approving\|minApprovals" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | head -30
+    - purpose: Review CODEOWNERS
+      command: |
+        cat CODEOWNERS .github/CODEOWNERS 2>/dev/null
+    expected_findings:
+    - Approval workflow configurations
+    - Required reviewer settings
+    - Code ownership rules
+  - id: '2'
+    name: Approval Level Analysis
+    description: |
+      Analyze whether approval requirements scale with change risk.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find environment-specific approvals
+      command: |
+        grep -rn -A 5 "environment:" --include="*.yaml" \
+          .github/workflows/ 2>/dev/null | grep -E "(name|reviewers)" | head -20
+    - purpose: Check for multiple approval requirements
+      command: |
+        grep -rn "approvals:\s*[2-9]\|minApprovals:\s*[2-9]" \
+          --include="*.yaml" . 2>/dev/null | head -10
+    expected_findings:
+    - Environment-specific requirements
+    - Multiple approver requirements
+    - Risk-based scaling
+  - id: '3'
+    name: Approval Process Verification
+    description: |
+      Verify approval processes are enforced and followed.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check branch protection status
+      command: |
+        gh api repos/{owner}/{repo}/branches/main/protection 2>/dev/null | \
+          jq '.required_pull_request_reviews' || echo "Cannot query branch protection"
+    - purpose: List recent approvals
+      command: |
+        gh pr list --state merged --limit 10 \
+          --json number,reviews 2>/dev/null || \
+          echo "GitHub CLI not available"
+    expected_findings:
+    - Branch protection status
+    - Recent approval activity
+    - Compliance with requirements
+  - id: '4'
+    name: Escalation and Delegation Review
+    description: |
+      Review escalation paths and delegation procedures.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find escalation configuration
+      command: |
+        grep -rn "escalat\|delegate\|fallback" \
+          --include="*.yaml" --include="*.md" . 2>/dev/null | head -20
+    - purpose: Find approval documentation
+      command: |
+        find . -type f \( -name "*approval*" -o -name "*change*process*" \) \
+          -name "*.md" -not -path "*/node_modules/*" 2>/dev/null | head -10
+    expected_findings:
+    - Escalation procedures
+    - Delegation rules
+    - Process documentation
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Workflow Configuration Analysis
+    - Approval Level Assessment
+    - Recommendations
+  - type: approval_matrix
+    format: table
+    description: Approval requirements by change type and environment
+  confidence_guidance:
+    high: Workflow configurations verified and tested
+    medium: Configurations found but enforcement not verified
+    low: Workflow status requires manual verification
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: itil-change-authorization
+      priority: required
+    - source_id: soc2-cc61
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Approval workflow audit requires thorough review
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: appr-001
+  item: Production changes require approval
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify production environment has approval gates
+  expected: Confirmed by reviewer
+- id: appr-002
+  item: Approval cannot be bypassed
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify approval requirements are enforced
+  expected: Confirmed by reviewer
+- id: appr-003
+  item: Risk-based approval levels defined
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify different approval requirements by risk
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ITIL
+    controls:
+    - Change Authorization
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC8.1
+  - framework: ISO 27001
+    controls:
+    - A.8.32
+  - framework: PCI-DSS
+    controls:
+    - 6.4.5
+relationships:
+  commonly_combined:
+  - configuration-management.configuration-control.change-control
+  - configuration-management.configuration-control.version-control

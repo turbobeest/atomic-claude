@@ -1,0 +1,360 @@
+audit:
+  id: infrastructure-as-code.iac-operations.import-state-management
+  name: Import State Management
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: iac-operations
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines practices for managing Terraform state operations,
+    including:
+
+    - Resource import procedures and documentation
+    - State migration and refactoring
+    - State backup and recovery
+    - State file security
+    - Import block usage (Terraform 1.5+)
+    - moved blocks for refactoring
+    - State manipulation commands (mv, rm, taint)
+
+    The focus is on safe, documented state operations that maintain
+    infrastructure integrity.
+  why_it_matters: |
+    State operations are high-risk activities:
+
+    - Incorrect imports can cause resource replacement
+    - State corruption leads to resource orphaning
+    - Missing resources in state cause unmanaged drift
+    - State manipulation without backup risks data loss
+    - Undocumented imports create configuration drift
+
+    Proper state management ensures resources are correctly tracked
+    and changes are predictable.
+  when_to_run:
+  - Before importing existing resources
+  - When refactoring Terraform configurations
+  - After state-related incidents
+  - During migration to Terraform
+prerequisites:
+  required_artifacts:
+  - type: terraform_state
+    description: Access to Terraform state
+  - type: terraform_configuration
+    description: Terraform configurations
+  access_requirements:
+  - Access to Terraform state backend
+  - Permissions for terraform state commands
+discovery:
+  code_patterns:
+  - pattern: import\s*\{
+    type: regex
+    scope: source
+    purpose: Find import blocks
+  - pattern: moved\s*\{
+    type: regex
+    scope: source
+    purpose: Find moved blocks
+  - pattern: terraform\s+import
+    type: regex
+    scope: config
+    purpose: Find import commands in scripts
+  - pattern: terraform\s+state
+    type: regex
+    scope: config
+    purpose: Find state manipulation
+  file_patterns:
+  - glob: '**/imports.tf'
+    purpose: Import block definitions
+  - glob: '**/moved.tf'
+    purpose: Moved block definitions
+  - glob: '**/*.sh'
+    purpose: Import scripts
+  - glob: '**/MIGRATION*.md'
+    purpose: Migration documentation
+knowledge_sources:
+  specifications:
+  - id: terraform-import
+    name: Terraform Import
+    url: https://developer.hashicorp.com/terraform/language/import
+    offline_cache: true
+    priority: required
+  guides:
+  - id: terraform-state-commands
+    name: Terraform State Commands
+    url: https://developer.hashicorp.com/terraform/cli/state
+    offline_cache: true
+  - id: terraform-moved-blocks
+    name: Terraform Refactoring with Moved Blocks
+    url: https://developer.hashicorp.com/terraform/language/modules/develop/refactoring
+    offline_cache: true
+  - id: spacelift-state-migration
+    name: Terraform State Migration Guide
+    url: https://spacelift.io/blog/terraform-migrate-state
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: terraform import
+    purpose: Import existing resources
+    command: terraform import aws_instance.example i-1234567890
+  - tool: terraform state
+    purpose: State manipulation
+    command: terraform state list
+  - tool: terraform plan -generate-config-out
+    purpose: Generate config for imports
+    command: terraform plan -generate-config-out=generated.tf
+  scripts:
+  - id: safe-import
+    language: bash
+    purpose: Safe import procedure with backup
+    source: inline
+    code: |
+      #!/bin/bash
+      # Safe import procedure
+
+      # 1. Backup current state
+      echo "Backing up state..."
+      terraform state pull > "state-backup-$(date +%Y%m%d-%H%M%S).json"
+
+      # 2. Plan to verify no changes before import
+      echo "Running pre-import plan..."
+      terraform plan -out=pre-import.tfplan
+
+      # 3. Perform import
+      echo "Importing resource..."
+      # terraform import $RESOURCE_ADDRESS $RESOURCE_ID
+
+      # 4. Plan to verify configuration matches
+      echo "Running post-import plan..."
+      terraform plan
+
+      echo "Review plan for unexpected changes before applying"
+signals:
+  critical:
+  - id: IAC-IMP-CRIT-001
+    signal: State manipulation without backup
+    evidence_pattern: terraform state mv/rm without prior state pull
+    explanation: |
+      State manipulation commands modify state directly. Without
+      a backup, mistakes are difficult to recover from and may
+      result in resource orphaning or duplication.
+    remediation: |
+      Always backup before state operations:
+      terraform state pull > state-backup.json
+      # Then perform state operation
+      terraform state mv old.address new.address
+  - id: IAC-IMP-CRIT-002
+    signal: Imports not tested in non-production first
+    evidence_pattern: Import directly to production state
+    explanation: |
+      Imports can cause unexpected resource modifications if the
+      Terraform configuration doesn't match the actual resource.
+      Testing in non-production catches configuration mismatches.
+    remediation: |
+      Test imports in non-production:
+      1. Import to development/staging first
+      2. Run terraform plan to verify no changes
+      3. Fix any configuration mismatches
+      4. Then import to production
+  high:
+  - id: IAC-IMP-HIGH-001
+    signal: CLI import used instead of import blocks
+    evidence_pattern: terraform import commands without import blocks
+    explanation: |
+      CLI imports are imperative and not tracked in configuration.
+      Import blocks (Terraform 1.5+) are declarative, repeatable,
+      and version controlled.
+    remediation: |
+      Use import blocks:
+      import {
+        to = aws_instance.example
+        id = "i-1234567890"
+      }
+  - id: IAC-IMP-HIGH-002
+    signal: No moved blocks for refactoring
+    evidence_pattern: terraform state mv used instead of moved blocks
+    explanation: |
+      Using terraform state mv for refactoring requires manual
+      coordination. Moved blocks make refactoring explicit,
+      version controlled, and repeatable.
+    remediation: |
+      Use moved blocks for refactoring:
+      moved {
+        from = aws_instance.old_name
+        to   = aws_instance.new_name
+      }
+  medium:
+  - id: IAC-IMP-MED-001
+    signal: Import procedures not documented
+    remediation: |
+      Document import procedures:
+      - Prerequisites and permissions needed
+      - Backup procedures
+      - Import commands and blocks
+      - Verification steps
+      - Rollback procedures
+  - id: IAC-IMP-MED-002
+    signal: No verification after import
+    remediation: |
+      Verify imports with terraform plan:
+      # After import, plan should show no changes
+      terraform plan
+      # If changes shown, configuration doesn't match reality
+  low:
+  - id: IAC-IMP-LOW-001
+    signal: Old import blocks not cleaned up after successful import
+    remediation: Remove import blocks after successful import
+  positive:
+  - id: IAC-IMP-POS-001
+    signal: Import blocks used for resource imports
+  - id: IAC-IMP-POS-002
+    signal: Moved blocks used for refactoring
+  - id: IAC-IMP-POS-003
+    signal: State backup procedure documented and followed
+  - id: IAC-IMP-POS-004
+    signal: Imports tested in non-production first
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review import practices
+    description: |
+      Check for import blocks and CLI import usage.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find import blocks
+      command: grep -r 'import\s*{' --include='*.tf' . | head -20
+    - purpose: Find import in scripts
+      command: grep -r 'terraform import' . --include='*.sh' | head -10
+    - purpose: Check CI for imports
+      command: grep -r 'terraform import\|state mv' .github/ 2>/dev/null | head -10
+    expected_findings:
+    - Import method used
+    - Import block adoption
+  - id: '2'
+    name: Check for moved blocks
+    description: |
+      Verify moved blocks are used for refactoring.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find moved blocks
+      command: grep -r 'moved\s*{' --include='*.tf' . | head -20
+    - purpose: Check for state mv usage
+      command: grep -r 'terraform state mv\|state mv' . --include='*.sh' --include='*.md' | head -10
+    expected_findings:
+    - Moved block usage
+    - Refactoring approach
+  - id: '3'
+    name: Review state backup procedures
+    description: |
+      Check for state backup practices.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find backup commands
+      command: grep -r 'state pull\|backup' . --include='*.sh' --include='*.md' | head -20
+    - purpose: Check S3 versioning
+      command: grep -r 'versioning' --include='*.tf' . | head -10
+    expected_findings:
+    - Backup procedures
+    - State versioning
+  - id: '4'
+    name: Review documentation
+    description: |
+      Check for state operation documentation.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find migration docs
+      command: find . -iname '*migrat*' -o -iname '*import*' | grep -E '\.(md|txt)$' | head -10
+    - purpose: Check README for state procedures
+      command: grep -i 'import\|state\|migrat' README.md 2>/dev/null | head -10
+    expected_findings:
+    - Documentation status
+    - Procedure coverage
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Import Practice Review
+    - State Operation Safety
+    - Documentation Assessment
+    - Recommendations
+  confidence_guidance:
+    high: State operations reviewed and procedures tested
+    medium: Configuration reviewed
+    low: Only file presence confirmed
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-import
+      priority: required
+    - source_id: terraform-moved-blocks
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed procedure review
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      reason: Critical for production safety
+closeout_checklist:
+- id: import-001
+  item: State backup procedure exists
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify backup procedure documented and S3 versioning enabled
+  expected: Confirmed by reviewer
+- id: import-002
+  item: Import blocks used (not CLI import)
+  level: BLOCKING
+  verification: grep -r 'import\s*{' --include='*.tf' . | wc -l
+  expected: '>0 or no imports needed'
+- id: import-003
+  item: Moved blocks used for refactoring
+  level: WARNING
+  verification: grep -r 'moved\s*{' --include='*.tf' . | wc -l
+  expected: '>0 or no refactoring done'
+- id: import-004
+  item: Import procedures documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify import documentation exists
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC8.1
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.cicd-integration.rollback-strategy
+  - infrastructure-as-code.iac-operations.workspace-strategy

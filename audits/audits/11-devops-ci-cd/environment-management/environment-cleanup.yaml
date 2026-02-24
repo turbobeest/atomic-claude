@@ -1,0 +1,338 @@
+# ============================================================
+# AUDIT FILE: Environment Cleanup
+# ============================================================
+# Evaluates processes for decommissioning environments and
+# preventing resource sprawl and orphaned infrastructure.
+# ============================================================
+
+audit:
+  id: "devops-ci-cd.environment-management.environment-cleanup"
+  name: "Environment Cleanup Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "environment-management"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines environment lifecycle management with focus on
+    decommissioning and cleanup processes. It evaluates automated cleanup
+    mechanisms, orphaned resource detection, cost attribution, and
+    policies for temporary environment expiration.
+
+  why_it_matters: |
+    Inadequate environment cleanup leads to resource sprawl, escalating
+    cloud costs, security vulnerabilities from forgotten systems, and
+    operational confusion from orphaned infrastructure. Organizations
+    can waste significant budget on unused resources.
+
+  when_to_run:
+    - "Monthly cost optimization reviews"
+    - "After major project completions"
+    - "When cloud costs unexpectedly increase"
+    - "Quarterly infrastructure hygiene audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "cloud_inventory"
+      description: "List of deployed cloud resources"
+    - type: "cost_reports"
+      description: "Cloud cost allocation reports"
+
+  access_requirements:
+    - "Read access to cloud resource inventories"
+    - "Access to cost management dashboards"
+    - "Permission to view resource tags and metadata"
+
+discovery:
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Infrastructure definitions"
+    - glob: "**/.github/workflows/*cleanup*.yaml"
+      purpose: "Automated cleanup workflows"
+    - glob: "**/scripts/*cleanup*"
+      purpose: "Cleanup scripts"
+    - glob: "**/lifecycle/**"
+      purpose: "Lifecycle policy definitions"
+
+  code_patterns:
+    - pattern: "ttl|expir|cleanup|destroy|delete"
+      type: "keyword"
+      scope: "config"
+      purpose: "Cleanup-related configurations"
+    - pattern: "aws_autoscaling.*lifecycle|lifecycle_rule"
+      type: "regex"
+      scope: "config"
+      purpose: "Lifecycle policies"
+    - pattern: "schedule.*cron|cronjob"
+      type: "regex"
+      scope: "config"
+      purpose: "Scheduled cleanup jobs"
+
+knowledge_sources:
+  guides:
+    - id: "finops-practices"
+      name: "FinOps Foundation Best Practices"
+      url: "https://www.finops.org/framework/"
+      offline_cache: true
+    - id: "aws-cost-optimization"
+      name: "AWS Cost Optimization Pillar"
+      url: "https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/"
+      offline_cache: true
+
+  specifications:
+    - id: "cloud-tagging"
+      name: "Cloud Tagging Best Practices"
+      url: "https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html"
+      offline_cache: true
+      priority: "recommended"
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws"
+      purpose: "Identify unused resources"
+      command: "aws ce get-cost-and-usage --time-period Start=2024-01-01,End=2024-01-31 --granularity MONTHLY --metrics UnblendedCost"
+    - tool: "terraform"
+      purpose: "Destroy temporary environments"
+      command: "terraform destroy -auto-approve"
+    - tool: "kubectl"
+      purpose: "Find orphaned namespaces"
+      command: "kubectl get namespaces --show-labels"
+
+  scripts:
+    - id: "orphan-finder"
+      language: "bash"
+      purpose: "Find potentially orphaned resources"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find resources without proper tagging
+        aws ec2 describe-instances \
+          --query 'Reservations[*].Instances[?!Tags].[InstanceId,LaunchTime]' \
+          --output table
+
+signals:
+  critical:
+    - id: "ENVCLN-CRIT-001"
+      signal: "Production data persists in decommissioned environments"
+      evidence_indicators:
+        - "Databases or storage from old environments still contain sensitive data"
+        - "No data sanitization process before environment teardown"
+      explanation: |
+        Sensitive data in orphaned resources creates breach risk and
+        compliance violations. Decommissioned systems may not receive
+        security patches, creating vulnerabilities.
+      remediation: "Implement data sanitization as mandatory cleanup step; audit storage before deletion"
+
+    - id: "ENVCLN-CRIT-002"
+      signal: "No automated cleanup for temporary/feature branch environments"
+      evidence_indicators:
+        - "Feature branch environments exist for deleted branches"
+        - "Preview environments remain active indefinitely"
+      explanation: |
+        Uncontrolled temporary environments consume budget and create
+        security exposure from unmaintained systems.
+      remediation: "Implement TTL-based automatic cleanup with configurable retention"
+
+  high:
+    - id: "ENVCLN-HIGH-001"
+      signal: "Orphaned resources with no identifiable owner"
+      evidence_pattern: "untagged|no-owner|unknown"
+      explanation: |
+        Orphaned resources indicate process breakdown and create
+        uncertainty about what can be safely removed.
+      remediation: "Implement mandatory tagging with ownership and expiration metadata"
+
+    - id: "ENVCLN-HIGH-002"
+      signal: "Cleanup processes require manual execution"
+      evidence_indicators:
+        - "Runbook requires manual resource deletion"
+        - "No scheduled cleanup automation"
+      explanation: |
+        Manual cleanup is inconsistently performed and creates
+        dependency on individual knowledge and availability.
+      remediation: "Automate all cleanup processes with scheduled execution"
+
+  medium:
+    - id: "ENVCLN-MED-001"
+      signal: "No cost alerts for unexpected resource consumption"
+      remediation: "Implement cost anomaly detection and alerting per environment"
+
+    - id: "ENVCLN-MED-002"
+      signal: "Cleanup logs not retained for audit purposes"
+      remediation: "Implement audit logging for all resource deletions"
+
+  low:
+    - id: "ENVCLN-LOW-001"
+      signal: "Cleanup automation lacks dry-run capability"
+
+  positive:
+    - id: "ENVCLN-POS-001"
+      signal: "Automated TTL-based cleanup with owner notifications"
+    - id: "ENVCLN-POS-002"
+      signal: "Regular orphan resource reports reviewed by infrastructure team"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory cleanup mechanisms"
+      description: |
+        Identify all cleanup automation, scripts, and processes
+        currently in place for environment decommissioning.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find cleanup-related scripts"
+          command: "find . -name '*cleanup*' -o -name '*destroy*' -o -name '*teardown*' 2>/dev/null | head -20"
+        - purpose: "Check for scheduled cleanup jobs"
+          command: "grep -r 'schedule\\|cron' --include='*.yaml' --include='*.yml' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Inventory of cleanup automation"
+        - "Gaps in cleanup coverage"
+
+    - id: "2"
+      name: "Audit resource tagging"
+      description: |
+        Review tagging policies and compliance to determine
+        if resources can be attributed to owners and environments.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check for tagging requirements"
+          command: "grep -r 'tags\\|labels' --include='*.tf' --include='*.yaml' . 2>/dev/null | head -30"
+      expected_findings:
+        - "Tagging policy assessment"
+        - "Tag compliance rate"
+
+    - id: "3"
+      name: "Identify orphaned resources"
+      description: |
+        Search for resources that appear to be orphaned based on
+        age, tagging, or association with deleted projects.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find Terraform state files"
+          command: "find . -name 'terraform.tfstate*' 2>/dev/null | head -10"
+      expected_findings:
+        - "List of potentially orphaned resources"
+        - "Cost attribution for orphaned resources"
+
+    - id: "4"
+      name: "Review temporary environment lifecycle"
+      description: |
+        Examine how temporary environments (feature branches, previews)
+        are created and cleaned up.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find preview/feature environment configs"
+          command: "grep -r 'preview\\|feature\\|ephemeral\\|temporary' --include='*.yaml' --include='*.yml' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Temporary environment lifecycle documentation"
+        - "TTL and expiration policies"
+
+    - id: "5"
+      name: "Calculate cleanup effectiveness"
+      description: |
+        Measure the effectiveness of cleanup processes through
+        cost trends and resource utilization metrics.
+      duration_estimate: "45 min"
+      questions:
+        - "What percentage of cloud spend is attributed to active projects?"
+        - "How many resources lack proper ownership tagging?"
+        - "What is the average age of temporary environments?"
+      expected_findings:
+        - "Cleanup effectiveness metrics"
+        - "Cost savings opportunity assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Orphaned Resource Inventory"
+        - "Cost Impact Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct resource inventory with cost data"
+    medium: "Configuration analysis with inferred resource state"
+    low: "Documentation review without live verification"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "finops-practices"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive resource inventory"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "envcln-001"
+    item: "Automated cleanup exists for temporary environments"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify TTL-based cleanup automation is configured and active"
+    expected: "Confirmed by reviewer"
+
+  - id: "envcln-002"
+    item: "All resources tagged with owner and environment"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify tagging policy is enforced and compliance is high"
+    expected: "Confirmed by reviewer"
+
+  - id: "envcln-003"
+    item: "No orphaned resources older than retention threshold"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review resource inventory for unattributed old resources"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.5"]
+    - framework: "FinOps"
+      controls: ["Cost Allocation", "Resource Optimization"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.environment-management.environment-provisioning"
+    - "devops-ci-cd.environment-management.environment-documentation"

@@ -1,0 +1,453 @@
+audit:
+  id: security-trust.network-security.egress-control
+  name: Egress Control Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: network-security
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines outbound network traffic controls including firewall
+    egress rules, proxy configurations, DNS filtering, and data loss
+    prevention mechanisms. It evaluates whether the organization can detect
+    and prevent data exfiltration, command-and-control communication, and
+    unauthorized external access.
+  why_it_matters: |
+    Egress filtering is critical for preventing data exfiltration and
+    blocking command-and-control traffic from malware. Many organizations
+    focus on inbound security while neglecting outbound controls. Without
+    egress filtering, compromised systems can freely communicate with
+    attacker infrastructure. CMU SEI emphasizes egress filtering as essential
+    for defense in depth.
+  when_to_run:
+  - Initial security assessment
+  - After security incidents
+  - Data protection reviews
+  - Zero trust implementation
+  - Annual security audit
+prerequisites:
+  required_artifacts:
+  - type: firewall_config
+    description: Firewall egress rule configurations
+  - type: proxy_config
+    description: Web proxy configurations if applicable
+  - type: network_diagram
+    description: Network architecture showing egress points
+  access_requirements:
+  - Firewall management access
+  - Proxy server configuration access
+  - DNS server/filter configuration access
+  - Cloud security group access
+discovery:
+  code_patterns:
+  - pattern: egress|outbound|FORWARD.*ACCEPT
+    type: regex
+    scope: config
+    purpose: Identify egress configurations
+  - pattern: proxy|squid|privoxy|forward.?proxy
+    type: regex
+    scope: config
+    purpose: Identify proxy configurations
+  - pattern: deny.*all.*outbound|drop.*egress
+    type: regex
+    scope: config
+    purpose: Identify egress deny rules
+  file_patterns:
+  - glob: '**/squid.conf'
+    purpose: Squid proxy configuration
+  - glob: '**/egress-*.yaml'
+    purpose: Kubernetes egress policies
+  - glob: '**/outbound-firewall*.conf'
+    purpose: Egress firewall rules
+knowledge_sources:
+  specifications:
+  - id: nsa-network-infrastructure
+    name: NSA Network Infrastructure Security Guide
+    url: https://media.defense.gov/2022/Jun/15/2003018261/-1/-1/0/CTR_NSA_NETWORK_INFRASTRUCTURE_SECURITY_GUIDE_20220615.PDF
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: sei-egress-filtering
+    name: CMU SEI - Best Practices in Egress Filtering
+    url: https://www.sei.cmu.edu/blog/best-practices-and-considerations-in-egress-filtering/
+    offline_cache: true
+  - id: nist-sp-800-41
+    name: NIST SP 800-41 - Guidelines on Firewalls and Firewall Policy
+    url: https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-41r1.pdf
+    offline_cache: true
+  - id: k8s-egress-control
+    name: Kubernetes Egress Control Best Practices
+    url: https://k8s-security.geek-kb.com/docs/best_practices/cluster_setup_and_hardening/network_security/egress_control/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: iptables
+    purpose: Review Linux egress rules
+    command: iptables -L OUTPUT -n -v
+  - tool: aws-cli
+    purpose: Check AWS security group egress
+    command: aws ec2 describe-security-groups --query 'SecurityGroups[*].IpPermissionsEgress'
+  - tool: curl
+    purpose: Test egress connectivity
+    command: curl -v --connect-timeout 5 https://external-test-site.com
+  scripts:
+  - id: egress-test
+    language: bash
+    purpose: Test egress to common exfiltration destinations
+    source: inline
+    code: |
+      #!/bin/bash
+      # Test common egress paths
+      for port in 53 80 443 8080 8443; do
+        timeout 3 nc -zv 8.8.8.8 $port 2>&1 | grep -q succeeded && \
+          echo "Port $port: OPEN" || echo "Port $port: BLOCKED"
+      done
+signals:
+  critical:
+  - id: EGRESS-CRIT-001
+    signal: No egress filtering implemented
+    cwe_id: CWE-284
+    evidence_indicators:
+    - All outbound traffic allowed
+    - No outbound firewall rules
+    - Default allow egress policy
+    explanation: |
+      Without egress filtering, any compromised system can communicate
+      freely with attacker infrastructure, exfiltrate data, or participate
+      in attacks against third parties.
+    remediation: Implement default-deny egress policy with explicit allow rules
+  - id: EGRESS-CRIT-002
+    signal: Direct internet access from database servers
+    cwe_id: CWE-284
+    evidence_indicators:
+    - Database servers can reach internet
+    - No proxy requirement for database tier
+    - Database servers in public subnet
+    explanation: |
+      Database servers should never have direct internet access. This
+      enables trivial data exfiltration if the server is compromised.
+    remediation: Block all egress from database tier except to required internal services
+  - id: EGRESS-CRIT-003
+    signal: Unrestricted DNS egress
+    cwe_id: CWE-284
+    evidence_pattern: allow.*53.*any|permit.*dns.*0\.0\.0\.0
+    explanation: |
+      DNS can be used as a covert channel for data exfiltration and
+      C2 communication. Traffic should go through monitored DNS resolvers
+      only.
+    remediation: Force all DNS through internal resolvers; block direct external DNS
+  high:
+  - id: EGRESS-HIGH-001
+    signal: Web proxy bypass possible
+    cwe_id: CWE-284
+    evidence_indicators:
+    - Direct HTTPS allowed alongside proxy
+    - Proxy not enforced for all users
+    - Alternative ports not blocked
+    explanation: |
+      If users can bypass the web proxy, malicious traffic avoids
+      inspection and filtering controls.
+    remediation: Block direct internet access; force all HTTP/HTTPS through proxy
+  - id: EGRESS-HIGH-002
+    signal: No egress logging
+    cwe_id: CWE-778
+    evidence_indicators:
+    - Egress firewall rules don't log
+    - No netflow for outbound traffic
+    - Proxy access logs not retained
+    explanation: |
+      Without egress logging, detecting data exfiltration or C2 traffic
+      is extremely difficult. Logs are essential for incident response.
+    remediation: Enable logging for all egress traffic at firewall and proxy
+  - id: EGRESS-HIGH-003
+    signal: Broad port ranges allowed outbound
+    cwe_id: CWE-284
+    evidence_pattern: allow.*1024:65535|permit.*high-ports
+    explanation: |
+      Allowing broad port ranges outbound enables malware to communicate
+      on non-standard ports. Only specific required ports should be allowed.
+    remediation: Restrict egress to specific required ports (80, 443, etc.)
+  - id: EGRESS-HIGH-004
+    signal: No DLP controls on egress
+    cwe_id: CWE-200
+    evidence_indicators:
+    - No content inspection on egress
+    - Large file transfers not monitored
+    - No DLP agent or proxy DLP
+    explanation: |
+      Without Data Loss Prevention controls, sensitive data can be
+      exfiltrated via normal channels without detection.
+    remediation: Implement DLP on egress proxy and endpoint
+  medium:
+  - id: EGRESS-MED-001
+    signal: No egress whitelisting for servers
+    evidence_indicators:
+    - Servers can reach any external IP
+    - No destination restrictions
+    - Egress based only on port
+    explanation: |
+      Server egress should be limited to known required destinations
+      (update servers, APIs, etc.) not just port-based.
+    remediation: Implement destination whitelisting for server egress
+  - id: EGRESS-MED-002
+    signal: Egress rules not environment-specific
+    evidence_indicators:
+    - Same egress rules for dev and prod
+    - Development can reach production external endpoints
+    - No environment isolation
+    explanation: |
+      Different environments have different egress requirements.
+      Development should have more restricted egress than necessary
+      for actual functionality.
+    remediation: Create environment-specific egress policies
+  - id: EGRESS-MED-003
+    signal: No egress anomaly detection
+    evidence_indicators:
+    - No baseline for normal egress
+    - No alerting on unusual egress
+    - SIEM not monitoring egress patterns
+    explanation: |
+      Anomaly detection helps identify data exfiltration that uses
+      allowed channels but exhibits unusual patterns.
+    remediation: Implement egress traffic baselining and anomaly alerting
+  low:
+  - id: EGRESS-LOW-001
+    signal: Egress rules not documented
+    evidence_indicators:
+    - Business justification missing for rules
+    - Rule ownership unclear
+    - No egress change process
+    explanation: |
+      Undocumented egress rules lead to rule accumulation and
+      difficulty in auditing.
+    remediation: Document all egress rules with business justification
+  positive:
+  - id: EGRESS-POS-001
+    signal: Default-deny egress policy implemented
+    explanation: Only explicitly allowed egress traffic permitted
+  - id: EGRESS-POS-002
+    signal: All egress through monitored proxy
+    explanation: Web traffic inspected and logged through proxy
+  - id: EGRESS-POS-003
+    signal: DLP controls on egress traffic
+    explanation: Content inspection prevents sensitive data exfiltration
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Egress Points
+    description: |
+      Document all network egress points including firewalls, NAT gateways,
+      proxies, and direct internet connections.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List NAT gateways
+      command: aws ec2 describe-nat-gateways --query 'NatGateways[*].[NatGatewayId,SubnetId,State]'
+    - purpose: List internet gateways
+      command: aws ec2 describe-internet-gateways
+    expected_findings:
+    - Complete egress point inventory
+    - Unexpected direct internet paths
+  - id: '2'
+    name: Analyze Egress Rules
+    description: |
+      Review firewall and security group egress rules to identify
+      overly permissive configurations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List iptables OUTPUT rules
+      command: iptables -L OUTPUT -n -v --line-numbers
+    - purpose: Check AWS security group egress
+      command: aws ec2 describe-security-groups --query 'SecurityGroups[*].[GroupId,GroupName,IpPermissionsEgress]'
+        --output json
+    - purpose: Find any/any egress rules
+      command: aws ec2 describe-security-groups --query 'SecurityGroups[*].IpPermissionsEgress[?IpProtocol==`-1`]'
+    expected_findings:
+    - Egress rule inventory
+    - Overly permissive rules
+  - id: '3'
+    name: Test Egress Connectivity
+    description: |
+      Test egress from various network segments to verify controls
+      are working as intended.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test direct internet access
+      command: curl -v --connect-timeout 5 https://www.google.com 2>&1 | head -20
+    - purpose: Test non-standard port
+      command: timeout 5 nc -zv 8.8.8.8 8443 2>&1
+    - purpose: Test DNS egress
+      command: dig @8.8.8.8 google.com +short
+    expected_findings:
+    - Egress connectivity from each segment
+    - Blocked vs allowed traffic
+  - id: '4'
+    name: Review Proxy Configuration
+    description: |
+      Examine web proxy configuration for authentication, logging,
+      content filtering, and bypass prevention.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check Squid ACLs
+      command: grep -E '^acl|^http_access' /etc/squid/squid.conf
+    - purpose: Verify proxy logging
+      command: grep -E 'access_log|cache_log' /etc/squid/squid.conf
+    expected_findings:
+    - Proxy filtering configuration
+    - Logging status
+  - id: '5'
+    name: Verify DNS Egress Control
+    description: |
+      Check that DNS queries are forced through internal resolvers
+      and external DNS is blocked.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Test direct external DNS
+      command: dig @8.8.8.8 example.com +short +timeout=3
+    - purpose: Check DNS firewall rules
+      command: iptables -L -n | grep -E 'dpt:53|domain'
+    expected_findings:
+    - External DNS access status
+    - DNS filtering configuration
+  - id: '6'
+    name: Check Egress Logging and Monitoring
+    description: |
+      Verify that egress traffic is logged and integrated with
+      security monitoring systems.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check VPC flow logs
+      command: aws ec2 describe-flow-logs
+    - purpose: Verify proxy logs to SIEM
+      command: ls -la /var/log/squid/access.log
+    expected_findings:
+    - Egress logging coverage
+    - SIEM integration status
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Egress Control Assessment
+    - Data Exfiltration Risk
+    - Logging and Monitoring
+    - Recommendations
+  confidence_guidance:
+    high: Direct testing verifies egress controls, configuration reviewed
+    medium: Configuration review without comprehensive connectivity testing
+    low: Based on documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: sei-egress-filtering
+      priority: required
+    - source_id: nist-sp-800-41
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Egress audit requires comprehensive testing across segments
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: egress-001
+  item: Default-deny egress policy implemented
+  level: CRITICAL
+  verification: iptables -L OUTPUT 2>/dev/null | grep -q 'policy DROP' && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: egress-002
+  item: Database servers cannot reach internet
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test egress from database servers to external hosts
+  expected: Confirmed by reviewer
+- id: egress-003
+  item: DNS forced through internal resolvers
+  level: CRITICAL
+  verification: timeout 3 dig @8.8.8.8 google.com +short 2>/dev/null | grep -q '.' && echo 'FAIL' || echo
+    'PASS'
+  expected: PASS
+- id: egress-004
+  item: Web traffic through proxy
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify direct HTTPS blocked and proxy required
+  expected: Confirmed by reviewer
+- id: egress-005
+  item: Egress traffic logged
+  level: BLOCKING
+  verification: aws ec2 describe-flow-logs 2>/dev/null | jq '.FlowLogs | length' | grep -q '^[1-9]' &&
+    echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: egress-006
+  item: DLP controls on egress
+  level: WARNING
+  verification: manual
+  verification_notes: Verify DLP inspection enabled on proxy or endpoint
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-5
+    - PR.PT-4
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.6
+  - framework: PCI-DSS
+    controls:
+    - '1.2'
+    - '1.3'
+  - framework: HIPAA
+    controls:
+    - 164.312(e)(1)
+relationships:
+  commonly_combined:
+  - security-trust.network-security.firewall-rules
+  - security-trust.network-security.network-segmentation
+  - security-trust.data-protection.dlp-implementation

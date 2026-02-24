@@ -1,0 +1,374 @@
+# ============================================================
+# AUDIT: HTTP/2 & HTTP/3 Utilization Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.network-efficiency.http2-http3-utilization"
+  name: "HTTP/2 & HTTP/3 Utilization Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "network-efficiency"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Assesses HTTP protocol version negotiation and utilization across the
+    application infrastructure. Verifies HTTP/2 and HTTP/3 (QUIC) support
+    on web servers, CDNs, and load balancers. Evaluates proper use of
+    multiplexing, server push, header compression (HPACK/QPACK), and
+    connection coalescing features unique to modern HTTP versions.
+
+  why_it_matters: |
+    HTTP/2 provides multiplexing, header compression, and server push that
+    can reduce page load times by 50% or more compared to HTTP/1.1. HTTP/3
+    over QUIC eliminates head-of-line blocking, improves performance on
+    lossy networks by 30%, and provides 0-RTT connection establishment.
+    Over 97% of browsers support HTTP/2, yet many sites still serve HTTP/1.1.
+    Mobile users on cellular networks see the largest gains from HTTP/3.
+
+  when_to_run:
+    - "Initial infrastructure setup"
+    - "After TLS certificate changes"
+    - "CDN provider migrations"
+    - "Quarterly performance audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Web server and load balancer configuration"
+    - type: "runtime_access"
+      description: "Production endpoints for protocol testing"
+
+  access_requirements:
+    - "Web server configuration files"
+    - "CDN configuration dashboard access"
+    - "DNS records for HTTPS RR verification"
+
+discovery:
+  code_patterns:
+    - pattern: "http2|h2|h2c|http3|quic|alt-svc"
+      type: "keyword"
+      scope: "config"
+      purpose: "Locate HTTP/2 and HTTP/3 configuration"
+    - pattern: "alpn|next_protocol"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find ALPN configuration for protocol negotiation"
+
+  file_patterns:
+    - glob: "**/nginx*.conf"
+      purpose: "Nginx HTTP/2 configuration"
+    - glob: "**/haproxy.cfg"
+      purpose: "HAProxy protocol settings"
+    - glob: "**/Caddyfile"
+      purpose: "Caddy automatic HTTP/3 config"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc7540"
+      name: "RFC 7540 - Hypertext Transfer Protocol Version 2 (HTTP/2)"
+      url: "https://datatracker.ietf.org/doc/html/rfc7540"
+      offline_cache: true
+      priority: "required"
+    - id: "rfc9114"
+      name: "RFC 9114 - HTTP/3"
+      url: "https://datatracker.ietf.org/doc/html/rfc9114"
+      offline_cache: true
+      priority: "required"
+    - id: "rfc9000"
+      name: "RFC 9000 - QUIC: A UDP-Based Multiplexed and Secure Transport"
+      url: "https://datatracker.ietf.org/doc/html/rfc9000"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "cloudflare-http3"
+      name: "Cloudflare HTTP/3 Guide"
+      url: "https://developers.cloudflare.com/speed/optimization/protocol/http3/"
+      offline_cache: true
+    - id: "nginx-http2"
+      name: "Nginx HTTP/2 Module Documentation"
+      url: "https://nginx.org/en/docs/http/ngx_http_v2_module.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "http2-explained"
+      title: "HTTP/2 Explained"
+      type: "book"
+      reference: "Daniel Stenberg, https://http2-explained.haxx.se/"
+
+tooling:
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Test HTTP version negotiation"
+      command: "curl -sI --http2 https://example.com"
+    - tool: "nghttp"
+      purpose: "Detailed HTTP/2 frame analysis"
+      command: "nghttp -nv https://example.com"
+    - tool: "quiche-client"
+      purpose: "Test HTTP/3 support"
+      command: "quiche-client https://example.com"
+
+  scripts:
+    - id: "protocol-checker"
+      language: "bash"
+      purpose: "Test HTTP protocol version support"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL="$1"
+        echo "=== Protocol Support for $URL ==="
+
+        # HTTP/1.1
+        H1=$(curl -sI --http1.1 -o /dev/null -w '%{http_version}' "$URL")
+        echo "HTTP/1.1: $H1"
+
+        # HTTP/2
+        H2=$(curl -sI --http2 -o /dev/null -w '%{http_version}' "$URL")
+        echo "HTTP/2: $H2"
+
+        # Check Alt-Svc header for HTTP/3
+        ALTSVC=$(curl -sI "$URL" | grep -i 'alt-svc')
+        echo "Alt-Svc: ${ALTSVC:-Not present}"
+
+signals:
+  critical:
+    - id: "HTTP-CRIT-001"
+      signal: "Only HTTP/1.1 supported on production endpoints"
+      evidence_pattern: "curl --http2 returns HTTP/1.1 protocol version"
+      explanation: |
+        Serving only HTTP/1.1 in 2026 represents a significant missed optimization.
+        HTTP/2 is supported by 97%+ of browsers and provides substantial performance
+        improvements through multiplexing and header compression. This is especially
+        impactful for sites with many assets, as HTTP/1.1 limits concurrent connections.
+      remediation: "Enable HTTP/2 in web server configuration. For nginx: 'listen 443 ssl http2'"
+
+    - id: "HTTP-CRIT-002"
+      signal: "TLS version prevents HTTP/2 negotiation"
+      evidence_pattern: "TLS 1.1 or earlier in use, blocking ALPN"
+      explanation: |
+        HTTP/2 requires TLS 1.2+ with ALPN extension for protocol negotiation.
+        Using outdated TLS versions not only blocks HTTP/2 but also represents
+        a security vulnerability. Modern browsers require TLS 1.2 minimum.
+      remediation: "Upgrade to TLS 1.2 or preferably TLS 1.3 with proper cipher suites"
+
+  high:
+    - id: "HTTP-HIGH-001"
+      signal: "HTTP/3 not available despite CDN support"
+      evidence_pattern: "No Alt-Svc header advertising h3"
+      explanation: |
+        HTTP/3 provides significant benefits for mobile users and lossy networks.
+        If your CDN supports HTTP/3 (Cloudflare, Fastly, Akamai all do), not enabling
+        it leaves performance gains on the table. HTTP/3 eliminates head-of-line
+        blocking and provides 0-RTT reconnection.
+      remediation: "Enable HTTP/3 in CDN configuration. Add Alt-Svc header advertising h3 support."
+
+    - id: "HTTP-HIGH-002"
+      signal: "Domain sharding in use with HTTP/2"
+      evidence_pattern: "Multiple subdomains (cdn1, cdn2, static1) for same-origin assets"
+      explanation: |
+        Domain sharding was a workaround for HTTP/1.1's connection limits. With HTTP/2,
+        it's counterproductive because each domain requires a separate TCP connection,
+        negating multiplexing benefits. HTTP/2 can handle hundreds of concurrent streams
+        on a single connection.
+      remediation: "Consolidate assets to single domain to maximize HTTP/2 multiplexing"
+
+  medium:
+    - id: "HTTP-MED-001"
+      signal: "Server push configured but not utilized effectively"
+      evidence_pattern: "Link preload headers present but pushed resources not used"
+      remediation: "Audit server push configurations for actual resource usage patterns"
+
+    - id: "HTTP-MED-002"
+      signal: "HPACK dynamic table size not optimized"
+      evidence_pattern: "Default HPACK settings with repetitive headers"
+      remediation: "Increase http2_header_table_size for header-heavy applications"
+
+  low:
+    - id: "HTTP-LOW-001"
+      signal: "HTTP/2 push disabled without evaluation"
+
+  positive:
+    - id: "HTTP-POS-001"
+      signal: "HTTP/2 and HTTP/3 both available on all endpoints"
+    - id: "HTTP-POS-002"
+      signal: "Proper Alt-Svc header with h3 advertisement"
+    - id: "HTTP-POS-003"
+      signal: "TLS 1.3 with 0-RTT enabled"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Test HTTP/2 Support"
+      description: |
+        Verify HTTP/2 is properly negotiated on all production endpoints
+        using protocol-aware tools like curl and nghttp.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check HTTP version negotiated"
+          command: "curl -sI --http2 -o /dev/null -w '%{http_version}\n' https://example.com"
+        - purpose: "Detailed HTTP/2 frame analysis"
+          command: "nghttp -nv https://example.com 2>&1 | head -50"
+        - purpose: "Verify ALPN negotiation"
+          command: "openssl s_client -alpn h2 -connect example.com:443 </dev/null 2>&1 | grep 'ALPN'"
+
+      expected_findings:
+        - "HTTP/2 (version 2) successfully negotiated"
+        - "ALPN protocol: h2"
+
+    - id: "2"
+      name: "Check HTTP/3 Support"
+      description: |
+        Test for HTTP/3 availability by checking Alt-Svc headers
+        and attempting QUIC connections where tooling permits.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check Alt-Svc header for h3 advertisement"
+          command: "curl -sI https://example.com | grep -i 'alt-svc'"
+        - purpose: "Check for HTTPS DNS record (HTTP/3 discovery)"
+          command: "dig +short TYPE65 example.com"
+
+      expected_findings:
+        - "Alt-Svc header advertising h3"
+        - "HTTPS DNS RR for QUIC discovery"
+
+    - id: "3"
+      name: "Analyze Connection Multiplexing"
+      description: |
+        Verify that HTTP/2 multiplexing is being utilized effectively
+        by examining concurrent stream usage and avoiding anti-patterns.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Check for domain sharding (anti-pattern)"
+          command: "curl -s https://example.com | grep -oE 'https?://[^/\"]+' | sort | uniq -c | sort -rn"
+        - purpose: "Count unique origins on page"
+          command: "curl -s https://example.com | grep -oE 'src=\"[^\"]+\"' | grep -oE 'https?://[^/\"]+' | sort -u | wc -l"
+
+      expected_findings:
+        - "Assets consolidated to few domains"
+        - "No unnecessary domain sharding"
+
+    - id: "4"
+      name: "Review Server Configuration"
+      description: |
+        Examine web server configuration for HTTP/2 and HTTP/3 settings,
+        verifying optimal parameters for header table size and streams.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check nginx HTTP/2 settings"
+          command: "grep -rn 'http2\\|http3' /etc/nginx/ 2>/dev/null | head -20"
+        - purpose: "Verify listen directive"
+          command: "grep -rn 'listen.*443' /etc/nginx/ 2>/dev/null"
+
+      expected_findings:
+        - "http2 enabled on 443 listeners"
+        - "Appropriate protocol settings"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Protocol Support Matrix"
+        - "Configuration Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct protocol negotiation testing with curl/nghttp"
+    medium: "Configuration file analysis"
+    low: "Inferred from CDN provider capabilities"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "rfc7540"
+        priority: "required"
+      - source_id: "rfc9114"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "Protocol check is fast and high-impact"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "http2-001"
+    item: "HTTP/2 successfully negotiated on production endpoints"
+    level: "CRITICAL"
+    verification: |
+      VERSION=$(curl -sI --http2 -o /dev/null -w '%{http_version}' https://example.com)
+      if [ "$VERSION" = "2" ]; then echo "PASS"; else echo "FAIL: HTTP/$VERSION"; fi
+    expected: "PASS"
+
+  - id: "http2-002"
+    item: "TLS 1.2+ in use for ALPN support"
+    level: "CRITICAL"
+    verification: |
+      TLS=$(curl -sI -o /dev/null -w '%{ssl_version}' https://example.com)
+      case "$TLS" in TLSv1.2|TLSv1.3) echo "PASS: $TLS";; *) echo "FAIL: $TLS";; esac
+    expected: "PASS"
+
+  - id: "http2-003"
+    item: "HTTP/3 advertised via Alt-Svc header"
+    level: "BLOCKING"
+    verification: |
+      ALTSVC=$(curl -sI https://example.com | grep -i 'alt-svc.*h3')
+      if [ -n "$ALTSVC" ]; then echo "PASS"; else echo "FAIL: No h3 in Alt-Svc"; fi
+    expected: "PASS"
+
+  - id: "http2-004"
+    item: "No unnecessary domain sharding detected"
+    level: "WARNING"
+    verification: |
+      DOMAINS=$(curl -s https://example.com | grep -oE 'https?://[^/\"]+' | sort -u | wc -l)
+      if [ "$DOMAINS" -lt 5 ]; then echo "PASS: $DOMAINS domains"; else echo "FAIL: $DOMAINS domains"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.network-efficiency.compression-effectiveness"
+    - "performance-efficiency.network-efficiency.connection-reuse"

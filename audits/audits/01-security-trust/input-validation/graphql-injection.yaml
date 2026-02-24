@@ -1,0 +1,420 @@
+audit:
+  id: security-trust.input-validation.graphql-injection
+  name: GraphQL Injection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 2.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines GraphQL API implementations for injection vulnerabilities
+    including SQL injection through resolvers, NoSQL injection, OS command injection,
+    query complexity attacks, introspection information disclosure, and authorization
+    bypass through nested queries. GraphQL's flexible query language creates unique
+    attack surfaces that differ from REST APIs.
+  why_it_matters: |
+    GraphQL APIs are increasingly targeted due to their complexity and the potential
+    for deeply nested queries that can bypass security controls. Injection attacks in
+    GraphQL can lead to data exfiltration, unauthorized access, denial of service
+    through resource exhaustion, and backend system compromise. The OWASP Web Security
+    Testing Guide specifically addresses GraphQL injection vulnerabilities.
+  when_to_run:
+  - During GraphQL API security reviews
+  - Before deploying GraphQL endpoints to production
+  - After adding new resolvers or mutations
+  - When integrating GraphQL with existing databases
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: GraphQL schema definitions and resolver implementations
+  access_requirements:
+  - Read access to GraphQL schema files
+  - Read access to resolver implementations
+  - Access to GraphQL server configuration
+discovery:
+  code_patterns:
+  - pattern: graphql|apollo|type-graphql|nexus
+    type: regex
+    scope: source
+    purpose: Identify GraphQL framework usage
+  - pattern: args\.|context\.|input\.
+    type: regex
+    scope: source
+    purpose: Detect resolver argument handling
+  - pattern: introspection|__schema|__type
+    type: regex
+    scope: source
+    purpose: Find introspection configuration
+  - pattern: depth|complexity|maxDepth|costLimit
+    type: regex
+    scope: source
+    purpose: Detect query depth/complexity limits
+  - pattern: \$\{.*args|`.*\$\{.*args
+    type: regex
+    scope: source
+    purpose: Find string interpolation with user input
+  file_patterns:
+  - glob: '**/*.graphql'
+    purpose: GraphQL schema definition files
+  - glob: '**/schema.{js,ts}'
+    purpose: JavaScript/TypeScript schema definitions
+  - glob: '**/resolvers/**'
+    purpose: Resolver implementations
+  - glob: '**/typeDefs/**'
+    purpose: Type definitions
+  - glob: '**/graphql/**'
+    purpose: GraphQL-related code
+knowledge_sources:
+  specifications:
+  - id: owasp-graphql-cheatsheet
+    name: OWASP GraphQL Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/GraphQL_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  - id: owasp-wstg-graphql
+    name: OWASP Testing GraphQL
+    url: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/12-API_Testing/01-Testing_GraphQL
+    offline_cache: true
+    priority: required
+  - id: cwe-89
+    name: 'CWE-89: SQL Injection'
+    url: https://cwe.mitre.org/data/definitions/89.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: portswigger-graphql
+    name: PortSwigger GraphQL API Vulnerabilities
+    url: https://portswigger.net/web-security/graphql
+    offline_cache: true
+  - id: cwe-200
+    name: 'CWE-200: Exposure of Sensitive Information'
+    url: https://cwe.mitre.org/data/definitions/200.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: graphql-cop
+    purpose: GraphQL-specific security scanner
+    offline_capable: true
+  - tool: InQL Scanner
+    purpose: GraphQL introspection and security analysis
+    offline_capable: true
+  - tool: semgrep
+    purpose: Custom rules for GraphQL injection patterns
+    offline_capable: true
+  scripts:
+  - id: graphql-security-scan
+    language: bash
+    purpose: Scan for GraphQL security issues
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Scanning for GraphQL Security Issues ==="
+
+      # Check for introspection enabled
+      grep -rn --include="*.js" --include="*.ts" 'introspection.*true' . 2>/dev/null
+
+      # Check for missing depth limits
+      grep -rn --include="*.js" --include="*.ts" 'ApolloServer\|graphqlHTTP' . 2>/dev/null | \
+        grep -v 'depthLimit\|maxDepth'
+
+      # Check for SQL/NoSQL in resolvers
+      grep -rn --include="*.js" --include="*.ts" -A5 'resolve.*args' . 2>/dev/null | \
+        grep -E 'query\(|find\(|execute'
+signals:
+  critical:
+  - id: GQL-CRIT-001
+    signal: SQL injection in GraphQL resolvers
+    evidence_pattern: args\.\w+.*\+.*query|\$\{args\.\w+\}.*SQL|`SELECT.*\$\{args
+    explanation: |
+      Resolver functions that concatenate user-supplied arguments directly into
+      SQL queries enable SQL injection attacks. Attackers can manipulate GraphQL
+      arguments to execute arbitrary SQL commands. CWE-89.
+    remediation: Use parameterized queries or prepared statements in all resolvers
+    cwe: CWE-89
+  - id: GQL-CRIT-002
+    signal: NoSQL injection through GraphQL arguments
+    evidence_pattern: find\(.*args\.|findOne\(.*args\..*\$
+    explanation: |
+      Passing GraphQL arguments directly to NoSQL database queries without
+      validation allows operator injection. Attackers can inject MongoDB
+      operators like $ne, $gt through GraphQL arguments. CWE-943.
+    remediation: Validate argument types, sanitize operators, use allowlists
+    cwe: CWE-943
+  - id: GQL-CRIT-003
+    signal: OS command injection in resolvers
+    evidence_pattern: exec\(.*args\.|spawn\(.*args\.|shell.*args\.
+    explanation: |
+      Resolver functions that pass user arguments to system commands enable
+      command injection attacks. Attackers can execute arbitrary commands
+      on the server. CWE-78.
+    remediation: Never pass user input to system commands; use safe APIs
+    cwe: CWE-78
+  high:
+  - id: GQL-HIGH-001
+    signal: Introspection enabled in production
+    evidence_pattern: introspection:\s*true|NODE_ENV.*production.*introspection
+    explanation: |
+      GraphQL introspection exposes the entire API schema including all types,
+      queries, mutations, and fields. In production, this provides attackers
+      with detailed information to craft targeted attacks. CWE-200.
+    remediation: Disable introspection in production environments
+    cwe: CWE-200
+  - id: GQL-HIGH-002
+    signal: Missing query depth limits
+    evidence_pattern: ApolloServer|graphqlHTTP|GraphQLServer
+    explanation: |
+      Without query depth limits, attackers can construct deeply nested queries
+      that cause exponential resource consumption, leading to denial of service.
+      Example: {user{friends{friends{friends{...}}}}}. CWE-400.
+    remediation: Implement query depth limiting using graphql-depth-limit or similar
+    cwe: CWE-400
+  - id: GQL-HIGH-003
+    signal: Missing query complexity analysis
+    evidence_pattern: ApolloServer|createServer
+    explanation: |
+      Without query complexity limits, attackers can craft queries that are
+      shallow but computationally expensive, exhausting server resources.
+      This enables denial of service attacks. CWE-400.
+    remediation: Implement query cost analysis using graphql-cost-analysis or similar
+    cwe: CWE-400
+  - id: GQL-HIGH-004
+    signal: Authorization bypass through nested queries
+    evidence_pattern: resolve.*context\.user.*args
+    explanation: |
+      GraphQL's nested query structure can bypass field-level authorization
+      when resolvers don't properly verify access at each level. Attackers
+      can access restricted data through authorized parent objects. CWE-863.
+    remediation: Implement authorization checks at every resolver level
+    cwe: CWE-863
+  medium:
+  - id: GQL-MED-001
+    signal: Missing input validation on GraphQL arguments
+    evidence_pattern: args\.\w+(?!.*validate|.*check|.*sanitize)
+    explanation: |
+      GraphQL arguments used without validation can contain malicious payloads.
+      While GraphQL enforces types, it doesn't validate semantic content like
+      regex patterns or length limits. CWE-20.
+    remediation: Use graphql-constraint-directive or custom scalar validation
+    cwe: CWE-20
+  - id: GQL-MED-002
+    signal: Batching attacks possible (no rate limiting)
+    explanation: |
+      GraphQL allows multiple queries in a single request. Without batching
+      limits, attackers can send hundreds of queries simultaneously,
+      potentially bypassing rate limiting. CWE-770.
+    remediation: Implement query batching limits and per-operation rate limiting
+    cwe: CWE-770
+  - id: GQL-MED-003
+    signal: Error messages expose internal details
+    evidence_pattern: formatError.*stack|debug.*true
+    explanation: |
+      Detailed error messages can expose internal implementation details,
+      stack traces, or database structure to attackers. CWE-209.
+    remediation: Implement custom error formatting that masks internal details
+    cwe: CWE-209
+  positive:
+  - id: GQL-POS-001
+    signal: Query depth limiting implemented
+  - id: GQL-POS-002
+    signal: Query complexity analysis enabled
+  - id: GQL-POS-003
+    signal: Introspection disabled in production
+  - id: GQL-POS-004
+    signal: Input validation using custom scalars or directives
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify GraphQL implementation
+    description: |
+      Locate all GraphQL-related code including schema definitions,
+      resolvers, and server configuration.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find GraphQL schema files
+      command: find . -name '*.graphql' -o -name 'schema.js' -o -name 'schema.ts' 2>/dev/null | head -20
+    - purpose: Find GraphQL framework usage
+      command: grep -rn --include='*.js' --include='*.ts' 'apollo-server\|graphql-yoga\|express-graphql\|type-graphql'
+        . | head -20
+    expected_findings:
+    - GraphQL schema locations
+    - Framework and server configuration
+  - id: '2'
+    name: Analyze resolver implementations
+    description: |
+      Examine how resolvers handle user input from GraphQL arguments
+      and whether they properly validate/sanitize before database operations.
+    duration_estimate: 40 min
+    commands:
+    - purpose: Find resolver functions
+      command: grep -rn --include='*.js' --include='*.ts' 'resolve.*args\|resolvers.*{' . | head -30
+    - purpose: Check for SQL in resolvers
+      command: grep -rn --include='*.js' --include='*.ts' -B2 -A5 'query.*args\|SELECT.*args' .
+    - purpose: Check for NoSQL in resolvers
+      command: grep -rn --include='*.js' --include='*.ts' 'find.*args\|findOne.*args' .
+    expected_findings:
+    - Database operations in resolvers
+    - Argument handling patterns
+  - id: '3'
+    name: Check query protection mechanisms
+    description: |
+      Verify that query depth limits, complexity analysis, and
+      rate limiting are properly configured.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for depth limiting
+      command: grep -rn --include='*.js' --include='*.ts' 'depthLimit\|maxDepth\|depth-limit' .
+    - purpose: Check for complexity analysis
+      command: grep -rn --include='*.js' --include='*.ts' 'costAnalysis\|complexity\|graphql-cost' .
+    - purpose: Check for rate limiting
+      command: grep -rn --include='*.js' --include='*.ts' 'rateLimit\|throttle\|rateLimiter' .
+    expected_findings:
+    - Presence or absence of query protection
+    - Configuration of limits
+  - id: '4'
+    name: Verify introspection configuration
+    description: |
+      Check whether introspection is properly disabled in
+      production environments.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check introspection settings
+      command: grep -rn --include='*.js' --include='*.ts' 'introspection' . | head -20
+    - purpose: Check environment-based configuration
+      command: grep -rn --include='*.js' --include='*.ts' 'NODE_ENV.*introspection\|introspection.*NODE_ENV'
+        .
+    expected_findings:
+    - Introspection configuration
+    - Environment-based toggles
+  - id: '5'
+    name: Run security scanning tools
+    description: |
+      Execute automated GraphQL security scanners to detect
+      common vulnerabilities.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Run graphql-cop if available
+      command: graphql-cop -t http://localhost:4000/graphql 2>/dev/null || echo 'graphql-cop not available'
+    - purpose: Run semgrep GraphQL rules
+      command: semgrep --config=p/graphql . 2>/dev/null || echo 'Semgrep not configured'
+    expected_findings:
+    - Automated vulnerability detection results
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Injection Vulnerabilities
+    - Query Protection Analysis
+    - Information Disclosure Risks
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence of user input in database queries without parameterization
+    medium: Missing protections that could lead to exploitation
+    low: Configuration concerns requiring runtime verification
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-graphql-cheatsheet
+      priority: required
+    - source_id: owasp-wstg-graphql
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough resolver analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: graphql-injection-001
+  item: No SQL concatenation in resolvers
+  level: CRITICAL
+  verification: grep -rn --include='*.js' --include='*.ts' 'args\..*\+.*query\|\$\{args.*SELECT' . | wc
+    -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: graphql-injection-002
+  item: Query depth limiting implemented
+  level: BLOCKING
+  verification: grep -rn --include='*.js' --include='*.ts' 'depthLimit\|maxDepth' . | head -1 | grep -q
+    . && echo PASS || echo FAIL
+  expected: PASS
+- id: graphql-injection-003
+  item: Introspection disabled for production
+  level: BLOCKING
+  verification: grep -rn --include='*.js' --include='*.ts' 'introspection.*false\|NODE_ENV.*introspection'
+    . | head -1 | grep -q . && echo PASS || echo FAIL
+  expected: PASS
+- id: graphql-injection-004
+  item: Input validation on arguments
+  level: WARNING
+  verification: grep -rn --include='*.js' --include='*.ts' 'graphql-constraint\|custom.*scalar\|validate.*args'
+    . | head -1 | grep -q . && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - api-service
+    - graphql-api
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A03:2021-Injection
+    - A01:2021-Broken Access Control
+  - framework: CWE
+    controls:
+    - CWE-89
+    - CWE-943
+    - CWE-200
+    - CWE-400
+    - CWE-863
+  - framework: OWASP API Security
+    controls:
+    - API8:2019-Injection
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.sql-injection
+  - security-trust.input-validation.nosql-injection
+  - security-trust.authorization.access-control

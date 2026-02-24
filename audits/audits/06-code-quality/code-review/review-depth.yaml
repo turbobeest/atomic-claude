@@ -1,0 +1,258 @@
+audit:
+  id: code-quality.code-review.review-depth
+  name: Code Review Depth Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: code-review
+  tier: expert
+  estimated_duration: 45 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: repository
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the thoroughness and quality of code reviews beyond simple approval
+    counts. Analyzes review comment density, inline feedback frequency, change
+    request patterns, and substantive engagement indicators. Distinguishes between
+    rubber-stamp approvals and meaningful review interactions.
+  why_it_matters: |
+    Shallow reviews provide false confidence while missing critical defects.
+    Microsoft research shows that reviews with fewer than 2 comments per 100 lines
+    catch only 20% of defects compared to 70% for thorough reviews. Studies indicate
+    that 40% of approvals happen within 5 minutes of PR creation, suggesting
+    insufficient review depth.
+  when_to_run:
+  - Quarterly quality assessments
+  - After production incidents
+  - During code quality improvement initiatives
+  - Team onboarding and training
+prerequisites:
+  required_artifacts:
+  - type: pr_metadata
+    description: Pull request records with review comments
+  - type: review_comments
+    description: Inline and general review feedback
+  access_requirements:
+  - Access to PR/MR platform API
+  - Read access to review comments and threads
+discovery:
+  code_patterns:
+  - pattern: LGTM|looks good|ship it|approved
+    type: regex
+    scope: review_comments
+    purpose: Identify low-effort approval patterns
+  - pattern: 'nit:|suggestion:|consider:|question:'
+    type: regex
+    scope: review_comments
+    purpose: Identify substantive feedback patterns
+  file_patterns:
+  - glob: .github/pull_request_template.md
+    purpose: PR template requiring review checklist
+  - glob: .github/CODEOWNERS
+    purpose: Expert reviewer assignment
+knowledge_sources:
+  specifications:
+  - id: google-review-standards
+    name: Google Code Review Developer Guide
+    url: https://google.github.io/eng-practices/review/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: effective-code-review
+    name: Effective Code Review Practices
+    url: https://github.blog/developer-skills/github/how-to-review-code-effectively/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: gh
+    purpose: Extract review comments and threads
+    offline_capable: false
+  scripts:
+  - id: review-depth-calc
+    language: bash
+    purpose: Calculate review comment density
+    source: inline
+    code: |
+      gh pr list --state merged --limit 50 --json number,additions,deletions,comments,reviews \
+        --jq '.[] | {number, loc: (.additions + .deletions), comments: .comments, reviews: (.reviews | length)}'
+signals:
+  critical:
+  - id: RD-CRIT-001
+    signal: More than 50% of reviews have zero comments
+    evidence_pattern: zero_comment_reviews > 50%
+    explanation: |
+      Majority of reviews provide no feedback, indicating systematic
+      rubber-stamping rather than genuine code inspection. This defeats
+      the purpose of peer review entirely.
+    remediation: Require minimum review activity and train on effective review
+  - id: RD-CRIT-002
+    signal: Large PRs (>500 LOC) approved in under 5 minutes
+    evidence_pattern: large_pr_quick_approval
+    explanation: |
+      Complex changes cannot be properly reviewed in minutes. This pattern
+      indicates review theater rather than actual quality control.
+    remediation: Set minimum review time thresholds based on PR size
+  high:
+  - id: RD-HIGH-001
+    signal: Average comments per 100 LOC below 0.5
+    evidence_pattern: comment_density < 0.5
+    explanation: |
+      Very low comment density suggests superficial review that likely
+      misses significant issues and improvement opportunities.
+    remediation: Encourage thorough review with comment expectations
+  - id: RD-HIGH-002
+    signal: Change requests rarely made (<10% of reviews)
+    evidence_pattern: change_request_rate < 10%
+    explanation: |
+      Nearly all PRs approved without changes suggests either excellent
+      code quality (unlikely) or insufficient review rigor.
+    remediation: Review sample PRs for missed improvement opportunities
+  medium:
+  - id: RD-MED-001
+    signal: Low thread resolution rate
+    evidence_pattern: unresolved_threads > 20%
+    remediation: Require thread resolution before merge
+  - id: RD-MED-002
+    signal: Review comments mostly stylistic
+    evidence_pattern: style_comments > 80%
+    remediation: Automate style checks, focus review on logic and design
+  low:
+  - id: RD-LOW-001
+    signal: Inconsistent comment patterns across reviewers
+    evidence_pattern: reviewer_variance > 2x
+    remediation: Establish shared review expectations and training
+  positive:
+  - id: RD-POS-001
+    signal: Healthy comment density (1-3 per 100 LOC)
+    evidence_pattern: 0.5 <= comment_density <= 3
+  - id: RD-POS-002
+    signal: Mix of suggestions and questions in reviews
+    evidence_pattern: suggestion_rate > 20% && question_rate > 10%
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Extract Review Activity Data
+    description: |
+      Collect all review comments, threads, and approval patterns
+      for PRs in the analysis period.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Get PR review details
+      command: |
+        gh pr list --state merged --limit 50 --json number,reviews,comments
+    - purpose: Get review comments for sample PRs
+      command: |
+        gh pr view <PR_NUMBER> --json reviews,comments
+    expected_findings:
+    - Comment counts per PR
+    - Review type distribution
+    - Thread resolution status
+  - id: '2'
+    name: Calculate Depth Metrics
+    description: |
+      Compute review depth indicators including comment density,
+      change request rate, and time-per-LOC.
+    duration_estimate: 10 min
+    expected_findings:
+    - Comments per 100 lines of code
+    - Percentage of reviews with change requests
+    - Average review time relative to PR size
+  - id: '3'
+    name: Analyze Comment Quality
+    description: |
+      Categorize review comments by type (style, logic, security,
+      performance, design) to assess review focus areas.
+    duration_estimate: 15 min
+    expected_findings:
+    - Comment type distribution
+    - Substantive vs trivial feedback ratio
+    - Security and logic comment frequency
+  - id: '4'
+    name: Identify Rubber-Stamp Patterns
+    description: |
+      Find reviews that show signs of insufficient engagement
+      such as immediate approval or boilerplate comments.
+    duration_estimate: 5 min
+    expected_findings:
+    - Quick approval rate
+    - LGTM-only approval frequency
+output:
+  deliverables:
+  - type: metrics
+    format: structured
+    content:
+    - comment_density_per_100_loc
+    - change_request_rate
+    - zero_comment_review_rate
+    - avg_review_time_per_loc
+    - comment_type_distribution
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Review Depth Analysis
+    - Quality Indicators
+    - Recommendations
+  confidence_guidance:
+    high: Full comment data with review timestamps available
+    medium: Comment counts available but limited content analysis
+    low: Only approval counts available without comment details
+offline:
+  capability: minimal
+  cache_manifest:
+    knowledge:
+    - source_id: google-review-standards
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Depth analysis requires substantial data collection
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: rd-001
+  item: Comment density calculated
+  level: BLOCKING
+  verification: Numeric value for comments per 100 LOC
+  expected: Value between 0.1 and 10
+- id: rd-002
+  item: Rubber-stamp rate identified
+  level: WARNING
+  verification: Percentage of zero-comment approvals
+  expected: Numeric percentage value
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 27001
+    controls:
+    - A.14.2.2
+  - framework: SOC 2
+    controls:
+    - CC8.1
+relationships:
+  commonly_combined:
+  - code-quality.code-review.pr-review-coverage
+  - code-quality.code-review.review-feedback-quality
+  - code-quality.code-review.review-checklist

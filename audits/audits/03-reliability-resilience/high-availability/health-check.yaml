@@ -1,0 +1,297 @@
+# ============================================================
+# AUDIT: Health Check Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.high-availability.health-check"
+  name: "Health Check Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "high-availability"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the design and implementation of health check endpoints
+    including liveness probes, readiness probes, and deep health checks.
+    Examines whether health checks accurately reflect service capability,
+    check appropriate dependencies, and integrate correctly with
+    orchestration and load balancing systems.
+
+  why_it_matters: |
+    Health checks are the primary mechanism for automated failure detection
+    and traffic management. Poorly designed health checks can cause false
+    positives (unnecessary restarts), false negatives (traffic to unhealthy
+    instances), or cascading failures (checking dependencies that cause
+    thundering herd). Proper health check design is critical for self-healing
+    infrastructure.
+
+  when_to_run:
+    - "During service development and code review"
+    - "When experiencing unexpected pod restarts"
+    - "After adding new dependencies"
+    - "During production readiness review"
+
+prerequisites:
+  required_artifacts:
+    - type: "codebase"
+      description: "Source code with health check implementations"
+    - type: "config"
+      description: "Kubernetes manifests or orchestration configuration"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Kubernetes cluster access for runtime verification"
+
+discovery:
+  code_patterns:
+    - pattern: "/health|/healthz|/ready|/live|/ping|/status"
+      type: "regex"
+      scope: "source"
+      purpose: "Locate health check endpoint definitions"
+    - pattern: "livenessProbe|readinessProbe|startupProbe"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find Kubernetes probe configurations"
+
+  file_patterns:
+    - glob: "**/k8s/**/*.yaml"
+      purpose: "Kubernetes deployment manifests"
+    - glob: "**/deployment*.yaml"
+      purpose: "Deployment configurations"
+
+knowledge_sources:
+  specifications:
+    - id: "k8s-probes"
+      name: "Kubernetes Probe Documentation"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "health-check-patterns"
+      name: "Health Check Patterns for Microservices"
+      url: "https://microservices.io/patterns/observability/health-check-api.html"
+      offline_cache: true
+    - id: "release-it"
+      name: "Michael Nygard - Release It!"
+      url: "https://pragprog.com/titles/mnee2/release-it-second-edition/"
+      offline_cache: true
+    - id: "sre-book"
+      name: "Site Reliability Engineering"
+      url: "https://sre.google/sre-book/table-of-contents/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "grep/ast"
+      purpose: "Identify health check implementations in code"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Verify probe configurations"
+      command: "kubectl describe pod <pod-name> | grep -A5 'Liveness\\|Readiness'"
+    - tool: "curl"
+      purpose: "Test health check endpoints"
+      command: "curl -v http://localhost:8080/health"
+
+signals:
+  critical:
+    - id: "HA-HC-CRIT-001"
+      signal: "No health check endpoints implemented"
+      evidence_pattern: "No /health, /healthz, /ready, or similar endpoints found"
+      explanation: |
+        Without health checks, orchestration systems cannot detect failures
+        or manage traffic appropriately, leading to extended outages.
+      remediation: "Implement liveness and readiness health check endpoints"
+
+    - id: "HA-HC-CRIT-002"
+      signal: "Health check always returns success regardless of actual state"
+      evidence_pattern: "return 200|return ok without checking actual health"
+      explanation: |
+        A health check that always succeeds provides no value and masks
+        actual failures from the orchestration system.
+      remediation: "Implement meaningful health checks that verify actual service capability"
+
+  high:
+    - id: "HA-HC-HIGH-001"
+      signal: "Liveness check verifies external dependencies"
+      explanation: |
+        Liveness checks that fail due to dependency issues cause unnecessary
+        restarts that worsen the situation during partial outages.
+      remediation: "Liveness should only check local process health; use readiness for dependencies"
+
+    - id: "HA-HC-HIGH-002"
+      signal: "No distinction between liveness and readiness"
+      explanation: "Using one check for both purposes leads to inappropriate responses to failures"
+      remediation: "Implement separate liveness (process alive) and readiness (can serve traffic) checks"
+
+  medium:
+    - id: "HA-HC-MED-001"
+      signal: "Health check timeouts not configured appropriately"
+      remediation: "Set timeouts shorter than check intervals to prevent pile-up"
+
+    - id: "HA-HC-MED-002"
+      signal: "No startup probe for slow-starting services"
+      remediation: "Add startup probe to prevent premature liveness failures during initialization"
+
+  low:
+    - id: "HA-HC-LOW-001"
+      signal: "Health check response does not include diagnostic information"
+
+  positive:
+    - id: "HA-HC-POS-001"
+      signal: "Deep health check available for debugging with dependency status"
+    - id: "HA-HC-POS-002"
+      signal: "Health checks include appropriate caching to prevent thundering herd"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Health Check Endpoints"
+      description: |
+        Search the codebase to find all health check endpoint implementations.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find health check routes"
+          command: "grep -rn 'health\\|ready\\|live\\|ping' --include='*.py' --include='*.js' --include='*.go' ."
+      expected_findings:
+        - "List of health check endpoints"
+        - "Implementation patterns used"
+
+    - id: "2"
+      name: "Analyze Health Check Logic"
+      description: |
+        Review the implementation of each health check to understand
+        what conditions are being verified.
+      duration_estimate: "45 min"
+      questions:
+        - "What does the liveness check verify?"
+        - "What does the readiness check verify?"
+        - "Are external dependencies checked, and if so, where?"
+      expected_findings:
+        - "Health check decision logic"
+        - "Dependencies included in each check type"
+
+    - id: "3"
+      name: "Review Probe Configuration"
+      description: |
+        Examine Kubernetes or orchestration probe configurations.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List probe configurations"
+          command: "grep -A10 'livenessProbe\\|readinessProbe' k8s/*.yaml"
+      expected_findings:
+        - "Probe timeout and interval settings"
+        - "Failure thresholds"
+        - "Initial delay configurations"
+
+    - id: "4"
+      name: "Test Health Checks"
+      description: |
+        Verify health check behavior under normal and degraded conditions.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Test health endpoint"
+          command: "curl -w '\\n%{http_code}' http://localhost:8080/health"
+      expected_findings:
+        - "Response format and content"
+        - "Response times"
+        - "Behavior under simulated failures"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Health Check Implementation Review"
+        - "Probe Configuration Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Code review and runtime testing completed"
+    medium: "Code review completed, limited runtime verification"
+    low: "Documentation or configuration review only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-probes"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "health-check-001"
+    item: "Liveness probe is implemented and configured"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify liveness probe exists in deployment configuration"
+    expected: "Confirmed by reviewer"
+
+  - id: "health-check-002"
+    item: "Readiness probe is implemented and configured"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify readiness probe exists in deployment configuration"
+    expected: "Confirmed by reviewer"
+
+  - id: "health-check-003"
+    item: "Liveness probe does not check external dependencies"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review liveness check implementation for dependency calls"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC7.2"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.high-availability.uptime-monitoring"
+    - "reliability-resilience.high-availability.load-balancer-configuration"

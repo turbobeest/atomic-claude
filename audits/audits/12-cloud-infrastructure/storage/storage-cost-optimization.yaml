@@ -1,0 +1,390 @@
+audit:
+  id: cloud-infrastructure.storage.storage-cost-optimization
+  name: Storage Cost Optimization
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: storage
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Comprehensive assessment of storage cost optimization opportunities
+    including unused resources, over-provisioned capacity, inefficient
+    configurations, and pricing model optimization. Consolidates findings
+    from tiering, lifecycle, and access pattern analysis into actionable
+    cost reduction roadmap.
+  why_it_matters: |
+    Storage costs often represent 20-40% of cloud spend and are frequently
+    overlooked in optimization efforts. Organizations typically waste
+    25-40% of storage spending on unused volumes, over-provisioned IOPS,
+    wrong storage classes, and accumulating stale data. Strategic storage
+    optimization can deliver significant sustained savings.
+  when_to_run:
+  - Quarterly cost optimization reviews
+  - Annual budget planning
+  - After major infrastructure changes
+  - When storage costs spike unexpectedly
+prerequisites:
+  required_artifacts:
+  - type: billing_access
+    description: Access to cost and usage reports
+  - type: cloud_access
+    description: Read access to storage configurations
+  - type: metrics_access
+    description: Access to storage utilization metrics
+  access_requirements:
+  - Cost Explorer or billing dashboard access
+  - S3/EBS/EFS configuration access
+  - Storage utilization metrics access
+discovery:
+  metrics_queries:
+  - system: Cost Explorer
+    query: |
+      aws ce get-cost-and-usage
+      --time-period Start=YYYY-MM-01,End=YYYY-MM-DD
+      --granularity MONTHLY
+      --metrics BlendedCost
+      --group-by Type=DIMENSION,Key=SERVICE
+      --filter '{"Dimensions":{"Key":"SERVICE","Values":["Amazon Simple Storage Service","Amazon Elastic Block Store"]}}'
+    purpose: Get storage cost breakdown
+    threshold: Identify largest cost drivers
+  - system: CloudWatch
+    query: |
+      SELECT AVG(VolumeIdleTime)
+      FROM EBS
+      WHERE VolumeId = '{volume}'
+    purpose: Identify idle EBS volumes
+    threshold: VolumeIdleTime > 99% suggests unused volume
+  file_patterns:
+  - glob: '**/terraform/**/*storage*.tf'
+    purpose: Find Terraform storage configurations
+  - glob: '**/terraform/**/*ebs*.tf'
+    purpose: Find EBS volume configurations
+knowledge_sources:
+  specifications:
+  - id: aws-cost-optimization
+    name: AWS Cost Optimization Pillar
+    url: https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/
+    offline_cache: true
+    priority: required
+  - id: s3-pricing
+    name: Amazon S3 Pricing
+    url: https://aws.amazon.com/s3/pricing/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: finops-storage
+    name: FinOps Storage Optimization
+    url: https://www.finops.org/framework/capabilities/
+    offline_cache: true
+  - id: aws-storage-optimization
+    name: AWS Storage Cost Optimization
+    url: https://docs.aws.amazon.com/whitepapers/latest/cost-optimization-storage-optimization/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS Cost Explorer
+    purpose: Storage cost analysis
+    command: aws ce get-cost-and-usage --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date
+      +%Y-%m-%d) --granularity MONTHLY --metrics BlendedCost --group-by Type=DIMENSION,Key=USAGE_TYPE
+      --filter '{"Dimensions":{"Key":"SERVICE","Values":["Amazon Simple Storage Service"]}}'
+  - tool: AWS CLI
+    purpose: Find unattached EBS volumes
+    command: aws ec2 describe-volumes --filters 'Name=status,Values=available' --query 'Volumes[].{ID:VolumeId,Size:Size,Type:VolumeType,Created:CreateTime}'
+  - tool: AWS Trusted Advisor
+    purpose: Get cost optimization recommendations
+    command: aws support describe-trusted-advisor-checks --language en | jq '.checks[] | select(.category=="cost_optimizing")'
+  scripts:
+  - id: storage-cost-analyzer
+    language: bash
+    purpose: Comprehensive storage cost analysis
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Storage Cost Optimization Analysis ==="
+
+      # Unattached EBS volumes
+      echo "Unattached EBS Volumes (wasted cost):"
+      aws ec2 describe-volumes \
+        --filters "Name=status,Values=available" \
+        --query 'Volumes[].{ID:VolumeId,Size:Size,Type:VolumeType,Created:CreateTime}' \
+        --output table
+
+      # Calculate unattached volume costs
+      total_gb=$(aws ec2 describe-volumes \
+        --filters "Name=status,Values=available" \
+        --query 'sum(Volumes[].Size)' \
+        --output text)
+      echo "Total unattached volume size: ${total_gb:-0} GB"
+
+      # Old EBS snapshots
+      echo ""
+      echo "EBS Snapshots older than 90 days:"
+      NINETY_DAYS_AGO=$(date -d '90 days ago' +%Y-%m-%dT%H:%M:%S)
+      aws ec2 describe-snapshots --owner-ids self \
+        --query "Snapshots[?StartTime<='$NINETY_DAYS_AGO'].[SnapshotId,VolumeSize,StartTime]" \
+        --output table | head -20
+
+      # gp2 volumes (should be gp3)
+      echo ""
+      echo "gp2 Volumes (consider migrating to gp3 for 20% savings):"
+      aws ec2 describe-volumes \
+        --filters "Name=volume-type,Values=gp2" \
+        --query 'Volumes[].{ID:VolumeId,Size:Size}' \
+        --output table
+
+      # S3 buckets without lifecycle policies
+      echo ""
+      echo "Large S3 Buckets without Lifecycle Policies:"
+      for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text); do
+        lifecycle=$(aws s3api get-bucket-lifecycle-configuration --bucket "$bucket" 2>&1)
+        if echo "$lifecycle" | grep -q "NoSuchLifecycleConfiguration"; then
+          size=$(aws cloudwatch get-metric-statistics \
+            --namespace AWS/S3 \
+            --metric-name BucketSizeBytes \
+            --dimensions Name=BucketName,Value=$bucket Name=StorageType,Value=StandardStorage \
+            --start-time $(date -d '1 day ago' -u +%Y-%m-%dT%H:%M:%SZ) \
+            --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+            --period 86400 --statistics Average \
+            --query 'Datapoints[0].Average' --output text 2>/dev/null)
+          if [ ! -z "$size" ] && [ "$size" != "None" ]; then
+            size_gb=$(echo "scale=2; $size/1024/1024/1024" | bc 2>/dev/null || echo "N/A")
+            echo "$bucket: ${size_gb} GB - NO LIFECYCLE"
+          fi
+        fi
+      done
+signals:
+  critical:
+  - id: STORAGECOST-CRIT-001
+    signal: Significant spend on unattached EBS volumes
+    evidence_threshold: Unattached volumes > $1000/month
+    explanation: |
+      Unattached EBS volumes incur full storage costs while providing
+      no value. This is pure waste that should be eliminated immediately.
+      Common causes: orphaned volumes from terminated instances,
+      forgotten test resources, or incomplete cleanup.
+    remediation: Snapshot critical data and delete unattached volumes
+  - id: STORAGECOST-CRIT-002
+    signal: Major storage spending on unused or stale data
+    evidence_threshold: '> 30% of storage not accessed in 90 days in Standard class'
+    explanation: |
+      Keeping rarely accessed data in expensive storage tiers wastes
+      significant money. This data should be archived or deleted.
+    remediation: Implement lifecycle policies for automated tiering
+  high:
+  - id: STORAGECOST-HIGH-001
+    signal: gp2 EBS volumes not migrated to gp3
+    evidence_threshold: '> 1TB of gp2 volumes'
+    explanation: |
+      gp3 provides 20% cost savings over gp2 with better baseline
+      performance. Migration is non-disruptive and should be
+      prioritized for cost savings.
+    remediation: Migrate gp2 volumes to gp3
+  - id: STORAGECOST-HIGH-002
+    signal: Over-provisioned IOPS/throughput
+    evidence_threshold: Provisioned IOPS utilization < 30%
+    explanation: |
+      Provisioned IOPS are expensive. Low utilization indicates
+      over-provisioning that should be right-sized.
+    remediation: Reduce provisioned IOPS to match actual usage
+  - id: STORAGECOST-HIGH-003
+    signal: Old snapshots accumulating without cleanup
+    evidence_threshold: '> 100 snapshots older than 90 days'
+    explanation: |
+      Old snapshots consume storage and incur ongoing costs.
+      Most snapshots are only needed for short-term recovery.
+    remediation: Implement DLM policies with snapshot retention limits
+  medium:
+  - id: STORAGECOST-MED-001
+    signal: S3 Intelligent-Tiering not used for variable access
+    remediation: Enable Intelligent-Tiering for unpredictable access patterns
+  - id: STORAGECOST-MED-002
+    signal: No cost allocation tags for storage resources
+    remediation: Implement cost allocation tags for accountability
+  - id: STORAGECOST-MED-003
+    signal: Storage costs not regularly reviewed
+    remediation: Implement monthly storage cost review process
+  low:
+  - id: STORAGECOST-LOW-001
+    signal: No storage cost forecasting
+    remediation: Implement cost forecasting for budget planning
+  positive:
+  - id: STORAGECOST-POS-001
+    signal: Regular storage optimization with documented savings
+  - id: STORAGECOST-POS-002
+    signal: Automated lifecycle and tiering policies
+  - id: STORAGECOST-POS-003
+    signal: Storage costs tracked by team/project
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Cost Baseline Collection
+    description: |
+      Collect storage cost data from billing and usage reports
+      to establish baseline and identify largest cost drivers.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get storage cost breakdown
+      command: aws ce get-cost-and-usage --time-period Start=$(date -d '90 days ago' +%Y-%m-%d),End=$(date
+        +%Y-%m-%d) --granularity MONTHLY --metrics BlendedCost --group-by Type=DIMENSION,Key=USAGE_TYPE
+        --filter '{"Dimensions":{"Key":"SERVICE","Values":["Amazon Simple Storage Service","Amazon Elastic
+        Block Store","Amazon Elastic File System"]}}' --output table
+    expected_findings:
+    - Monthly storage spend by type
+    - Cost trends over time
+  - id: '2'
+    name: Unused Resource Identification
+    description: |
+      Identify unused storage resources including unattached volumes,
+      orphaned snapshots, and empty buckets.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find unattached EBS volumes
+      command: aws ec2 describe-volumes --filters 'Name=status,Values=available' --query 'Volumes[].{ID:VolumeId,Size:Size,Type:VolumeType,Created:CreateTime}'
+        --output table
+    - purpose: Count old snapshots
+      command: aws ec2 describe-snapshots --owner-ids self --query 'length(Snapshots[?StartTime<=`'$(date
+        -d '90 days ago' +%Y-%m-%d)'`])'
+    expected_findings:
+    - Unattached volume inventory
+    - Orphaned snapshot count
+    - Immediate savings opportunities
+  - id: '3'
+    name: Efficiency Analysis
+    description: |
+      Analyze storage efficiency including volume type optimization,
+      IOPS utilization, and storage class alignment.
+    duration_estimate: 45 min
+    commands:
+    - purpose: List gp2 volumes for gp3 migration
+      command: aws ec2 describe-volumes --filters 'Name=volume-type,Values=gp2' --query 'sum(Volumes[].Size)'
+    - purpose: Check provisioned IOPS volumes
+      command: aws ec2 describe-volumes --filters 'Name=volume-type,Values=io1,io2' --query 'Volumes[].{ID:VolumeId,Size:Size,IOPS:Iops}'
+        --output table
+    expected_findings:
+    - gp3 migration opportunities
+    - IOPS optimization opportunities
+  - id: '4'
+    name: Tiering and Lifecycle Gaps
+    description: |
+      Identify storage lacking appropriate tiering and lifecycle
+      policies for automated optimization.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find buckets without lifecycle
+      command: 'for bucket in $(aws s3api list-buckets --query ''Buckets[].Name'' --output text | head
+        -20); do aws s3api get-bucket-lifecycle-configuration --bucket $bucket 2>&1 | grep -q NoSuchLifecycleConfiguration
+        && echo "NO LIFECYCLE: $bucket"; done'
+    expected_findings:
+    - Buckets needing lifecycle policies
+    - Tiering optimization opportunities
+  - id: '5'
+    name: Savings Roadmap Development
+    description: |
+      Prioritize optimization opportunities and develop
+      implementation roadmap with expected savings.
+    duration_estimate: 30 min
+    expected_findings:
+    - Prioritized savings opportunities
+    - Implementation timeline
+    - Expected monthly savings
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Current Cost Analysis
+    - Optimization Opportunities
+    - Implementation Roadmap
+    - Expected Savings
+  - type: spreadsheet
+    format: csv
+    contents: Optimization opportunities with estimated savings
+  confidence_guidance:
+    high: Full billing access, 90+ days of data, complete inventory
+    medium: 30-90 days of data, partial inventory
+    low: Limited data or access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-cost-optimization
+      priority: required
+    - source_id: s3-pricing
+      priority: required
+  limitations:
+  - Cannot access live cost data offline
+  - Current pricing requires online access
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive cost analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: storagecost-001
+  item: Storage cost baseline established
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm cost data collected for all storage services
+  expected: Confirmed by reviewer
+- id: storagecost-002
+  item: Unused resources identified
+  level: CRITICAL
+  verification: aws ec2 describe-volumes --filters 'Name=status,Values=available' --query 'length(Volumes)'
+    | xargs -I{} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: storagecost-003
+  item: Optimization opportunities quantified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Each opportunity includes estimated monthly savings
+  expected: Confirmed by reviewer
+- id: storagecost-004
+  item: Implementation roadmap created
+  level: WARNING
+  verification: manual
+  verification_notes: Prioritized list of actions with timeline
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Cost Optimization
+    - Storage Optimization
+    - Waste Reduction
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.storage.storage-tiering
+  - cloud-infrastructure.storage.storage-lifecycle
+  - cloud-infrastructure.storage.storage-access-patterns
+  - cloud-infrastructure.compute.instance-right-sizing

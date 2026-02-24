@@ -1,0 +1,426 @@
+audit:
+  id: security-trust.input-validation.mass-assignment
+  name: Mass Assignment Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines applications for mass assignment vulnerabilities (also known
+    as over-posting or autobinding) where attackers can modify object properties they
+    should not have access to by including extra parameters in HTTP requests. This
+    occurs when applications automatically bind user input to internal objects without
+    proper filtering, allowing privilege escalation, data tampering, or security bypass.
+  why_it_matters: |
+    Mass assignment is ranked in OWASP API Security Top 10 as API6:2019 and has been
+    merged into "Broken Object Property Level Authorization" in newer versions. The
+    2012 GitHub hack exploited this vulnerability, allowing an attacker to upload
+    their public key to any organization. CWE-915 classifies this as Improperly
+    Controlled Modification of Dynamically-Determined Object Attributes.
+  when_to_run:
+  - During API security reviews
+  - When reviewing ORM/ODM configurations
+  - After adding new model attributes
+  - Before deploying API endpoints that accept user data
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code including models, controllers, and API handlers
+  access_requirements:
+  - Read access to model definitions
+  - Read access to API endpoint handlers
+  - Access to ORM/ODM configuration
+discovery:
+  code_patterns:
+  - pattern: \$fillable|\$guarded|attr_accessible|attr_protected
+    type: regex
+    scope: source
+    purpose: Laravel/Rails mass assignment protection attributes
+  - pattern: req\.body|request\.body|ctx\.request\.body
+    type: regex
+    scope: source
+    purpose: Direct request body usage in handlers
+  - pattern: \.create\(|\.(update|save)\(|Model\.
+    type: regex
+    scope: source
+    purpose: ORM model operations
+  - pattern: '@Bind|@RequestBody|@ModelAttribute'
+    type: regex
+    scope: source
+    purpose: Spring MVC binding annotations
+  - pattern: Object\.assign\(.*req|spread.*req\.body
+    type: regex
+    scope: source
+    purpose: JavaScript object spreading with request data
+  file_patterns:
+  - glob: '**/models/**'
+    purpose: Model definitions
+  - glob: '**/controllers/**'
+    purpose: Controller implementations
+  - glob: '**/handlers/**'
+    purpose: Request handlers
+  - glob: '**/*.entity.ts'
+    purpose: TypeORM entities
+  - glob: '**/routes/**'
+    purpose: Route definitions with handlers
+knowledge_sources:
+  specifications:
+  - id: owasp-mass-assignment-cheatsheet
+    name: OWASP Mass Assignment Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  - id: cwe-915
+    name: 'CWE-915: Improperly Controlled Modification of Dynamically-Determined Object Attributes'
+    url: https://cwe.mitre.org/data/definitions/915.html
+    offline_cache: true
+    priority: required
+  - id: owasp-api-security
+    name: OWASP API Security Top 10 - API6:2019 Mass Assignment
+    url: https://owasp.org/API-Security/editions/2019/en/0xa6-mass-assignment/
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-wstg-mass-assignment
+    name: OWASP Testing for Mass Assignment
+    url: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/20-Testing_for_Mass_Assignment
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect mass assignment patterns across languages
+    offline_capable: true
+  - tool: brakeman
+    purpose: Ruby on Rails security scanner with mass assignment detection
+    offline_capable: true
+  - tool: eslint-plugin-security
+    purpose: JavaScript security linting
+    offline_capable: true
+  scripts:
+  - id: mass-assignment-scan
+    language: bash
+    purpose: Scan for mass assignment vulnerabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Scanning for Mass Assignment Patterns ==="
+
+      # Check for direct request body to model
+      grep -rn --include="*.js" --include="*.ts" 'create(req.body)\|update(req.body)' . 2>/dev/null
+
+      # Check Laravel models without $fillable or $guarded
+      grep -rn --include="*.php" 'extends Model' . 2>/dev/null | while read line; do
+        file=$(echo "$line" | cut -d: -f1)
+        if ! grep -q '\$fillable\|\$guarded' "$file" 2>/dev/null; then
+          echo "Warning: $file may lack mass assignment protection"
+        fi
+      done
+signals:
+  critical:
+  - id: MASS-CRIT-001
+    signal: Direct request body to database create/update without filtering
+    evidence_pattern: \.create\(req\.body\)|\.update\(req\.body\)|\.save\(req\.body\)
+    explanation: |
+      Passing the entire request body directly to ORM create/update methods
+      allows attackers to set any model property including sensitive ones
+      like isAdmin, role, or passwordHash. CWE-915.
+    remediation: Explicitly extract only allowed fields or use DTOs
+    cwe: CWE-915
+  - id: MASS-CRIT-002
+    signal: Model without fillable/guarded protection (Laravel)
+    evidence_pattern: extends Model(?!.*\$fillable|.*\$guarded)
+    explanation: |
+      Laravel Eloquent models without $fillable or $guarded arrays are
+      vulnerable to mass assignment. All database columns become
+      assignable through user input. CWE-915.
+    remediation: Define $fillable with allowed fields or $guarded with protected fields
+    cwe: CWE-915
+  - id: MASS-CRIT-003
+    signal: Unprotected Rails attr_accessible
+    evidence_pattern: attr_accessible\s*:all|without_protection
+    explanation: |
+      Using attr_accessible :all or without_protection disables Rails'
+      mass assignment protection entirely, making all attributes
+      assignable. CWE-915.
+    remediation: Explicitly list allowed attributes in attr_accessible
+    cwe: CWE-915
+  high:
+  - id: MASS-HIGH-001
+    signal: Object spread/assign with request body
+    evidence_pattern: \.\.\.req\.body|Object\.assign\(.*,\s*req\.body
+    explanation: |
+      Using spread operator or Object.assign to merge request body into
+      objects can copy sensitive properties. Attackers can inject any
+      property present in the target object. CWE-915.
+    remediation: Destructure only expected properties from request
+    cwe: CWE-915
+  - id: MASS-HIGH-002
+    signal: Spring MVC @Bind without include/exclude
+    evidence_pattern: '@ModelAttribute.*\{|@RequestBody.*\{'
+    explanation: |
+      Spring MVC's data binding without WebDataBinder configuration to
+      include/exclude fields allows all request parameters to bind to
+      model objects. CWE-915.
+    remediation: Configure WebDataBinder with setAllowedFields or use DTOs
+    cwe: CWE-915
+  - id: MASS-HIGH-003
+    signal: Mongoose model update without projection
+    evidence_pattern: findOneAndUpdate\(.*req\.body|findByIdAndUpdate\(.*req\.body
+    explanation: |
+      Mongoose findOneAndUpdate/findByIdAndUpdate with unprojected request
+      body allows modification of any document field. CWE-915.
+    remediation: Extract only allowed update fields before passing to Mongoose
+    cwe: CWE-915
+  - id: MASS-HIGH-004
+    signal: Entity with auto-binding and sensitive fields
+    evidence_pattern: '@Entity.*isAdmin|@Entity.*role|@Column.*admin'
+    explanation: |
+      Entities with sensitive boolean fields like isAdmin or role that
+      use auto-binding are particularly dangerous - attackers can
+      escalate privileges. CWE-915.
+    remediation: Mark sensitive fields as non-bindable or use separate DTOs
+    cwe: CWE-915
+  medium:
+  - id: MASS-MED-001
+    signal: Missing DTO layer between requests and entities
+    explanation: |
+      Direct binding between HTTP requests and database entities without
+      an intermediate DTO layer increases mass assignment risk and makes
+      it harder to enforce field-level security. CWE-915.
+    remediation: Implement Data Transfer Objects (DTOs) for all API endpoints
+    cwe: CWE-915
+  - id: MASS-MED-002
+    signal: Implicit schema binding without validation
+    evidence_pattern: express\.json\(\)|bodyParser\.json\(\)
+    explanation: |
+      JSON body parsing without schema validation allows arbitrary
+      properties in request bodies. While not mass assignment itself,
+      it enables the attack. CWE-20.
+    remediation: Implement JSON schema validation for all endpoints
+    cwe: CWE-20
+  - id: MASS-MED-003
+    signal: PATCH endpoint without field restriction
+    evidence_pattern: PATCH|patch.*update|app\.patch
+    explanation: |
+      PATCH endpoints that allow partial updates are particularly
+      susceptible if they don't explicitly restrict which fields
+      can be modified. CWE-915.
+    remediation: Validate allowed fields for PATCH operations
+    cwe: CWE-915
+  positive:
+  - id: MASS-POS-001
+    signal: Explicit field extraction from request body
+  - id: MASS-POS-002
+    signal: DTO pattern implementation
+  - id: MASS-POS-003
+    signal: $fillable properly configured in Laravel
+  - id: MASS-POS-004
+    signal: Strong typing with class-transformer/class-validator
+  - id: MASS-POS-005
+    signal: JSON schema validation on input
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify model definitions
+    description: |
+      Locate all data model definitions to understand which fields
+      exist and could be targeted for mass assignment.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find JavaScript/TypeScript models
+      command: find . -type f \( -name '*.model.js' -o -name '*.model.ts' -o -name '*.entity.ts' \) 2>/dev/null
+        | grep -v node_modules | head -20
+    - purpose: Find Laravel models
+      command: find . -type f -name '*.php' -path '*Models*' 2>/dev/null | head -20
+    - purpose: Find Rails models
+      command: find . -type f -name '*.rb' -path '*models*' 2>/dev/null | head -20
+    expected_findings:
+    - Model file locations
+    - Model structure and sensitive fields
+  - id: '2'
+    name: Check mass assignment protection
+    description: |
+      Verify that models have appropriate mass assignment protection
+      configured for the framework in use.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Check Laravel $fillable/$guarded
+      command: grep -rn --include='*.php' '\$fillable\|\$guarded' . 2>/dev/null | head -20
+    - purpose: Check Rails attr_accessible/attr_protected
+      command: grep -rn --include='*.rb' 'attr_accessible\|attr_protected\|strong_parameters' . 2>/dev/null
+        | head -20
+    - purpose: Check Mongoose schema options
+      command: grep -rn --include='*.js' --include='*.ts' 'new Schema\|mongoose\.Schema' . 2>/dev/null
+        | head -20
+    expected_findings:
+    - Protection mechanisms in place
+    - Models lacking protection
+  - id: '3'
+    name: Analyze request body handling
+    description: |
+      Review how request bodies are processed and whether they're
+      passed directly to database operations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find direct request body to create
+      command: grep -rn --include='*.js' --include='*.ts' 'create(req.body)\|create({.*req.body' . 2>/dev/null
+        | grep -v node_modules
+    - purpose: Find direct request body to update
+      command: grep -rn --include='*.js' --include='*.ts' 'update(req.body)\|updateOne.*req.body' . 2>/dev/null
+        | grep -v node_modules
+    - purpose: Find spread operator with request body
+      command: grep -rn --include='*.js' --include='*.ts' '\.\.\.req\.body' . 2>/dev/null | grep -v node_modules
+    expected_findings:
+    - Unsafe request body handling
+    - Proper field extraction patterns
+  - id: '4'
+    name: Review DTO implementations
+    description: |
+      Check for Data Transfer Object patterns that provide safe
+      input handling.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find DTO definitions
+      command: find . -type f \( -name '*dto*.ts' -o -name '*DTO*.java' -o -name '*dto*.js' \) 2>/dev/null
+        | grep -v node_modules | head -20
+    - purpose: Check for class-validator usage
+      command: grep -rn --include='*.ts' 'class-validator\|@IsString\|@IsNumber\|@IsEmail' . 2>/dev/null
+        | grep -v node_modules | head -10
+    - purpose: Check for Joi/Yup validation
+      command: grep -rn --include='*.js' --include='*.ts' 'Joi\.object\|yup\.object\|z\.object' . 2>/dev/null
+        | grep -v node_modules | head -10
+    expected_findings:
+    - DTO patterns in use
+    - Input validation implementations
+  - id: '5'
+    name: Check for sensitive fields
+    description: |
+      Identify sensitive fields in models that would be particularly
+      dangerous if exposed to mass assignment.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find admin/role fields in models
+      command: grep -rn --include='*.js' --include='*.ts' --include='*.php' --include='*.rb' 'isAdmin\|role\|admin\|permission'
+        . 2>/dev/null | grep -v node_modules | head -20
+    - purpose: Find sensitive boolean flags
+      command: grep -rn --include='*.js' --include='*.ts' 'verified\|active\|banned\|suspended' . 2>/dev/null
+        | grep -v node_modules | head -20
+    expected_findings:
+    - Sensitive field locations
+    - High-value mass assignment targets
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Vulnerable Endpoints
+    - Unprotected Models
+    - Remediation Roadmap
+  confidence_guidance:
+    high: Direct evidence of request body passed to database operations
+    medium: Missing protection mechanisms with sensitive fields present
+    low: Potential issues requiring manual verification of data flow
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-mass-assignment-cheatsheet
+      priority: required
+    - source_id: cwe-915
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires model and endpoint analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: mass-assignment-001
+  item: No direct request body to database create operations
+  level: CRITICAL
+  verification: grep -rn --include='*.js' --include='*.ts' '\.create(req\.body)' . 2>/dev/null | grep
+    -v node_modules | wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: mass-assignment-002
+  item: All models have mass assignment protection
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify all ORM models have $fillable, $guarded, or equivalent protection
+  expected: Confirmed by reviewer
+- id: mass-assignment-003
+  item: DTO or explicit field extraction in use
+  level: BLOCKING
+  verification: find . -type f \( -name '*dto*.ts' -o -name '*DTO*.java' \) 2>/dev/null | grep -v node_modules
+    | head -1 | grep -q . && echo PASS || echo FAIL
+  expected: PASS
+- id: mass-assignment-004
+  item: Input validation schema defined
+  level: WARNING
+  verification: grep -rn 'Joi\|yup\|zod\|class-validator' . 2>/dev/null | grep -v node_modules | head
+    -1 | grep -q . && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - api-service
+    - microservice
+  compliance_frameworks:
+  - framework: OWASP API Security Top 10
+    controls:
+    - API6:2019-Mass Assignment
+  - framework: CWE
+    controls:
+    - CWE-915
+    - CWE-20
+  - framework: OWASP ASVS
+    controls:
+    - V5.1.4
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.prototype-pollution
+  - security-trust.authorization.access-control
+  - security-trust.input-validation.schema-validation

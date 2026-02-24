@@ -1,0 +1,346 @@
+audit:
+  id: data-state-management.storage-strategy.storage-cost-optimization
+  name: Storage Cost Optimization Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: data-state-management
+  category_number: 8
+  subcategory: storage-strategy
+  tier: phd
+  estimated_duration: 120 minutes
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - cost
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates storage efficiency and cost optimization across all data stores
+    including object storage, databases, caches, and file systems. Analyzes
+    compression usage, deduplication, unused resources, over-provisioning,
+    and opportunities for cost reduction without impacting functionality.
+  why_it_matters: |
+    Storage costs grow continuously as data accumulates. Without optimization,
+    organizations pay for redundant copies, uncompressed data, oversized
+    instances, and never-accessed archives. Storage can become one of the
+    largest infrastructure costs, often with 30-50% waste.
+  when_to_run:
+  - Monthly cost reviews
+  - Budget planning cycles
+  - After rapid data growth
+  - Infrastructure cost audits
+prerequisites:
+  required_artifacts:
+  - type: infrastructure_config
+    description: Storage configurations and provisioning
+  - type: cost_reports
+    description: Cloud billing and storage cost breakdowns
+  - type: storage_metrics
+    description: Storage utilization and access metrics
+  access_requirements:
+  - Read access to infrastructure configurations
+  - Access to billing/cost reports
+  - Access to storage utilization metrics
+discovery:
+  code_patterns:
+  - pattern: compress|gzip|zstd|lz4|snappy
+    type: regex
+    scope: source
+    purpose: Detect compression usage
+  - pattern: IOPS|throughput|provisioned|reserved
+    type: regex
+    scope: config
+    purpose: Detect provisioned capacity
+  - pattern: cleanup|purge|delete.*old|ttl|expir
+    type: regex
+    scope: source
+    purpose: Detect data cleanup logic
+  file_patterns:
+  - glob: '**/terraform/**'
+    purpose: Infrastructure provisioning
+  - glob: '**/*-cost*.yaml'
+    purpose: Cost configurations
+  - glob: '**/cleanup/**'
+    purpose: Data cleanup scripts
+knowledge_sources:
+  guides:
+  - id: aws-cost-optimization
+    name: AWS Storage Cost Optimization
+    url: https://aws.amazon.com/blogs/storage/optimizing-amazon-s3-costs/
+    offline_cache: true
+  - id: finops-practices
+    name: FinOps Best Practices
+    url: https://www.finops.org/introduction/what-is-finops/
+    offline_cache: true
+  learning_resources:
+  - id: cloud-finops
+    title: Cloud FinOps
+    type: book
+    reference: 'J.R. Storment, ISBN: 978-1492054627'
+tooling:
+  infrastructure_tools:
+  - tool: aws cost-explorer
+    purpose: Analyze AWS storage costs
+    command: aws ce get-cost-and-usage --granularity MONTHLY
+  - tool: aws s3api
+    purpose: Analyze S3 bucket metrics
+    command: aws s3api list-buckets
+  scripts:
+  - id: storage-cost-scan
+    language: bash
+    purpose: Identify storage cost optimization opportunities
+    source: inline
+    code: |
+      echo "=== Storage Cost Analysis ==="
+      echo "--- Compression settings ---"
+      grep -rn "compress\|gzip\|encoding\|zstd" \
+        --include="*.yaml" --include="*.json" --include="*.tf" . 2>/dev/null | head -20
+
+      echo "--- Provisioned capacity ---"
+      grep -rn "IOPS\|throughput\|storage_type\|size\|capacity" \
+        --include="*.tf" --include="*.yaml" . 2>/dev/null | head -20
+
+      echo "--- Cleanup/retention ---"
+      grep -rn "cleanup\|purge\|retention\|ttl\|expir" \
+        --include="*.yaml" --include="*.tf" --include="*.py" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: SCO-CRIT-001
+    signal: No data retention or cleanup policies
+    evidence_pattern: Data grows unbounded without deletion policies
+    explanation: |
+      Without retention policies, data accumulates indefinitely. Storage
+      costs compound as historical data is never cleaned. This often
+      accounts for the majority of storage waste.
+    remediation: Implement retention policies with automatic cleanup
+  - id: SCO-CRIT-002
+    signal: Orphaned storage resources after service decommission
+    evidence_pattern: EBS volumes, buckets from deleted services still exist
+    explanation: |
+      When services are decommissioned, their storage is often forgotten.
+      These orphaned resources continue incurring costs with zero value.
+    remediation: Audit for orphaned storage; implement tagging and cleanup automation
+  high:
+  - id: SCO-HIGH-001
+    signal: Compression not enabled on compressible data
+    evidence_pattern: Large text/JSON data stored uncompressed
+    explanation: |
+      Text data, logs, and JSON typically compress 70-90%. Storing
+      uncompressed means 3-10x storage costs and slower I/O.
+    remediation: Enable compression for text-based data types
+  - id: SCO-HIGH-002
+    signal: Over-provisioned database storage
+    evidence_pattern: Database storage at <30% utilization
+    explanation: |
+      Provisioned IOPS and storage cost money whether used or not.
+      Over-provisioning wastes money; right-sizing can reduce costs
+      significantly.
+    remediation: Right-size storage based on actual usage patterns
+  - id: SCO-HIGH-003
+    signal: Duplicate data across multiple systems
+    evidence_pattern: Same data in database, data warehouse, and backup without dedup
+    explanation: |
+      Logical duplicates across systems multiply storage costs.
+      Data should have clear source of truth with derived views
+      optimized for their purpose.
+    remediation: Deduplicate or use efficient references; enable storage-level dedup
+  medium:
+  - id: SCO-MED-001
+    signal: No reserved capacity for predictable workloads
+    evidence_pattern: Paying on-demand for consistent storage usage
+    remediation: Use reserved capacity or savings plans for predictable storage
+  - id: SCO-MED-002
+    signal: Unoptimized backup retention
+    evidence_pattern: Daily backups kept for years without consolidation
+    remediation: Implement grandfather-father-son backup retention
+  - id: SCO-MED-003
+    signal: Log retention exceeds compliance requirements
+    evidence_pattern: Keeping logs longer than required by policy
+    remediation: Align log retention with compliance requirements
+  low:
+  - id: SCO-LOW-001
+    signal: No cost allocation tags on storage resources
+    evidence_pattern: Storage costs not attributable to teams/projects
+    remediation: Implement consistent tagging for cost allocation
+  - id: SCO-LOW-002
+    signal: Storage cost trends not monitored
+    evidence_pattern: No alerting on unusual storage cost increases
+    remediation: Set up cost anomaly detection alerts
+  positive:
+  - id: SCO-POS-001
+    signal: Comprehensive compression strategy
+    evidence_pattern: Compression enabled at multiple layers
+  - id: SCO-POS-002
+    signal: Automated cleanup with documented retention
+    evidence_pattern: Lifecycle policies with clear retention rules
+  - id: SCO-POS-003
+    signal: Regular storage cost reviews
+    evidence_pattern: Monthly cost optimization reviews documented
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Storage Resources
+    description: |
+      Catalog all storage resources and their costs.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find storage provisioning
+      command: |
+        grep -rn "aws_s3\|aws_ebs\|aws_rds\|azurerm_storage\|google_storage" \
+          --include="*.tf" . 2>/dev/null | head -30
+    - purpose: Find storage configurations
+      command: |
+        grep -rn "storage\|volume\|bucket\|database" \
+          --include="*.yaml" --include="docker-compose*.y*ml" . 2>/dev/null | head -30
+    expected_findings:
+    - Storage resource inventory
+    - Provisioned capacity
+  - id: '2'
+    name: Analyze Compression and Deduplication
+    description: |
+      Review compression and deduplication settings.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find compression settings
+      command: |
+        grep -rn "compress\|gzip\|zstd\|deflate" \
+          --include="*.yaml" --include="*.json" --include="*.tf" --include="*.ts" . 2>/dev/null | head -30
+    - purpose: Find deduplication
+      command: |
+        grep -rn "dedup\|deduplicate\|hash.*content" \
+          --include="*.ts" --include="*.py" --include="*.yaml" . 2>/dev/null | head -20
+    expected_findings:
+    - Compression coverage
+    - Deduplication usage
+  - id: '3'
+    name: Review Retention Policies
+    description: |
+      Examine data retention and cleanup policies.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find retention policies
+      command: |
+        grep -rn "retention\|ttl\|expire\|lifecycle\|cleanup" \
+          --include="*.yaml" --include="*.tf" --include="*.py" . 2>/dev/null | head -40
+    - purpose: Find cleanup jobs
+      command: |
+        grep -rn "delete.*old\|purge\|cleanup" \
+          --include="*.ts" --include="*.py" --include="*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Retention policy coverage
+    - Cleanup automation
+  - id: '4'
+    name: Identify Optimization Opportunities
+    description: |
+      Find specific cost reduction opportunities.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find provisioned capacity
+      command: |
+        grep -rn "iops\|throughput\|size.*=\|allocated_storage" \
+          --include="*.tf" . 2>/dev/null | head -20
+    expected_findings:
+    - Over-provisioning instances
+    - Optimization opportunities
+  - id: '5'
+    name: Review Cost Monitoring
+    description: |
+      Check cost visibility and alerting.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find cost tagging
+      command: |
+        grep -rn "tags.*=\|labels.*=" --include="*.tf" . 2>/dev/null | head -30
+    - purpose: Find cost alerts
+      command: |
+        grep -rn "budget\|cost.*alert\|spending" \
+          --include="*.tf" --include="*.yaml" . 2>/dev/null | head -20
+    expected_findings:
+    - Cost visibility status
+    - Alert configuration
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - storage_inventory
+    - optimization_opportunities
+    - cost_reduction_potential
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Storage Inventory
+    - Cost Analysis
+    - Optimization Opportunities
+    - Recommendations
+  confidence_guidance:
+    high: Clear evidence of waste (orphaned resources, missing compression)
+    medium: Optimization opportunity exists but impact uncertain
+    low: Requires detailed cost analysis to confirm savings
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: finops-practices
+      priority: required
+    - source_id: aws-cost-optimization
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires infrastructure and cost analysis
+    full:
+      included: true
+      priority: 2
+    cost:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: sco-001
+  item: Data retention policies defined
+  level: CRITICAL
+  verification: |
+    grep -rn "retention\|lifecycle\|ttl\|expire" --include="*.yaml" --include="*.tf" . 2>/dev/null | \
+      wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: sco-002
+  item: Compression enabled for compressible data
+  level: BLOCKING
+  verification: |
+    grep -rn "compress\|gzip\|encoding" --include="*.yaml" --include="*.tf" . 2>/dev/null | \
+      wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: sco-003
+  item: Storage resources tagged for cost allocation
+  level: WARNING
+  verification: |
+    grep -rn "tags.*=" --include="*.tf" . 2>/dev/null | \
+      wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Cost Optimization
+    - Resource Management
+relationships:
+  commonly_combined:
+  - data-state-management.storage-strategy.hot-warm-cold-storage
+  - data-state-management.storage-strategy.storage-redundancy
+  - observability-instrumentation.cost-observability.resource-utilization

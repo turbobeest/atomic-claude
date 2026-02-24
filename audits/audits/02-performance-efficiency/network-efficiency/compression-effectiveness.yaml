@@ -1,0 +1,354 @@
+# ============================================================
+# AUDIT: Compression Effectiveness Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.network-efficiency.compression-effectiveness"
+  name: "Compression Effectiveness Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "network-efficiency"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "yes"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates HTTP compression configuration and effectiveness across the
+    application stack. Verifies that gzip, Brotli, and zstd compression
+    are properly configured for appropriate content types, checks compression
+    levels, and measures actual compression ratios achieved in production.
+
+  why_it_matters: |
+    Proper compression typically reduces transfer sizes by 70-90% for text-based
+    content (HTML, CSS, JS, JSON). Missing or misconfigured compression is one
+    of the most common and easily fixable performance issues. Brotli provides
+    15-25% better compression than gzip for web content. Every 1KB saved on a
+    page loaded 1 million times saves 1TB of bandwidth monthly.
+
+  when_to_run:
+    - "After server configuration changes"
+    - "When deploying to new infrastructure"
+    - "During CDN configuration review"
+    - "Quarterly performance audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Web server configuration (nginx, Apache, Express middleware)"
+    - type: "runtime_access"
+      description: "Access to running application for header inspection"
+
+  access_requirements:
+    - "Server configuration files (nginx.conf, httpd.conf, etc.)"
+    - "CDN configuration access"
+    - "HTTP endpoint access for testing"
+
+discovery:
+  code_patterns:
+    - pattern: "compression|gzip|brotli|deflate"
+      type: "keyword"
+      scope: "config"
+      purpose: "Locate compression configuration"
+    - pattern: "Content-Encoding"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find explicit header manipulation"
+
+  file_patterns:
+    - glob: "**/nginx*.conf"
+      purpose: "Nginx compression configuration"
+    - glob: "**/httpd*.conf"
+      purpose: "Apache compression configuration"
+    - glob: "**/.htaccess"
+      purpose: "Apache per-directory compression rules"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc7231"
+      name: "RFC 7231 - HTTP/1.1 Semantics and Content"
+      url: "https://datatracker.ietf.org/doc/html/rfc7231"
+      offline_cache: true
+      priority: "required"
+    - id: "rfc7932"
+      name: "RFC 7932 - Brotli Compressed Data Format"
+      url: "https://datatracker.ietf.org/doc/html/rfc7932"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "nginx-compression"
+      name: "Nginx Compression and Decompression"
+      url: "https://docs.nginx.com/nginx/admin-guide/web-server/compression/"
+      offline_cache: true
+    - id: "cloudflare-compression"
+      name: "Cloudflare Compression Guide"
+      url: "https://developers.cloudflare.com/speed/optimization/content/brotli/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Test compression headers and response sizes"
+      command: "curl -H 'Accept-Encoding: gzip, deflate, br' -sI https://example.com"
+    - tool: "nghttp"
+      purpose: "Test HTTP/2 with compression"
+      command: "nghttp -v https://example.com"
+
+  scripts:
+    - id: "compression-checker"
+      language: "bash"
+      purpose: "Compare compressed vs uncompressed response sizes"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL="$1"
+        echo "=== Compression Analysis for $URL ==="
+
+        # No compression
+        UNCOMPRESSED=$(curl -s -o /dev/null -w '%{size_download}' "$URL")
+
+        # Gzip
+        GZIP=$(curl -s -o /dev/null -w '%{size_download}' -H 'Accept-Encoding: gzip' "$URL")
+
+        # Brotli
+        BROTLI=$(curl -s -o /dev/null -w '%{size_download}' -H 'Accept-Encoding: br' "$URL")
+
+        echo "Uncompressed: ${UNCOMPRESSED} bytes"
+        echo "Gzip: ${GZIP} bytes ($(echo "scale=1; 100 - $GZIP * 100 / $UNCOMPRESSED" | bc)% reduction)"
+        echo "Brotli: ${BROTLI} bytes ($(echo "scale=1; 100 - $BROTLI * 100 / $UNCOMPRESSED" | bc)% reduction)"
+
+signals:
+  critical:
+    - id: "COMPRESS-CRIT-001"
+      signal: "No compression enabled for text-based responses"
+      evidence_pattern: "Missing Content-Encoding header for text/html, application/json, text/css, application/javascript"
+      explanation: |
+        Serving uncompressed text content is a critical performance failure.
+        HTML, CSS, JS, and JSON typically compress to 20-30% of original size.
+        This represents wasted bandwidth, slower page loads, and higher costs.
+        Every major browser has supported compression for over 15 years.
+      remediation: "Enable gzip/Brotli compression in web server and CDN configuration"
+
+    - id: "COMPRESS-CRIT-002"
+      signal: "Compression disabled for API responses"
+      evidence_pattern: "JSON API responses lack Content-Encoding header"
+      explanation: |
+        API responses are often highly compressible, especially for list endpoints
+        returning repetitive JSON structures. Not compressing APIs wastes significant
+        bandwidth on high-traffic systems and increases latency for all API consumers.
+      remediation: "Configure compression middleware for all JSON/XML content types"
+
+  high:
+    - id: "COMPRESS-HIGH-001"
+      signal: "Brotli compression not enabled despite browser support"
+      evidence_pattern: "Only gzip Content-Encoding present, no br support"
+      explanation: |
+        Brotli provides 15-25% better compression than gzip for typical web content
+        with similar decompression speed. All modern browsers support Brotli.
+        Not using it leaves significant bandwidth savings on the table.
+      remediation: "Enable Brotli compression with appropriate quality level (4-6 for dynamic, 11 for static)"
+
+    - id: "COMPRESS-HIGH-002"
+      signal: "Compression applied to already-compressed formats"
+      evidence_pattern: "Attempting to gzip JPEG, PNG, WOFF2, or video files"
+      explanation: |
+        Compressing already-compressed files wastes CPU cycles without reducing
+        file size (often slightly increases it). This adds latency and server load
+        with no benefit. Binary formats like images and fonts are already compressed.
+      remediation: "Exclude image, video, and font files from compression rules"
+
+  medium:
+    - id: "COMPRESS-MED-001"
+      signal: "Suboptimal compression level configured"
+      evidence_pattern: "gzip_comp_level < 4 or > 6 for dynamic content"
+      remediation: "Use compression level 4-6 for dynamic content (balance of ratio vs CPU)"
+
+    - id: "COMPRESS-MED-002"
+      signal: "Missing Vary: Accept-Encoding header"
+      evidence_pattern: "Compressed responses without Vary header"
+      remediation: "Add 'Vary: Accept-Encoding' to prevent cache poisoning"
+
+  low:
+    - id: "COMPRESS-LOW-001"
+      signal: "zstd compression not evaluated for eligible content"
+
+  positive:
+    - id: "COMPRESS-POS-001"
+      signal: "Brotli enabled with appropriate compression levels"
+    - id: "COMPRESS-POS-002"
+      signal: "Pre-compressed static assets served (*.br, *.gz files)"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Verify Server Compression Configuration"
+      description: |
+        Review web server configuration files to verify compression
+        is enabled for appropriate content types with sensible levels.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check nginx gzip configuration"
+          command: "grep -r 'gzip\\|brotli' /etc/nginx/ 2>/dev/null"
+        - purpose: "Check Apache mod_deflate"
+          command: "grep -r 'mod_deflate\\|AddOutputFilterByType' /etc/apache2/ 2>/dev/null"
+
+      expected_findings:
+        - "Compression module enabled"
+        - "Content types properly specified"
+        - "Compression levels configured"
+
+    - id: "2"
+      name: "Test Live Compression Headers"
+      description: |
+        Make requests to production endpoints and verify compression
+        headers are present in responses for compressible content.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check gzip support"
+          command: "curl -sI -H 'Accept-Encoding: gzip' https://example.com | grep -i 'content-encoding'"
+        - purpose: "Check Brotli support"
+          command: "curl -sI -H 'Accept-Encoding: br' https://example.com | grep -i 'content-encoding'"
+        - purpose: "Check Vary header"
+          command: "curl -sI https://example.com | grep -i 'vary'"
+
+      expected_findings:
+        - "Content-Encoding: gzip or br present"
+        - "Vary: Accept-Encoding header present"
+
+    - id: "3"
+      name: "Measure Compression Ratios"
+      description: |
+        Compare compressed and uncompressed response sizes to calculate
+        actual compression effectiveness for key content types.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Compare sizes with and without compression"
+          command: |
+            echo "Uncompressed: $(curl -s -o /dev/null -w '%{size_download}' https://example.com)"
+            echo "Gzipped: $(curl -s -o /dev/null -w '%{size_download}' -H 'Accept-Encoding: gzip' https://example.com)"
+
+      expected_findings:
+        - "70-90% reduction for text content"
+        - "Minimal change for already-compressed content"
+
+    - id: "4"
+      name: "Verify CDN Compression"
+      description: |
+        If using a CDN, verify compression is properly configured at
+        the edge and not interfering with origin compression.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check CDN headers for compression info"
+          command: "curl -sI https://example.com | grep -iE 'cf-|x-cache|x-cdn'"
+
+      expected_findings:
+        - "CDN compression enabled or passthrough configured"
+        - "No double-compression occurring"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Compression Configuration Status"
+        - "Compression Ratio Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct header inspection and size measurements"
+    medium: "Configuration file analysis without runtime verification"
+    low: "Inferred from partial configuration data"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "rfc7932"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "Compression checks are fast and high-impact"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "compression-001"
+    item: "Compression enabled for text-based content types"
+    level: "CRITICAL"
+    verification: |
+      ENCODING=$(curl -sI -H 'Accept-Encoding: gzip, br' https://example.com | grep -i 'content-encoding')
+      if [ -n "$ENCODING" ]; then echo "PASS"; else echo "FAIL: No compression"; fi
+    expected: "PASS"
+
+  - id: "compression-002"
+    item: "Brotli compression available"
+    level: "BLOCKING"
+    verification: |
+      BR=$(curl -sI -H 'Accept-Encoding: br' https://example.com | grep -i 'content-encoding: br')
+      if [ -n "$BR" ]; then echo "PASS"; else echo "FAIL: Brotli not enabled"; fi
+    expected: "PASS"
+
+  - id: "compression-003"
+    item: "Vary header present on compressed responses"
+    level: "WARNING"
+    verification: |
+      VARY=$(curl -sI https://example.com | grep -i 'vary.*accept-encoding')
+      if [ -n "$VARY" ]; then echo "PASS"; else echo "FAIL: Missing Vary header"; fi
+    expected: "PASS"
+
+  - id: "compression-004"
+    item: "Compression ratio exceeds 60% for HTML"
+    level: "BLOCKING"
+    verification: |
+      UNCOMPRESSED=$(curl -s -o /dev/null -w '%{size_download}' -H 'Accept-Encoding: identity' https://example.com)
+      COMPRESSED=$(curl -s -o /dev/null -w '%{size_download}' -H 'Accept-Encoding: gzip' https://example.com)
+      RATIO=$(echo "scale=0; 100 - $COMPRESSED * 100 / $UNCOMPRESSED" | bc)
+      if [ "$RATIO" -ge 60 ]; then echo "PASS: ${RATIO}% reduction"; else echo "FAIL: Only ${RATIO}% reduction"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.network-efficiency.payload-size"
+    - "performance-efficiency.network-efficiency.http2-http3-utilization"

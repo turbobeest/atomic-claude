@@ -1,0 +1,380 @@
+# ============================================================
+# AUDIT: Concern Leakage Assessment
+# ============================================================
+# Evaluates whether cross-cutting concerns leak into
+# inappropriate layers or components of the architecture.
+# ============================================================
+
+audit:
+  id: "architecture-design.cross-cutting-concerns.concern-leakage"
+  name: "Concern Leakage Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "cross-cutting-concerns"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates concern leakage - when cross-cutting concerns
+    (like logging, security, persistence, UI) inappropriately appear in
+    components that should not know about them. It identifies violations
+    of layer boundaries and responsibility separation.
+
+  why_it_matters: |
+    Concern leakage causes:
+    - Domain logic polluted with infrastructure details
+    - Difficult testing due to unwanted dependencies
+    - Tight coupling to specific implementations
+    - Violation of clean architecture principles
+    - Reduced portability and reusability
+    Preventing leakage maintains clean boundaries and modularity.
+
+  when_to_run:
+    - "During architecture reviews"
+    - "When layers seem tangled"
+    - "Before major refactoring"
+    - "When testing becomes difficult due to dependencies"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+    - type: "architecture_documentation"
+      description: "Documentation of layer responsibilities"
+
+  access_requirements:
+    - "Read access to source code"
+
+discovery:
+  code_patterns:
+    - pattern: "import.*springframework|import.*hibernate|import.*javax\\.persistence"
+      type: "regex"
+      scope: "source"
+      purpose: "Find framework imports in domain layer"
+
+    - pattern: "HttpServletRequest|HttpServletResponse|@Controller"
+      type: "regex"
+      scope: "source"
+      purpose: "Find web layer leaking into business"
+
+    - pattern: "System\\.out|println|console\\.log"
+      type: "regex"
+      scope: "source"
+      purpose: "Find direct logging leakage"
+
+  file_patterns:
+    - glob: "**/domain/**/*.{java,ts,py}"
+      purpose: "Domain layer - should be pure"
+    - glob: "**/core/**/*.{java,ts,py}"
+      purpose: "Core layer - minimal dependencies"
+    - glob: "**/model/**/*.{java,ts,py}"
+      purpose: "Model layer - should be POJO"
+
+knowledge_sources:
+  specifications:
+    - id: "clean-architecture"
+      name: "The Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "hexagonal"
+      name: "Hexagonal Architecture"
+      url: "https://alistair.cockburn.us/hexagonal-architecture/"
+      offline_cache: true
+
+    - id: "onion"
+      name: "Onion Architecture"
+      url: "https://jeffreypalermo.com/2008/07/the-onion-architecture-part-1/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "ddd-book"
+      title: "Domain-Driven Design"
+      type: "book"
+      reference: "Eric Evans"
+
+    - id: "clean-arch-book"
+      title: "Clean Architecture"
+      type: "book"
+      reference: "Robert C. Martin"
+
+tooling:
+  static_analysis:
+    - tool: "ArchUnit"
+      purpose: "Enforce architectural boundaries"
+      offline_capable: true
+
+    - tool: "Structure101"
+      purpose: "Visualize dependency violations"
+      offline_capable: true
+
+    - tool: "dependency-cruiser"
+      purpose: "JavaScript/TypeScript dependency rules"
+      offline_capable: true
+
+  scripts:
+    - id: "leakage-detector"
+      language: "bash"
+      purpose: "Detect concern leakage patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Framework Imports in Domain ==="
+        grep -rn "import.*springframework\|import.*hibernate" $(find . -path "*/domain/*.java") 2>/dev/null | head -20
+
+        echo "=== Web Types in Services ==="
+        grep -rn "HttpServletRequest\|@RequestMapping" $(find . -name "*Service.java") 2>/dev/null | head -20
+
+        echo "=== Direct Logging in Domain ==="
+        grep -rn "System.out\|Logger\|log\." $(find . -path "*/domain/*.java") 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "LEAK-CRIT-001"
+      signal: "Infrastructure framework in domain layer"
+      evidence_pattern: "Domain entity has Spring or Hibernate annotations"
+      explanation: |
+        When domain entities depend on infrastructure frameworks, they become
+        impossible to use without those frameworks. The domain loses its
+        portability and becomes coupled to deployment choices.
+      remediation: "Use pure domain models; map to ORM entities at boundaries"
+
+    - id: "LEAK-CRIT-002"
+      signal: "Web layer concepts in business logic"
+      evidence_pattern: "Service method accepts HttpServletRequest parameter"
+      explanation: |
+        When business logic depends on web layer types, it cannot be reused
+        in other contexts (CLI, messaging, batch). The business rules become
+        entangled with HTTP concerns.
+      remediation: "Extract request data at controller; pass domain types to services"
+
+  high:
+    - id: "LEAK-HIGH-001"
+      signal: "Persistence details in domain entities"
+      evidence_pattern: "Domain entity has SQL queries or @Table annotations"
+      explanation: |
+        Domain entities should represent business concepts, not database
+        tables. Persistence details couple the domain to specific storage.
+      remediation: "Use repository pattern; keep entities persistence-ignorant"
+
+    - id: "LEAK-HIGH-002"
+      signal: "UI concerns in business layer"
+      evidence_pattern: "Service formats data for specific UI (HTML, JSON structure)"
+      explanation: |
+        Business logic should not know about presentation. UI-specific
+        formatting couples services to specific clients.
+      remediation: "Return domain objects; transform in presentation layer"
+
+  medium:
+    - id: "LEAK-MED-001"
+      signal: "Logging framework coupled to domain"
+      evidence_pattern: "Domain classes import specific logging framework"
+      remediation: "Use facade (SLF4J) or inject logging abstraction"
+
+    - id: "LEAK-MED-002"
+      signal: "Configuration library in domain"
+      evidence_pattern: "Domain reads from ConfigurationProperties directly"
+      remediation: "Inject configuration values; don't expose config mechanism"
+
+  low:
+    - id: "LEAK-LOW-001"
+      signal: "Utility library leakage"
+      remediation: "Evaluate if utility is truly needed in domain"
+
+  positive:
+    - id: "LEAK-POS-001"
+      signal: "Domain layer free of infrastructure imports"
+    - id: "LEAK-POS-002"
+      signal: "Clean separation between layers"
+    - id: "LEAK-POS-003"
+      signal: "Architecture tests enforcing boundaries"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map architectural layers"
+      description: |
+        Identify the intended architectural layers and their
+        allowed dependencies.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find layer packages"
+          command: "find . -type d -name 'domain' -o -name 'application' -o -name 'infrastructure' -o -name 'presentation' | head -20"
+        - purpose: "Find core packages"
+          command: "find . -type d -name 'core' -o -name 'model' -o -name 'entities' | head -15"
+      expected_findings:
+        - "Layer structure"
+        - "Package organization"
+
+    - id: "2"
+      name: "Check domain purity"
+      description: |
+        Verify that domain layer has no infrastructure dependencies.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find framework imports in domain"
+          command: "grep -rn 'import.*springframework\\|import.*hibernate\\|import.*javax.persistence' $(find . -path '*/domain/*.java') 2>/dev/null | head -30"
+        - purpose: "Find web types in domain"
+          command: "grep -rn 'HttpServlet\\|@Controller\\|@RequestMapping' $(find . -path '*/domain/*.java') 2>/dev/null | head -20"
+      expected_findings:
+        - "Domain contamination"
+        - "Import violations"
+
+    - id: "3"
+      name: "Check service layer boundaries"
+      description: |
+        Verify services don't leak web or persistence concerns.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find web concerns in services"
+          command: "grep -rn 'HttpServletRequest\\|@RequestBody\\|ResponseEntity' --include='*Service.java' | head -30"
+        - purpose: "Find persistence in services"
+          command: "grep -rn 'EntityManager\\|Session\\|Connection' --include='*Service.java' | head -20"
+      expected_findings:
+        - "Web leakage"
+        - "Persistence leakage"
+
+    - id: "4"
+      name: "Analyze dependency direction"
+      description: |
+        Verify dependencies flow inward (infrastructure depends
+        on domain, not reverse).
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check infrastructure imports of domain"
+          command: "grep -rn 'import.*domain\\.' $(find . -path '*/infrastructure/*.java') 2>/dev/null | wc -l"
+        - purpose: "Check domain imports of infrastructure"
+          command: "grep -rn 'import.*infrastructure\\.' $(find . -path '*/domain/*.java') 2>/dev/null | head -20"
+      expected_findings:
+        - "Dependency direction"
+        - "Inversion violations"
+
+    - id: "5"
+      name: "Review boundary tests"
+      description: |
+        Check if architecture tests exist to prevent leakage.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find ArchUnit tests"
+          command: "find . -name '*ArchTest*.java' -o -name '*ArchitectureTest*.java' | head -10"
+        - purpose: "Check for layer rules"
+          command: "grep -rn 'layeredArchitecture\\|noClasses.*should' --include='*Test.java' | head -15"
+      expected_findings:
+        - "Architecture test coverage"
+        - "Enforcement mechanisms"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "leakage_map"
+      format: "visual"
+      sections:
+        - "Layer Diagram"
+        - "Violation Points"
+        - "Dependency Direction"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Leakage Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear leakage violation found"
+    medium: "Potential boundary violation"
+    low: "Minor concern requiring review"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "clean-architecture"
+        priority: "required"
+      - source_id: "hexagonal"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive layer analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "leak-001"
+    item: "Domain layer free of framework dependencies"
+    level: "CRITICAL"
+    verification: "grep -rn 'import.*springframework' $(find . -path '*/domain/*.java') 2>/dev/null | wc -l"
+    expected: "0"
+
+  - id: "leak-002"
+    item: "Services don't expose web concerns"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Services accept/return domain types, not HTTP types"
+    expected: "Confirmed by reviewer"
+
+  - id: "leak-003"
+    item: "Dependencies flow inward only"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Domain doesn't import infrastructure packages"
+    expected: "Confirmed by reviewer"
+
+  - id: "leak-004"
+    item: "Architecture tests enforce boundaries"
+    level: "WARNING"
+    verification: "find . -name '*ArchTest*.java' | wc -l"
+    verification_notes: "ArchUnit or similar tests exist"
+    expected: ">= 1"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modularity", "Reusability"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.cross-cutting-concerns.cross-cutting-concern-handling"
+    - "architecture-design.design-principles.dependency-inversion"
+    - "architecture-design.extensibility-evolution.abstraction-level"
+    - "architecture-design.coupling.tight-coupling-detection"

@@ -1,0 +1,237 @@
+audit:
+  id: signal-processing-data-acquisition.data-integrity.data-loss-detection
+  name: Data Loss Detection Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: data-integrity
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates data loss detection mechanisms for signal
+    acquisition systems. It examines:
+    - Sequence number tracking
+    - Gap detection in data streams
+    - Overflow/underflow reporting
+    - Sample count verification
+    - Timestamp continuity checking
+    - Loss statistics and reporting
+  why_it_matters: |
+    Data loss detection reveals acquisition problems:
+    - Silent data loss corrupts analysis without indication
+    - Sequence numbers enable gap detection
+    - Sample count verifies data completeness
+    - Timestamp gaps indicate lost time periods
+    - Loss metrics enable system optimization
+
+    Without loss detection, users cannot trust data completeness
+    and may make decisions based on incomplete information.
+  when_to_run:
+  - Data acquisition system design
+  - Quality assurance review
+  - Data completeness verification
+  - System reliability assessment
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Data handling and loss detection code
+  - type: data_format
+    description: Data format with sequence information
+  access_requirements:
+  - Access to acquisition code
+  - Data format documentation
+discovery:
+  code_patterns:
+  - pattern: (sequence|seq)_(num|number|count)
+    type: regex
+    scope: source
+    purpose: Detect sequence tracking
+  - pattern: (gap|miss|lost|drop)_(detect|count)
+    type: regex
+    scope: source
+    purpose: Detect loss tracking
+  - pattern: (overflow|underflow|overrun)_(count|flag)
+    type: regex
+    scope: source
+    purpose: Detect overflow tracking
+  file_patterns:
+  - glob: '**/data*.{c,h,cpp,py}'
+    purpose: Data handling files
+  - glob: '**/integrity*.{c,h,cpp,py}'
+    purpose: Integrity checking files
+  - glob: '**/stream*.{c,h,cpp,py}'
+    purpose: Stream processing files
+signals:
+  critical:
+  - id: LOSS-CRIT-001
+    signal: No data loss detection mechanism
+    evidence_indicators:
+    - No sequence numbers in data
+    - No gap detection
+    - Loss possible but not detectable
+    explanation: |
+      Without loss detection, data completeness cannot be
+      verified. Lost data may be silently missing, leading
+      to incorrect analysis conclusions.
+    remediation: |
+      - Add sequence numbers to data
+      - Implement gap detection
+      - Track and report loss statistics
+      - Include loss info in metadata
+    cwe: CWE-754
+  - id: LOSS-CRIT-002
+    signal: Data loss detected but not reported
+    evidence_indicators:
+    - Loss detected internally but not exposed
+    - No user notification of loss
+    - Data presented as complete when not
+    explanation: |
+      Detecting loss without reporting defeats the purpose.
+      Users must be informed of data completeness to make
+      valid decisions.
+    remediation: |
+      - Report loss to user
+      - Include in data metadata
+      - Mark affected time periods
+      - Provide loss statistics
+    cwe: CWE-754
+  high:
+  - id: LOSS-HIGH-001
+    signal: Sequence number wraparound not handled
+    evidence_indicators:
+    - Sequence counter overflows
+    - Wraparound appears as large gap
+    - False loss detection at wraparound
+    explanation: |
+      Sequence numbers eventually wrap around. If not handled,
+      wraparound triggers false gap detection or is missed
+      entirely.
+    remediation: |
+      - Handle sequence wraparound
+      - Use wide enough sequence number
+      - Track expected vs. actual sequence
+      - Document wraparound behavior
+  medium:
+  - id: LOSS-MED-001
+    signal: Loss detection granularity too coarse
+    evidence_indicators:
+    - Can detect large gaps but not single samples
+    - Block-level but not sample-level detection
+    - Fine-grained loss undetectable
+    explanation: |
+      Coarse detection may miss small losses that accumulate
+      over time. Detection granularity should match accuracy
+      requirements.
+    remediation: |
+      - Add sample-level sequence tracking
+      - Implement finer granularity detection
+      - Balance overhead vs. granularity
+      - Document detection capability
+  low:
+  - id: LOSS-LOW-001
+    signal: Loss detection not documented
+    evidence_indicators:
+    - Detection capability unknown
+    - Limitations not specified
+    - User guidance missing
+    explanation: |
+      Without documentation, users don't know how to verify
+      data completeness or what detection is available.
+    remediation: |
+      - Document detection mechanisms
+      - Specify detection granularity
+      - Provide user guidance
+      - Include in data specifications
+  positive:
+  - id: LOSS-POS-001
+    signal: Comprehensive loss detection
+    evidence_indicators:
+    - Sequence tracking at appropriate granularity
+    - Loss reported to user
+    - Statistics available
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: reliability-engineer
+  steps:
+  - id: '1'
+    name: Loss Detection Review
+    description: |
+      Review data loss detection implementation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find loss detection code
+      command: |
+        grep -rniE "(sequence|gap|lost|miss|overflow)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - Sequence tracking
+    - Gap detection
+    - Loss reporting
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Loss Detection Analysis
+    - Reporting Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 1
+    signal-processing:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: loss-001
+  item: Data loss detection implemented
+  level: CRITICAL
+  verification: |
+    grep -rniE "(sequence|gap|lost|overflow)" \
+      --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: loss-002
+  item: Loss reported to user
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify loss information exposed to user
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - data-acquisition
+    - scientific-instruments
+    - safety-critical
+relationships:
+  commonly_combined:
+  - signal-processing.data-integrity.buffer-management
+  - signal-processing.data-integrity.timestamp-accuracy
+  - signal-processing.data-integrity.checksum-crc
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

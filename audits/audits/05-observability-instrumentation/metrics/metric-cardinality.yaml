@@ -1,0 +1,363 @@
+audit:
+  id: observability-instrumentation.metrics.metric-cardinality
+  name: Metric Cardinality Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: metrics
+  tier: phd
+  estimated_duration: 4 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes metric cardinality across the monitoring infrastructure to identify
+    high-cardinality metrics that threaten system stability and cost efficiency.
+    This audit examines label dimensions, unique time series counts, growth
+    patterns, and identifies metrics that create combinatorial explosions.
+    The assessment covers both current cardinality and projected growth.
+  why_it_matters: |
+    High-cardinality metrics are the leading cause of metrics system failures
+    and cost overruns. A single poorly-designed metric with user IDs or request
+    IDs as labels can create millions of time series, causing memory exhaustion,
+    query timeouts, and storage cost explosions. Cardinality issues often remain
+    hidden until they cause production incidents in the monitoring system itself.
+  when_to_run:
+  - New service instrumentation review
+  - Metrics platform capacity planning
+  - Cost optimization initiatives
+  - After metrics system performance degradation
+  - Quarterly monitoring health checks
+prerequisites:
+  required_artifacts:
+  - type: metrics-system
+    description: Access to Prometheus, Datadog, or equivalent with cardinality APIs
+  - type: metrics-inventory
+    description: Catalog of instrumented metrics and their owners
+  access_requirements:
+  - Admin access to metrics platform for cardinality queries
+  - Access to metrics cost reporting
+  - Service instrumentation code access
+discovery:
+  code_patterns:
+  - pattern: user_id|customer_id|request_id|session_id
+    type: keyword
+    scope: source
+    purpose: Identify high-cardinality label candidates
+  - pattern: WithLabelValues|labels=|tags=
+    type: regex
+    scope: source
+    purpose: Find metric labeling patterns
+  - pattern: for.*in.*metrics|dynamic.*label
+    type: regex
+    scope: source
+    purpose: Detect programmatic label generation
+  file_patterns:
+  - glob: '**/metrics.go'
+    purpose: Go metrics definitions
+  - glob: '**/prometheus/**/*.py'
+    purpose: Python metrics instrumentation
+  - glob: '**/recording_rules.yaml'
+    purpose: Recording rules that may aggregate cardinality
+  metrics_queries:
+  - system: Prometheus
+    query: count({__name__=~".+"}) by (__name__)
+    purpose: Time series count per metric name
+    threshold: No single metric > 100,000 series
+  - system: Prometheus
+    query: topk(20, count by (__name__)({__name__=~".+"}))
+    purpose: Top 20 highest cardinality metrics
+    threshold: Review any > 10,000 series
+knowledge_sources:
+  specifications:
+  - id: prometheus-practices
+    name: Prometheus Best Practices - Naming and Labels
+    url: https://prometheus.io/docs/practices/naming/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: cardinality-guide
+    name: Managing Prometheus Cardinality
+    url: https://www.robustperception.io/cardinality-is-key
+    offline_cache: true
+  - id: datadog-cardinality
+    name: Datadog Custom Metrics and Cardinality
+    url: https://docs.datadoghq.com/metrics/custom_metrics/
+    offline_cache: true
+  learning_resources:
+  - id: promcon-cardinality
+    title: 'PromCon Talk: Cardinality Explosion Prevention'
+    type: video
+    reference: PromCon 2023
+tooling:
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      # Total time series count
+      sum(scrape_series_added)
+    purpose: Monitor total cardinality trend
+  - system: Prometheus
+    query: |
+      # Series per label
+      count({__name__=~".+"}) by (job)
+    purpose: Identify high-cardinality jobs
+  - system: Prometheus
+    query: |
+      # Growth rate of series
+      rate(prometheus_tsdb_head_series[1h])
+    purpose: Detect cardinality growth acceleration
+  - system: Prometheus
+    query: |
+      # Memory impact
+      prometheus_tsdb_head_series * 1024
+    purpose: Estimate memory consumption from cardinality
+  infrastructure_tools:
+  - tool: promtool
+    purpose: Analyze metric exposition
+    command: promtool check metrics < metrics_output.txt
+  - tool: mimirtool
+    purpose: Cardinality analysis for Mimir/Cortex
+    command: mimirtool analyze prometheus --address=http://localhost:9090
+  scripts:
+  - id: cardinality-report
+    language: python
+    purpose: Generate cardinality analysis report
+    source: inline
+    code: |
+      import requests
+      from collections import defaultdict
+
+      def analyze_cardinality(prometheus_url):
+          # Query for series counts
+          query = 'count by (__name__)({__name__=~".+"})'
+          response = requests.get(f'{prometheus_url}/api/v1/query', params={'query': query})
+          data = response.json()['data']['result']
+
+          report = {
+              'total_series': sum(int(m['value'][1]) for m in data),
+              'metrics_over_10k': [m for m in data if int(m['value'][1]) > 10000],
+              'metrics_over_1k': [m for m in data if int(m['value'][1]) > 1000]
+          }
+          return report
+signals:
+  critical:
+  - id: CARD-CRIT-001
+    signal: Metric with unbounded cardinality detected
+    evidence_pattern: Label containing user_id, request_id, or UUID
+    evidence_threshold: Single metric > 1M series
+    explanation: |
+      Unbounded labels create infinite cardinality growth. A single metric
+      with user IDs could create millions of time series, causing memory
+      exhaustion and query failures. This is often the root cause of
+      monitoring system outages.
+    remediation: Remove high-cardinality labels, use sampling, or move to logs
+  - id: CARD-CRIT-002
+    signal: Cardinality explosion causing resource exhaustion
+    evidence_pattern: prometheus_tsdb_head_series growth > 100% per day
+    explanation: |
+      Exponential cardinality growth will cause system failure. The monitoring
+      system itself becomes the incident, creating a blind spot during actual
+      production issues.
+    remediation: Implement cardinality limits, drop problematic metrics, alert on growth
+  high:
+  - id: CARD-HIGH-001
+    signal: Single metric exceeds cardinality threshold
+    evidence_pattern: Metric with > 100,000 unique time series
+    explanation: |
+      High-cardinality metrics dominate query resources and storage costs.
+      Even if not currently problematic, they represent concentration risk.
+    remediation: Review label necessity, implement aggregation, or use recording rules
+  - id: CARD-HIGH-002
+    signal: Dynamic label generation in code
+    evidence_pattern: Labels constructed from variables without bounds
+    explanation: |
+      Code that dynamically generates labels often leads to cardinality issues
+      that are hard to predict and control.
+    remediation: Use label allowlists, enumerate valid values, validate at instrumentation
+  medium:
+  - id: CARD-MED-001
+    signal: Label dimensions create combinatorial growth
+    evidence_pattern: Multiple medium-cardinality labels multiplying together
+    remediation: Reduce label dimensions or use recording rules for common queries
+  - id: CARD-MED-002
+    signal: No cardinality monitoring or alerting
+    evidence_pattern: Missing alerts on prometheus_tsdb_head_series
+    remediation: Implement cardinality growth alerts and dashboards
+  low:
+  - id: CARD-LOW-001
+    signal: Inconsistent cardinality across similar services
+    remediation: Standardize instrumentation patterns across service fleet
+  positive:
+  - id: CARD-POS-001
+    signal: Cardinality limits enforced at ingestion
+  - id: CARD-POS-002
+    signal: Regular cardinality reviews and cleanup processes
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Measure current cardinality
+    description: |
+      Query the metrics system to establish baseline cardinality counts
+      across all metrics and identify the highest cardinality contributors.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get total series count
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=prometheus_tsdb_head_series' | jq '.data.result[0].value[1]'
+    - purpose: Top cardinality metrics
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=topk(50,count%20by%20(__name__)(%7B__name__=~%22.%2B%22%7D))'
+        | jq '.data.result'
+    expected_findings:
+    - Total time series count
+    - Top 50 highest cardinality metrics
+  - id: '2'
+    name: Analyze label dimensions
+    description: |
+      For high-cardinality metrics, break down which labels contribute
+      most to the cardinality explosion.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Label analysis for specific metric
+      command: curl -s 'http://prometheus:9090/api/v1/label/__name__/values' | jq '.data'
+    expected_findings:
+    - Label cardinality breakdown per metric
+    - Identification of unbounded labels
+  - id: '3'
+    name: Review instrumentation code
+    description: |
+      Examine source code for metrics with identified cardinality issues
+      to understand how labels are being set.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Find label usage patterns
+      command: grep -r 'WithLabelValues\|labels=' --include='*.go' --include='*.py' /path/to/services
+    expected_findings:
+    - Dynamic label patterns
+    - Unbounded value sources
+  - id: '4'
+    name: Analyze growth trends
+    description: |
+      Examine cardinality growth over time to identify accelerating
+      metrics before they cause problems.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Series growth rate
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=rate(prometheus_tsdb_head_series[24h])'
+        | jq '.data.result'
+    expected_findings:
+    - Growth rate per metric
+    - Projected cardinality in 30/90 days
+  - id: '5'
+    name: Calculate cost impact
+    description: |
+      Estimate the storage, memory, and platform costs associated with
+      high-cardinality metrics.
+    duration_estimate: 30 min
+    questions:
+    - What is the per-series cost in the current platform?
+    - How much could be saved by optimizing top offenders?
+    expected_findings:
+    - Cost attribution per metric
+    - ROI of cardinality reduction
+  - id: '6'
+    name: Develop remediation plan
+    description: |
+      Create prioritized recommendations for reducing cardinality with
+      minimal impact on monitoring capability.
+    duration_estimate: 45 min
+    questions:
+    - Which labels can be removed without losing value?
+    - What aggregations via recording rules are possible?
+    - Which metrics should move to logs/traces instead?
+    expected_findings:
+    - Prioritized remediation actions
+    - Expected cardinality reduction per action
+output:
+  deliverables:
+  - type: cardinality_report
+    format: structured
+    description: Detailed cardinality analysis with trends
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Cardinality Analysis
+    - Cost Impact
+    - Remediation Roadmap
+  confidence_guidance:
+    high: Cardinality measured from production metrics system
+    medium: Based on code review with estimated cardinality
+    low: Projected from limited sample data
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: prometheus-practices
+      priority: required
+    - source_id: cardinality-guide
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed metrics system analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cardinality-001
+  item: No metrics with unbounded cardinality labels
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm no user_id, request_id, or UUID labels exist
+  expected: Confirmed by reviewer
+- id: cardinality-002
+  item: Top 10 metrics reviewed for cardinality optimization
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review highest cardinality metrics with service owners
+  expected: Confirmed by reviewer
+- id: cardinality-003
+  item: Cardinality monitoring and alerting in place
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify alerts exist for cardinality growth
+  expected: Confirmed by reviewer
+- id: cardinality-004
+  item: Cardinality budget defined per service
+  level: WARNING
+  verification: manual
+  verification_notes: Check if cardinality limits are documented
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Cost Optimization
+relationships:
+  commonly_combined:
+  - observability-instrumentation.metrics.metric-label-design
+  - observability-instrumentation.metrics.metric-retention
+  - observability-instrumentation.observability-operations.cost-optimization

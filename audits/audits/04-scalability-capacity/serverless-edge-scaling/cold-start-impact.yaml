@@ -1,0 +1,397 @@
+# ============================================================
+# AUDIT: Cold Start Impact Audit
+# ============================================================
+# Category 4: Scalability & Capacity
+# Subcategory 4.7: Serverless & Edge Scaling
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "scalability-capacity.serverless-edge-scaling.cold-start-impact"
+
+  name: "Cold Start Impact Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "serverless-edge-scaling"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "high"
+
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Analyzes cold start behavior and latency impact in serverless functions,
+    including initialization time, dependency loading, connection establishment,
+    and the frequency of cold starts under various traffic patterns. Evaluates
+    mitigation strategies such as provisioned concurrency, keep-warm patterns,
+    and runtime optimization.
+
+  why_it_matters: |
+    Cold starts introduce unpredictable latency spikes that can violate SLAs,
+    degrade user experience, and cause timeout failures in synchronous
+    workflows. Functions with heavy initialization (database connections,
+    ML model loading, large dependencies) are particularly affected. Understanding
+    cold start impact is essential for serverless architecture decisions.
+
+  when_to_run:
+    - "Before deploying latency-sensitive serverless functions"
+    - "When experiencing intermittent timeout issues"
+    - "During serverless migration assessments"
+    - "After adding new dependencies or initialization logic"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "function_code"
+      description: "Serverless function source code and configurations"
+    - type: "metrics_system"
+      description: "Function invocation and latency metrics"
+    - type: "infrastructure_config"
+      description: "Function runtime and memory configurations"
+
+  access_requirements:
+    - "Access to serverless function configurations"
+    - "Access to CloudWatch, X-Ray, or equivalent tracing"
+    - "Access to function deployment packages"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "init|initialize|bootstrap"
+      type: "regex"
+      scope: "source"
+      purpose: "Find initialization code executed on cold start"
+    - pattern: "getConnection|createPool|connect\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find connection initialization in cold path"
+    - pattern: "import.*heavy|require.*large"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find heavy dependency imports"
+
+  file_patterns:
+    - glob: "**/lambda/**/*.{js,ts,py,go}"
+      purpose: "Lambda function code"
+    - glob: "**/functions/**/*.{js,ts,py,go}"
+      purpose: "Generic serverless function code"
+    - glob: "**/serverless.{yml,yaml}"
+      purpose: "Serverless framework configurations"
+
+  metrics_queries:
+    - system: "CloudWatch"
+      query: "filter @type = 'REPORT' | stats avg(@initDuration) as avg_init"
+      purpose: "Average cold start initialization time"
+      threshold: "Should be < 500ms for user-facing functions"
+    - system: "CloudWatch"
+      query: "filter @type = 'REPORT' | stats count(@initDuration) / count(*) as cold_start_ratio"
+      purpose: "Percentage of invocations with cold starts"
+      threshold: "< 5% for frequently invoked functions"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "lambda-performance"
+      name: "AWS Lambda Performance Optimization"
+      url: "https://docs.aws.amazon.com/lambda/latest/operatorguide/perf-optimize.html"
+      offline_cache: true
+    - id: "cold-start-best-practices"
+      name: "Minimizing Cold Starts"
+      url: "https://aws.amazon.com/blogs/compute/operating-lambda-performance-optimization-part-1/"
+      offline_cache: true
+
+  papers:
+    - id: "serverless-cold-start"
+      title: "Understanding and Addressing Cold Start in Serverless Computing"
+      url: "https://arxiv.org/abs/2012.02382"
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws lambda get-function-configuration"
+      purpose: "Check function memory and runtime settings"
+      command: "aws lambda get-function-configuration --function-name <name>"
+    - tool: "aws lambda get-provisioned-concurrency-config"
+      purpose: "Check if provisioned concurrency is configured"
+      command: "aws lambda get-provisioned-concurrency-config --function-name <name>"
+
+  monitoring_queries:
+    - system: "CloudWatch Insights"
+      query: "filter @type = 'REPORT' | stats percentile(@initDuration, 99) as p99_init by bin(1h)"
+      purpose: "P99 cold start duration over time"
+    - system: "X-Ray"
+      query: "Trace segments with Initialization subsegment"
+      purpose: "Detailed cold start breakdown"
+
+  scripts:
+    - id: "cold-start-analyzer"
+      language: "bash"
+      purpose: "Analyze function initialization code"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "Analyzing function initialization patterns..."
+        grep -r "init\|bootstrap\|module.exports" --include='*.js' --include='*.ts' . 2>/dev/null
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "COLDSTART-CRIT-001"
+      signal: "Cold start duration exceeds function timeout"
+      evidence_threshold: "init_duration > timeout"
+      explanation: |
+        When initialization takes longer than the function timeout,
+        cold starts always fail, causing 100% failure rate during
+        scale-up events or after idle periods.
+      remediation: "Reduce initialization time or increase timeout"
+    - id: "COLDSTART-CRIT-002"
+      signal: "Synchronous API backed by function with >2s cold start"
+      evidence_threshold: "init_duration > 2000ms for API-triggered function"
+      explanation: |
+        Long cold starts in user-facing APIs cause unacceptable latency
+        and potential cascading timeouts in downstream services.
+      remediation: "Use provisioned concurrency or optimize initialization"
+
+  high:
+    - id: "COLDSTART-HIGH-001"
+      signal: "No provisioned concurrency for latency-sensitive functions"
+      explanation: "Cold starts will impact user experience unpredictably"
+      remediation: "Configure provisioned concurrency for critical paths"
+    - id: "COLDSTART-HIGH-002"
+      signal: "Heavy dependencies loaded in initialization path"
+      explanation: "Large packages increase cold start duration"
+      remediation: "Lazy-load heavy dependencies or use layers"
+
+  medium:
+    - id: "COLDSTART-MED-001"
+      signal: "Database connections established on every cold start"
+      remediation: "Use connection pooling services like RDS Proxy"
+    - id: "COLDSTART-MED-002"
+      signal: "Cold start frequency not monitored"
+      remediation: "Add cold start metrics and alerting"
+
+  low:
+    - id: "COLDSTART-LOW-001"
+      signal: "Function package size not optimized"
+
+  positive:
+    - id: "COLDSTART-POS-001"
+      signal: "Provisioned concurrency configured for user-facing functions"
+    - id: "COLDSTART-POS-002"
+      signal: "Initialization time under 100ms"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Serverless Functions"
+      description: |
+        List all serverless functions, their triggers, and
+        latency requirements to prioritize cold start analysis.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List Lambda functions"
+          command: "aws lambda list-functions --query 'Functions[*].[FunctionName,Runtime,MemorySize]'"
+      expected_findings:
+        - "Complete function inventory"
+        - "Function criticality classification"
+
+    - id: "2"
+      name: "Measure Cold Start Durations"
+      description: |
+        Analyze initialization duration metrics for each function,
+        identifying the worst offenders.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Cold start duration per function"
+        - "Initialization time breakdown"
+
+    - id: "3"
+      name: "Analyze Initialization Code"
+      description: |
+        Review function code to identify what executes during
+        cold starts and optimization opportunities.
+      duration_estimate: "45 min"
+      questions:
+        - "What happens during initialization?"
+        - "Are there heavy imports or connections?"
+        - "Can initialization be deferred?"
+      expected_findings:
+        - "Initialization code paths"
+        - "Optimization opportunities"
+
+    - id: "4"
+      name: "Review Mitigation Strategies"
+      description: |
+        Evaluate current cold start mitigation including
+        provisioned concurrency and keep-warm patterns.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check provisioned concurrency"
+          command: "aws lambda list-provisioned-concurrency-configs --function-name <name>"
+      expected_findings:
+        - "Current mitigation coverage"
+        - "Gaps in protection"
+
+    - id: "5"
+      name: "Calculate Cold Start Impact"
+      description: |
+        Determine the percentage of requests affected by cold starts
+        and the latency impact on SLAs.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Cold start frequency"
+        - "SLA impact assessment"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Function Inventory"
+        - "Cold Start Analysis"
+        - "Impact Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Metrics analyzed, code reviewed, impact quantified"
+    medium: "Metrics reviewed with limited code analysis"
+    low: "Configuration review only"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "lambda-performance"
+        priority: "required"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires metrics analysis and code review"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "cold-start-001"
+    item: "Cold start duration under SLA threshold for all critical functions"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify p99 init_duration < latency_sla for user-facing functions"
+    expected: "Confirmed by reviewer"
+
+  - id: "cold-start-002"
+    item: "Provisioned concurrency configured for latency-sensitive functions"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "All synchronous API functions have provisioned concurrency"
+    expected: "Confirmed by reviewer"
+
+  - id: "cold-start-003"
+    item: "Cold start metrics monitored and alerted"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Dashboards and alerts exist for cold start frequency and duration"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["serverless", "api-gateway", "event-driven"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.serverless-edge-scaling.concurrency-limits"
+    - "scalability-capacity.serverless-edge-scaling.provisioned-capacity"

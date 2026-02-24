@@ -1,0 +1,361 @@
+audit:
+  id: security-trust.application-security.clickjacking-protection
+  name: Clickjacking Protection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: application-security
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines clickjacking defenses including X-Frame-Options
+    header, Content-Security-Policy frame-ancestors directive, and
+    supplementary JavaScript frame-busting code. It verifies that the
+    application cannot be embedded in malicious iframes used to hijack
+    user clicks.
+  why_it_matters: |
+    Clickjacking attacks overlay transparent frames to trick users into
+    clicking hidden elements, performing unintended actions like changing
+    settings, transferring money, or granting permissions. This is
+    classified as CWE-1021 (Improper Restriction of Rendered UI Layers).
+    Both X-Frame-Options and CSP frame-ancestors should be implemented
+    for defense in depth.
+  when_to_run:
+  - New application deployment
+  - Security assessment
+  - After header configuration changes
+  - Compliance audits
+prerequisites:
+  required_artifacts:
+  - type: endpoint_list
+    description: List of application URLs to test
+  access_requirements:
+  - HTTP access to application endpoints
+  - Browser for manual verification
+discovery:
+  code_patterns:
+  - pattern: X-Frame-Options|frame-ancestors|frameOptions
+    type: regex
+    scope: config
+    purpose: Identify clickjacking protection configuration
+  - pattern: top\.location|self\.location|frameElement
+    type: regex
+    scope: source
+    purpose: Identify JavaScript frame-busting code
+  file_patterns:
+  - glob: '**/security*.conf'
+    purpose: Security header configurations
+  - glob: '**/nginx.conf'
+    purpose: Web server header configuration
+  - glob: '**/headers*.js'
+    purpose: Header middleware configuration
+knowledge_sources:
+  specifications:
+  - id: cwe-1021
+    name: 'CWE-1021: Improper Restriction of Rendered UI Layers'
+    url: https://cwe.mitre.org/data/definitions/1021.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-clickjacking
+    name: OWASP Clickjacking Defense Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-csp
+    name: OWASP Content Security Policy Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html
+    offline_cache: true
+  - id: mdn-x-frame-options
+    name: MDN X-Frame-Options Reference
+    url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Frame-Options
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Check response headers
+    command: curl -sI https://target | grep -iE 'x-frame-options|content-security-policy'
+  - tool: nmap
+    purpose: HTTP header scanning
+    command: nmap --script http-headers -p 443 target
+  scripts:
+  - id: clickjacking-test
+    language: html
+    purpose: Test if page can be framed
+    source: inline
+    code: |
+      <!DOCTYPE html>
+      <html>
+      <body>
+      <h1>Clickjacking Test</h1>
+      <iframe src="https://target" width="800" height="600"></iframe>
+      <p>If you see the target page above, it's vulnerable to clickjacking.</p>
+      </body>
+      </html>
+signals:
+  critical:
+  - id: CLICK-CRIT-001
+    signal: No clickjacking protection headers
+    cwe_id: CWE-1021
+    evidence_pattern: X-Frame-Options.*not found|frame-ancestors.*not found
+    explanation: |
+      Without X-Frame-Options or CSP frame-ancestors, the application
+      can be embedded in iframes on attacker-controlled sites, enabling
+      clickjacking attacks.
+    remediation: 'Add X-Frame-Options: DENY and CSP frame-ancestors ''none'''
+  - id: CLICK-CRIT-002
+    signal: X-Frame-Options set to ALLOW-FROM (obsolete)
+    cwe_id: CWE-1021
+    evidence_pattern: X-Frame-Options.*ALLOW-FROM
+    explanation: |
+      ALLOW-FROM is obsolete and not supported by modern browsers.
+      When browsers don't recognize the directive, they ignore it entirely,
+      leaving no protection.
+    remediation: Replace with CSP frame-ancestors for domain-specific framing
+  high:
+  - id: CLICK-HIGH-001
+    signal: Inconsistent protection across endpoints
+    cwe_id: CWE-1021
+    evidence_indicators:
+    - Some pages have headers, others don't
+    - Login page unprotected
+    - Sensitive actions unprotected
+    explanation: |
+      Inconsistent protection leaves specific pages vulnerable. Attackers
+      will target unprotected pages, especially those with sensitive actions.
+    remediation: Apply protection headers globally via server configuration
+  - id: CLICK-HIGH-002
+    signal: X-Frame-Options in meta tag (ineffective)
+    cwe_id: CWE-1021
+    evidence_pattern: <meta.*http-equiv.*X-Frame-Options
+    explanation: |
+      X-Frame-Options must be sent as an HTTP response header. Meta tag
+      implementations are ignored by browsers and provide no protection.
+    remediation: Configure X-Frame-Options as HTTP response header
+  - id: CLICK-HIGH-003
+    signal: Only X-Frame-Options without CSP frame-ancestors
+    cwe_id: CWE-1021
+    evidence_indicators:
+    - X-Frame-Options present
+    - No CSP frame-ancestors directive
+    explanation: |
+      CSP frame-ancestors is the modern standard and provides more
+      flexibility. Both should be used for defense in depth and
+      browser compatibility.
+    remediation: Add CSP frame-ancestors alongside X-Frame-Options
+  medium:
+  - id: CLICK-MED-001
+    signal: X-Frame-Options SAMEORIGIN may be overly permissive
+    cwe_id: CWE-1021
+    evidence_pattern: X-Frame-Options.*SAMEORIGIN
+    explanation: |
+      SAMEORIGIN allows framing by same-origin pages. If any same-origin
+      page is compromised (XSS), it can frame other pages for clickjacking.
+      DENY is more secure unless framing is required.
+    remediation: Use DENY unless same-origin framing is required functionality
+  - id: CLICK-MED-002
+    signal: JavaScript frame-busting used alone
+    cwe_id: CWE-1021
+    evidence_pattern: if.*top.*!=.*self|top\.location.*=.*self
+    explanation: |
+      JavaScript frame-busters can be bypassed using iframe sandbox
+      attributes or double framing. They should supplement, not replace,
+      header-based protection.
+    remediation: Use JavaScript frame-busting only as additional defense layer
+  - id: CLICK-MED-003
+    signal: CSP frame-ancestors uses wildcard
+    cwe_id: CWE-1021
+    evidence_pattern: frame-ancestors.*\*
+    explanation: |
+      Wildcard in frame-ancestors allows framing from any origin,
+      providing no clickjacking protection.
+    remediation: Specify explicit origins or use 'self' / 'none'
+  low:
+  - id: CLICK-LOW-001
+    signal: No SameSite cookie attribute as supplemental protection
+    evidence_indicators:
+    - Session cookie without SameSite
+    - Only header protection, no cookie protection
+    explanation: |
+      SameSite cookie attribute provides additional protection by
+      preventing session cookies from being sent in framed requests.
+    remediation: Set SameSite=Strict on session cookies
+  positive:
+  - id: CLICK-POS-001
+    signal: Both X-Frame-Options DENY and CSP frame-ancestors 'none'
+    explanation: Maximum protection with defense in depth
+  - id: CLICK-POS-002
+    signal: Protection applied globally via server configuration
+    explanation: Consistent protection across all endpoints
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Check Response Headers
+    description: |
+      Examine HTTP response headers for X-Frame-Options and CSP
+      frame-ancestors directives.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check X-Frame-Options header
+      command: curl -sI https://target | grep -i 'x-frame-options'
+    - purpose: Check CSP frame-ancestors
+      command: curl -sI https://target | grep -i 'content-security-policy' | grep -o 'frame-ancestors[^;]*'
+    - purpose: Scan multiple pages
+      command: for page in / /login /dashboard /settings; do echo "$page:"; curl -sI "https://target$page"
+        | grep -iE 'x-frame-options|frame-ancestors'; done
+    expected_findings:
+    - X-Frame-Options header value
+    - CSP frame-ancestors directive
+    - Consistency across pages
+  - id: '2'
+    name: Verify Header Configuration
+    description: |
+      Validate that headers are properly configured with secure values.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check for ALLOW-FROM (obsolete)
+      command: curl -sI https://target | grep -i 'x-frame-options' | grep -i 'allow-from'
+    - purpose: Check for weak CSP values
+      command: curl -sI https://target | grep -i 'content-security-policy' | grep -E 'frame-ancestors.*\*'
+    expected_findings:
+    - No obsolete directives
+    - No wildcard allowances
+  - id: '3'
+    name: Test Framing Behavior
+    description: |
+      Attempt to embed the application in an iframe to verify
+      protection is working.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Create test HTML
+      command: echo '<html><body><iframe src="https://target" width="800" height="600"></iframe></body></html>'
+        > /tmp/clickjack-test.html
+    - purpose: Open in browser (manual)
+      command: echo 'Open /tmp/clickjack-test.html in browser and verify page does not load in iframe'
+    expected_findings:
+    - Page refuses to load in iframe
+    - Browser shows security error
+  - id: '4'
+    name: Check Server Configuration
+    description: |
+      Review server configuration files to ensure headers are
+      applied globally.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check nginx configuration
+      command: grep -rn 'X-Frame-Options\|frame-ancestors' /etc/nginx/
+    - purpose: Check Apache configuration
+      command: grep -rn 'X-Frame-Options\|frame-ancestors' /etc/apache2/ /etc/httpd/
+    expected_findings:
+    - Global header configuration
+    - Configuration in main server config
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Header Analysis
+    - Framing Test Results
+    - Recommendations
+  confidence_guidance:
+    high: Headers verified, framing test confirms protection
+    medium: Headers present but framing not tested
+    low: Based on configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-clickjacking
+      priority: required
+    - source_id: cwe-1021
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: click-001
+  item: X-Frame-Options header present
+  level: CRITICAL
+  verification: curl -sI https://$HOST 2>/dev/null | grep -qi 'x-frame-options' && echo 'PASS' || echo
+    'FAIL'
+  expected: PASS
+- id: click-002
+  item: CSP frame-ancestors directive present
+  level: BLOCKING
+  verification: curl -sI https://$HOST 2>/dev/null | grep -qi 'frame-ancestors' && echo 'PASS' || echo
+    'FAIL'
+  expected: PASS
+- id: click-003
+  item: No ALLOW-FROM (obsolete) directive
+  level: CRITICAL
+  verification: curl -sI https://$HOST 2>/dev/null | grep -qi 'allow-from' && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: click-004
+  item: Headers consistent across pages
+  level: WARNING
+  verification: manual
+  verification_notes: Check multiple pages have consistent clickjacking protection
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP-ASVS
+    controls:
+    - 14.4.7
+  - framework: PCI-DSS
+    controls:
+    - 6.5.9
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-5
+relationships:
+  commonly_combined:
+  - security-trust.application-security.security-headers
+  - security-trust.application-security.content-security-policy
+  - security-trust.application-security.csrf-protection

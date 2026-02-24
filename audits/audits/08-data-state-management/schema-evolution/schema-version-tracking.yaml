@@ -1,0 +1,316 @@
+# ============================================================
+# AUDIT: Schema Version Tracking
+# ============================================================
+# Evaluates how database schema versions are tracked, documented,
+# and correlated with application versions.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-evolution.schema-version-tracking"
+
+  name: "Schema Version Tracking"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-evolution"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates how database schema versions are tracked throughout
+    the development and deployment lifecycle. It examines migration versioning
+    schemes, schema-application version correlation, audit trails for schema
+    changes, and the ability to determine schema state at any point in time.
+
+  why_it_matters: |
+    Without proper schema version tracking, it's impossible to know what
+    schema version is running in each environment, diagnose compatibility
+    issues, or perform rollbacks safely. Schema version confusion leads to
+    deployment failures, data corruption from version mismatches, and
+    difficulty debugging production issues.
+
+  when_to_run:
+    - "When establishing migration practices"
+    - "After deployment issues involving schema"
+    - "During environment synchronization"
+    - "When auditing deployment practices"
+
+prerequisites:
+  required_artifacts:
+    - type: "migration-files"
+      description: "Database migration files"
+    - type: "migration-config"
+      description: "Migration framework configuration"
+
+  access_requirements:
+    - "Read access to migration files"
+    - "Access to migration history tables"
+    - "Deployment documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "schema_migrations|flyway_schema_history|alembic_version|_prisma_migrations"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify migration tracking tables"
+    - pattern: "VERSION|version|\\d{14}_|V\\d+__"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify versioning patterns in migration names"
+
+  file_patterns:
+    - glob: "**/migrations/**/*"
+      purpose: "Migration files with version identifiers"
+    - glob: "**/flyway/**/*"
+      purpose: "Flyway migration configuration"
+    - glob: "**/alembic/**/*"
+      purpose: "Alembic migration configuration"
+
+knowledge_sources:
+  guides:
+    - id: "flyway-versioning"
+      name: "Flyway Versioned Migrations"
+      url: "https://flywaydb.org/documentation/concepts/migrations#versioned-migrations"
+      offline_cache: true
+
+    - id: "alembic-versioning"
+      name: "Alembic Version Branches"
+      url: "https://alembic.sqlalchemy.org/en/latest/branches.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "migration-cli"
+      purpose: "Query current schema version"
+      command: "npx prisma migrate status"
+    - tool: "flyway"
+      purpose: "Flyway migration info"
+      command: "flyway info"
+
+signals:
+  critical:
+    - id: "SCHVER-CRIT-001"
+      signal: "No migration tracking table or version history"
+      evidence_pattern: "Missing schema_migrations, flyway_schema_history, etc."
+      explanation: |
+        Without a migration tracking table, there's no way to know which
+        migrations have been applied. This leads to duplicate migrations,
+        skipped migrations, and inability to determine current schema state.
+      remediation: "Use a migration framework that tracks applied migrations in a history table"
+
+    - id: "SCHVER-CRIT-002"
+      signal: "Inconsistent versioning across environments"
+      evidence_pattern: "Different migration states in dev/staging/prod"
+      explanation: |
+        Inconsistent schema versions across environments cause subtle bugs
+        that only appear in certain environments. Features may work in
+        dev but fail in production due to missing schema changes.
+      remediation: "Implement schema version checks in deployment pipeline; sync environments regularly"
+
+  high:
+    - id: "SCHVER-HIGH-001"
+      signal: "Migration files without clear version ordering"
+      evidence_pattern: "Migrations named without timestamps or sequential numbers"
+      explanation: |
+        Without clear ordering, migrations may be applied in wrong order
+        or skipped entirely. This causes schema inconsistencies and
+        potential data corruption.
+      remediation: "Use timestamp prefixes (20260118120000_) or sequential numbers (V1__, V2__)"
+
+    - id: "SCHVER-HIGH-002"
+      signal: "No correlation between schema and application versions"
+      evidence_pattern: "Schema version not documented alongside application version"
+      explanation: |
+        Without correlation, it's impossible to know which application
+        version requires which schema version. Deploying incompatible
+        versions causes runtime errors and data issues.
+      remediation: "Document required schema version in application; add version compatibility checks"
+
+  medium:
+    - id: "SCHVER-MED-001"
+      signal: "Missing migration descriptions or change documentation"
+      evidence_pattern: "Migration files without comments explaining changes"
+      remediation: "Add descriptive names and comments to all migrations"
+
+    - id: "SCHVER-MED-002"
+      signal: "No schema change audit trail"
+      evidence_pattern: "Missing who/when/why for schema changes"
+      remediation: "Track author and timestamp in migration files; link to tickets/PRs"
+
+  low:
+    - id: "SCHVER-LOW-001"
+      signal: "Manual schema version management"
+
+  positive:
+    - id: "SCHVER-POS-001"
+      signal: "Comprehensive version tracking with audit trail"
+    - id: "SCHVER-POS-002"
+      signal: "Automated version compatibility checks in deployment"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Migration Framework Analysis"
+      description: |
+        Identify the migration framework in use and how it
+        tracks schema versions.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find migration framework configuration"
+          command: "find . -name 'flyway.conf' -o -name 'alembic.ini' -o -name 'knexfile.*' -o -name 'prisma' -type d 2>/dev/null | head -10"
+        - purpose: "Find migration history table references"
+          command: "grep -riE 'schema_migrations|flyway_schema|alembic_version|_prisma_migrations' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Migration framework in use"
+        - "Version tracking mechanism"
+
+    - id: "2"
+      name: "Versioning Scheme Analysis"
+      description: |
+        Analyze the versioning scheme used for migrations
+        and verify ordering clarity.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "List migration files with versions"
+          command: "find . -path '*/migrations/*' -type f \\( -name '*.sql' -o -name '*.ts' -o -name '*.py' \\) 2>/dev/null | sort | head -50"
+        - purpose: "Check for timestamp prefixes"
+          command: "find . -path '*/migrations/*' -type f 2>/dev/null | grep -E '[0-9]{8,14}' | head -20"
+        - purpose: "Check for version prefixes (V1, V2)"
+          command: "find . -path '*/migrations/*' -type f 2>/dev/null | grep -E 'V[0-9]+' | head -20"
+
+      expected_findings:
+        - "Versioning scheme in use"
+        - "Ordering clarity"
+
+    - id: "3"
+      name: "Documentation Analysis"
+      description: |
+        Evaluate whether migrations are documented with
+        descriptions and change context.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find migration comments"
+          command: "grep -riE '^--|^#|^/\\*|description' --include='*.sql' --include='*.ts' --include='*.py' -path '*/migrations/*' . 2>/dev/null | head -30"
+        - purpose: "Find ticket references in migrations"
+          command: "grep -riE '(JIRA|TICKET|ISSUE|PR)[-#][0-9]+' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Documentation quality"
+        - "Change tracking references"
+
+    - id: "4"
+      name: "Version Correlation Analysis"
+      description: |
+        Evaluate schema-application version correlation
+        and compatibility checking.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find version compatibility checks"
+          command: "grep -riE 'schema.*version|migration.*required|required.*migration|db.*version' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -20"
+        - purpose: "Find version documentation"
+          command: "find . -name 'CHANGELOG*' -o -name 'VERSION' -o -name 'version.txt' 2>/dev/null | head -10"
+
+      expected_findings:
+        - "Version correlation mechanisms"
+        - "Compatibility checking"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Version Tracking Assessment"
+        - "Documentation Quality"
+        - "Correlation Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of missing or inadequate version tracking"
+    medium: "Tracking exists but completeness uncertain"
+    low: "Tracking appears adequate but verification needed"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "flyway-versioning"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires migration framework analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "schver-001"
+    item: "Migration tracking mechanism identified"
+    level: "CRITICAL"
+    verification: "find . -path '*/migrations/*' -type f 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "schver-002"
+    item: "Clear versioning scheme in use"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify migrations have clear ordering"
+    expected: "Confirmed by reviewer"
+
+  - id: "schver-003"
+    item: "Schema-application version correlation documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify version compatibility is documented"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Configuration Management"
+      controls: ["CFG-001", "CFG-002"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-evolution.migration-safety"
+    - "data-state-management.schema-evolution.migration-rollback-capability"

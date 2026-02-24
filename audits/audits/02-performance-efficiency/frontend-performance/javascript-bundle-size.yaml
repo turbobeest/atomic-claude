@@ -1,0 +1,351 @@
+# ============================================================
+# JAVASCRIPT BUNDLE SIZE AUDIT
+# ============================================================
+# Analyzes JavaScript bundle sizes and identifies opportunities
+# to reduce payload for faster loading.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.frontend-performance.javascript-bundle-size"
+  name: "JavaScript Bundle Size Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "frontend-performance"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "yes"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes JavaScript bundle sizes including main bundle, vendor bundles,
+    and lazy-loaded chunks. Examines dependency tree for oversized libraries,
+    duplicate dependencies, unused exports (tree-shaking opportunities), and
+    code splitting effectiveness.
+
+  why_it_matters: |
+    Large JavaScript bundles directly impact page load time and Time to
+    Interactive. Every 100KB of JavaScript adds approximately 350ms on a
+    mid-tier mobile device. Oversized bundles cause poor Core Web Vitals,
+    especially on slower networks and devices.
+
+  when_to_run:
+    - "After adding new dependencies"
+    - "Before major releases"
+    - "When bundle size budget is exceeded"
+    - "During performance optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Frontend source code with package.json"
+    - type: "build_output"
+      description: "Production build artifacts (optional but recommended)"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Ability to run build process"
+
+discovery:
+  code_patterns:
+    - pattern: "import\\s+\\*\\s+as"
+      type: "regex"
+      scope: "source"
+      purpose: "Find namespace imports preventing tree-shaking"
+
+    - pattern: "require\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find CommonJS requires that may prevent optimization"
+
+    - pattern: "import\\s*\\(.*\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find dynamic imports for code splitting"
+
+  file_patterns:
+    - glob: "**/package.json"
+      purpose: "Dependency declarations"
+    - glob: "**/webpack.config.*"
+      purpose: "Webpack configuration"
+    - glob: "**/rollup.config.*"
+      purpose: "Rollup configuration"
+    - glob: "**/vite.config.*"
+      purpose: "Vite configuration"
+    - glob: "**/*.js"
+      purpose: "JavaScript source files"
+    - glob: "**/*.ts"
+      purpose: "TypeScript source files"
+
+knowledge_sources:
+  guides:
+    - id: "webpack-bundle-analysis"
+      name: "Webpack Bundle Analysis"
+      url: "https://webpack.js.org/guides/code-splitting/"
+      offline_cache: true
+
+    - id: "tree-shaking"
+      name: "Tree Shaking Guide"
+      url: "https://webpack.js.org/guides/tree-shaking/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "web-performance"
+      title: "High Performance Browser Networking"
+      type: "book"
+      reference: "https://hpbn.co/"
+
+tooling:
+  static_analysis:
+    - tool: "webpack-bundle-analyzer"
+      purpose: "Visualize bundle composition"
+      offline_capable: true
+
+    - tool: "source-map-explorer"
+      purpose: "Analyze bundle with source maps"
+      offline_capable: true
+
+    - tool: "bundlephobia"
+      purpose: "Check dependency sizes before adding"
+      offline_capable: false
+
+    - tool: "size-limit"
+      purpose: "Enforce bundle size budgets"
+      offline_capable: true
+
+  scripts:
+    - id: "analyze-bundle"
+      language: "bash"
+      purpose: "Generate bundle analysis"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Build with stats
+        npm run build -- --stats
+        # Analyze with webpack-bundle-analyzer
+        npx webpack-bundle-analyzer stats.json
+
+signals:
+  critical:
+    - id: "BUNDLE-CRIT-001"
+      signal: "Main bundle exceeds 500KB (gzipped)"
+      evidence_threshold: "main.*.js gzipped > 500KB"
+      explanation: |
+        A main bundle over 500KB gzipped takes significant time to download
+        and parse, especially on mobile networks. This directly impacts
+        Time to Interactive and First Input Delay.
+      remediation: "Implement code splitting, lazy loading, and remove unused dependencies"
+
+    - id: "BUNDLE-CRIT-002"
+      signal: "Entire library imported for single function"
+      evidence_pattern: "import.*from\\s*['\"]lodash['\"]|import.*from\\s*['\"]moment['\"]"
+      explanation: |
+        Importing entire libraries like lodash or moment.js when only using
+        a few functions adds hundreds of KB unnecessarily.
+      remediation: "Use modular imports (lodash-es) or modern alternatives (date-fns)"
+
+  high:
+    - id: "BUNDLE-HIGH-001"
+      signal: "Duplicate dependencies in bundle"
+      evidence_pattern: "multiple versions of same package"
+      explanation: |
+        Duplicate dependencies (e.g., two versions of React) bloat the bundle
+        and can cause runtime issues.
+      remediation: "Use npm dedupe, resolve version conflicts, check resolutions field"
+
+    - id: "BUNDLE-HIGH-002"
+      signal: "No code splitting implemented"
+      evidence_pattern: "single bundle without dynamic imports"
+      explanation: |
+        Loading all JavaScript upfront delays interactivity. Code splitting
+        allows loading only what's needed for the current route.
+      remediation: "Implement route-based code splitting with dynamic imports"
+
+    - id: "BUNDLE-HIGH-003"
+      signal: "Development dependencies in production bundle"
+      evidence_pattern: "propTypes|devDependencies"
+      explanation: |
+        Development-only code (PropTypes, test utilities) in production
+        bundles wastes bytes and may expose information.
+      remediation: "Configure bundler to strip dev code in production"
+
+  medium:
+    - id: "BUNDLE-MED-001"
+      signal: "Namespace imports preventing tree-shaking"
+      evidence_pattern: "import\\s+\\*\\s+as\\s+\\w+\\s+from"
+      remediation: "Use named imports to enable tree-shaking"
+
+    - id: "BUNDLE-MED-002"
+      signal: "Large polyfill bundle"
+      evidence_pattern: "core-js|babel-polyfill"
+      remediation: "Configure browserslist targets, use useBuiltIns: 'usage'"
+
+  low:
+    - id: "BUNDLE-LOW-001"
+      signal: "No bundle size monitoring in CI"
+      evidence_pattern: "(?!.*size-limit|bundlewatch)"
+      remediation: "Add bundle size checks to CI pipeline"
+
+  positive:
+    - id: "BUNDLE-POS-001"
+      signal: "Code splitting implemented"
+      evidence_pattern: "import\\(.*\\)|React\\.lazy|loadable"
+
+    - id: "BUNDLE-POS-002"
+      signal: "Modern bundle targets"
+      evidence_pattern: "type.*module|module.*esm"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Build production bundle"
+      description: |
+        Create production build with source maps for analysis.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Build with stats"
+          command: "npm run build -- --stats"
+        - purpose: "Generate source map analysis"
+          command: "npx source-map-explorer dist/*.js"
+      expected_findings:
+        - "Bundle sizes"
+        - "Source map analysis"
+
+    - id: "2"
+      name: "Analyze bundle composition"
+      description: |
+        Examine what's in the bundle using visualization tools.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Run webpack-bundle-analyzer"
+          command: "npx webpack-bundle-analyzer stats.json"
+      expected_findings:
+        - "Module sizes"
+        - "Largest dependencies"
+        - "Duplicate modules"
+
+    - id: "3"
+      name: "Check dependency sizes"
+      description: |
+        Review package.json dependencies for large or problematic libraries.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "List dependencies"
+          command: "npm ls --depth=0"
+        - purpose: "Check bundle impact of dependencies"
+          command: "npx import-cost"
+      expected_findings:
+        - "Large dependencies"
+        - "Replacement candidates"
+
+    - id: "4"
+      name: "Evaluate code splitting"
+      description: |
+        Check if code splitting is implemented effectively.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find dynamic imports"
+          command: "grep -rn 'import(' --include='*.ts' --include='*.tsx' --include='*.js' ."
+        - purpose: "Count chunk files"
+          command: "ls -la dist/*.js | wc -l"
+      expected_findings:
+        - "Code splitting patterns"
+        - "Chunk count and sizes"
+
+    - id: "5"
+      name: "Check tree-shaking effectiveness"
+      description: |
+        Verify that unused code is being eliminated.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find namespace imports"
+          command: "grep -rn 'import \\* as' --include='*.ts' --include='*.tsx' --include='*.js' ."
+      expected_findings:
+        - "Tree-shaking blockers"
+        - "Optimization opportunities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Bundle Size Analysis"
+        - "Dependency Analysis"
+        - "Code Splitting Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Bundle analyzer shows clear size and composition"
+    medium: "Code patterns suggest optimization opportunity"
+    low: "Potential issue requiring build analysis"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "webpack-bundle-analysis"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "bundle-001"
+    item: "Main bundle under 200KB gzipped"
+    level: "CRITICAL"
+    verification: "gzip -c dist/main*.js | wc -c"
+    expected: "< 200000 bytes"
+
+  - id: "bundle-002"
+    item: "No duplicate dependencies"
+    level: "BLOCKING"
+    verification: "npm ls 2>&1 | grep 'deduped' | wc -l"
+    expected: "Minimal duplicates"
+
+  - id: "bundle-003"
+    item: "Code splitting implemented"
+    level: "WARNING"
+    verification: "ls dist/*.js | wc -l"
+    expected: "> 1 chunk"
+
+governance:
+  applicable_to:
+    archetypes: ["webapp", "spa"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.frontend-performance.core-web-vitals"
+    - "performance-efficiency.frontend-performance.critical-rendering-path"

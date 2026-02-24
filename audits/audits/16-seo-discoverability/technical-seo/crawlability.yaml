@@ -1,0 +1,373 @@
+# ============================================================
+# AUDIT: Crawlability Assessment
+# ============================================================
+# Evaluates whether search engine bots can effectively discover
+# and crawl all important pages on the website.
+# ============================================================
+
+audit:
+  id: "seo-discoverability.technical-seo.crawlability"
+
+  name: "Crawlability Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "seo-discoverability"
+  category_number: 16
+  subcategory: "technical-seo"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines whether search engine crawlers can effectively
+    discover, access, and navigate through all important pages on a website.
+    It evaluates crawl budget efficiency, identifies crawl blockers, assesses
+    internal link architecture, analyzes JavaScript rendering requirements,
+    and checks for orphaned pages that cannot be discovered.
+
+  why_it_matters: |
+    If search engines cannot crawl your website effectively, your pages
+    will not be indexed and will not appear in search results. Poor
+    crawlability can result from blocked resources, JavaScript rendering
+    issues, crawl budget waste on low-value pages, broken internal links,
+    or overly complex site architecture. Addressing crawlability issues
+    is the foundation of all SEO efforts.
+
+  when_to_run:
+    - "Before launching a new website"
+    - "After major site architecture changes"
+    - "When experiencing indexation problems"
+    - "After migrating to a new CMS or framework"
+    - "Quarterly technical SEO audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "website"
+      description: "Live or staging website accessible for crawling"
+    - type: "source_code"
+      description: "Access to website source code for configuration review"
+    - type: "server_logs"
+      description: "Search engine bot crawl logs (optional but recommended)"
+
+  access_requirements:
+    - "Google Search Console access with full permissions"
+    - "Server log access for bot activity analysis"
+    - "Ability to run crawl simulations"
+
+discovery:
+  code_patterns:
+    - pattern: "meta\\s+name=[\"']robots[\"']"
+      type: "regex"
+      scope: "source"
+      purpose: "Find meta robots directives that may block crawling"
+    - pattern: "X-Robots-Tag"
+      type: "keyword"
+      scope: "config"
+      purpose: "Identify HTTP header-based robot directives"
+    - pattern: "noindex|nofollow|none"
+      type: "regex"
+      scope: "source"
+      purpose: "Find pages blocked from indexing or link following"
+
+  file_patterns:
+    - glob: "**/robots.txt"
+      purpose: "Locate robots.txt files"
+    - glob: "**/*.sitemap.xml"
+      purpose: "Find sitemap files for crawl reference"
+    - glob: "**/next.config.{js,ts}"
+      purpose: "Check Next.js configuration for rendering settings"
+    - glob: "**/nuxt.config.{js,ts}"
+      purpose: "Check Nuxt.js configuration for rendering settings"
+
+knowledge_sources:
+  specifications:
+    - id: "robots-exclusion-protocol"
+      name: "Robots Exclusion Protocol (RFC 9309)"
+      url: "https://www.rfc-editor.org/rfc/rfc9309"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "google-crawl-budget"
+      name: "Google Search Central: Crawl Budget Management"
+      url: "https://developers.google.com/search/docs/crawling-indexing/large-site-managing-crawl-budget"
+      offline_cache: true
+    - id: "google-js-seo"
+      name: "Google JavaScript SEO Guide"
+      url: "https://developers.google.com/search/docs/crawling-indexing/javascript/javascript-seo-basics"
+      offline_cache: true
+    - id: "ahrefs-crawlability"
+      name: "Ahrefs: How to Audit Your Website's Crawlability"
+      url: "https://ahrefs.com/blog/crawlability/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Screaming Frog SEO Spider"
+      purpose: "Comprehensive site crawl simulation and analysis"
+      offline_capable: true
+    - tool: "Sitebulb"
+      purpose: "Visual crawl analysis and issue detection"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "Google Search Console"
+      purpose: "Review Googlebot crawl statistics and errors"
+      command: "Access via web interface"
+    - tool: "curl"
+      purpose: "Test individual page crawlability"
+      command: "curl -A 'Googlebot' -I https://example.com/page"
+
+  scripts:
+    - id: "crawl-block-checker"
+      language: "bash"
+      purpose: "Check for common crawl blockers"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check robots.txt accessibility
+        echo "=== Robots.txt Check ==="
+        curl -s -o /dev/null -w "%{http_code}" "$1/robots.txt"
+        echo ""
+
+        # Check for meta robots
+        echo "=== Meta Robots Check ==="
+        curl -s "$1" | grep -i "meta.*robots"
+
+        # Check X-Robots-Tag header
+        echo "=== X-Robots-Tag Header ==="
+        curl -sI "$1" | grep -i "X-Robots-Tag"
+
+signals:
+  critical:
+    - id: "CRAWL-CRIT-001"
+      signal: "Entire site blocked by robots.txt"
+      evidence_pattern: "Disallow: /"
+      explanation: |
+        A blanket Disallow: / in robots.txt blocks all search engine
+        crawlers from accessing any page on the site, making the entire
+        site invisible to search engines.
+      remediation: "Remove or modify the Disallow: / directive in robots.txt"
+
+    - id: "CRAWL-CRIT-002"
+      signal: "Critical pages return 5xx errors during crawl"
+      evidence_indicators:
+        - "Server errors in GSC coverage report"
+        - "5xx responses in crawl simulation"
+      explanation: |
+        Server errors prevent search engines from accessing and indexing
+        content, leading to pages being dropped from the index entirely.
+      remediation: "Investigate and resolve server-side issues causing 5xx errors"
+
+  high:
+    - id: "CRAWL-HIGH-001"
+      signal: "JavaScript-rendered content not accessible to crawlers"
+      explanation: |
+        While Googlebot can render JavaScript, important content that
+        requires JavaScript execution may be missed or delayed in indexing.
+        Other search engines have limited JavaScript rendering capabilities.
+      remediation: "Implement server-side rendering or static generation for critical content"
+
+    - id: "CRAWL-HIGH-002"
+      signal: "Significant crawl budget wasted on low-value pages"
+      explanation: |
+        When crawl budget is consumed by faceted navigation, search results
+        pages, or duplicate content, important pages may not be crawled
+        frequently enough.
+      remediation: "Use robots.txt, noindex, or parameter handling to manage low-value pages"
+
+  medium:
+    - id: "CRAWL-MED-001"
+      signal: "Orphaned pages discovered (no internal links pointing to them)"
+      remediation: "Add internal links to important orphaned pages or remove if unnecessary"
+
+    - id: "CRAWL-MED-002"
+      signal: "Excessive crawl depth (important pages more than 3 clicks from homepage)"
+      remediation: "Restructure site architecture to reduce click depth for important pages"
+
+  low:
+    - id: "CRAWL-LOW-001"
+      signal: "Crawl rate fluctuations observed in server logs"
+
+  positive:
+    - id: "CRAWL-POS-001"
+      signal: "All important pages crawled within 3 clicks of homepage"
+    - id: "CRAWL-POS-002"
+      signal: "Server-side rendering implemented for critical content"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze Robots.txt Configuration"
+      description: |
+        Review robots.txt for overly restrictive directives, syntax errors,
+        and proper configuration for all relevant search engine bots.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Fetch and review robots.txt"
+          command: "curl -s https://example.com/robots.txt"
+        - purpose: "Validate robots.txt syntax"
+          command: "Use Google's robots.txt tester in Search Console"
+      expected_findings:
+        - "List of allowed and disallowed paths"
+        - "Sitemap references"
+        - "Bot-specific rules"
+
+    - id: "2"
+      name: "Review Crawl Statistics in GSC"
+      description: |
+        Analyze Google Search Console crawl statistics to understand
+        crawl patterns, errors, and budget allocation.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Average crawl frequency"
+        - "Crawl errors by type"
+        - "Response time statistics"
+
+    - id: "3"
+      name: "Run Comprehensive Site Crawl"
+      description: |
+        Use a crawling tool to simulate search engine behavior and
+        identify pages that cannot be discovered or accessed.
+      duration_estimate: "60-120 min"
+      commands:
+        - purpose: "Run Screaming Frog crawl (example)"
+          command: "Configure with Googlebot user agent, respect robots.txt"
+      expected_findings:
+        - "Complete page inventory"
+        - "Orphaned pages"
+        - "Crawl depth analysis"
+        - "Internal linking structure"
+
+    - id: "4"
+      name: "Evaluate JavaScript Rendering"
+      description: |
+        Test whether JavaScript-rendered content is accessible to
+        search engine crawlers.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Compare rendered vs source HTML"
+          command: "Use Google's URL Inspection Tool or Rich Results Test"
+      expected_findings:
+        - "Content visibility differences"
+        - "Render-blocking resources"
+        - "Dynamic content accessibility"
+
+    - id: "5"
+      name: "Analyze Server Logs for Bot Activity"
+      description: |
+        Review server logs to understand actual crawl behavior and
+        identify pages receiving excessive or insufficient crawl attention.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Most frequently crawled pages"
+        - "Bot crawl patterns"
+        - "Unusual crawl behavior"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Crawlability Score"
+        - "Critical Issues"
+        - "Crawl Budget Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Issues verified through multiple tools and GSC data"
+    medium: "Issues identified in crawl simulation, not confirmed in GSC"
+    low: "Potential issues based on code review alone"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "robots-exclusion-protocol"
+        priority: "required"
+      - source_id: "google-crawl-budget"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Full crawl analysis requires significant time"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "crawlability-001"
+    item: "Robots.txt does not block critical pages"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm robots.txt allows access to all important page types"
+    expected: "Confirmed by reviewer"
+
+  - id: "crawlability-002"
+    item: "No 5xx errors on important pages during crawl"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review crawl report for server errors on key pages"
+    expected: "Confirmed by reviewer"
+
+  - id: "crawlability-003"
+    item: "Important pages within 3 clicks of homepage"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify site architecture depth in crawl visualization"
+    expected: "Confirmed by reviewer"
+
+  - id: "crawlability-004"
+    item: "JavaScript content accessible when JS is disabled"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Test critical pages with JS disabled or compare source vs rendered"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "marketing-site", "ecommerce", "content-site"]
+
+  compliance_frameworks:
+    - framework: "SEO Best Practices"
+      controls: ["Technical SEO", "Crawl Optimization"]
+
+relationships:
+  commonly_combined:
+    - "seo-discoverability.technical-seo.indexability"
+    - "seo-discoverability.technical-seo.robots-txt"
+    - "seo-discoverability.technical-seo.xml-sitemap"

@@ -1,0 +1,363 @@
+audit:
+  id: observability-instrumentation.debug-troubleshooting.profiling-capability
+  name: Profiling Capability Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: debug-troubleshooting
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses the ability to profile applications in production
+    including CPU profiling, memory allocation analysis, lock
+    contention detection, and continuous profiling capabilities.
+    Evaluates whether teams can diagnose performance issues
+    without impacting production stability.
+  why_it_matters: |
+    Lack of profiling capability causes:
+    - Inability to diagnose performance degradation
+    - Guesswork in optimization efforts
+    - Extended resolution time for CPU/memory issues
+    - Risk when trying to add profiling during incidents
+    - Wasted resources from unoptimized code paths
+    - Memory leaks going undetected until OOM
+  when_to_run:
+  - After performance incidents
+  - During optimization initiatives
+  - When introducing new services
+  - Quarterly performance capability review
+prerequisites:
+  required_artifacts:
+  - type: application_access
+    description: Access to running application instances
+  - type: profiling_infrastructure
+    description: Access to profiling tools and data storage
+  optional_artifacts:
+  - type: profiling_documentation
+    description: Documented profiling procedures
+  - type: continuous_profiling_config
+    description: Configuration for continuous profiling
+  access_requirements:
+  - Application runtime access
+  - Profiling tool access (Pyroscope, Parca, async-profiler, etc.)
+  - Storage for profiling data
+discovery:
+  code_patterns:
+  - pattern: (pprof|profiler|Pyroscope|Parca|async-profiler)
+    type: regex
+    scope: config
+    purpose: Find profiling configuration
+  - pattern: (heap.*profile|cpu.*profile|flame.*graph)
+    type: regex
+    scope: source
+    purpose: Find profiling code
+  file_patterns:
+  - glob: '**/pprof/**'
+    purpose: Go pprof endpoints
+  - glob: '**/*profil*.{yaml,yml,json}'
+    purpose: Profiling configuration
+knowledge_sources:
+  guides:
+  - id: continuous-profiling
+    name: Continuous Profiling in Production
+    url: https://www.cncf.io/blog/2022/05/31/what-is-continuous-profiling/
+    offline_cache: true
+    priority: required
+  - id: golang-pprof
+    name: Go pprof Documentation
+    url: https://pkg.go.dev/net/http/pprof
+    offline_cache: true
+    priority: recommended
+  - id: async-profiler
+    name: async-profiler for JVM
+    url: https://github.com/async-profiler/async-profiler
+    offline_cache: true
+    priority: recommended
+  learning_resources:
+  - id: systems-performance
+    title: Systems Performance
+    type: book
+    reference: Brendan Gregg, ISBN 978-0136820154
+tooling:
+  infrastructure_tools:
+  - tool: pyroscope
+    purpose: Continuous profiling platform
+    command: pyroscope connect --application-name $APP
+  - tool: parca
+    purpose: Continuous profiling with eBPF
+  - tool: async-profiler
+    purpose: Low-overhead JVM profiling
+    command: profiler.sh -d 30 -f /tmp/flamegraph.html $PID
+  - tool: pprof
+    purpose: Go profiling tool
+    command: go tool pprof http://localhost:6060/debug/pprof/profile
+  - tool: perf
+    purpose: Linux performance profiling
+    command: perf record -g -p $PID sleep 30
+  scripts:
+  - id: profiling-capability-check
+    language: bash
+    purpose: Check profiling endpoints and capabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check profiling capabilities
+
+      APP_URL=${1:-http://localhost:8080}
+
+      echo "=== Profiling Capability Check ==="
+
+      echo ""
+      echo "Checking Go pprof endpoints:"
+      for endpoint in profile heap goroutine threadcreate block mutex; do
+        status=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/debug/pprof/$endpoint" 2>/dev/null || echo "N/A")
+        echo "  /debug/pprof/$endpoint: $status"
+      done
+
+      echo ""
+      echo "Checking Java profiling:"
+      # Check if JMX is enabled
+      if curl -s "$APP_URL/actuator/threaddump" > /dev/null 2>&1; then
+        echo "  Spring Actuator thread dump: Available"
+      fi
+
+      echo ""
+      echo "Checking continuous profiling agents:"
+      if pgrep -f "pyroscope" > /dev/null 2>&1; then
+        echo "  Pyroscope agent: Running"
+      fi
+      if pgrep -f "parca-agent" > /dev/null 2>&1; then
+        echo "  Parca agent: Running"
+      fi
+signals:
+  critical:
+  - id: PROFILE-CRIT-001
+    signal: No profiling capability in production
+    evidence_indicators:
+    - No profiling endpoints exposed
+    - No continuous profiling agents deployed
+    explanation: |
+      Without profiling capability, diagnosing CPU spikes, memory
+      issues, or performance degradation requires adding profiling
+      during an incident, which is risky and may miss the issue.
+    remediation: |
+      Implement production profiling:
+      - Deploy continuous profiling (Pyroscope, Parca)
+      - Enable pprof endpoints for Go services
+      - Configure async-profiler for JVM services
+      - Ensure profiling data is stored and queryable
+  - id: PROFILE-CRIT-002
+    signal: Profiling requires application restart
+    evidence_indicators:
+    - Profiling disabled by default
+    - No runtime activation mechanism
+    explanation: |
+      If profiling requires restart, the conditions causing the
+      issue may disappear before profiling can be enabled.
+    remediation: |
+      Enable always-on continuous profiling with low overhead,
+      or implement runtime activation mechanisms.
+  high:
+  - id: PROFILE-HIGH-001
+    signal: No CPU profiling capability
+    explanation: |
+      CPU profiling is essential for diagnosing high CPU usage,
+      inefficient algorithms, and blocking operations.
+    remediation: |
+      Implement CPU profiling using platform-appropriate tools:
+      - Go: pprof profile endpoint
+      - JVM: async-profiler or JFR
+      - Python: py-spy or cProfile
+      - Node.js: V8 profiler
+  - id: PROFILE-HIGH-002
+    signal: No memory allocation profiling
+    explanation: |
+      Memory profiling helps identify allocation hotspots,
+      memory leaks, and GC pressure sources.
+    remediation: |
+      Enable memory/heap profiling:
+      - Go: pprof heap endpoint
+      - JVM: async-profiler alloc mode
+      - Monitor allocation rates and object counts
+  medium:
+  - id: PROFILE-MED-001
+    signal: No lock contention profiling
+    remediation: |
+      Enable lock/mutex profiling for multi-threaded applications
+      to identify synchronization bottlenecks.
+  - id: PROFILE-MED-002
+    signal: Profiling data not retained for analysis
+    remediation: |
+      Store profiling data in a continuous profiling system
+      for historical analysis and comparison.
+  - id: PROFILE-MED-003
+    signal: High profiling overhead
+    remediation: |
+      Use low-overhead profiling methods (sampling-based)
+      suitable for production. Target < 1% overhead.
+  low:
+  - id: PROFILE-LOW-001
+    signal: No flame graph visualization
+    remediation: |
+      Implement flame graph generation for intuitive
+      profiling data visualization.
+  positive:
+  - id: PROFILE-POS-001
+    signal: Continuous profiling deployed in production
+  - id: PROFILE-POS-002
+    signal: Multiple profiling modes available (CPU, memory, lock)
+  - id: PROFILE-POS-003
+    signal: Profiling overhead < 1%
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Profiling Infrastructure Assessment
+    description: |
+      Evaluate what profiling infrastructure is deployed.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for continuous profiling agents
+      command: kubectl get pods -A | grep -E 'pyroscope|parca|profiler'
+    - purpose: Check for profiling endpoints
+      command: curl -s $APP_URL/debug/pprof/ || curl -s $APP_URL/actuator/threaddump
+    expected_findings:
+    - Continuous profiling deployment status
+    - Available profiling endpoints
+  - id: '2'
+    name: CPU Profiling Capability Test
+    description: |
+      Verify ability to capture CPU profiles from production.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Capture Go CPU profile
+      command: curl -o /tmp/profile.pb.gz '$APP_URL/debug/pprof/profile?seconds=30'
+    - purpose: Verify profile is valid
+      command: go tool pprof -top /tmp/profile.pb.gz | head -20
+    expected_findings:
+    - CPU profiling availability
+    - Profile quality and detail
+  - id: '3'
+    name: Memory Profiling Capability Test
+    description: |
+      Verify ability to capture memory allocation profiles.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Capture Go heap profile
+      command: curl -o /tmp/heap.pb.gz '$APP_URL/debug/pprof/heap'
+    expected_findings:
+    - Memory profiling availability
+    - Allocation tracking capability
+  - id: '4'
+    name: Profiling Overhead Assessment
+    description: |
+      Evaluate the performance impact of profiling.
+    duration_estimate: 30 min
+    questions:
+    - What is the profiling overhead?
+    - Is profiling always-on or on-demand?
+    - Does profiling impact latency SLOs?
+    expected_findings:
+    - Profiling overhead metrics
+    - Production safety assessment
+output:
+  deliverables:
+  - type: profiling_capability_assessment
+    format: structured
+    description: Analysis of profiling capabilities
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Profiling Infrastructure
+    - Capability Matrix
+    - Overhead Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct capability testing in production
+    medium: Configuration and deployment analysis
+    low: Documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: continuous-profiling
+      priority: required
+  degradation:
+  - feature: Live profiling tests
+    impact: Cannot verify actual profiling capability
+    mitigation: Review deployment configurations and documentation
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime capability testing
+    full:
+      included: true
+      priority: 14
+    production:
+      included: true
+      priority: 12
+closeout_checklist:
+- id: profile-001
+  item: CPU profiling available in production
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify ability to capture CPU profile from production
+  expected: Confirmed by reviewer
+- id: profile-002
+  item: Memory profiling available in production
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify ability to capture heap/allocation profile
+  expected: Confirmed by reviewer
+- id: profile-003
+  item: Profiling can be enabled without restart
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify runtime profiling activation
+  expected: Confirmed by reviewer
+- id: profile-004
+  item: Profiling overhead acceptable for production
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm < 2% overhead during profiling
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    platforms:
+    - kubernetes
+    - vm
+    - containers
+  compliance_frameworks:
+  - framework: Internal Standards
+    controls:
+    - Performance Debugging Capability
+relationships:
+  commonly_combined:
+  - observability-instrumentation.debug-troubleshooting.heap-dump-capability
+  - observability-instrumentation.debug-troubleshooting.thread-dump-capability
+  - observability-instrumentation.metrics.resource-metrics
+  - performance.profiling.continuous-profiling

@@ -1,0 +1,337 @@
+# ============================================================
+# CPU Utilization Audit
+# ============================================================
+# Evaluates CPU resource allocation, consumption patterns, and
+# threshold compliance across containerized and bare-metal workloads.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.resource-utilization.cpu-utilization"
+  name: "CPU Utilization Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "resource-utilization"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines CPU utilization patterns, resource requests/limits
+    configurations, and consumption trends across infrastructure. It analyzes
+    Kubernetes CPU requests/limits, container runtime metrics, host-level
+    CPU saturation, and identifies workloads with misconfigured or inefficient
+    CPU allocation.
+
+  why_it_matters: |
+    Improper CPU utilization leads to degraded application performance,
+    increased latency, wasted infrastructure costs, and potential service
+    outages. Over-provisioning wastes resources while under-provisioning
+    causes throttling and poor user experience. CPU throttling in containers
+    is often invisible but severely impacts application performance.
+
+  when_to_run:
+    - "After deploying new services or workloads"
+    - "During capacity planning exercises"
+    - "When investigating performance degradation"
+    - "Monthly infrastructure health checks"
+
+prerequisites:
+  required_artifacts:
+    - type: "metrics-system"
+      description: "Access to Prometheus, CloudWatch, or equivalent metrics platform"
+    - type: "container-orchestration"
+      description: "Kubernetes cluster access or Docker daemon metrics"
+
+  access_requirements:
+    - "Read access to Kubernetes API (kubectl get pods, describe)"
+    - "Read access to metrics server or Prometheus"
+    - "Access to container runtime metrics (docker stats, crictl)"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "sum(rate(container_cpu_usage_seconds_total[5m])) by (pod, namespace)"
+      purpose: "Current CPU consumption per pod"
+      threshold: "< 80% of limit"
+    - system: "Prometheus"
+      query: "sum(container_cpu_cfs_throttled_seconds_total) by (pod, namespace)"
+      purpose: "Identify CPU throttled containers"
+      threshold: "Should be minimal or zero"
+    - system: "Prometheus"
+      query: "kube_pod_container_resource_requests{resource='cpu'}"
+      purpose: "CPU requests configuration"
+      threshold: "Should be set for all production pods"
+    - system: "Prometheus"
+      query: "node_cpu_seconds_total{mode='idle'}"
+      purpose: "Host-level CPU idle time"
+      threshold: "> 20% idle recommended"
+
+  file_patterns:
+    - glob: "**/deployment*.yaml"
+      purpose: "Kubernetes deployment configurations"
+    - glob: "**/values*.yaml"
+      purpose: "Helm chart values with resource definitions"
+    - glob: "**/docker-compose*.yaml"
+      purpose: "Docker Compose resource configurations"
+
+knowledge_sources:
+  specifications:
+    - id: "k8s-resource-management"
+      name: "Kubernetes Resource Management for Pods and Containers"
+      url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "google-sre-utilization"
+      name: "Google SRE Book - Managing Resources"
+      url: "https://sre.google/sre-book/handling-overload/"
+      offline_cache: true
+    - id: "k8s-cpu-throttling"
+      name: "Understanding Kubernetes CPU Throttling"
+      url: "https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Inspect pod resource configurations and utilization"
+      command: "kubectl top pods --all-namespaces"
+    - tool: "docker stats"
+      purpose: "Monitor container CPU usage in real-time"
+      command: "docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}'"
+    - tool: "crictl"
+      purpose: "Container runtime inspection for containerd"
+      command: "crictl stats"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        (sum(rate(container_cpu_usage_seconds_total{container!='POD',container!=''}[5m])) by (namespace, pod, container)
+        / sum(kube_pod_container_resource_limits{resource='cpu'}) by (namespace, pod, container)) * 100
+      purpose: "CPU utilization as percentage of limit"
+
+signals:
+  critical:
+    - id: "CPU-CRIT-001"
+      signal: "Sustained CPU utilization above 95% causing service degradation"
+      evidence_threshold: "container_cpu_usage > 95% of limit for > 5 minutes"
+      explanation: |
+        When CPU utilization consistently exceeds 95% of the limit, containers
+        experience severe throttling. This results in increased latency, request
+        timeouts, and potential cascading failures in microservice architectures.
+      remediation: "Increase CPU limits, scale horizontally, or optimize CPU-intensive code paths"
+
+    - id: "CPU-CRIT-002"
+      signal: "No CPU limits configured for production workloads"
+      evidence_pattern: "resources.limits.cpu: null or missing"
+      explanation: |
+        Without CPU limits, a single runaway process can consume all available
+        CPU on a node, starving other workloads. This violates Kubernetes best
+        practices and can cause cluster-wide performance degradation.
+      remediation: "Configure appropriate CPU limits in deployment specifications"
+
+  high:
+    - id: "CPU-HIGH-001"
+      signal: "CPU throttling detected in production containers"
+      evidence_threshold: "container_cpu_cfs_throttled_seconds_total increasing"
+      explanation: |
+        CPU throttling indicates containers are hitting their CPU limits and
+        being artificially slowed. This often manifests as latency spikes and
+        is frequently missed in monitoring that only tracks average utilization.
+      remediation: "Analyze throttling patterns; increase limits or optimize code"
+
+    - id: "CPU-HIGH-002"
+      signal: "CPU requests significantly lower than actual usage"
+      evidence_threshold: "actual_usage > 2x requests consistently"
+      explanation: |
+        When requests are too low, Kubernetes scheduler makes poor placement
+        decisions. This leads to node overcommitment and noisy neighbor problems
+        where pods compete for CPU resources.
+      remediation: "Adjust CPU requests to match actual usage patterns (P95)"
+
+  medium:
+    - id: "CPU-MED-001"
+      signal: "CPU utilization consistently below 30% of allocated resources"
+      evidence_threshold: "avg(cpu_usage) < 30% of requests over 7 days"
+      remediation: "Right-size CPU requests to reduce waste and cost"
+
+    - id: "CPU-MED-002"
+      signal: "Burstable QoS class for latency-sensitive workloads"
+      evidence_pattern: "Burstable QoS with requests != limits"
+      remediation: "Consider Guaranteed QoS for critical services"
+
+  low:
+    - id: "CPU-LOW-001"
+      signal: "Missing CPU metrics collection for some workloads"
+
+  positive:
+    - id: "CPU-POS-001"
+      signal: "Well-tuned CPU requests matching actual utilization patterns"
+    - id: "CPU-POS-002"
+      signal: "Guaranteed QoS configured for critical services"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory CPU configurations"
+      description: |
+        Collect CPU requests and limits from all deployments, statefulsets,
+        and daemonsets. Identify workloads with missing or misconfigured
+        resource specifications.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List all pods with CPU requests and limits"
+          command: |
+            kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.containers[*].resources.requests.cpu}{"\t"}{.spec.containers[*].resources.limits.cpu}{"\n"}{end}'
+        - purpose: "Find pods without CPU limits"
+          command: |
+            kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].resources.limits.cpu == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+      expected_findings:
+        - "List of all workload CPU configurations"
+        - "Identification of missing resource specifications"
+
+    - id: "2"
+      name: "Analyze current utilization"
+      description: |
+        Query metrics to understand actual CPU consumption patterns across
+        workloads. Compare against configured requests and limits.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Get current CPU utilization per pod"
+          command: "kubectl top pods -A --sort-by=cpu"
+        - purpose: "Check for throttled containers (Prometheus)"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(container_cpu_cfs_throttled_seconds_total[5m]))by(pod,namespace)' | jq '.data.result[] | select(.value[1] | tonumber > 0)'
+      expected_findings:
+        - "Current CPU usage by workload"
+        - "Throttling metrics per container"
+
+    - id: "3"
+      name: "Evaluate node-level saturation"
+      description: |
+        Assess CPU saturation at the node level. Identify overcommitted nodes
+        and potential resource contention issues.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check node CPU allocations"
+          command: "kubectl describe nodes | grep -A 5 'Allocated resources'"
+        - purpose: "Node CPU utilization"
+          command: "kubectl top nodes"
+      expected_findings:
+        - "Node-level CPU allocation percentages"
+        - "Identification of overcommitted nodes"
+
+    - id: "4"
+      name: "Review historical trends"
+      description: |
+        Analyze CPU utilization trends over time to identify patterns,
+        capacity needs, and optimization opportunities.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "7-day CPU trend analysis (Prometheus)"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query_range?query=avg(rate(container_cpu_usage_seconds_total[1h]))by(namespace)&start=-7d&end=now&step=1h'
+      expected_findings:
+        - "Usage patterns over time"
+        - "Peak utilization periods"
+        - "Capacity planning data"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "CPU Configuration Analysis"
+        - "Utilization Findings"
+        - "Throttling Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct metrics observation, verified through kubectl and Prometheus"
+    medium: "Metrics available but limited historical data"
+    low: "Configuration analysis without runtime verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-resource-management"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime metrics collection"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cpu-001"
+    item: "All production pods have CPU limits configured"
+    level: "CRITICAL"
+    verification: |
+      kubectl get pods -A -o json | jq '[.items[] | select(.spec.containers[].resources.limits.cpu == null and .metadata.namespace != "kube-system")] | length == 0'
+    expected: "true"
+
+  - id: "cpu-002"
+    item: "No pods experiencing sustained throttling"
+    level: "BLOCKING"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(container_cpu_cfs_throttled_seconds_total[5m]))by(pod)' | jq '.data.result | length == 0 or all(.value[1] | tonumber < 0.1)'
+    expected: "true"
+
+  - id: "cpu-003"
+    item: "CPU requests within 50% of actual utilization"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review utilization vs requests ratio for production workloads"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "FinOps Foundation"
+      controls: ["Resource Optimization"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.resource-utilization.memory-utilization"
+    - "performance-efficiency.resource-utilization.container-resource-limits"

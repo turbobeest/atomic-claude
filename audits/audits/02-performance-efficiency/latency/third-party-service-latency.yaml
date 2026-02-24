@@ -1,0 +1,342 @@
+# ============================================================
+# THIRD-PARTY SERVICE LATENCY AUDIT
+# ============================================================
+# Measures latency impact of external service dependencies.
+
+audit:
+  id: "performance-efficiency.latency.third-party-service-latency"
+  name: "Third-Party Service Latency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "latency"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit measures the latency contribution of third-party services
+    and external APIs (payment processors, identity providers, analytics,
+    email services, etc.). It evaluates dependency response times, timeout
+    configurations, circuit breaker settings, and the impact of third-party
+    slowdowns on overall system performance.
+
+  why_it_matters: |
+    Third-party services are often outside your control but directly
+    impact your users. A slow payment processor can make checkout
+    unusable. A delayed identity provider blocks all logins. Understanding
+    third-party latency helps set appropriate timeouts, implement
+    fallbacks, and communicate realistic SLAs to users.
+
+  when_to_run:
+    - "When adding new third-party integrations"
+    - "During third-party service reviews"
+    - "When investigating latency spikes"
+    - "As part of dependency risk assessment"
+
+prerequisites:
+  required_artifacts:
+    - type: "dependency_inventory"
+      description: "List of third-party service dependencies"
+    - type: "client_metrics"
+      description: "Metrics from HTTP clients calling external services"
+
+  access_requirements:
+    - "Network access to third-party services"
+    - "Access to client-side latency metrics"
+    - "Access to circuit breaker/retry configurations"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: |
+        histogram_quantile(0.99,
+          sum(rate(http_client_request_duration_seconds_bucket{external="true"}[5m])) by (le, host)
+        )
+      purpose: "P99 latency by external service"
+      threshold: "< 2s for most integrations"
+
+    - system: "Prometheus"
+      query: |
+        rate(http_client_request_total{external="true", status=~"5.."}[5m])
+        / rate(http_client_request_total{external="true"}[5m])
+      purpose: "Error rate for external services"
+      threshold: "< 1%"
+
+  code_patterns:
+    - pattern: "requests\\.get|requests\\.post|fetch\\(|axios\\."
+      type: "regex"
+      scope: "source"
+      purpose: "Find external HTTP calls"
+
+    - pattern: "timeout.*=|Timeout\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find timeout configurations"
+
+knowledge_sources:
+  guides:
+    - id: "circuit-breaker-pattern"
+      name: "Circuit Breaker Pattern"
+      url: "https://docs.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker"
+      offline_cache: true
+
+    - id: "resilience4j"
+      name: "Resilience4j Documentation"
+      url: "https://resilience4j.readme.io/docs"
+      offline_cache: true
+
+  learning_resources:
+    - id: "release-it"
+      title: "Release It! - Michael Nygard"
+      type: "book"
+      reference: "ISBN 978-1680502398"
+
+tooling:
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Measure third-party API latency"
+      command: |
+        curl -w "DNS: %{time_namelookup}s, Connect: %{time_connect}s, TTFB: %{time_starttransfer}s, Total: %{time_total}s\n" \
+          -o /dev/null -s https://api.stripe.com/v1/health
+
+    - tool: "hey"
+      purpose: "Load test third-party endpoint"
+      command: "hey -n 100 -c 5 https://api.third-party.com/health"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        topk(5,
+          histogram_quantile(0.99,
+            sum(rate(http_client_request_duration_seconds_bucket{external="true"}[5m])) by (le, service)
+          )
+        )
+      purpose: "Identify slowest third-party dependencies"
+
+    - system: "Prometheus"
+      query: |
+        sum(rate(circuit_breaker_state{state="open"}[5m])) by (service)
+      purpose: "Track circuit breaker activations"
+
+signals:
+  critical:
+    - id: "3P-CRIT-001"
+      signal: "Third-party service P99 latency exceeds timeout configuration"
+      evidence_threshold: "P99 > configured_timeout"
+      explanation: |
+        When P99 latency exceeds the timeout, 1% or more of requests will
+        timeout. This causes cascading failures, retries, and degraded
+        user experience even when the service is technically responding.
+      remediation: "Increase timeout or implement async processing; add circuit breaker"
+
+    - id: "3P-CRIT-002"
+      signal: "Critical path dependency has no circuit breaker"
+      evidence_indicators:
+        - "No circuit breaker configuration"
+        - "External call in synchronous request path"
+      explanation: |
+        Without circuit breakers, a slow or failing third-party service
+        will exhaust your thread pool and cause cascading failures.
+        Every request blocks waiting for the unresponsive service.
+      remediation: "Implement circuit breaker pattern with fallback behavior"
+
+  high:
+    - id: "3P-HIGH-001"
+      signal: "Third-party latency contributes more than 50% of request time"
+      evidence_threshold: "third_party_time / total_time > 0.5"
+      explanation: |
+        When external services dominate your latency budget, your
+        performance is largely outside your control. You cannot
+        optimize your way to better performance.
+      remediation: "Implement caching; consider async processing; evaluate alternative providers"
+
+    - id: "3P-HIGH-002"
+      signal: "No timeout configured for third-party HTTP calls"
+      evidence_pattern: "requests\\.get\\([^)]*\\)(?!.*timeout)"
+      explanation: |
+        Without timeouts, a hung third-party service will block threads
+        indefinitely, eventually exhausting resources and causing
+        complete system failure.
+      remediation: "Configure explicit timeouts on all external HTTP calls"
+
+  medium:
+    - id: "3P-MED-001"
+      signal: "Third-party latency metrics not labeled by service"
+      remediation: "Add service/host labels to external call metrics"
+
+    - id: "3P-MED-002"
+      signal: "No SLA tracking for third-party dependencies"
+      remediation: "Document and track third-party SLAs; implement monitoring"
+
+  low:
+    - id: "3P-LOW-001"
+      signal: "Third-party dependency inventory not documented"
+
+  positive:
+    - id: "3P-POS-001"
+      signal: "Circuit breakers configured for all external dependencies"
+    - id: "3P-POS-002"
+      signal: "Fallback behavior implemented for critical integrations"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Third-Party Dependencies"
+      description: |
+        Identify all third-party services and APIs the system depends on,
+        including their criticality and usage patterns.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find external HTTP calls in code"
+          command: |
+            grep -rn 'https://.*\.com\|https://.*\.io\|https://api\.' --include='*.py' --include='*.js' . | \
+              grep -v 'node_modules' | head -20
+        - purpose: "Check environment for API endpoints"
+          command: "grep -i 'API_URL\\|_ENDPOINT\\|_HOST' .env.example 2>/dev/null || echo 'No .env.example'"
+      expected_findings:
+        - "List of third-party services"
+        - "Criticality classification"
+
+    - id: "2"
+      name: "Measure Third-Party Latency"
+      description: |
+        Measure current latency for each third-party service from your
+        infrastructure.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Measure latency to common services"
+          command: |
+            for url in "https://api.stripe.com/v1" "https://api.sendgrid.com/v3"; do
+              echo "Testing: $url"
+              curl -w "Total: %{time_total}s\n" -o /dev/null -s "$url"
+            done
+        - purpose: "Query metrics for external calls"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(http_client_request_duration_seconds_bucket{external="true"}[5m]))by(le,host))'
+      expected_findings:
+        - "P50, P95, P99 latency per service"
+        - "Latency variability"
+
+    - id: "3"
+      name: "Review Timeout and Retry Configuration"
+      description: |
+        Verify that appropriate timeouts, retries, and circuit breakers
+        are configured for each dependency.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find timeout configurations"
+          command: "grep -rn 'timeout\\|Timeout\\|TIMEOUT' --include='*.py' --include='*.yaml' ."
+        - purpose: "Find circuit breaker configurations"
+          command: "grep -rn 'circuit\\|CircuitBreaker\\|resilience' --include='*.py' --include='*.yaml' ."
+      expected_findings:
+        - "Timeout values per service"
+        - "Circuit breaker configuration"
+
+    - id: "4"
+      name: "Analyze Latency Impact"
+      description: |
+        Calculate the contribution of third-party latency to overall
+        request latency.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Compare internal vs external time from traces"
+          command: |
+            curl -s 'http://jaeger:16686/api/traces?service=api&limit=20' | \
+              jq '.data[].spans[] | select(.tags[] | select(.key=="peer.service")) | {operation: .operationName, duration: .duration}'
+      expected_findings:
+        - "Percentage of latency from third parties"
+        - "Critical path dependencies"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Dependency Inventory"
+        - "Latency Analysis"
+        - "Resilience Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Measurements from production with labeled metrics"
+    medium: "Ad-hoc measurements from staging"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "circuit-breaker-pattern"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires network access and runtime measurements"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "3p-latency-001"
+    item: "All third-party calls have explicit timeouts"
+    level: "CRITICAL"
+    verification: |
+      grep -rn 'requests\\.get\\|requests\\.post\\|fetch\\(' --include='*.py' --include='*.js' . | \
+        grep -v timeout | wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+    expected: "PASS"
+
+  - id: "3p-latency-002"
+    item: "Circuit breakers configured for critical dependencies"
+    level: "BLOCKING"
+    verification: |
+      grep -rn 'CircuitBreaker\\|circuit_breaker\\|resilience' --include='*.py' --include='*.yaml' . | \
+        wc -l | xargs -I {} test {} -gt 0 && echo PASS || echo FAIL
+    expected: "PASS"
+
+  - id: "3p-latency-003"
+    item: "Third-party latency under 2 seconds P99"
+    level: "WARNING"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(http_client_request_duration_seconds_bucket{external="true"}[5m]))by(le))' | \
+        jq '.data.result[0].value[1] | tonumber < 2'
+    threshold: "< 2s"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.latency.end-to-end-latency"
+    - "reliability-resilience.fault-tolerance.circuit-breakers"

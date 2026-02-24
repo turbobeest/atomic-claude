@@ -1,0 +1,310 @@
+audit:
+  id: signal-processing-data-acquisition.adc-dac.dac-accuracy
+  name: DAC Accuracy Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: adc-dac
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: hardware
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates DAC accuracy characteristics that affect
+    analog output quality and control precision. It examines:
+    - Integral Non-Linearity (INL) and Differential Non-Linearity (DNL)
+    - Gain error and offset error
+    - Monotonicity and glitch impulse
+    - Settling time and slew rate
+    - Output noise and spurious-free dynamic range (SFDR)
+    - Temperature stability and calibration requirements
+  why_it_matters: |
+    DAC accuracy directly affects output signal quality:
+    - INL and DNL affect static output accuracy
+    - Gain and offset errors affect full-scale range accuracy
+    - Non-monotonicity can cause control instability
+    - Glitch impulse affects transient output quality
+    - SFDR affects spectral purity of generated signals
+    - IEEE 1658 defines DAC characterization methods
+
+    For control systems and signal generation, DAC accuracy determines
+    the precision of the output and system performance.
+  when_to_run:
+  - DAC selection and evaluation
+  - Control system design
+  - Signal generator design
+  - System calibration development
+  - Accuracy verification
+prerequisites:
+  required_artifacts:
+  - type: dac_datasheet
+    description: DAC specifications including accuracy parameters
+  - type: requirements
+    description: Output accuracy requirements for application
+  - type: calibration_data
+    description: DAC calibration data if applicable
+  access_requirements:
+  - Access to DAC specifications
+  - Test equipment for accuracy measurement
+  - Precision measurement equipment
+discovery:
+  code_patterns:
+  - pattern: (dac|DAC)_(write|output|set)
+    type: regex
+    scope: source
+    purpose: Detect DAC control code
+  - pattern: (dac|DAC).*(cal|calibrat|correct)
+    type: regex
+    scope: source
+    purpose: Detect DAC calibration
+  - pattern: (gain|offset)_(error|correct|cal)
+    type: regex
+    scope: source
+    purpose: Detect error correction
+  file_patterns:
+  - glob: '**/dac*.{c,h,cpp,py}'
+    purpose: DAC driver files
+  - glob: '**/calibrat*.{c,h,cpp,py,json}'
+    purpose: Calibration files
+  - glob: '**/analog_out*.{c,h}'
+    purpose: Analog output files
+knowledge_sources:
+  specifications:
+  - id: ieee-1658
+    name: IEEE 1658 - Standard for DAC Terminology and Test Methods
+    url: https://standards.ieee.org/standard/1658-2011.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ti-dac-selection
+    name: Texas Instruments DAC Selection Guide
+    url: https://www.ti.com/lit/sg/slyt176/slyt176.pdf
+    offline_cache: true
+  - id: analog-dac-tutorial
+    name: Analog Devices DAC Tutorial
+    url: https://www.analog.com/media/en/training-seminars/tutorials/MT-013.pdf
+    offline_cache: true
+signals:
+  critical:
+  - id: DAC-CRIT-001
+    signal: DAC accuracy insufficient for control requirements
+    evidence_indicators:
+    - DAC INL/DNL exceeds control tolerance
+    - Output precision insufficient for application
+    - Control loop performance degraded by DAC errors
+    explanation: |
+      DAC accuracy errors directly affect output precision. For
+      control applications, these errors can cause steady-state
+      errors, oscillation, or inability to reach setpoints.
+    remediation: |
+      - Select DAC with adequate accuracy specifications
+      - Implement gain and offset calibration
+      - Use closed-loop feedback to correct DAC errors
+      - Consider higher-resolution DAC for more precision
+    cwe: CWE-682
+  - id: DAC-CRIT-002
+    signal: Non-monotonic DAC causing control instability
+    evidence_indicators:
+    - DAC output reverses direction with increasing code
+    - Control loop oscillates near certain setpoints
+    - DNL > 1 LSB at some codes
+    explanation: |
+      Non-monotonic DACs can cause control instability when the
+      feedback controller increases output but actual output
+      decreases. This creates positive feedback and oscillation.
+    remediation: |
+      - Select guaranteed monotonic DAC
+      - Verify monotonicity in system
+      - Add hysteresis to avoid problem codes
+      - Implement software monotonicity enforcement
+    cwe: CWE-682
+  high:
+  - id: DAC-HIGH-001
+    signal: Gain and offset errors not calibrated
+    evidence_indicators:
+    - Full-scale output differs from expected
+    - Zero code produces non-zero output
+    - No calibration for gain/offset
+    explanation: |
+      Uncalibrated gain and offset errors cause systematic output
+      errors. Gain error scales with output level; offset is constant.
+      Both are typically correctable with two-point calibration.
+    remediation: |
+      - Implement two-point calibration (zero and full-scale)
+      - Calculate and apply gain and offset corrections
+      - Recalibrate periodically or with temperature
+      - Document calibration procedure and frequency
+  - id: DAC-HIGH-002
+    signal: DAC settling time exceeds update rate requirements
+    evidence_indicators:
+    - Output not settled before next update
+    - Visible staircase or glitch artifacts
+    - Waveform distortion at high update rates
+    explanation: |
+      DAC settling time must be less than update period for accurate
+      output. Insufficient settling causes inter-sample interference
+      and output distortion, especially for waveform generation.
+    remediation: |
+      - Verify settling time vs. update rate
+      - Reduce update rate if settling is inadequate
+      - Select faster-settling DAC for high-speed applications
+      - Add settling time delay between updates
+  medium:
+  - id: DAC-MED-001
+    signal: Glitch impulse affecting output quality
+    evidence_indicators:
+    - Visible glitch during code transitions
+    - Major carry bit transitions show large glitches
+    - Output signal shows periodic spikes
+    explanation: |
+      DAC glitch impulse occurs during code changes due to timing
+      skew between bits. The energy appears as spikes that degrade
+      signal quality and SFDR.
+    remediation: |
+      - Select deglitched DAC for sensitive applications
+      - Add output sample-and-hold to blank glitches
+      - Filter output to attenuate glitch frequency components
+      - Accept glitch if SFDR requirement is met
+  - id: DAC-MED-002
+    signal: Output noise exceeds application requirements
+    evidence_indicators:
+    - DAC output noise > specification
+    - SNR insufficient for application
+    - Reference noise contributing to output
+    explanation: |
+      DAC output noise limits the precision of DC outputs and the
+      SNR of AC signals. Noise may come from the DAC itself, the
+      reference, or power supplies.
+    remediation: |
+      - Select low-noise DAC for sensitive applications
+      - Use low-noise reference
+      - Filter power supplies
+      - Add output filtering for DC applications
+  low:
+  - id: DAC-LOW-001
+    signal: DAC specifications not documented
+    evidence_indicators:
+    - DAC selection rationale not recorded
+    - Accuracy requirements not specified
+    - No DAC accuracy in system documentation
+    explanation: |
+      Without documentation, DAC accuracy cannot be verified as
+      meeting requirements. Component substitutions may degrade
+      system performance without detection.
+    remediation: |
+      - Document DAC accuracy specifications
+      - Record accuracy requirements
+      - Include DAC in accuracy budget
+      - Add to component specification documents
+  positive:
+  - id: DAC-POS-001
+    signal: Well-characterized and calibrated DAC
+    evidence_indicators:
+    - DAC meets accuracy requirements
+    - Calibration implemented
+    - Accuracy documented in system specification
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: analog-engineer
+  steps:
+  - id: '1'
+    name: DAC Specification Review
+    description: |
+      Review DAC specifications against requirements.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find DAC configuration
+      command: |
+        grep -rniE "(dac|DAC)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - DAC configuration
+    - Accuracy specifications
+    - Calibration implementation
+  - id: '2'
+    name: Calibration Review
+    description: |
+      Review DAC calibration implementation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find calibration code
+      command: |
+        grep -rniE "(dac|DAC).*(cal|correct|gain|offset)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - Calibration algorithms
+    - Gain/offset correction
+    - Calibration data storage
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - DAC Accuracy Analysis
+    - Calibration Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: dac-001
+  item: DAC accuracy meets application requirements
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify DAC INL/DNL within accuracy budget
+  expected: Confirmed by reviewer
+- id: dac-002
+  item: DAC is monotonic
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify monotonicity specification or measurement
+  expected: Confirmed by reviewer
+- id: dac-003
+  item: Gain and offset calibrated if needed
+  level: WARNING
+  verification: |
+    grep -rniE "(dac|DAC).*(cal|correct)" \
+      --include="*.c" --include="*.h" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "N/A"
+  expected: PASS or N/A
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - industrial-control
+    - scientific-instruments
+    - signal-generators
+relationships:
+  commonly_combined:
+  - signal-processing.adc-dac.adc-resolution-adequacy
+  - signal-processing.adc-dac.reference-voltage-stability
+  - signal-processing.adc-dac.conversion-timing
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

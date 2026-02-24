@@ -1,0 +1,316 @@
+audit:
+  id: scalability-capacity.database-scalability.connection-scaling
+  name: Connection Scaling Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: database-scalability
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines database connection management including
+    connection pooling configuration, pool sizing, connection limits,
+    idle connection handling, connection timeout settings, and
+    connection distribution across application instances. It ensures
+    efficient connection utilization without exhausting database limits.
+  why_it_matters: |
+    Database connections are expensive resources - each connection consumes
+    memory on the database server (typically 10-50MB for PostgreSQL).
+    Connection exhaustion causes immediate application failures. Poor
+    pooling leads to connection storms during traffic spikes, while
+    oversized pools waste database resources and can cause OOM conditions.
+  when_to_run:
+  - When experiencing connection timeout errors
+  - Before scaling application instances
+  - After observing 'too many connections' errors
+  - During capacity planning exercises
+  - When database memory usage is high
+prerequisites:
+  required_artifacts:
+  - type: database-configuration
+    description: Connection limit settings
+  - type: application-configuration
+    description: Connection pool settings
+  - type: monitoring-data
+    description: Connection count metrics over time
+  access_requirements:
+  - Database connection metrics
+  - Application pool configuration
+  - Infrastructure deployment count
+discovery:
+  code_patterns:
+  - pattern: pool[_-]?size|max[_-]?connections|connection[_-]?pool
+    type: regex
+    scope: config
+    purpose: Find connection pool configuration
+  - pattern: pgbouncer|pgpool|hikari|c3p0|dbcp
+    type: regex
+    scope: config
+    purpose: Identify connection pooling technology
+  - pattern: idle[_-]?timeout|connection[_-]?timeout|max[_-]?lifetime
+    type: regex
+    scope: config
+    purpose: Find connection lifecycle settings
+  file_patterns:
+  - glob: '**/pgbouncer*.{ini,conf}'
+    purpose: PgBouncer configuration
+  - glob: '**/database*.{yaml,yml,json,properties}'
+    purpose: Database connection configuration
+  metrics_queries:
+  - system: Database Monitoring
+    query: pg_stat_activity_count
+    purpose: Current connection count
+    threshold: < 80% of max_connections
+  - system: Database Monitoring
+    query: pgbouncer_pools_cl_active
+    purpose: Active pooled connections
+    threshold: Stable under normal load
+knowledge_sources:
+  specifications:
+  - id: pgbouncer-docs
+    name: PgBouncer Documentation
+    url: https://www.pgbouncer.org/config.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: connection-pooling-guide
+    name: Database Connection Pooling Best Practices
+    url: https://wiki.postgresql.org/wiki/Number_Of_Database_Connections
+    offline_cache: true
+  - id: hikari-tuning
+    name: HikariCP Connection Pool Sizing
+    url: https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: pg_stat_activity
+    purpose: View active database connections
+    command: SELECT count(*), state, usename FROM pg_stat_activity GROUP BY state, usename
+  - tool: pgbouncer admin
+    purpose: View connection pool status
+    command: SHOW POOLS; SHOW STATS;
+  monitoring_queries:
+  - system: Prometheus
+    query: pg_stat_activity_count / pg_settings_max_connections
+    purpose: Connection utilization percentage
+  - system: Prometheus
+    query: rate(pgbouncer_stats_queries_total[5m])
+    purpose: Queries per second through pool
+  scripts:
+  - id: connection-audit
+    language: bash
+    purpose: Audit connection usage and limits
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Database Connection Audit ==="
+      echo "Max connections: $(psql -tAc 'SHOW max_connections')"
+      echo "Current connections: $(psql -tAc 'SELECT count(*) FROM pg_stat_activity')"
+      echo "Connections by state:"
+      psql -c "SELECT state, count(*) FROM pg_stat_activity GROUP BY state"
+      echo "Connections by application:"
+      psql -c "SELECT application_name, count(*) FROM pg_stat_activity GROUP BY application_name ORDER BY count DESC"
+signals:
+  critical:
+  - id: CONN-CRIT-001
+    signal: Connection count regularly exceeds 90% of max_connections
+    evidence_threshold: max(pg_stat_activity_count) / max_connections > 0.9
+    explanation: |
+      Operating near connection limits means any traffic spike will cause
+      connection failures. New application instances cannot start, and
+      existing connections may timeout waiting for available slots.
+    remediation: Implement connection pooling (PgBouncer), reduce pool sizes, or increase max_connections
+  - id: CONN-CRIT-002
+    signal: No external connection pooler for >10 application instances
+    evidence_indicators:
+    - Application-level pooling only
+    - Direct connections from each app instance
+    - max_connections < app_instances * pool_size
+    explanation: |
+      Each application instance maintains its own pool. With many instances,
+      the aggregate pool size exceeds database capacity. An external pooler
+      like PgBouncer multiplexes connections across all instances.
+    remediation: Deploy PgBouncer or similar connection pooler
+  high:
+  - id: CONN-HIGH-001
+    signal: Pool size exceeds optimal per-instance recommendation
+    explanation: Over-provisioned pools waste resources and can cause contention
+    remediation: 'Right-size pools using formula: connections = ((core_count * 2) + spindle_count)'
+  - id: CONN-HIGH-002
+    signal: No connection timeout configured
+    explanation: Stale connections consume slots indefinitely
+    remediation: Configure idle_in_transaction_session_timeout and statement_timeout
+  medium:
+  - id: CONN-MED-001
+    signal: Connection pool size not adjusted for workload
+    remediation: Tune pool size based on actual utilization metrics
+  - id: CONN-MED-002
+    signal: No monitoring for connection pool exhaustion
+    remediation: Add alerts for pool wait time and exhaustion events
+  low:
+  - id: CONN-LOW-001
+    signal: Idle connections not closed promptly
+  positive:
+  - id: CONN-POS-001
+    signal: Connection pooler deployed with transaction pooling
+  - id: CONN-POS-002
+    signal: Dynamic pool sizing based on load
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Audit Current Connection Configuration
+    description: |
+      Document database connection limits and application pool
+      configurations across all services.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get database max connections
+      command: psql -c 'SHOW max_connections;'
+    - purpose: Get reserved connections
+      command: psql -c 'SHOW superuser_reserved_connections;'
+    - purpose: List application pool configurations
+      command: grep -r 'pool_size\|max_connections' config/
+    expected_findings:
+    - Database connection limits
+    - Per-application pool sizes
+    - Total potential connection demand
+  - id: '2'
+    name: Analyze Connection Utilization
+    description: |
+      Review connection metrics to understand actual usage patterns
+      and identify inefficiencies.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Current connection breakdown
+      command: psql -c "SELECT application_name, state, count(*) FROM pg_stat_activity GROUP BY 1,2 ORDER
+        BY 3 DESC"
+    - purpose: Connection history from metrics
+      command: prometheus_query 'max_over_time(pg_stat_activity_count[7d])'
+    expected_findings:
+    - Peak connection utilization
+    - Connection distribution by application
+    - Idle vs active connection ratio
+  - id: '3'
+    name: Evaluate Connection Pooling Strategy
+    description: |
+      Assess whether current pooling approach is appropriate for
+      the deployment model and scale.
+    duration_estimate: 30 min
+    questions:
+    - Is an external connection pooler in use?
+    - What pooling mode is configured (session/transaction/statement)?
+    - How are connections distributed across read replicas?
+    - What happens during a connection pool exhaustion?
+    expected_findings:
+    - Pooling architecture assessment
+    - Pooling mode appropriateness
+    - Failure mode understanding
+  - id: '4'
+    name: Calculate Connection Capacity
+    description: |
+      Determine safe connection limits based on current deployment
+      and growth projections.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Calculate theoretical max demand
+      command: echo 'app_instances * pool_size_per_instance = total_demand'
+    - purpose: Check memory constraints
+      command: psql -c "SELECT pg_size_pretty(count(*) * 10 * 1024 * 1024) as memory_for_connections FROM
+        pg_stat_activity"
+    expected_findings:
+    - Maximum safe connection count
+    - Connection capacity for N instances
+    - Memory impact analysis
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Connection Architecture
+    - Utilization Analysis
+    - Capacity Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct measurement of connection metrics
+    medium: Analysis based on configuration with assumptions about deployment
+    low: Estimates without production metrics
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: pgbouncer-docs
+      priority: required
+    - source_id: hikari-tuning
+      priority: recommended
+  limitations:
+  - Cannot measure live connection utilization
+  - Pool exhaustion analysis requires runtime data
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Connection issues cause immediate outages
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: connection-scaling-001
+  item: Connection utilization under 80% at peak
+  level: CRITICAL
+  verification: test $(psql -tAc "SELECT count(*)*100/(SELECT setting::int FROM pg_settings WHERE name='max_connections')
+    FROM pg_stat_activity") -lt 80 && echo PASS || echo FAIL
+  expected: PASS
+- id: connection-scaling-002
+  item: External connection pooler deployed for multi-instance
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify PgBouncer or equivalent is in architecture for >5 app instances
+  expected: Confirmed by reviewer
+- id: connection-scaling-003
+  item: Pool exhaustion alerts configured
+  level: WARNING
+  verification: grep -q 'pool.*exhausted\|connection.*timeout' alerts/*.yaml && echo PASS || echo FAIL
+  expected: PASS
+- id: connection-scaling-004
+  item: Connection timeout settings configured
+  level: WARNING
+  verification: psql -tAc "SHOW idle_in_transaction_session_timeout" | grep -qv '0' && echo PASS || echo
+    FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - A1.2
+relationships:
+  commonly_combined:
+  - scalability-capacity.database-scalability.read-replica
+  - scalability-capacity.database-scalability.write-scaling
+  - scalability-capacity.application-scaling.horizontal-scaling

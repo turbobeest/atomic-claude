@@ -1,0 +1,385 @@
+# ============================================================
+# AUDIT: Data Locality
+# ============================================================
+
+audit:
+  id: "data-state-management.storage-strategy.data-locality"
+  name: "Data Locality Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "storage-strategy"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "requires_discovery"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "architecture"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates data placement strategies including geographic distribution,
+    edge caching, data residency compliance, and proximity of data to compute.
+    Analyzes whether data is stored close to where it's processed and consumed,
+    and whether regulatory requirements for data location are met.
+
+  why_it_matters: |
+    Data locality directly impacts latency and regulatory compliance. Data
+    stored far from users adds network latency to every request. Data stored
+    in wrong jurisdictions violates data residency laws (GDPR, data sovereignty).
+    Processing data far from storage incurs egress costs and adds latency.
+
+  when_to_run:
+    - "Global deployment planning"
+    - "Compliance audits"
+    - "Performance optimization"
+    - "New region expansions"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Cloud region and storage configurations"
+    - type: "architecture_docs"
+      description: "System architecture showing data flows"
+    - type: "compliance_requirements"
+      description: "Data residency and sovereignty requirements"
+
+  access_requirements:
+    - "Read access to infrastructure configurations"
+    - "Understanding of user geographic distribution"
+    - "Knowledge of regulatory requirements"
+
+discovery:
+  code_patterns:
+    - pattern: "region|location|zone|edge|cdn"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect geographic configuration"
+
+    - pattern: "data_residency|sovereignty|gdpr|ccpa"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect compliance considerations"
+
+    - pattern: "replication|geo.*replica|cross.*region"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect cross-region replication"
+
+  file_patterns:
+    - glob: "**/terraform/**"
+      purpose: "Infrastructure region configuration"
+    - glob: "**/*-regions*.yaml"
+      purpose: "Multi-region configuration"
+    - glob: "**/cdn/**"
+      purpose: "CDN configuration"
+
+knowledge_sources:
+  guides:
+    - id: "gdpr-data-transfers"
+      name: "GDPR Data Transfer Guidelines"
+      url: "https://ec.europa.eu/info/law/law-topic/data-protection/international-dimension-data-protection/rules-international-data-transfers_en"
+      offline_cache: true
+
+    - id: "aws-global"
+      name: "AWS Global Infrastructure"
+      url: "https://aws.amazon.com/about-aws/global-infrastructure/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "data-sovereignty"
+      title: "Data Sovereignty in Cloud Computing"
+      type: "article"
+      reference: "IEEE Cloud Computing"
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws describe-regions"
+      purpose: "List configured AWS regions"
+      command: "aws ec2 describe-regions"
+
+  scripts:
+    - id: "data-locality-scan"
+      language: "bash"
+      purpose: "Identify data locality configurations"
+      source: "inline"
+      code: |
+        echo "=== Data Locality Analysis ==="
+        echo "--- Region configurations ---"
+        grep -rn "region\s*=\|location\s*=" \
+          --include="*.tf" --include="*.yaml" --include="*.json" . 2>/dev/null | head -30
+
+        echo "--- Multi-region settings ---"
+        grep -rn "multi.*region\|geo.*replica\|global\|cross.*region" \
+          --include="*.tf" --include="*.yaml" . 2>/dev/null | head -20
+
+        echo "--- CDN configuration ---"
+        grep -rn "cloudfront\|cdn\|edge\|akamai\|cloudflare" \
+          --include="*.tf" --include="*.yaml" . 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "DL-CRIT-001"
+      signal: "User data stored in non-compliant region"
+      evidence_pattern: "EU user data stored in US without adequacy"
+      explanation: |
+        GDPR and other regulations restrict where personal data can be stored.
+        Storing EU citizen data outside approved regions without adequate
+        safeguards violates regulations and risks heavy fines.
+      remediation: "Store user data in compliant regions; implement data residency controls"
+
+    - id: "DL-CRIT-002"
+      signal: "All data in single region with global users"
+      evidence_pattern: "Single-region deployment serving worldwide traffic"
+      explanation: |
+        Global users accessing data in a single distant region experience
+        high latency. For real-time applications, this can make the service
+        unusable for distant users.
+      remediation: "Implement multi-region deployment or edge caching"
+
+  high:
+    - id: "DL-HIGH-001"
+      signal: "Compute and storage in different regions"
+      evidence_pattern: "Application in us-east-1, database in eu-west-1"
+      explanation: |
+        Cross-region data access adds 50-200ms latency per request and
+        incurs significant egress costs. Compute should be co-located
+        with the data it accesses frequently.
+      remediation: "Co-locate compute and storage in same region"
+
+    - id: "DL-HIGH-002"
+      signal: "No CDN for static assets"
+      evidence_pattern: "Static files served from origin for all users"
+      explanation: |
+        Serving static assets from origin server to global users wastes
+        bandwidth and adds unnecessary latency. CDNs cache content at
+        edge locations close to users.
+      remediation: "Implement CDN for static asset delivery"
+
+    - id: "DL-HIGH-003"
+      signal: "Synchronous cross-region database operations"
+      evidence_pattern: "Application waits for cross-region write acknowledgment"
+      explanation: |
+        Synchronous cross-region operations add significant latency.
+        Unless strong consistency is required, async replication or
+        eventual consistency is more appropriate.
+      remediation: "Use async replication or accept eventual consistency"
+
+  medium:
+    - id: "DL-MED-001"
+      signal: "No regional failover capability"
+      evidence_pattern: "Data exists only in primary region"
+      remediation: "Implement cross-region replication for disaster recovery"
+
+    - id: "DL-MED-002"
+      signal: "Data residency requirements not codified"
+      evidence_pattern: "Compliance relies on operational discipline only"
+      remediation: "Implement technical controls for data residency"
+
+    - id: "DL-MED-003"
+      signal: "Edge caching without invalidation strategy"
+      evidence_pattern: "CDN caching without cache busting for dynamic content"
+      remediation: "Implement cache invalidation for frequently changing content"
+
+  low:
+    - id: "DL-LOW-001"
+      signal: "Data locality strategy not documented"
+      evidence_pattern: "No documentation of region selection rationale"
+      remediation: "Document data locality strategy and compliance requirements"
+
+    - id: "DL-LOW-002"
+      signal: "No latency monitoring by user location"
+      evidence_pattern: "No visibility into geo-based performance"
+      remediation: "Implement geo-based latency monitoring"
+
+  positive:
+    - id: "DL-POS-001"
+      signal: "Data residency controls enforced technically"
+      evidence_pattern: "Infrastructure prevents data from leaving region"
+
+    - id: "DL-POS-002"
+      signal: "Multi-region deployment with local data"
+      evidence_pattern: "User data stored in user's region"
+
+    - id: "DL-POS-003"
+      signal: "Comprehensive CDN strategy"
+      evidence_pattern: "Static and dynamic content appropriately cached at edge"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Geographic Distribution"
+      description: |
+        Identify all regions where data and compute are deployed.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find region configurations"
+          command: |
+            grep -rn "region\s*=\|location\s*=" \
+              --include="*.tf" --include="*.yaml" . 2>/dev/null | head -40
+        - purpose: "Find cloud provider settings"
+          command: |
+            grep -rn "aws\|azure\|gcp\|provider" \
+              --include="*.tf" . 2>/dev/null | head -30
+
+      expected_findings:
+        - "Region inventory"
+        - "Geographic distribution"
+
+    - id: "2"
+      name: "Analyze Data Residency"
+      description: |
+        Review where user and sensitive data is stored.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find database region settings"
+          command: |
+            grep -rn "db.*region\|database.*location\|rds.*region" \
+              --include="*.tf" --include="*.yaml" . 2>/dev/null | head -20
+        - purpose: "Find data residency controls"
+          command: |
+            grep -rn "residency\|sovereignty\|gdpr\|compliance" \
+              --include="*.tf" --include="*.yaml" --include="*.ts" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Data storage locations"
+        - "Compliance controls"
+
+    - id: "3"
+      name: "Review Edge Caching"
+      description: |
+        Analyze CDN and edge caching configuration.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find CDN configuration"
+          command: |
+            grep -rn "cloudfront\|cdn\|edge\|cache" \
+              --include="*.tf" --include="*.yaml" . 2>/dev/null | head -30
+        - purpose: "Find cache policies"
+          command: |
+            grep -rn "cache.*control\|ttl\|max.*age" \
+              --include="*.tf" --include="*.yaml" --include="*.ts" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "CDN coverage"
+        - "Cache policies"
+
+    - id: "4"
+      name: "Assess Compute-Data Proximity"
+      description: |
+        Verify compute is co-located with frequently accessed data.
+      duration_estimate: "25 min"
+      questions:
+        - "Is the application deployed in the same region as its primary database?"
+        - "Are there cross-region data access patterns?"
+        - "What is the latency impact of data placement?"
+      expected_findings:
+        - "Compute-data co-location status"
+        - "Cross-region dependencies"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "region_inventory"
+        - "data_residency_status"
+        - "locality_issues"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Geographic Distribution"
+        - "Data Residency Compliance"
+        - "Edge Caching Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear data residency violation or geographic mismatch"
+    medium: "Suboptimal placement but functional"
+    low: "Requires user distribution data to confirm impact"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "gdpr-data-transfers"
+        priority: "required"
+      - source_id: "aws-global"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "dl-001"
+    item: "Data residency requirements met"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify user data stored in compliant regions"
+    expected: "Confirmed by reviewer"
+
+  - id: "dl-002"
+    item: "Compute co-located with frequently accessed data"
+    level: "BLOCKING"
+    verification: |
+      grep -rn "region" --include="*.tf" . 2>/dev/null | sort -u | wc -l | \
+        xargs -I {} sh -c 'test {} -lt 5 && echo "PASS" || echo "REVIEW"'
+    expected: "PASS"
+
+  - id: "dl-003"
+    item: "CDN configured for static assets"
+    level: "WARNING"
+    verification: |
+      grep -rn "cloudfront\|cdn\|edge" --include="*.tf" --include="*.yaml" . 2>/dev/null | \
+        wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["global", "enterprise"]
+
+  compliance_frameworks:
+    - framework: "GDPR"
+      controls: ["Chapter V - Data Transfers"]
+    - framework: "CCPA"
+      controls: ["Data Residency"]
+    - framework: "ISO 27001"
+      controls: ["A.18.1.4"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.storage-strategy.storage-redundancy"
+    - "performance-efficiency.network.cdn-configuration"
+    - "reliability-resilience.disaster-recovery.geo-redundancy"

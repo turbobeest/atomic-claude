@@ -1,0 +1,325 @@
+audit:
+  id: code-quality.test-code-quality.assertion-quality
+  name: Assertion Quality Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: test-code-quality
+  tier: expert
+  estimated_duration: 45 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: testing
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the quality and specificity of assertions in the test suite.
+    This includes checking for precise matchers, meaningful error messages,
+    appropriate assertion methods, and avoiding overly broad or weak assertions
+    that could pass even when the code is broken.
+  why_it_matters: |
+    Weak assertions are the silent killer of test suites. Tests that assert
+    toBeTruthy() when they should assert toEqual() can pass with completely
+    wrong behavior. Good assertions pinpoint exactly what broke, while poor
+    assertions lead to hours of debugging when tests pass but behavior is wrong.
+  when_to_run:
+  - During code reviews
+  - After test failures are hard to diagnose
+  - Test suite maintenance
+  - Quality improvement initiatives
+prerequisites:
+  required_artifacts:
+  - type: test_code
+    description: Test files
+  access_requirements:
+  - Read access to test directories
+discovery:
+  code_patterns:
+  - pattern: expect\(.*\)\.toBeTruthy\(\)|expect\(.*\)\.toBeFalsy\(\)
+    type: regex
+    scope: testing
+    purpose: Detect vague boolean assertions
+  - pattern: expect\(.*\)\.toBeDefined\(\)
+    type: regex
+    scope: testing
+    purpose: Detect weak defined assertions
+  - pattern: assert\s+\w+$|assertTrue\(\w+\)$
+    type: regex
+    scope: testing
+    purpose: Detect assertions without messages
+  - pattern: expect\(.*\.length\)\.toBeGreaterThan\(0\)
+    type: regex
+    scope: testing
+    purpose: Detect weak array assertions
+  file_patterns:
+  - glob: '**/*.test.{js,ts,jsx,tsx}'
+    purpose: Jest/Vitest test files
+  - glob: '**/*.spec.{js,ts,jsx,tsx}'
+    purpose: Spec files
+  - glob: '**/test_*.py'
+    purpose: Python test files
+knowledge_sources:
+  guides:
+  - id: jest-matchers
+    name: Jest Matchers Documentation
+    url: https://jestjs.io/docs/expect
+    offline_cache: true
+  - id: pytest-assertions
+    name: pytest Assertions
+    url: https://docs.pytest.org/en/stable/how-to/assert.html
+    offline_cache: true
+  - id: xunit-patterns
+    name: 'xUnit Test Patterns: Refactoring Test Code'
+    url: https://www.amazon.com/xUnit-Test-Patterns-Refactoring-Code/dp/0131495054
+    offline_cache: false
+  - id: working-effectively-legacy
+    name: Working Effectively with Legacy Code
+    url: https://www.oreilly.com/library/view/working-effectively-with/0131177052/
+    offline_cache: false
+  learning_resources:
+  - id: growing-software
+    title: Growing Object-Oriented Software, Guided by Tests
+    type: book
+    reference: 'Steve Freeman & Nat Pryce, Chapter 19: Listeners Not Mocks'
+tooling:
+  static_analysis:
+  - tool: eslint-plugin-jest
+    purpose: Jest assertion quality rules
+    offline_capable: true
+  scripts:
+  - id: assertion-quality-scan
+    language: bash
+    purpose: Detect weak assertion patterns
+    source: inline
+    code: |
+      echo "=== Assertion Quality Analysis ==="
+      echo "--- Vague boolean assertions ---"
+      grep -rn "toBeTruthy\|toBeFalsy\|assertTrue(\w\+)$\|assertFalse(\w\+)$" \
+        --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -30
+
+      echo "--- Weak defined assertions ---"
+      grep -rn "toBeDefined\|toBeUndefined\|is not None$" \
+        --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -20
+
+      echo "--- Weak length assertions ---"
+      grep -rn "\.length.*toBeGreaterThan(0)\|len(.*) > 0" \
+        --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: AQAL-CRIT-001
+    signal: No assertions in test (empty test)
+    evidence_pattern: it\(.*\{\s*\}\)|test\(.*\{\s*\}\)
+    explanation: |
+      Tests without any assertions always pass. They provide false
+      confidence and waste CI time.
+    remediation: Add meaningful assertions or delete the test
+  - id: AQAL-CRIT-002
+    signal: Assertions that always pass
+    evidence_pattern: expect\(true\)\.toBe\(true\)|assert True
+    explanation: |
+      Assertions on constants provide no value. They indicate
+      incomplete or copy-pasted tests.
+    remediation: Assert on actual function output or state
+  high:
+  - id: AQAL-HIGH-001
+    signal: Vague boolean assertions instead of specific values
+    evidence_pattern: toBeTruthy\(\)|toBeFalsy\(\)
+    explanation: |
+      toBeTruthy() passes for any truthy value (1, "string", [], {}).
+      This can mask incorrect return types or values.
+    remediation: Use toBe(true) for booleans, toEqual() for specific values
+  - id: AQAL-HIGH-002
+    signal: Only asserting existence, not value
+    evidence_pattern: toBeDefined\(\)|is not None$
+    explanation: |
+      Asserting only that something exists misses validation of
+      correct values. Wrong values would still pass.
+    remediation: Assert the expected value, not just existence
+  - id: AQAL-HIGH-003
+    signal: Asserting array length > 0 instead of contents
+    evidence_pattern: toHaveLength\(.*\)|len\(.*\).*>\s*0
+    explanation: |
+      Asserting only that an array has items doesn't verify
+      the correct items. Wrong items would still pass.
+    remediation: Assert specific expected items with toContain or toEqual
+  medium:
+  - id: AQAL-MED-001
+    signal: Multiple assertions without custom messages
+    evidence_pattern: expect.*expect.*expect without messages
+    remediation: Add custom error messages to assertions
+  - id: AQAL-MED-002
+    signal: Using toBe() for object comparison
+    evidence_pattern: expect\(\{.*\}\)\.toBe\(
+    explanation: |
+      toBe() uses reference equality. Two objects with same content
+      will fail unless they're the exact same reference.
+    remediation: Use toEqual() for object value comparison
+  - id: AQAL-MED-003
+    signal: Not using specific matchers
+    evidence_pattern: expect\(.*\.includes\(.*\)\)\.toBe\(true\)
+    remediation: Use toContain() instead of .includes().toBe(true)
+  low:
+  - id: AQAL-LOW-001
+    signal: Inconsistent assertion style
+    evidence_pattern: Mixed expect() and assert in same file
+    remediation: Standardize on one assertion style
+  - id: AQAL-LOW-002
+    signal: Not using snapshot testing where appropriate
+    evidence_pattern: Large toEqual() for serializable output
+    remediation: Consider toMatchSnapshot() for complex outputs
+  positive:
+  - id: AQAL-POS-001
+    signal: Specific value assertions with toEqual()
+    evidence_pattern: toEqual with specific expected values
+  - id: AQAL-POS-002
+    signal: Custom error messages on assertions
+    evidence_pattern: expect(...).toEqual(..., 'custom message')
+  - id: AQAL-POS-003
+    signal: Appropriate use of specialized matchers
+    evidence_pattern: toContain, toHaveBeenCalledWith, toMatchObject
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Scan for Weak Assertions
+    description: |
+      Search for assertion patterns that are known to be too weak.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find vague boolean assertions
+      command: |
+        grep -rn "toBeTruthy\|toBeFalsy" \
+          --include="*.test.js" --include="*.spec.ts" . 2>/dev/null | grep -v node_modules | head -40
+    - purpose: Find weak defined checks
+      command: |
+        grep -rn "toBeDefined\|toBeUndefined" \
+          --include="*.test.js" --include="*.spec.ts" . 2>/dev/null | grep -v node_modules | head -40
+    - purpose: Find Python weak assertions
+      command: |
+        grep -rn "is not None$\|assertTrue(\w\+)$" \
+          --include="test_*.py" . 2>/dev/null | head -40
+    expected_findings:
+    - Weak assertion inventory
+    - Most common weak patterns
+  - id: '2'
+    name: Identify Empty or Constant Assertions
+    description: |
+      Find tests with no assertions or assertions on constants.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find tests without expect
+      command: |
+        for f in $(find . \( find . -name "*.test.js" -o -name "*.spec.ts" \) | head -20); do
+          grep -L "expect\|assert" "$f" 2>/dev/null
+        done
+    - purpose: Find constant assertions
+      command: |
+        grep -rn "expect(true)\|expect(false)\|expect(1)\|expect(0)" \
+          --include="*.test.js" --include="*.spec.ts" . 2>/dev/null | head -20
+    expected_findings:
+    - Tests without assertions
+    - Constant assertions
+  - id: '3'
+    name: Analyze Matcher Usage
+    description: |
+      Review which matchers are being used and whether they're appropriate.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Count matcher usage
+      command: |
+        echo "toBe:" && grep -rn "\.toBe(" --include="*.test.js" --include="*.spec.ts" . 2>/dev/null | wc -l
+        echo "toEqual:" && grep -rn "\.toEqual(" --include="*.test.js" --include="*.spec.ts" . 2>/dev/null | wc -l
+        echo "toContain:" && grep -rn "\.toContain(" --include="*.test.js" --include="*.spec.ts" . 2>/dev/null | wc -l
+        echo "toHaveBeenCalled:" && grep -rn "\.toHaveBeenCalled" --include="*.test.js" --include="*.spec.ts" . 2>/dev/null | wc -l
+    expected_findings:
+    - Matcher distribution
+    - Underutilized specific matchers
+  - id: '4'
+    name: Check for Custom Error Messages
+    description: |
+      Evaluate whether assertions include helpful error messages.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Sample assertion messages
+      command: |
+        grep -rn "expect(.*,.*)" --include="*.test.js" --include="*.spec.ts" . 2>/dev/null | head -20
+    expected_findings:
+    - Custom message usage rate
+    - Message quality samples
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - weak_assertions
+    - empty_tests
+    - matcher_usage
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Assertion Quality Analysis
+    - Improvement Recommendations
+    - Matcher Usage Guide
+  confidence_guidance:
+    high: Pattern-matched weak assertion
+    medium: Potential issue requiring context
+    low: Subjective quality assessment
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: jest-matchers
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: aqal-001
+  item: No empty tests
+  level: CRITICAL
+  verification: All tests have at least one assertion
+  expected: Zero empty tests
+- id: aqal-002
+  item: No toBeTruthy for boolean values
+  level: HIGH
+  verification: grep -rn 'toBeTruthy' --include='*.test.js'
+  expected: Zero vague boolean assertions
+- id: aqal-003
+  item: Specific matchers preferred
+  level: WARNING
+  verification: toEqual/toContain preferred over toBe for objects/arrays
+  expected: Appropriate matcher usage
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Testability
+    - Reliability
+relationships:
+  commonly_combined:
+  - code-quality.test-code-quality.arrange-act-assert-pattern
+  - code-quality.test-code-quality.test-readability

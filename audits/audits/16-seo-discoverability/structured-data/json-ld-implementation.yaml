@@ -1,0 +1,346 @@
+audit:
+  id: seo-discoverability.structured-data.json-ld-implementation
+  name: JSON-LD Implementation Audit
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: seo-discoverability
+  category_number: 16
+  subcategory: structured-data
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines JSON-LD (JavaScript Object Notation for Linked Data)
+    structured data implementation specifically. It evaluates JSON syntax
+    validity, @context and @type declarations, property naming, script tag
+    placement, multiple schema handling, and dynamic JSON-LD generation
+    for JavaScript frameworks.
+  why_it_matters: |
+    JSON-LD is Google's preferred format for structured data due to its
+    separation from HTML content and ease of implementation. Incorrect
+    JSON-LD implementation (syntax errors, invalid contexts, improper
+    nesting) results in the structured data being ignored entirely.
+    Proper implementation ensures consistent rich result eligibility.
+  when_to_run:
+  - After implementing JSON-LD
+  - When updating schema implementations
+  - During JavaScript framework migrations
+  - When rich results stop appearing
+  - After CMS template changes
+prerequisites:
+  required_artifacts:
+  - type: website
+    description: Live website with JSON-LD implementation
+  - type: source_code
+    description: Access to templates or components generating JSON-LD
+  access_requirements:
+  - Ability to view page source
+  - Access to JavaScript rendering (for SPA sites)
+discovery:
+  code_patterns:
+  - pattern: application/ld\+json
+    type: keyword
+    scope: source
+    purpose: Find JSON-LD script tags
+  - pattern: '@context.*schema\.org'
+    type: regex
+    scope: source
+    purpose: Find schema.org context declarations
+  - pattern: JSON\.stringify\(.*schema
+    type: regex
+    scope: source
+    purpose: Find dynamic JSON-LD generation
+  file_patterns:
+  - glob: '**/*.html'
+    purpose: Check HTML for JSON-LD
+  - glob: '**/schema*.{js,ts,jsx,tsx}'
+    purpose: Find schema generation code
+  - glob: '**/seo*.{js,ts,jsx,tsx}'
+    purpose: Find SEO-related components
+knowledge_sources:
+  specifications:
+  - id: json-ld-spec
+    name: JSON-LD 1.1 Specification
+    url: https://www.w3.org/TR/json-ld11/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: google-json-ld
+    name: 'Google: JSON-LD Structured Data'
+    url: https://developers.google.com/search/docs/appearance/structured-data/intro-structured-data#structured-data-format
+    offline_cache: true
+  - id: schema-json-ld
+    name: 'Schema.org: Using Schema.org with JSON-LD'
+    url: https://schema.org/docs/datamodel.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: JSON-LD Playground
+    purpose: Validate and visualize JSON-LD
+    offline_capable: false
+  - tool: jq
+    purpose: Command-line JSON processing
+    offline_capable: true
+  - tool: JSONLint
+    purpose: JSON syntax validation
+    offline_capable: false
+  infrastructure_tools:
+  - tool: Google Rich Results Test
+    purpose: Test JSON-LD for rich result eligibility
+    command: https://search.google.com/test/rich-results
+  scripts:
+  - id: jsonld-validator
+    language: bash
+    purpose: Extract and validate JSON-LD
+    source: inline
+    code: |
+      #!/bin/bash
+      URL=$1
+      echo "=== JSON-LD Validation for: $URL ==="
+
+      # Extract JSON-LD blocks
+      JSONLD=$(curl -s "$URL" | grep -oP '(?<=<script type="application/ld\+json">)[\s\S]*?(?=</script>)')
+
+      if [ -z "$JSONLD" ]; then
+        echo "No JSON-LD found"
+        exit 1
+      fi
+
+      # Count JSON-LD blocks
+      COUNT=$(echo "$JSONLD" | grep -c "@context" || echo "0")
+      echo "JSON-LD blocks found: $COUNT"
+
+      # Validate JSON syntax
+      echo ""
+      echo "=== JSON Syntax Validation ==="
+      echo "$JSONLD" | python3 -m json.tool > /dev/null 2>&1 && echo "VALID JSON" || echo "INVALID JSON"
+
+      # Check for @context
+      echo ""
+      echo "=== Context Check ==="
+      echo "$JSONLD" | grep -q "@context" && echo "Has @context" || echo "Missing @context"
+
+      # Check for @type
+      echo ""
+      echo "=== Type Check ==="
+      echo "$JSONLD" | grep -oP '"@type"\s*:\s*"[^"]+"' | head -5
+signals:
+  critical:
+  - id: JSONLD-CRIT-001
+    signal: Invalid JSON syntax in JSON-LD block
+    evidence_indicators:
+    - JSON parsing errors
+    - Unclosed brackets or quotes
+    - Trailing commas
+    explanation: |
+      Invalid JSON prevents parsing of the entire structured data
+      block, resulting in complete loss of schema benefits.
+    remediation: Fix JSON syntax errors using a JSON validator
+  - id: JSONLD-CRIT-002
+    signal: Missing @context declaration
+    evidence_indicators:
+    - No @context property in JSON-LD
+    explanation: |
+      Without @context, the JSON-LD cannot be interpreted as
+      linked data and schema types/properties are meaningless.
+    remediation: 'Add @context: ''https://schema.org'' to JSON-LD'
+  high:
+  - id: JSONLD-HIGH-001
+    signal: Missing or invalid @type declaration
+    explanation: |
+      Without a valid @type, search engines cannot determine
+      what kind of entity the data describes.
+    remediation: Add valid schema.org @type value
+  - id: JSONLD-HIGH-002
+    signal: JSON-LD not rendered in initial HTML (SPA issue)
+    explanation: |
+      If JSON-LD is only added via JavaScript after page load,
+      search engines may not see it during initial crawl.
+    remediation: Use server-side rendering or static generation for JSON-LD
+  - id: JSONLD-HIGH-003
+    signal: Incorrect property names (not matching schema.org)
+    explanation: |
+      Misspelled or non-existent properties are ignored, reducing
+      the completeness of structured data.
+    remediation: Use exact property names from schema.org vocabulary
+  medium:
+  - id: JSONLD-MED-001
+    signal: Multiple unrelated JSON-LD blocks without @graph
+    remediation: Use @graph to combine multiple schemas properly
+  - id: JSONLD-MED-002
+    signal: JSON-LD placed in body instead of head
+    remediation: Move JSON-LD to head for better organization
+  - id: JSONLD-MED-003
+    signal: Hardcoded values instead of dynamic content
+    remediation: Generate JSON-LD dynamically from page content
+  low:
+  - id: JSONLD-LOW-001
+    signal: Unminified JSON-LD affecting page size
+  - id: JSONLD-LOW-002
+    signal: Comments or extra whitespace in JSON-LD
+  positive:
+  - id: JSONLD-POS-001
+    signal: Valid, well-structured JSON-LD on all pages
+  - id: JSONLD-POS-002
+    signal: Dynamic JSON-LD generation matching page content
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Extract JSON-LD Blocks
+    description: |
+      Crawl the site and extract all JSON-LD script blocks
+      from page source (and rendered output for SPAs).
+    duration_estimate: 20 min
+    commands:
+    - purpose: Extract JSON-LD from pages
+      command: grep -oP pattern for application/ld+json blocks
+    expected_findings:
+    - JSON-LD inventory
+    - Pages with/without JSON-LD
+    - Block count per page
+  - id: '2'
+    name: Validate JSON Syntax
+    description: |
+      Check each JSON-LD block for valid JSON syntax using
+      a JSON parser.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Validate JSON syntax
+      command: echo '$JSON' | python3 -m json.tool
+    expected_findings:
+    - Syntax errors
+    - Parsing failures
+    - Malformed JSON
+  - id: '3'
+    name: Verify Context and Type
+    description: |
+      Check that all JSON-LD blocks have proper @context
+      and @type declarations.
+    duration_estimate: 15 min
+    expected_findings:
+    - '@context presence'
+    - '@type validity'
+    - Context URL correctness
+  - id: '4'
+    name: Validate Property Names
+    description: |
+      Check that property names match schema.org vocabulary
+      exactly (case-sensitive).
+    duration_estimate: 20 min
+    expected_findings:
+    - Invalid property names
+    - Typos in properties
+    - Non-standard properties
+  - id: '5'
+    name: Test Server-Side Rendering
+    description: |
+      For JavaScript sites, verify JSON-LD appears in initial
+      HTML response, not just after JS execution.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check initial HTML for JSON-LD
+      command: curl -s URL | grep 'application/ld+json'
+    expected_findings:
+    - SSR/SSG status
+    - JavaScript-only JSON-LD
+    - Rendering recommendations
+  - id: '6'
+    name: Review Multiple Schema Handling
+    description: |
+      If multiple schemas exist on one page, verify they are
+      properly structured (using @graph if needed).
+    duration_estimate: 15 min
+    expected_findings:
+    - Multiple schema handling
+    - '@graph usage'
+    - Nesting correctness
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - JSON-LD Implementation Status
+    - Validation Results
+    - Issues Found
+    - Recommendations
+  confidence_guidance:
+    high: Issues verified via JSON parsing and Google tools
+    medium: Issues identified via pattern analysis
+    low: Potential issues based on code review
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: json-ld-spec
+      priority: required
+    - source_id: google-json-ld
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed JSON-LD analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: jsonld-001
+  item: All JSON-LD blocks are valid JSON
+  level: CRITICAL
+  verification: manual
+  verification_notes: Validate extracted JSON-LD with parser
+  expected: Confirmed by reviewer
+- id: jsonld-002
+  item: All JSON-LD blocks have @context and @type
+  level: CRITICAL
+  verification: manual
+  verification_notes: Check presence of required declarations
+  expected: Confirmed by reviewer
+- id: jsonld-003
+  item: JSON-LD present in initial HTML (not JS-only)
+  level: BLOCKING
+  verification: curl -s URL | grep 'application/ld+json'
+  expected: JSON-LD found in curl response
+- id: jsonld-004
+  item: Property names match schema.org exactly
+  level: WARNING
+  verification: manual
+  verification_notes: Verify properties against schema.org docs
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - marketing-site
+    - ecommerce
+    - content-site
+  compliance_frameworks:
+  - framework: SEO Best Practices
+    controls:
+    - Structured Data
+    - JSON-LD Standards
+relationships:
+  commonly_combined:
+  - seo-discoverability.structured-data.schema-markup
+  - seo-discoverability.structured-data.rich-snippet-eligibility

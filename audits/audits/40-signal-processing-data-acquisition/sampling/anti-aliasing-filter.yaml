@@ -1,0 +1,304 @@
+audit:
+  id: signal-processing-data-acquisition.sampling.anti-aliasing-filter
+  name: Anti-Aliasing Filter Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: sampling
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: hardware-software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates anti-aliasing filter design and implementation
+    to ensure proper attenuation of frequencies above the Nyquist limit. It examines:
+    - Filter cutoff frequency relative to sampling rate
+    - Stopband attenuation adequacy
+    - Passband ripple and flatness
+    - Phase response and group delay
+    - Filter order and topology selection
+    - Hardware vs. software filter implementation
+  why_it_matters: |
+    Anti-aliasing filters are essential for preventing frequency folding:
+    - Must attenuate all frequencies above fs/2 before sampling
+    - Inadequate attenuation allows aliased energy into sampled data
+    - Passband response affects signal fidelity
+    - Phase distortion can corrupt waveform shapes
+    - Filter design trades off cutoff sharpness vs. phase linearity
+
+    Without proper anti-aliasing, high-frequency content aliases into
+    the baseband and cannot be distinguished from legitimate signals.
+  when_to_run:
+  - Signal acquisition system design
+  - After filter hardware changes
+  - When sampling rate changes
+  - During system validation
+  - Quality certification audits
+prerequisites:
+  required_artifacts:
+  - type: schematic
+    description: Analog filter circuit schematic
+  - type: source_code
+    description: Digital filter implementation if applicable
+  - type: filter_specification
+    description: Filter requirements and design parameters
+  access_requirements:
+  - Access to filter design documentation
+  - Test equipment for frequency response measurement
+  - Component specifications for analog filters
+discovery:
+  code_patterns:
+  - pattern: (lowpass|lpf|anti[_-]?alias|cutoff)
+    type: regex
+    scope: source
+    purpose: Detect filter configuration
+  - pattern: (filter_order|poles|zeros|butterworth|chebyshev|bessel)
+    type: regex
+    scope: source
+    purpose: Detect filter type and order
+  - pattern: (filter_coeff|a_coeff|b_coeff|iir|fir)
+    type: regex
+    scope: source
+    purpose: Detect digital filter coefficients
+  file_patterns:
+  - glob: '**/filter*.{c,h,cpp,py}'
+    purpose: Filter implementation files
+  - glob: '**/*coeff*.{h,json}'
+    purpose: Filter coefficient files
+  - glob: '**/analog*.{sch,pdf}'
+    purpose: Analog filter schematics
+knowledge_sources:
+  specifications:
+  - id: oppenheim-dsp
+    name: Oppenheim - Discrete-Time Signal Processing
+    url: https://www.pearson.com/store/p/discrete-time-signal-processing/P100000298298
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ti-filter-design
+    name: Texas Instruments Active Filter Design
+    url: https://www.ti.com/lit/ml/sloa088/sloa088.pdf
+    offline_cache: true
+  - id: analog-filter-wizard
+    name: Analog Devices Filter Wizard Documentation
+    url: https://www.analog.com/designtools/en/filterwizard/
+    offline_cache: true
+signals:
+  critical:
+  - id: AAF-CRIT-001
+    signal: Anti-aliasing filter missing from signal path
+    evidence_indicators:
+    - No filter component between signal source and ADC
+    - Filter bypassed or disabled
+    - Wideband signal connected directly to ADC
+    explanation: |
+      Without anti-aliasing filter, all frequencies above Nyquist
+      alias into the sampled data. This creates phantom signals
+      that corrupt all subsequent analysis and cannot be removed.
+    remediation: |
+      - Add appropriate analog lowpass filter before ADC
+      - Use integrated ADC with built-in anti-aliasing
+      - Consider sigma-delta ADC with oversampling
+      - Verify filter is in signal path and functional
+    cwe: CWE-682
+  - id: AAF-CRIT-002
+    signal: Filter cutoff frequency above Nyquist
+    evidence_indicators:
+    - fc > fs/2 in filter configuration
+    - Inadequate attenuation at fs/2
+    - Visible aliased content in spectrum
+    explanation: |
+      A filter cutoff above Nyquist allows high-frequency content
+      to pass and alias. The cutoff should be 0.4-0.45 * fs with
+      adequate transition band for practical filter implementation.
+    remediation: |
+      - Set cutoff to 0.4-0.45 * fs for typical applications
+      - Increase filter order for sharper cutoff
+      - Use higher sampling rate to relax filter requirements
+      - Verify stopband attenuation meets requirements
+    cwe: CWE-682
+  high:
+  - id: AAF-HIGH-001
+    signal: Insufficient stopband attenuation
+    evidence_indicators:
+    - Stopband attenuation < 60 dB at Nyquist
+    - Aliased components visible above noise floor
+    - Filter order too low for application
+    explanation: |
+      Stopband attenuation must push aliased components below the
+      system noise floor. For 12-bit systems, 72 dB attenuation is
+      needed; for 16-bit, 96 dB. Insufficient attenuation allows
+      aliased energy to appear in acquired data.
+    remediation: |
+      - Increase filter order to improve stopband attenuation
+      - Add additional filter stages
+      - Use oversampling to relax attenuation requirements
+      - Verify attenuation exceeds ADC dynamic range
+  - id: AAF-HIGH-002
+    signal: Excessive passband ripple distorting signal
+    evidence_indicators:
+    - Passband ripple > 0.5 dB
+    - Visible amplitude variations in passband
+    - Chebyshev filter without ripple specification
+    explanation: |
+      Passband ripple causes frequency-dependent amplitude distortion.
+      While some filter types (Chebyshev) trade ripple for steeper
+      cutoff, excessive ripple distorts signal content.
+    remediation: |
+      - Use Butterworth or Bessel filter for flat passband
+      - Specify acceptable ripple in filter design
+      - Compensate for known ripple in digital processing
+      - Balance ripple against transition band requirements
+  medium:
+  - id: AAF-MED-001
+    signal: Phase distortion affecting time-domain signals
+    evidence_indicators:
+    - Non-linear phase in passband
+    - Variable group delay across frequency
+    - Waveform shape distortion visible
+    explanation: |
+      Non-linear phase causes group delay variation that distorts
+      waveform shapes. For transient signals or pulse measurement,
+      linear phase (Bessel) filters are essential.
+    remediation: |
+      - Use Bessel filter for linear phase response
+      - Implement FIR filter with linear phase
+      - Add digital phase equalization
+      - Document phase requirements and filter selection
+  - id: AAF-MED-002
+    signal: Filter component tolerance affecting cutoff accuracy
+    evidence_indicators:
+    - High-tolerance passive components in filter
+    - No calibration for component variations
+    - Cutoff frequency varies unit-to-unit
+    explanation: |
+      Analog filter cutoff depends on component values. Wide
+      tolerances cause cutoff variation between units, potentially
+      allowing aliasing in some systems.
+    remediation: |
+      - Use 1% or better tolerance components
+      - Add trimming or calibration capability
+      - Use integrated filter chips with trimmed components
+      - Increase Nyquist margin to accommodate tolerance
+  low:
+  - id: AAF-LOW-001
+    signal: Filter response not characterized
+    evidence_indicators:
+    - No frequency response measurements
+    - Design parameters not verified
+    - Filter assumed correct without validation
+    explanation: |
+      Without characterization, actual filter performance may differ
+      from design due to component variations, layout effects, or
+      implementation errors.
+    remediation: |
+      - Measure frequency response during development
+      - Verify cutoff, stopband, and phase response
+      - Document measured characteristics
+      - Implement production test if applicable
+  positive:
+  - id: AAF-POS-001
+    signal: Well-designed and characterized filter
+    evidence_indicators:
+    - Filter response meets requirements with margin
+    - Measured and documented characteristics
+    - Appropriate filter type for application
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: analog-engineer
+  steps:
+  - id: '1'
+    name: Filter Configuration Review
+    description: |
+      Review filter design parameters and implementation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find filter configuration
+      command: |
+        grep -rniE "(lowpass|anti_alias|cutoff|filter)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - Filter parameters
+    - Cutoff frequency configuration
+    - Filter type specification
+  - id: '2'
+    name: Frequency Response Verification
+    description: |
+      Verify filter frequency response meets requirements.
+    duration_estimate: 45 min
+    manual_verification: true
+    expected_findings:
+    - Cutoff frequency measurement
+    - Stopband attenuation measurement
+    - Phase response measurement
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Filter Design Analysis
+    - Performance Verification
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 2
+    signal-processing:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: aaf-001
+  item: Anti-aliasing filter present in signal path
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify filter exists between signal source and ADC
+  expected: Confirmed by reviewer
+- id: aaf-002
+  item: Filter cutoff below 0.45 * fs
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify filter cutoff frequency is appropriate
+  expected: Confirmed by reviewer
+- id: aaf-003
+  item: Stopband attenuation exceeds ADC dynamic range
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify attenuation at Nyquist exceeds ADC resolution
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - industrial-control
+    - scientific-instruments
+    - audio-systems
+relationships:
+  commonly_combined:
+  - signal-processing.sampling.nyquist-compliance
+  - signal-processing.sampling.sampling-rate-selection
+  - signal-processing.filtering.filter-design
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

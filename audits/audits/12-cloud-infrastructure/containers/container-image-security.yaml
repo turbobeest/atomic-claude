@@ -1,0 +1,376 @@
+audit:
+  id: cloud-infrastructure.containers.container-image-security
+  name: Container Image Security
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: containers
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines container image security posture including base image selection,
+    vulnerability scanning results, image signing and verification, layer
+    analysis, secrets in images, and image provenance. Verifies images use
+    minimal base images, are regularly updated, and follow security best
+    practices for container image construction.
+  why_it_matters: |
+    Container images are the foundation of containerized applications. Vulnerable
+    or compromised images can introduce security risks at scale since the same
+    image may run across many instances. Malicious code, embedded secrets, or
+    unpatched vulnerabilities in images can lead to data breaches, system
+    compromise, and compliance violations.
+  when_to_run:
+  - Before deploying new container images to production
+  - After base image updates or security advisories
+  - During security audits and compliance reviews
+  - When onboarding new containerized services
+prerequisites:
+  required_artifacts:
+  - type: container-registry
+    description: Access to container registry with images to audit
+  - type: dockerfiles
+    description: Dockerfiles or container build specifications
+  access_requirements:
+  - Read access to container registry
+  - Access to vulnerability scanning tools or results
+  - Access to image signing/verification infrastructure
+discovery:
+  file_patterns:
+  - glob: '**/Dockerfile*'
+    purpose: Identify container build specifications
+  - glob: '**/*.dockerfile'
+    purpose: Alternative Dockerfile naming conventions
+  - glob: '**/containerfile*'
+    purpose: Podman/Buildah container specifications
+  - glob: '**/.dockerignore'
+    purpose: Check for proper build context filtering
+  code_patterns:
+  - pattern: FROM\s+\w+:latest
+    type: regex
+    scope: config
+    purpose: Detect use of mutable 'latest' tags
+  - pattern: FROM\s+scratch
+    type: regex
+    scope: config
+    purpose: Identify distroless/scratch base images (positive)
+  - pattern: (ENV|ARG).*PASSWORD|SECRET|KEY|TOKEN
+    type: regex
+    scope: config
+    purpose: Detect potential secrets in build args
+  - pattern: ADD\s+https?://
+    type: regex
+    scope: config
+    purpose: Detect remote file additions (security risk)
+knowledge_sources:
+  specifications:
+  - id: cis-docker
+    name: CIS Docker Benchmark
+    url: https://www.cisecurity.org/benchmark/docker
+    offline_cache: true
+    priority: required
+  - id: nist-container
+    name: NIST Container Security Guide
+    url: https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-190.pdf
+    offline_cache: true
+    priority: required
+  - id: nsa-kubernetes
+    name: NSA Kubernetes Hardening Guide
+    url: https://media.defense.gov/2022/Aug/29/2003066362/-1/-1/0/CTR_KUBERNETES_HARDENING_GUIDANCE_1.2_20220829.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: docker-security
+    name: Docker Security Best Practices
+    url: https://docs.docker.com/develop/security-best-practices/
+    offline_cache: true
+  - id: snyk-container
+    name: Snyk Container Security Guide
+    url: https://snyk.io/learn/container-security/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: trivy
+    purpose: Container image vulnerability scanning
+    command: trivy image --severity HIGH,CRITICAL <image>
+  - tool: grype
+    purpose: Alternative vulnerability scanner
+    command: grype <image>
+  - tool: syft
+    purpose: Generate SBOM for container images
+    command: syft <image> -o json
+  - tool: cosign
+    purpose: Image signing and verification
+    command: cosign verify <image>
+  - tool: dive
+    purpose: Analyze image layers for efficiency and secrets
+    command: dive <image>
+  scripts:
+  - id: image-scan
+    language: bash
+    purpose: Scan images for vulnerabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      IMAGE=$1
+      echo "Scanning image: $IMAGE"
+      trivy image --severity HIGH,CRITICAL "$IMAGE" 2>/dev/null || \
+        echo "Install trivy for vulnerability scanning"
+signals:
+  critical:
+  - id: CONTAINER-IMG-CRIT-001
+    signal: Critical CVEs in container image
+    evidence_pattern: trivy output showing CRITICAL vulnerabilities
+    explanation: |
+      Critical vulnerabilities in container images can be exploited
+      immediately upon deployment. These often include remote code
+      execution or privilege escalation vulnerabilities.
+    remediation: Update base image, patch vulnerable packages, or rebuild image
+  - id: CONTAINER-IMG-CRIT-002
+    signal: Secrets embedded in container image layers
+    evidence_pattern: Sensitive data found in image history or layers
+    explanation: |
+      Secrets in image layers persist even if deleted in later layers.
+      Anyone with image access can extract these credentials.
+    remediation: Rebuild image without secrets, use runtime secret injection
+  - id: CONTAINER-IMG-CRIT-003
+    signal: Images running as root without necessity
+    evidence_pattern: USER directive missing or set to root
+    explanation: |
+      Containers running as root increase blast radius if compromised.
+      Container escape vulnerabilities are more impactful with root.
+    remediation: Add USER directive with non-root user in Dockerfile
+  high:
+  - id: CONTAINER-IMG-HIGH-001
+    signal: Use of mutable image tags (latest)
+    evidence_pattern: FROM.*:latest in Dockerfile
+    explanation: |
+      Mutable tags make builds non-reproducible and can introduce
+      unexpected changes or vulnerabilities without notice.
+    remediation: Pin images to specific digests or immutable version tags
+  - id: CONTAINER-IMG-HIGH-002
+    signal: Unsigned or unverified container images
+    evidence_pattern: Missing image signatures or failed verification
+    explanation: |
+      Unsigned images cannot prove provenance. Supply chain attacks
+      can inject malicious code into unsigned images.
+    remediation: Implement image signing with cosign or Notary
+  - id: CONTAINER-IMG-HIGH-003
+    signal: Base image significantly out of date
+    evidence_pattern: Base image version more than 90 days old
+    explanation: |
+      Old base images accumulate vulnerabilities over time and may
+      miss important security patches.
+    remediation: Update to latest patched base image version
+  medium:
+  - id: CONTAINER-IMG-MED-001
+    signal: Large image size with unnecessary packages
+    evidence_pattern: Image size >500MB for simple applications
+    remediation: Use multi-stage builds, minimal base images, remove dev dependencies
+  - id: CONTAINER-IMG-MED-002
+    signal: Missing health check definition
+    evidence_pattern: HEALTHCHECK directive not present
+    remediation: Add appropriate HEALTHCHECK instruction
+  - id: CONTAINER-IMG-MED-003
+    signal: Package manager cache retained in image
+    evidence_pattern: apt/yum cache not cleaned in same layer
+    remediation: Clean package manager cache in same RUN instruction
+  low:
+  - id: CONTAINER-IMG-LOW-001
+    signal: Missing LABEL metadata
+    remediation: Add LABEL instructions for maintainer, version, description
+  positive:
+  - id: CONTAINER-IMG-POS-001
+    signal: Using distroless or minimal base images
+  - id: CONTAINER-IMG-POS-002
+    signal: Image signatures verified successfully
+  - id: CONTAINER-IMG-POS-003
+    signal: No critical or high vulnerabilities detected
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory container images
+    description: |
+      Identify all container images used in the environment including
+      base images, application images, and sidecar containers.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List images in registry
+      command: docker images --format '{{.Repository}}:{{.Tag}}'
+    - purpose: Find Dockerfiles in codebase
+      command: find . -name 'Dockerfile*' -o -name '*.dockerfile'
+    expected_findings:
+    - Complete inventory of container images
+    - Mapping of Dockerfiles to built images
+  - id: '2'
+    name: Scan images for vulnerabilities
+    description: |
+      Run vulnerability scanners against all container images to
+      identify known CVEs and security issues.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Scan with trivy
+      command: trivy image --severity HIGH,CRITICAL <image>
+    - purpose: Generate SBOM
+      command: syft <image> -o cyclonedx-json > sbom.json
+    expected_findings:
+    - List of vulnerabilities by severity
+    - Software bill of materials for each image
+  - id: '3'
+    name: Analyze Dockerfiles
+    description: |
+      Review Dockerfile contents for security best practices including
+      base image selection, user privileges, and secrets handling.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for root user
+      command: grep -r 'USER' Dockerfile* || echo 'No USER directive found'
+    - purpose: Check for secrets in build args
+      command: grep -E '(ARG|ENV).*(PASSWORD|SECRET|KEY)' Dockerfile*
+    expected_findings:
+    - Assessment of privilege configuration
+    - Identification of potential secrets in build
+  - id: '4'
+    name: Verify image signing
+    description: |
+      Check that production images are signed and can be verified
+      against trusted keys.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Verify image signature
+      command: cosign verify <image> --key cosign.pub
+    expected_findings:
+    - Signature verification status for each image
+    - Gaps in signing coverage
+  - id: '5'
+    name: Analyze image layers
+    description: |
+      Examine image layers for efficiency, secrets leakage, and
+      unnecessary content.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Analyze layers with dive
+      command: dive <image>
+    - purpose: Check image history
+      command: docker history <image>
+    expected_findings:
+    - Layer efficiency assessment
+    - Identification of secrets in layers
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Vulnerability Summary
+    - Image Security Posture
+    - Recommendations
+  confidence_guidance:
+    high: Vulnerability scan results, verified secrets in layers
+    medium: Best practice deviations detected in Dockerfiles
+    low: Inferred issues from image metadata analysis
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: cis-docker
+      priority: required
+    - source_id: nist-container
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime scanning and registry access
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: container-image-security-001
+  item: All production images scanned for vulnerabilities
+  level: CRITICAL
+  verification: trivy image <image> --severity CRITICAL -q && echo PASS || echo FAIL
+  expected: PASS
+- id: container-image-security-002
+  item: No critical CVEs in production images
+  level: CRITICAL
+  verification: trivy image <image> --severity CRITICAL -q | grep -c CRITICAL | awk '{print ($1==0)?"PASS":"FAIL"}'
+  expected: PASS
+- id: container-image-security-003
+  item: Images use non-root user
+  level: BLOCKING
+  verification: grep -q 'USER' Dockerfile && echo PASS || echo FAIL
+  expected: PASS
+- id: container-image-security-004
+  item: No secrets embedded in image layers
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review image history and layer contents for credentials
+  expected: Confirmed by reviewer
+- id: container-image-security-005
+  item: Production images are signed
+  level: BLOCKING
+  verification: manual
+  expected: PASS
+  verification_notes: 'Requires variable substitution: cosign verify <image> && echo PASS || echo FAIL'
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC7.1
+  - framework: PCI-DSS
+    controls:
+    - '6.3'
+    - '6.5'
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-6
+    - PR.IP-2
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.containers.container-orchestration
+  - cloud-infrastructure.cloud-security.security-monitoring
+
+  # Multi-tool container image security:
+  # Trivy:
+  #   trivy image ${IMAGE}:${TAG}
+  #   trivy image --severity HIGH,CRITICAL ${IMAGE}
+  # Grype:
+  #   grype ${IMAGE}:${TAG}
+  #   grype ${IMAGE} -o json
+  # Snyk:
+  #   snyk container test ${IMAGE}:${TAG}
+  # Docker Scout:
+  #   docker scout cves ${IMAGE}:${TAG}
+  #   docker scout recommendations ${IMAGE}
+  # Clair:
+  #   clairctl report ${IMAGE}
+  # Anchore:
+  #   anchore-cli image add ${IMAGE}
+  #   anchore-cli image vuln ${IMAGE} all

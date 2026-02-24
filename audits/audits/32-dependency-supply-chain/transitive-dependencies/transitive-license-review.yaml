@@ -1,0 +1,218 @@
+audit:
+  id: dependency-supply-chain.transitive-dependencies.transitive-license-review
+  name: Transitive License Review Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: transitive-dependencies
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: dependencies
+  default_profiles:
+  - full
+  - legal
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit reviews licenses of transitive dependencies, which may
+    include licenses not present in direct dependencies. It ensures
+    the full dependency tree is compliant with project license policies.
+  why_it_matters: |
+    A direct dependency with MIT license may transitively depend on
+    GPL packages. License policies must cover the entire dependency
+    tree, not just direct deps. Hidden copyleft in transitives can
+    create unexpected compliance obligations.
+  when_to_run:
+  - During license compliance reviews
+  - When adding dependencies with many transitives
+  - Before releases
+  - For legal audits
+prerequisites:
+  required_artifacts:
+  - type: lock_file
+    description: Complete dependency resolution
+  - type: license_policy
+    description: Allowed/denied license list
+  access_requirements:
+  - Access to license scanning tools
+  - Access to dependency tree
+discovery:
+  file_patterns:
+  - glob: '**/package-lock.json'
+    purpose: Full dependency tree
+knowledge_sources:
+  guides:
+  - id: transitive-licenses
+    name: Transitive License Obligations
+    url: https://fossa.com/blog/transitive-dependencies-licensing-compliance/
+  standards:
+  - id: license-compliance
+    name: Open Source License Compliance
+    relevance: Full-tree compliance
+tooling:
+  analysis_tools:
+  - tool: license-checker
+    purpose: Scan all dependency licenses
+  - tool: fossa
+    purpose: Deep license analysis
+signals:
+  critical:
+  - id: DEP-TLIC-CRIT-001
+    signal: Copyleft license in transitive dependency
+    evidence_indicators:
+    - GPL/AGPL in transitive dep
+    - Not visible in direct deps
+    explanation: |
+      Copyleft licenses in transitives carry the same obligations
+      as if you used them directly. Hidden GPL can create unexpected
+      source disclosure requirements.
+    remediation: Evaluate compliance; may need to remove path
+  - id: DEP-TLIC-CRIT-002
+    signal: Unknown license in transitive
+    evidence_indicators:
+    - UNKNOWN or custom license
+    - License terms unclear
+    remediation: Research license; may need legal review
+  high:
+  - id: DEP-TLIC-HIGH-001
+    signal: Prohibited license in transitive
+    evidence_indicators:
+    - License on deny list
+    - Deep in transitive tree
+    remediation: Remove dependency path; use override if possible
+  - id: DEP-TLIC-HIGH-002
+    signal: License incompatibility in transitives
+    evidence_indicators:
+    - Incompatible licenses combined
+    - Through different transitive paths
+    remediation: Resolve conflict; may require restructuring
+  medium:
+  - id: DEP-TLIC-MED-001
+    signal: License requiring attribution in transitive
+    evidence_indicators:
+    - Apache, BSD with notice requirements
+    - Attribution may be missing
+    remediation: Ensure attributions included
+  - id: DEP-TLIC-MED-002
+    signal: Many different licenses in transitives
+    evidence_indicators:
+    - 10+ different license types
+    - Complex compliance requirements
+    remediation: Document; ensure all obligations met
+  low:
+  - id: DEP-TLIC-LOW-001
+    signal: Permissive licenses throughout
+    evidence_indicators:
+    - All MIT, ISC, BSD
+    - Low compliance burden
+    remediation: Good state; maintain
+  positive:
+  - id: DEP-TLIC-POS-001
+    signal: All transitive licenses compliant
+  - id: DEP-TLIC-POS-002
+    signal: No copyleft in transitive tree
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: legal-auditor
+  steps:
+  - id: '1'
+    name: Scan All Licenses
+    description: Get licenses for full tree
+    commands:
+    - purpose: Run license-checker on all
+      command: npx license-checker --summary 2>/dev/null || echo 'license-checker not available'
+  - id: '2'
+    name: Find Copyleft Licenses
+    description: Identify copyleft in transitives
+    commands:
+    - purpose: Find GPL/AGPL
+      command: npx license-checker 2>/dev/null | grep -iE '(GPL|AGPL|LGPL)' | head -20 || echo 'Copyleft
+        search not available'
+  - id: '3'
+    name: Find Unknown Licenses
+    description: Identify packages with unclear licenses
+    commands:
+    - purpose: Find unknowns
+      command: npx license-checker --unknown 2>/dev/null || echo 'Unknown license search not available'
+  - id: '4'
+    name: Check Policy Compliance
+    description: Compare against license policy
+    commands:
+    - purpose: Check against deny list
+      command: npx license-checker --failOn 'GPL;AGPL;UNLICENSED' 2>/dev/null || echo 'Policy check not
+        available'
+  - id: '5'
+    name: Trace Problematic Licenses
+    description: Find path to problematic licenses
+    commands:
+    - purpose: Trace a license issue
+      command: npm ls $(npx license-checker --json 2>/dev/null | jq -r 'to_entries[] | select(.value.licenses
+        | contains("GPL")) | .key' | head -1) 2>/dev/null || echo 'Use npm ls to trace problematic packages'
+  - id: '6'
+    name: Document License Distribution
+    description: Report on license types in tree
+    commands:
+    - purpose: Generate license summary
+      command: npx license-checker --summary 2>/dev/null | sort | uniq -c | sort -rn | head -20 || echo
+        'Generate license summary manually'
+output:
+  deliverables:
+  - type: transitive_license_report
+    format: structured
+    description: License inventory for all transitives
+  - type: compliance_issues
+    format: list
+    description: Licenses requiring attention
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - License Distribution
+    - Copyleft Analysis
+    - Compliance Issues
+    - Recommendations
+closeout_checklist:
+- id: dep-tlic-001
+  item: All transitive licenses identified
+  level: REQUIRED
+  verification: License scan complete
+- id: dep-tlic-002
+  item: No copyleft surprises
+  level: CRITICAL
+  verification: GPL/AGPL in transitives reviewed
+- id: dep-tlic-003
+  item: Unknown licenses researched
+  level: REQUIRED
+  verification: Unknowns resolved
+- id: dep-tlic-004
+  item: Policy compliance verified
+  level: CRITICAL
+  verification: No policy violations
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SOC 2
+    control: CC6.1
+    description: License compliance
+  - framework: ISO 27001
+    control: A.18.1.2
+    description: Intellectual property
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.license-compliance.license-detection
+  depends_on:
+  - dependency-supply-chain.transitive-dependencies.transitive-analysis
+  feeds_into:
+  - dependency-supply-chain.license-compliance.license-compatibility

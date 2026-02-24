@@ -1,0 +1,398 @@
+# ============================================================
+# AUDIT: Redirect Chain Analysis
+# ============================================================
+# Evaluates redirect implementations for efficiency, proper
+# status codes, and impact on SEO.
+# ============================================================
+
+audit:
+  id: "seo-discoverability.technical-seo.redirect-chain"
+
+  name: "Redirect Chain Analysis Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "seo-discoverability"
+  category_number: 16
+  subcategory: "technical-seo"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "yes"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines redirect implementations across the website to
+    identify chains, loops, and improper redirect status codes. It evaluates
+    301 vs 302 usage, redirect chain length, redirect loops, internal
+    redirects from internal links, HTTP to HTTPS redirects, and the impact
+    on page load time and crawl efficiency.
+
+  why_it_matters: |
+    Redirect chains waste crawl budget, dilute PageRank, slow page loads,
+    and can confuse search engines about the canonical URL. Each redirect
+    in a chain adds latency and risks losing link equity. Redirect loops
+    cause pages to be inaccessible. Using the wrong redirect type (302 vs
+    301) can prevent proper PageRank transfer.
+
+  when_to_run:
+    - "After site migrations or URL changes"
+    - "When consolidating duplicate content"
+    - "During technical SEO audits"
+    - "When investigating slow page loads"
+    - "After CMS or domain changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "website"
+      description: "Live website with redirect rules"
+    - type: "crawl_data"
+      description: "Site crawl including redirect tracking"
+
+  access_requirements:
+    - "Ability to crawl the website and follow redirects"
+    - "Access to server configuration files (optional)"
+
+discovery:
+  code_patterns:
+    - pattern: "Redirect|301|302|RewriteRule"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find redirect configurations"
+    - pattern: "header\\(.*Location"
+      type: "regex"
+      scope: "source"
+      purpose: "Find PHP redirect implementations"
+    - pattern: "redirect|navigate|replace"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find JavaScript redirects"
+
+  file_patterns:
+    - glob: "**/.htaccess"
+      purpose: "Apache redirect rules"
+    - glob: "**/nginx.conf"
+      purpose: "Nginx redirect configuration"
+    - glob: "**/vercel.json"
+      purpose: "Vercel redirects"
+    - glob: "**/netlify.toml"
+      purpose: "Netlify redirects"
+    - glob: "**/_redirects"
+      purpose: "Netlify/static site redirects"
+
+knowledge_sources:
+  guides:
+    - id: "google-redirects"
+      name: "Google: Redirects and Google Search"
+      url: "https://developers.google.com/search/docs/crawling-indexing/301-redirects"
+      offline_cache: true
+    - id: "moz-redirects"
+      name: "Moz: Redirection"
+      url: "https://moz.com/learn/seo/redirection"
+      offline_cache: true
+    - id: "ahrefs-redirects"
+      name: "Ahrefs: HTTP Redirects for SEO"
+      url: "https://ahrefs.com/blog/301-redirects/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Screaming Frog SEO Spider"
+      purpose: "Crawl site and track all redirects"
+      offline_capable: true
+    - tool: "Sitebulb"
+      purpose: "Redirect chain visualization"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Follow redirect chain for single URL"
+      command: "curl -sIL URL 2>&1 | grep -E 'HTTP/|Location:'"
+    - tool: "httpie"
+      purpose: "HTTP request with redirect following"
+      command: "http --follow --all URL"
+
+  scripts:
+    - id: "redirect-chain-checker"
+      language: "bash"
+      purpose: "Check redirect chain for a URL"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL=$1
+        echo "=== Redirect Chain for: $URL ==="
+
+        MAX_REDIRECTS=10
+        CURRENT_URL=$URL
+        REDIRECT_COUNT=0
+
+        while [ $REDIRECT_COUNT -lt $MAX_REDIRECTS ]; do
+          RESPONSE=$(curl -sI "$CURRENT_URL" | head -20)
+          STATUS=$(echo "$RESPONSE" | head -1 | grep -oP '\d{3}')
+
+          echo "[$REDIRECT_COUNT] $STATUS - $CURRENT_URL"
+
+          if [[ $STATUS == 3* ]]; then
+            LOCATION=$(echo "$RESPONSE" | grep -i "^location:" | awk '{print $2}' | tr -d '\r')
+            if [ -z "$LOCATION" ]; then
+              echo "ERROR: Redirect without Location header"
+              break
+            fi
+            CURRENT_URL=$LOCATION
+            REDIRECT_COUNT=$((REDIRECT_COUNT + 1))
+          else
+            echo "=== Final Status: $STATUS ==="
+            break
+          fi
+        done
+
+        if [ $REDIRECT_COUNT -eq $MAX_REDIRECTS ]; then
+          echo "WARNING: Max redirects reached"
+        fi
+
+signals:
+  critical:
+    - id: "REDIRECT-CRIT-001"
+      signal: "Redirect loops detected"
+      evidence_indicators:
+        - "URL redirects to itself"
+        - "Circular redirect chain"
+      explanation: |
+        Redirect loops make pages completely inaccessible to both
+        users and search engines, causing indexation loss.
+      remediation: "Identify and break the redirect loop"
+
+    - id: "REDIRECT-CRIT-002"
+      signal: "Important pages behind redirect chains (3+ hops)"
+      evidence_indicators:
+        - "Redirect chain with 3 or more redirects"
+      explanation: |
+        Long redirect chains cause Googlebot to give up after a certain
+        number of hops, potentially leaving important pages unindexed.
+        Each hop also reduces PageRank transfer.
+      remediation: "Consolidate redirect chains to single direct redirect"
+
+  high:
+    - id: "REDIRECT-HIGH-001"
+      signal: "302 redirects used for permanent URL changes"
+      explanation: |
+        302 (temporary) redirects may not transfer full PageRank and
+        signal to search engines that the redirect is not permanent.
+      remediation: "Use 301 redirects for permanent URL changes"
+
+    - id: "REDIRECT-HIGH-002"
+      signal: "Internal links pointing to redirect URLs"
+      explanation: |
+        Internal links to redirect URLs waste crawl budget and dilute
+        internal linking efficiency.
+      remediation: "Update internal links to point to final destination URLs"
+
+    - id: "REDIRECT-HIGH-003"
+      signal: "HTTP to HTTPS redirect not properly configured"
+      explanation: |
+        Incomplete HTTPS redirect setup can leave HTTP versions
+        accessible, creating duplicate content.
+      remediation: "Implement site-wide HTTP to HTTPS 301 redirects"
+
+  medium:
+    - id: "REDIRECT-MED-001"
+      signal: "Redirect chains with 2 hops"
+      remediation: "Consolidate to single redirect where possible"
+
+    - id: "REDIRECT-MED-002"
+      signal: "JavaScript redirects used instead of server-side"
+      remediation: "Replace JavaScript redirects with 301 server-side redirects"
+
+    - id: "REDIRECT-MED-003"
+      signal: "Meta refresh redirects used"
+      remediation: "Replace meta refresh with proper HTTP 301 redirects"
+
+  low:
+    - id: "REDIRECT-LOW-001"
+      signal: "307/308 redirects used (may confuse older bots)"
+
+  positive:
+    - id: "REDIRECT-POS-001"
+      signal: "All redirects are single-hop 301s"
+    - id: "REDIRECT-POS-002"
+      signal: "No internal links point to redirect URLs"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Crawl Site with Redirect Tracking"
+      description: |
+        Perform a comprehensive crawl that follows and records
+        all redirects encountered.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Crawl with redirect tracking"
+          command: "Configure Screaming Frog to follow redirects and track chains"
+      expected_findings:
+        - "Total redirect count"
+        - "Redirect types (301, 302, etc.)"
+        - "Redirect chains identified"
+
+    - id: "2"
+      name: "Identify Redirect Chains and Loops"
+      description: |
+        Analyze crawl data to find redirect chains longer than
+        one hop and any circular redirects.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "Chains by length (2 hop, 3+ hop)"
+        - "Redirect loops"
+        - "Affected page count"
+
+    - id: "3"
+      name: "Audit Redirect Status Codes"
+      description: |
+        Review redirect types to ensure permanent changes use
+        301 and temporary changes use 302.
+      duration_estimate: "15 min"
+      expected_findings:
+        - "301 vs 302 usage"
+        - "Mismatched redirect types"
+        - "307/308 usage"
+
+    - id: "4"
+      name: "Find Internal Links to Redirects"
+      description: |
+        Identify internal links that point to URLs that redirect,
+        creating unnecessary redirect processing.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "Internal links to 3xx URLs"
+        - "Pages with most redirect links"
+        - "Update recommendations"
+
+    - id: "5"
+      name: "Test HTTP/HTTPS Redirect Configuration"
+      description: |
+        Verify that HTTP to HTTPS redirects are properly configured
+        at all levels (domain, www, paths).
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Test HTTP redirect"
+          command: "curl -sI http://example.com"
+        - purpose: "Test www redirect"
+          command: "curl -sI http://www.example.com"
+      expected_findings:
+        - "HTTP redirect behavior"
+        - "WWW redirect behavior"
+        - "Consistency across site"
+
+    - id: "6"
+      name: "Review Server Configuration"
+      description: |
+        Examine server configuration files for redirect rules
+        that may need optimization.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "Redirect rule inventory"
+        - "Outdated or redundant rules"
+        - "Potential rule conflicts"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Redirect Overview"
+        - "Chain Analysis"
+        - "Status Code Audit"
+        - "Internal Link Issues"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Issues verified via direct URL testing"
+    medium: "Issues identified via crawl analysis"
+    low: "Potential issues based on configuration review"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "google-redirects"
+        priority: "required"
+      - source_id: "moz-redirects"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive redirect analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "redirect-001"
+    item: "No redirect loops exist"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review crawl report for circular redirects"
+    expected: "Confirmed by reviewer"
+
+  - id: "redirect-002"
+    item: "No redirect chains with 3+ hops"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check crawl data for long redirect chains"
+    expected: "Confirmed by reviewer"
+
+  - id: "redirect-003"
+    item: "Permanent URL changes use 301 redirects"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review redirect status codes for permanent moves"
+    expected: "Confirmed by reviewer"
+
+  - id: "redirect-004"
+    item: "HTTP to HTTPS redirect configured"
+    level: "BLOCKING"
+    verification: "curl -sI http://example.com | grep -i 'location:.*https'"
+    expected: "HTTPS location header present"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "marketing-site", "ecommerce", "content-site"]
+
+  compliance_frameworks:
+    - framework: "SEO Best Practices"
+      controls: ["Technical SEO", "Site Migration"]
+
+relationships:
+  commonly_combined:
+    - "seo-discoverability.technical-seo.crawlability"
+    - "seo-discoverability.technical-seo.canonical-url"
+    - "seo-discoverability.technical-seo.url-structure"

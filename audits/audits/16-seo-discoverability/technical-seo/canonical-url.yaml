@@ -1,0 +1,374 @@
+# ============================================================
+# AUDIT: Canonical URL Implementation
+# ============================================================
+# Evaluates canonical tag usage to prevent duplicate content
+# issues and consolidate ranking signals.
+# ============================================================
+
+audit:
+  id: "seo-discoverability.technical-seo.canonical-url"
+
+  name: "Canonical URL Implementation Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "seo-discoverability"
+  category_number: 16
+  subcategory: "technical-seo"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines the implementation of canonical URLs across the
+    website to ensure proper handling of duplicate or similar content.
+    It verifies self-referencing canonicals, cross-domain canonicals,
+    HTTP/HTTPS and www/non-www canonicalization, parameter handling,
+    pagination canonicalization, and consistency between canonical tags
+    and HTTP Link headers.
+
+  why_it_matters: |
+    Without proper canonical implementation, search engines may see
+    multiple versions of the same content as duplicates, diluting
+    ranking signals and potentially causing the wrong URL to rank.
+    Canonical tags consolidate link equity and crawl budget to your
+    preferred URLs, improving overall search performance.
+
+  when_to_run:
+    - "When setting up a new website"
+    - "After migrating HTTP to HTTPS"
+    - "When implementing URL parameter handling"
+    - "When adding pagination"
+    - "During duplicate content audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "website"
+      description: "Live website with multiple page types"
+    - type: "source_code"
+      description: "Access to page templates for canonical implementation"
+
+  access_requirements:
+    - "Ability to crawl the website"
+    - "Google Search Console for canonical verification"
+
+discovery:
+  code_patterns:
+    - pattern: "rel=[\"']canonical[\"']"
+      type: "regex"
+      scope: "source"
+      purpose: "Find canonical link elements"
+    - pattern: "<link.*canonical"
+      type: "regex"
+      scope: "source"
+      purpose: "Locate canonical tag implementations"
+    - pattern: "Link:.*rel=\"canonical\""
+      type: "regex"
+      scope: "config"
+      purpose: "Find HTTP Link header canonicals"
+
+  file_patterns:
+    - glob: "**/*.html"
+      purpose: "Check HTML pages for canonical tags"
+    - glob: "**/head.{html,php,jsx,tsx}"
+      purpose: "Find template head sections"
+    - glob: "**/_document.{js,jsx,ts,tsx}"
+      purpose: "Next.js document for head configuration"
+
+knowledge_sources:
+  guides:
+    - id: "google-canonical"
+      name: "Google: Consolidate Duplicate URLs"
+      url: "https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls"
+      offline_cache: true
+    - id: "google-canonical-faq"
+      name: "Google: How to Specify a Canonical"
+      url: "https://developers.google.com/search/docs/crawling-indexing/canonicalization"
+      offline_cache: true
+    - id: "moz-canonical"
+      name: "Moz: Canonical URL Tag - The Most Important Advancement in SEO Practices"
+      url: "https://moz.com/learn/seo/canonicalization"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Screaming Frog SEO Spider"
+      purpose: "Bulk canonical tag extraction and analysis"
+      offline_capable: true
+    - tool: "Sitebulb"
+      purpose: "Canonical issues visualization"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "Google Search Console"
+      purpose: "User-declared canonical vs Google-selected canonical"
+      command: "URL Inspection Tool"
+    - tool: "curl"
+      purpose: "Fetch canonical tag from page"
+      command: "curl -s URL | grep -i canonical"
+
+  scripts:
+    - id: "canonical-checker"
+      language: "bash"
+      purpose: "Check canonical tag implementation"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL=$1
+
+        echo "=== Checking canonical for: $URL ==="
+
+        # Check HTML canonical tag
+        echo "HTML Canonical Tag:"
+        curl -s "$URL" | grep -i "canonical" | head -5
+
+        # Check HTTP Link header
+        echo ""
+        echo "HTTP Link Header:"
+        curl -sI "$URL" | grep -i "Link:.*canonical"
+
+        # Check if self-referencing
+        echo ""
+        echo "URL matches canonical:"
+        CANONICAL=$(curl -s "$URL" | grep -oP '(?<=rel="canonical" href=")[^"]+')
+        if [ "$URL" == "$CANONICAL" ]; then
+          echo "YES - Self-referencing canonical"
+        else
+          echo "NO - Canonical: $CANONICAL"
+        fi
+
+signals:
+  critical:
+    - id: "CANON-CRIT-001"
+      signal: "Canonical pointing to non-existent page (404)"
+      evidence_indicators:
+        - "Canonical URL returns 404"
+      explanation: |
+        A canonical pointing to a 404 page sends confusing signals to
+        search engines and can prevent the page from being indexed.
+      remediation: "Update canonical to point to a valid, existing URL"
+
+    - id: "CANON-CRIT-002"
+      signal: "Canonical creates redirect chain or loop"
+      evidence_indicators:
+        - "Canonical URL redirects to another URL"
+        - "Canonical chains through multiple pages"
+      explanation: |
+        Canonical chains confuse search engines and may cause them to
+        ignore the canonical entirely, leading to duplicate content issues.
+      remediation: "Point canonical directly to final destination URL"
+
+  high:
+    - id: "CANON-HIGH-001"
+      signal: "Missing canonical tags on pages with URL variations"
+      explanation: |
+        Pages accessible via multiple URLs (parameters, sorting, filters)
+        without canonicals will be seen as duplicates.
+      remediation: "Add self-referencing canonicals or canonicals to the primary version"
+
+    - id: "CANON-HIGH-002"
+      signal: "Conflicting canonical signals (tag vs HTTP header)"
+      explanation: |
+        When HTML canonical tag and HTTP Link header specify different
+        URLs, search engine behavior is unpredictable.
+      remediation: "Ensure canonical tag and HTTP header are consistent"
+
+    - id: "CANON-HIGH-003"
+      signal: "HTTPS page canonicalizes to HTTP"
+      explanation: |
+        Canonicalizing secure pages to insecure versions undermines
+        HTTPS migration and security benefits.
+      remediation: "Update canonicals to use HTTPS URLs"
+
+  medium:
+    - id: "CANON-MED-001"
+      signal: "Relative canonical URLs instead of absolute"
+      remediation: "Use absolute URLs for canonical tags"
+
+    - id: "CANON-MED-002"
+      signal: "Paginated pages not properly canonicalized"
+      remediation: "Use self-referencing canonicals for paginated pages (not all to page 1)"
+
+    - id: "CANON-MED-003"
+      signal: "Canonical differs from Google-selected canonical"
+      remediation: "Investigate why Google chooses a different URL"
+
+  low:
+    - id: "CANON-LOW-001"
+      signal: "Multiple canonical tags on same page"
+
+  positive:
+    - id: "CANON-POS-001"
+      signal: "All pages have self-referencing canonicals"
+    - id: "CANON-POS-002"
+      signal: "Canonical signals consistent across the site"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Extract All Canonical Tags"
+      description: |
+        Crawl the site and extract canonical tags from all pages
+        to create a complete inventory.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Crawl site extracting canonicals"
+          command: "Use Screaming Frog with canonical extraction enabled"
+      expected_findings:
+        - "Pages with canonicals"
+        - "Pages missing canonicals"
+        - "Canonical URL list"
+
+    - id: "2"
+      name: "Identify Self-Referencing vs Cross-Page Canonicals"
+      description: |
+        Categorize canonicals into self-referencing (page canonicalizes
+        to itself) and cross-page (canonicalizes to different URL).
+      duration_estimate: "15 min"
+      expected_findings:
+        - "Self-referencing canonical count"
+        - "Cross-page canonical relationships"
+        - "Cross-domain canonicals"
+
+    - id: "3"
+      name: "Validate Canonical Targets"
+      description: |
+        Verify that all canonical target URLs return 200 OK and
+        are not redirected.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "Canonicals to 404 pages"
+        - "Canonicals to redirects"
+        - "Canonical chains"
+
+    - id: "4"
+      name: "Check HTTP/HTTPS and WWW Consistency"
+      description: |
+        Verify that canonical URLs consistently use the preferred
+        protocol (HTTPS) and subdomain (www or non-www).
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Check protocol consistency"
+          command: "grep -i 'canonical' crawl_export.csv | grep 'http:'"
+      expected_findings:
+        - "HTTP vs HTTPS canonicals"
+        - "WWW vs non-WWW canonicals"
+        - "Mixed signals"
+
+    - id: "5"
+      name: "Compare with GSC Canonical Selection"
+      description: |
+        Use Google Search Console URL Inspection to compare your
+        declared canonical with Google's selected canonical.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Canonicals Google honors"
+        - "Canonicals Google overrides"
+        - "Reasons for discrepancies"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Canonical Implementation Overview"
+        - "Critical Issues"
+        - "Coverage Analysis"
+        - "GSC Discrepancies"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Verified via GSC URL Inspection tool"
+    medium: "Identified via crawl tool analysis"
+    low: "Suspected based on pattern analysis"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "google-canonical"
+        priority: "required"
+      - source_id: "google-canonical-faq"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive crawl analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "canonical-001"
+    item: "All pages have canonical tags"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review crawl report for pages missing canonical tags"
+    expected: "Confirmed by reviewer"
+
+  - id: "canonical-002"
+    item: "No canonicals pointing to 404 or redirect pages"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Validate all canonical target URLs return 200"
+    expected: "Confirmed by reviewer"
+
+  - id: "canonical-003"
+    item: "All canonicals use HTTPS"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check for any HTTP canonical URLs"
+    expected: "Confirmed by reviewer"
+
+  - id: "canonical-004"
+    item: "Canonical and sitemap URLs are consistent"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Cross-reference canonical URLs with sitemap entries"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "marketing-site", "ecommerce", "content-site"]
+
+  compliance_frameworks:
+    - framework: "SEO Best Practices"
+      controls: ["Duplicate Content Management", "Technical SEO"]
+
+relationships:
+  commonly_combined:
+    - "seo-discoverability.technical-seo.indexability"
+    - "seo-discoverability.technical-seo.redirect-chain"
+    - "seo-discoverability.technical-seo.url-structure"

@@ -1,0 +1,346 @@
+audit:
+  id: observability-instrumentation.visualization-dashboards.dashboard-performance
+  name: Dashboard Performance Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: visualization-dashboards
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: metrics
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses dashboard performance including page load times,
+    query execution times, panel rendering efficiency, and
+    overall user experience. Identifies slow queries, inefficient
+    visualizations, and configuration issues impacting dashboard
+    responsiveness.
+  why_it_matters: |
+    Slow dashboards cause:
+    - Delayed incident response when every second counts
+    - User frustration leading to dashboard abandonment
+    - Excessive load on monitoring infrastructure
+    - Timeouts during critical operational moments
+    - Reduced adoption of observability practices
+    - Missed insights due to impatience with slow tools
+  when_to_run:
+  - When users report dashboard slowness
+  - After adding complex queries or panels
+  - When monitoring infrastructure shows high load
+  - Quarterly performance baseline assessments
+prerequisites:
+  required_artifacts:
+  - type: dashboard_access
+    description: Access to dashboards to measure performance
+  - type: metrics_backend_access
+    description: Access to Prometheus/Thanos/etc. for query analysis
+  optional_artifacts:
+  - type: browser_devtools
+    description: Browser developer tools for network analysis
+  - type: grafana_stats
+    description: Grafana internal metrics about dashboard usage
+  access_requirements:
+  - Dashboard viewer access
+  - Prometheus/InfluxDB query logs (if available)
+  - Grafana admin access for internal metrics
+discovery:
+  metrics_queries:
+  - system: Grafana Metrics
+    query: grafana_api_dashboard_loading_duration_seconds_bucket
+    purpose: Measure dashboard load times
+    threshold: P95 < 3 seconds
+  - system: Prometheus
+    query: prometheus_engine_query_duration_seconds
+    purpose: Analyze query execution times
+    threshold: P95 < 5 seconds
+  - system: Grafana Metrics
+    query: grafana_api_response_status_total{handler=~'/api/ds/query.*'}
+    purpose: Track datasource query errors
+  documents_to_review:
+  - type: Dashboard JSON
+    purpose: Analyze query complexity and panel count
+  - type: Query logs
+    purpose: Identify expensive queries
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: grafana-query-optimization
+    name: Grafana Query Optimization Guide
+    url: https://grafana.com/docs/grafana/latest/dashboards/build-dashboards/best-practices/#query-performance
+    offline_cache: true
+    priority: required
+  - id: prometheus-query-performance
+    name: Prometheus Query Performance
+    url: https://prometheus.io/docs/practices/query-performance/
+    offline_cache: true
+    priority: required
+  specifications:
+  - id: web-vitals
+    name: Web Vitals Performance Metrics
+    url: https://web.dev/vitals/
+    offline_cache: true
+    priority: recommended
+tooling:
+  infrastructure_tools:
+  - tool: browser-devtools
+    purpose: Measure network timing and resource loading
+  - tool: lighthouse
+    purpose: Automated web performance auditing
+    command: lighthouse $DASHBOARD_URL --output=json
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.95,
+        sum(rate(prometheus_engine_query_duration_seconds_bucket[5m])) by (le))
+    purpose: P95 query duration
+  - system: Grafana
+    query: |
+      histogram_quantile(0.95,
+        sum(rate(grafana_api_dashboard_loading_duration_seconds_bucket[1h])) by (le))
+    purpose: P95 dashboard load time
+  scripts:
+  - id: dashboard-query-analyzer
+    language: bash
+    purpose: Extract and analyze queries from dashboard JSON
+    source: inline
+    code: |
+      #!/bin/bash
+      # Analyze dashboard queries
+
+      DASHBOARD_UID=$1
+
+      # Fetch dashboard JSON
+      dashboard=$(curl -s -H "Authorization: Bearer $TOKEN" \
+        "$GRAFANA_URL/api/dashboards/uid/$DASHBOARD_UID")
+
+      echo "=== Query Analysis for $DASHBOARD_UID ==="
+
+      # Extract all queries
+      echo "$dashboard" | jq -r '
+        .dashboard.panels[].targets[]? |
+        select(.expr != null) |
+        .expr' | while read query; do
+        echo "Query: $query"
+
+        # Check for expensive patterns
+        if echo "$query" | grep -qE 'rate\([^)]+\[1h\]|1d\]'; then
+          echo "  WARNING: Long range vector"
+        fi
+        if echo "$query" | grep -qE '\{[^}]*=~'; then
+          echo "  WARNING: Regex matcher"
+        fi
+      done
+signals:
+  critical:
+  - id: DASHPERF-CRIT-001
+    signal: Dashboard load time exceeds 30 seconds
+    evidence_threshold: P95 dashboard load > 30s
+    explanation: |
+      Dashboards taking over 30 seconds to load are essentially
+      unusable during incidents when rapid situational awareness
+      is critical.
+    remediation: |
+      - Reduce number of panels per dashboard
+      - Optimize expensive queries
+      - Implement query caching
+      - Split into multiple focused dashboards
+  - id: DASHPERF-CRIT-002
+    signal: Queries timing out regularly
+    evidence_threshold: Query timeout rate > 5%
+    explanation: |
+      Regular query timeouts indicate fundamental performance
+      issues that prevent dashboards from displaying data.
+    remediation: |
+      - Analyze slow query logs
+      - Add recording rules for complex queries
+      - Reduce query time ranges
+      - Optimize metric cardinality
+  high:
+  - id: DASHPERF-HIGH-001
+    signal: P95 dashboard load time exceeds 10 seconds
+    explanation: |
+      10+ second load times significantly impact user experience
+      and slow down incident response workflows.
+    remediation: |
+      - Reduce panel count
+      - Implement lazy loading
+      - Optimize slowest queries
+  - id: DASHPERF-HIGH-002
+    signal: High cardinality queries without aggregation
+    explanation: |
+      Queries returning thousands of time series without
+      aggregation overwhelm visualization and backend.
+    remediation: |
+      Add aggregation (sum, avg, max) to reduce cardinality.
+      Use topk() or bottomk() for meaningful subsets.
+  medium:
+  - id: DASHPERF-MED-001
+    signal: Excessive regex matchers in queries
+    remediation: |
+      Replace regex matchers with exact matches where possible.
+      Create recording rules for common regex patterns.
+  - id: DASHPERF-MED-002
+    signal: Dashboards with 50+ panels
+    remediation: |
+      Split into multiple focused dashboards with clear navigation.
+      Use variables to reduce panel duplication.
+  low:
+  - id: DASHPERF-LOW-001
+    signal: Unnecessary high refresh rates
+    remediation: |
+      Adjust refresh intervals to match data update frequency.
+      5-minute refresh is sufficient for most use cases.
+  positive:
+  - id: DASHPERF-POS-001
+    signal: All dashboards load under 5 seconds
+  - id: DASHPERF-POS-002
+    signal: Recording rules used for complex aggregations
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Baseline Dashboard Load Times
+    description: |
+      Measure load times for all critical dashboards under
+      typical conditions.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Query Grafana metrics for load times
+      command: |
+        curl -s -H "Authorization: Bearer $TOKEN" \
+          "$PROMETHEUS_URL/api/v1/query?query=histogram_quantile(0.95,sum(rate(grafana_api_dashboard_loading_duration_seconds_bucket[1h]))by(le))"
+    expected_findings:
+    - P50, P95, P99 load times
+    - Dashboards exceeding thresholds
+  - id: '2'
+    name: Identify Slow Queries
+    description: |
+      Analyze query performance to find expensive operations.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find slowest queries
+      command: |
+        curl -s "$PROMETHEUS_URL/api/v1/query?query=topk(10,prometheus_engine_query_duration_seconds)"
+    expected_findings:
+    - Top 10 slowest queries
+    - Query patterns causing slowness
+  - id: '3'
+    name: Analyze Query Patterns
+    description: |
+      Review dashboard JSON to identify problematic query patterns.
+    duration_estimate: 45 min
+    questions:
+    - Are queries using high cardinality labels?
+    - Are time ranges appropriate for the use case?
+    - Could recording rules improve performance?
+    expected_findings:
+    - Queries needing optimization
+    - Recording rule candidates
+  - id: '4'
+    name: Browser Performance Analysis
+    description: |
+      Use browser developer tools to analyze client-side performance.
+    duration_estimate: 30 min
+    expected_findings:
+    - Network waterfall analysis
+    - JavaScript execution time
+    - Rendering bottlenecks
+output:
+  deliverables:
+  - type: performance_report
+    format: structured
+    description: Dashboard performance metrics and analysis
+  - type: slow_query_list
+    format: table
+    description: Queries requiring optimization
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Performance Baselines
+    - Identified Bottlenecks
+    - Optimization Recommendations
+  confidence_guidance:
+    high: Direct measurement from metrics and browser tools
+    medium: Inferred from query complexity analysis
+    low: User-reported observations
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: prometheus-query-performance
+      priority: required
+    - source_id: grafana-query-optimization
+      priority: required
+  degradation:
+  - feature: Live performance measurement
+    impact: Cannot measure actual load times
+    mitigation: Export dashboard JSON and query logs for analysis
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed performance analysis
+    full:
+      included: true
+      priority: 15
+closeout_checklist:
+- id: dashperf-001
+  item: No dashboards exceed 10 second P95 load time
+  level: CRITICAL
+  verification: |
+    curl -s "$PROMETHEUS_URL/api/v1/query?query=histogram_quantile(0.95,sum(rate(grafana_api_dashboard_loading_duration_seconds_bucket[1h]))by(le))" | jq '.data.result[0].value[1] | tonumber < 10'
+  expected: 'true'
+- id: dashperf-002
+  item: Query timeout rate below 1%
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review query error rates in monitoring backend
+  expected: Confirmed by reviewer
+- id: dashperf-003
+  item: Recording rules exist for complex aggregations
+  level: WARNING
+  verification: manual
+  verification_notes: Review Prometheus recording rules configuration
+  expected: Confirmed by reviewer
+- id: dashperf-004
+  item: Dashboard panel counts documented and reasonable
+  level: WARNING
+  verification: manual
+  verification_notes: No dashboard exceeds 30 panels without justification
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    - serverless
+  compliance_frameworks:
+  - framework: Internal SLO
+    controls:
+    - Dashboard Performance SLO
+relationships:
+  commonly_combined:
+  - observability-instrumentation.metrics.query-performance
+  - observability-instrumentation.visualization-dashboards.dashboard-coverage
+  - observability-instrumentation.observability-operations.monitoring-scalability

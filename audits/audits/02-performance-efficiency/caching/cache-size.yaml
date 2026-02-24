@@ -1,0 +1,327 @@
+# ============================================================
+# CACHE SIZE AUDIT
+# ============================================================
+# Evaluates cache memory allocation, sizing strategies, and
+# eviction policies for optimal resource utilization.
+
+audit:
+  id: "performance-efficiency.caching.cache-size"
+  name: "Cache Size Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "caching"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes cache memory allocation relative to working set size, eviction
+    rates, and memory fragmentation. Evaluates whether cache sizing is
+    appropriate for the workload and identifies over/under-provisioning.
+
+  why_it_matters: |
+    Undersized caches cause excessive evictions, thrashing, and backend load.
+    Oversized caches waste expensive memory resources. Proper sizing ensures
+    optimal cost-to-performance ratio and prevents cache-related outages.
+
+  when_to_run:
+    - "High eviction rates observed"
+    - "Memory cost optimization"
+    - "Scaling planning"
+    - "After significant workload changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "cache_infrastructure"
+      description: "Access to Redis/Memcached instances"
+    - type: "monitoring_system"
+      description: "Memory usage metrics"
+
+  access_requirements:
+    - "Redis CLI or Memcached admin access"
+    - "Infrastructure monitoring dashboards"
+    - "Historical usage data (30+ days preferred)"
+
+discovery:
+  metrics_queries:
+    - system: "Redis"
+      query: "INFO memory"
+      purpose: "Get memory utilization statistics"
+      threshold: "used_memory < maxmemory * 0.9"
+
+    - system: "Prometheus"
+      query: "redis_memory_used_bytes / redis_memory_max_bytes"
+      purpose: "Memory utilization percentage"
+      threshold: "< 0.9"
+
+    - system: "Redis"
+      query: "INFO stats | grep evicted"
+      purpose: "Check eviction counts"
+      threshold: "evicted_keys should be minimal"
+
+  file_patterns:
+    - glob: "**/redis*.conf"
+      purpose: "Redis configuration with maxmemory settings"
+    - glob: "**/docker-compose*.yml"
+      purpose: "Container memory limits"
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Infrastructure sizing configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "redis-memory"
+      name: "Redis Memory Optimization"
+      url: "https://redis.io/docs/management/optimization/memory-optimization/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "memcached-sizing"
+      name: "Memcached Memory Management"
+      url: "https://github.com/memcached/memcached/wiki/ConfiguringServer"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "redis-cli"
+      purpose: "Memory statistics"
+      command: "redis-cli INFO memory"
+
+    - tool: "redis-cli"
+      purpose: "Memory usage by key pattern"
+      command: "redis-cli --bigkeys"
+
+    - tool: "redis-cli"
+      purpose: "Memory fragmentation analysis"
+      command: "redis-cli MEMORY DOCTOR"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "redis_memory_used_bytes"
+      purpose: "Current memory usage"
+
+    - system: "Prometheus"
+      query: "rate(redis_evicted_keys_total[5m])"
+      purpose: "Eviction rate over time"
+
+signals:
+  critical:
+    - id: "CACHE-SIZE-CRIT-001"
+      signal: "Cache at maxmemory with high eviction rate"
+      evidence_threshold: "memory_usage > 95% AND eviction_rate > 100/sec"
+      explanation: |
+        Cache is constantly evicting data to make room for new entries.
+        This thrashing behavior defeats the purpose of caching and adds
+        latency overhead without providing cache benefits.
+      remediation: "Increase cache size, optimize key storage, or reduce cached data scope"
+
+    - id: "CACHE-SIZE-CRIT-002"
+      signal: "No maxmemory limit configured"
+      evidence_pattern: "maxmemory\\s*0|maxmemory not set"
+      explanation: |
+        Without memory limits, cache can consume all available memory,
+        causing OOM kills, system instability, and potential data loss.
+      remediation: "Set appropriate maxmemory limit with eviction policy"
+
+  high:
+    - id: "CACHE-SIZE-HIGH-001"
+      signal: "High memory fragmentation ratio"
+      evidence_threshold: "mem_fragmentation_ratio > 1.5"
+      explanation: |
+        Memory fragmentation wastes allocated memory and can lead to
+        unexpected OOM conditions even when reported usage seems acceptable.
+      remediation: "Restart cache instance or enable active defragmentation"
+
+    - id: "CACHE-SIZE-HIGH-002"
+      signal: "Cache significantly undersized for working set"
+      evidence_threshold: "working_set_size > maxmemory * 1.5"
+      explanation: |
+        Working set larger than cache causes constant eviction of useful data,
+        resulting in poor hit rates and wasted cache infrastructure.
+      remediation: "Increase cache size or reduce working set through TTL tuning"
+
+  medium:
+    - id: "CACHE-SIZE-MED-001"
+      signal: "Cache oversized relative to working set"
+      evidence_threshold: "used_memory < maxmemory * 0.5 consistently"
+      remediation: "Reduce cache allocation to optimize cost"
+
+    - id: "CACHE-SIZE-MED-002"
+      signal: "Inconsistent memory usage patterns"
+      evidence_pattern: "Memory spikes during specific time periods"
+      remediation: "Implement predictive scaling or pre-warming strategies"
+
+  low:
+    - id: "CACHE-SIZE-LOW-001"
+      signal: "No memory usage alerting configured"
+      remediation: "Set up alerts at 80% and 90% memory thresholds"
+
+  positive:
+    - id: "CACHE-SIZE-POS-001"
+      signal: "Memory utilization between 70-85% with minimal evictions"
+
+    - id: "CACHE-SIZE-POS-002"
+      signal: "Active memory defragmentation enabled"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Collect memory statistics"
+      description: |
+        Gather current and historical memory usage, limits, and eviction
+        metrics from all cache instances.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Get Redis memory info"
+          command: "redis-cli INFO memory"
+        - purpose: "Get memory configuration"
+          command: "redis-cli CONFIG GET maxmemory*"
+        - purpose: "Get eviction stats"
+          command: "redis-cli INFO stats | grep evicted"
+
+      expected_findings:
+        - "Current memory utilization"
+        - "Configured limits"
+        - "Eviction counts"
+
+    - id: "2"
+      name: "Analyze key distribution"
+      description: |
+        Identify large keys, key distribution patterns, and memory usage
+        by key prefix/namespace.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find large keys"
+          command: "redis-cli --bigkeys"
+        - purpose: "Sample key sizes"
+          command: "redis-cli DEBUG OBJECT $(redis-cli RANDOMKEY)"
+        - purpose: "Count keys by pattern"
+          command: "redis-cli SCAN 0 MATCH '*' COUNT 1000 | head -20"
+
+      expected_findings:
+        - "Large key identification"
+        - "Key distribution patterns"
+
+    - id: "3"
+      name: "Evaluate eviction policy"
+      description: |
+        Review the configured eviction policy and assess its appropriateness
+        for the workload characteristics.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check eviction policy"
+          command: "redis-cli CONFIG GET maxmemory-policy"
+
+      expected_findings:
+        - "Eviction policy assessment"
+        - "Policy-workload fit"
+
+    - id: "4"
+      name: "Review historical trends"
+      description: |
+        Analyze memory usage trends over time to identify patterns,
+        growth rates, and capacity planning needs.
+      duration_estimate: "30 min"
+
+      expected_findings:
+        - "Growth trend analysis"
+        - "Capacity planning recommendations"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Memory Utilization Analysis"
+        - "Key Distribution Analysis"
+        - "Sizing Recommendations"
+
+  confidence_guidance:
+    high: "Direct metrics from production over extended period"
+    medium: "Point-in-time measurements or staging environment data"
+    low: "Estimated from application code or documentation"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "redis-memory"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires production metrics"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cache-size-001"
+    item: "maxmemory limit is configured"
+    level: "CRITICAL"
+    verification: "redis-cli CONFIG GET maxmemory | awk 'NR==2{if($1>0)print \"PASS\"; else print \"FAIL\"}'"
+    expected: "PASS"
+
+  - id: "cache-size-002"
+    item: "Memory utilization is not critically high"
+    level: "CRITICAL"
+    verification: "redis-cli INFO memory | awk -F: '/used_memory_peak_perc/{gsub(/%/,\"\",$2); if($2<95)print \"PASS\"; else print \"FAIL\"}'"
+    expected: "PASS"
+
+  - id: "cache-size-003"
+    item: "Eviction policy is appropriate"
+    level: "BLOCKING"
+    verification: "redis-cli CONFIG GET maxmemory-policy | awk 'NR==2{if($1!=\"noeviction\")print \"PASS\"; else print \"FAIL\"}'"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Cost Optimization"
+      controls: ["Resource Right-sizing"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.caching.cache-hit-rate"
+    - "performance-efficiency.caching.ttl-configuration"
+    - "performance-efficiency.resource-utilization.memory-usage"

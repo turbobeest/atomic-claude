@@ -1,0 +1,380 @@
+audit:
+  id: infrastructure-as-code.state-management.remote-state-access
+  name: IaC Remote State Access
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: state-management
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines how remote state is accessed across Terraform
+    configurations, including cross-state data sharing patterns, access
+    controls, and security implications of remote state data sources.
+
+    Key areas examined:
+    - Remote state data source configurations
+    - Access patterns and permissions
+    - Data exposed through remote state outputs
+    - Authentication mechanisms for cross-state access
+    - Security of remote state endpoints
+    - Alternative patterns to remote state
+  why_it_matters: |
+    Remote state access has significant security implications:
+    - State files contain sensitive infrastructure data
+    - Overly permissive outputs expose internal details
+    - Cross-account access requires proper IAM configuration
+    - Network exposure of state endpoints creates risk
+
+    Proper remote state access controls ensure:
+    - Minimum necessary data exposure
+    - Proper authentication and authorization
+    - Audit trails for state access
+    - Defense in depth for sensitive infrastructure
+  when_to_run:
+  - During security architecture review
+  - When setting up cross-team state sharing
+  - Before compliance audits
+  - When restructuring state architecture
+prerequisites:
+  required_artifacts:
+  - type: iac_repository
+    description: Access to infrastructure code repository
+  - type: iam_config
+    description: Access to IAM configurations for state access
+  access_requirements:
+  - Read access to IaC repositories
+  - IAM policy read access
+  - Understanding of state architecture
+discovery:
+  code_patterns:
+  - pattern: data\s+"terraform_remote_state"
+    type: regex
+    scope: config
+    purpose: Find remote state data sources
+  - pattern: data\.terraform_remote_state\.[^.]+\.outputs
+    type: regex
+    scope: config
+    purpose: Identify accessed remote state outputs
+  - pattern: output\s+"[^"]+"
+    type: regex
+    scope: config
+    purpose: Find outputs that may be shared via remote state
+  file_patterns:
+  - glob: '**/data.tf'
+    purpose: Data source definitions
+  - glob: '**/outputs.tf'
+    purpose: Output definitions
+  - glob: '**/remote_state.tf'
+    purpose: Remote state configurations
+knowledge_sources:
+  specifications:
+  - id: terraform-remote-state-data
+    name: Terraform Remote State Data Source
+    url: https://developer.hashicorp.com/terraform/language/state/remote-state-data
+    offline_cache: true
+    priority: required
+  guides:
+  - id: terraform-data-sharing
+    name: Terraform Data Sharing Alternatives
+    url: https://developer.hashicorp.com/terraform/language/state/remote-state-data#alternative-ways-to-share-data-between-configurations
+    offline_cache: true
+  - id: aws-iam-cross-account
+    name: AWS Cross-Account Access
+    url: https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_cross-account-with-roles.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: tflint
+    purpose: Lint remote state configurations
+    offline_capable: true
+  - tool: checkov
+    purpose: Check for insecure remote state patterns
+    offline_capable: true
+  scripts:
+  - id: remote-state-analyzer
+    language: bash
+    purpose: Analyze remote state access patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Remote State Data Sources ==="
+      grep -rA15 'data\s*"terraform_remote_state"' --include='*.tf'
+
+      echo ""
+      echo "=== Outputs Accessed from Remote State ==="
+      grep -roh 'data\.terraform_remote_state\.[^.]*\.outputs\.[^[:space:]]*' --include='*.tf' | sort | uniq -c | sort -rn
+signals:
+  critical:
+  - id: IAC-RSA-CRIT-001
+    signal: Sensitive data exposed via remote state outputs
+    evidence_indicators:
+    - Outputs named 'password', 'secret', 'key', 'token'
+    - Sensitive values in outputs without sensitive flag
+    explanation: |
+      Sensitive data in remote state outputs can be accessed by any
+      configuration with state read permissions, potentially exposing
+      secrets to unintended consumers.
+    remediation: Use secret managers (Vault, SSM, Secrets Manager) instead of state outputs for sensitive
+      data
+  - id: IAC-RSA-CRIT-002
+    signal: Remote state accessible without authentication
+    evidence_indicators:
+    - HTTP backend without authentication
+    - Public S3 bucket for state
+    explanation: |
+      Unauthenticated state access allows anyone to read infrastructure
+      details and potentially sensitive outputs.
+    remediation: Require authentication for all state access
+  - id: IAC-RSA-CRIT-003
+    signal: Overly broad remote state read permissions
+    evidence_indicators:
+    - IAM policy allowing s3:GetObject on all state files
+    - No restrictions on which states can be read
+    explanation: |
+      Broad state read permissions violate least privilege and allow
+      configurations to access more state data than necessary.
+    remediation: Implement per-state read permissions with specific IAM policies
+  high:
+  - id: IAC-RSA-HIGH-001
+    signal: Remote state outputs expose infrastructure internals
+    evidence_indicators:
+    - VPC IDs, subnet IDs in outputs
+    - Internal hostnames exposed
+    - Security group IDs in outputs
+    explanation: |
+      Exposing infrastructure internals through outputs increases
+      attack surface and aids reconnaissance.
+    remediation: Minimize outputs to only necessary values; prefer data sources for discovery
+  - id: IAC-RSA-HIGH-002
+    signal: No audit logging for remote state access
+    evidence_indicators:
+    - CloudTrail not logging state bucket access
+    - No visibility into who reads state
+    explanation: |
+      Without audit logging, unauthorized state access cannot be
+      detected or investigated.
+    remediation: Enable CloudTrail data events for state bucket
+  - id: IAC-RSA-HIGH-003
+    signal: Cross-account state access without assume role
+    evidence_indicators:
+    - Direct credential usage for cross-account access
+    - No role assumption in remote state config
+    explanation: |
+      Direct credentials for cross-account access are difficult to
+      audit and revoke compared to role-based access.
+    remediation: Use assume_role for cross-account remote state access
+  medium:
+  - id: IAC-RSA-MED-001
+    signal: Remote state used where alternatives exist
+    evidence_indicators:
+    - Using remote state for values available via data sources
+    - Remote state for static values that could be variables
+    remediation: Use AWS data sources or variables instead of remote state where appropriate
+  - id: IAC-RSA-MED-002
+    signal: No clear documentation of state output contracts
+    evidence_indicators:
+    - Outputs without descriptions
+    - No documentation of output consumers
+    remediation: Document all outputs with descriptions and known consumers
+  - id: IAC-RSA-MED-003
+    signal: Chained remote state dependencies
+    evidence_indicators:
+    - State A reads from B which reads from C
+    - Long dependency chains
+    remediation: Flatten dependency chains; consider SSM Parameter Store for shared values
+  low:
+  - id: IAC-RSA-LOW-001
+    signal: Inconsistent remote state configuration patterns
+    evidence_indicators:
+    - Different backends in remote state configs
+    - Inconsistent naming patterns
+    remediation: Standardize remote state configuration patterns
+  positive:
+  - id: IAC-RSA-POS-001
+    signal: Minimal, well-defined remote state outputs
+    evidence_indicators:
+    - Only necessary values in outputs
+    - Documented output contracts
+  - id: IAC-RSA-POS-002
+    signal: Role-based cross-account state access
+    evidence_indicators:
+    - Assume role configuration in remote state
+    - Per-state IAM roles
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Remote State Access Inventory
+    description: |
+      Identify all remote state data sources and the data
+      they access.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find all remote state data sources
+      command: grep -rA15 'data\s*"terraform_remote_state"' --include='*.tf'
+    - purpose: Extract accessed outputs
+      command: grep -roh 'data\.terraform_remote_state\.[^.]*\.outputs\.[^[:space:]]*' --include='*.tf'
+        | sort | uniq -c | sort -rn
+    - purpose: Count remote state dependencies
+      command: grep -rl 'terraform_remote_state' --include='*.tf' | wc -l
+    expected_findings:
+    - Remote state data sources
+    - Outputs being accessed
+    - Dependency count
+  - id: '2'
+    name: Output Security Analysis
+    description: |
+      Evaluate the security of outputs exposed via remote
+      state.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find all outputs
+      command: grep -rA5 'output\s*"' --include='outputs.tf' | head -100
+    - purpose: Check for sensitive outputs
+      command: grep -rn 'output\s*"[^"]*\(password\|secret\|key\|token\)' --include='*.tf'
+    - purpose: Check sensitive flag usage
+      command: grep -rn 'sensitive\s*=\s*true' --include='outputs.tf'
+    expected_findings:
+    - Output definitions
+    - Potentially sensitive outputs
+    - Sensitive flag usage
+  - id: '3'
+    name: Access Control Review
+    description: |
+      Assess IAM and authentication configuration for remote
+      state access.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find assume_role configurations
+      command: grep -rA10 'assume_role' --include='*.tf' | grep -A10 'terraform_remote_state'
+    - purpose: Check for cross-account access
+      command: grep -rn 'role_arn\|external_id' --include='*.tf'
+    - purpose: Look for IAM policies on state
+      command: grep -rn 's3:GetObject' --include='*.tf' | grep -i 'state\|tfstate'
+    expected_findings:
+    - Authentication mechanisms
+    - Cross-account access patterns
+    - IAM policy coverage
+  - id: '4'
+    name: Alternative Pattern Assessment
+    description: |
+      Evaluate whether remote state is the appropriate
+      pattern for data sharing needs.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find SSM parameter usage
+      command: grep -rn 'aws_ssm_parameter' --include='*.tf' | wc -l
+    - purpose: Check for data sources that could replace remote state
+      command: grep -rn 'data\s*"aws_' --include='*.tf' | head -30
+    expected_findings:
+    - Alternative data sharing patterns
+    - Opportunities to reduce remote state usage
+    - Data source coverage
+  - id: '5'
+    name: Audit and Monitoring Review
+    description: |
+      Verify logging and monitoring for remote state access.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check CloudTrail configuration
+      command: grep -rA30 'aws_cloudtrail' --include='*.tf' | grep -A30 'data_resource'
+    - purpose: Look for state access monitoring
+      command: grep -rn 's3:GetObject\|s3:ListBucket' --include='*.tf' | grep -i alarm
+    expected_findings:
+    - Audit logging configuration
+    - Monitoring coverage
+    - Detection capabilities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Remote State Access Patterns
+    - Security Assessment
+    - Output Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct configuration analysis
+    medium: Inferred from patterns
+    low: Based on documentation or naming
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-remote-state-data
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Remote state access requires thorough security review
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: rsa-001
+  item: No sensitive data in remote state outputs
+  level: CRITICAL
+  verification: grep -rn 'output\s*"[^"]*\(password\|secret\|key\|token\|credential\)' --include='*.tf'
+    | wc -l | xargs -I{} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: rsa-002
+  item: Cross-account access uses assume_role
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify all cross-account remote state access uses role assumption
+  expected: Confirmed by reviewer
+- id: rsa-003
+  item: Remote state access audited
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify CloudTrail data events enabled for state bucket
+  expected: Confirmed by reviewer
+- id: rsa-004
+  item: Outputs documented with descriptions
+  level: WARNING
+  verification: manual
+  verification_notes: Review outputs.tf files for comprehensive descriptions
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.6
+  - framework: CIS Controls
+    controls:
+    - Control 3
+    - Control 6
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.state-management.state-backend-security
+  - infrastructure-as-code.state-management.state-file-segmentation
+  - infrastructure-as-code.security-compliance.least-privilege

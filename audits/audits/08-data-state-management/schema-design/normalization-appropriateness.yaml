@@ -1,0 +1,334 @@
+# ============================================================
+# AUDIT: Database Normalization Appropriateness
+# ============================================================
+# Evaluates whether database schemas apply appropriate normalization
+# levels based on access patterns and performance requirements.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-design.normalization-appropriateness"
+
+  name: "Database Normalization Appropriateness"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-design"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines database schemas to evaluate whether normalization
+    levels are appropriate for the application's access patterns. It identifies
+    over-normalized schemas causing excessive joins and under-normalized schemas
+    causing data redundancy and update anomalies. The analysis considers both
+    OLTP and OLAP workloads.
+
+  why_it_matters: |
+    Inappropriate normalization levels directly impact application performance
+    and data integrity. Over-normalization leads to complex queries requiring
+    many joins, increasing latency and database load. Under-normalization
+    causes data redundancy, storage waste, and update anomalies that can
+    corrupt data consistency. Finding the right balance is critical for
+    maintainable, performant systems.
+
+  when_to_run:
+    - "During initial database design review"
+    - "When query performance degrades"
+    - "After significant schema changes"
+    - "Before major scaling initiatives"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-schema"
+      description: "Database schema definitions (DDL, migrations, or ORM models)"
+    - type: "query-patterns"
+      description: "Access to common query patterns or query logs"
+
+  access_requirements:
+    - "Read access to database schema definitions"
+    - "Access to migration files or ORM model definitions"
+    - "Query execution plan access (recommended)"
+
+discovery:
+  code_patterns:
+    - pattern: "CREATE TABLE"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify table definitions"
+    - pattern: "FOREIGN KEY|REFERENCES"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify relationships between tables"
+    - pattern: "JOIN.*JOIN.*JOIN"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify queries with multiple joins"
+
+  file_patterns:
+    - glob: "**/migrations/**/*.sql"
+      purpose: "Database migration files"
+    - glob: "**/models/**/*.py"
+      purpose: "ORM model definitions (Python)"
+    - glob: "**/entities/**/*.ts"
+      purpose: "TypeORM entity definitions"
+    - glob: "**/schema/**/*.prisma"
+      purpose: "Prisma schema files"
+
+knowledge_sources:
+  specifications:
+    - id: "codd-normal-forms"
+      name: "Codd's Normal Forms (1NF-5NF)"
+      url: "https://en.wikipedia.org/wiki/Database_normalization"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "use-the-index-luke"
+      name: "Use The Index, Luke - Normalization"
+      url: "https://use-the-index-luke.com/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "database-design-fundamentals"
+      title: "Database Design for Mere Mortals"
+      type: "book"
+      reference: "ISBN: 978-0321884497"
+
+tooling:
+  static_analysis:
+    - tool: "sqlfluff"
+      purpose: "SQL linting and schema analysis"
+      offline_capable: true
+    - tool: "pg_dump --schema-only"
+      purpose: "Extract PostgreSQL schema for analysis"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "mysql"
+      purpose: "MySQL schema inspection"
+      command: "mysql -e 'SHOW CREATE TABLE tablename'"
+    - tool: "psql"
+      purpose: "PostgreSQL schema inspection"
+      command: "psql -c '\\d+ tablename'"
+
+signals:
+  critical:
+    - id: "NORM-CRIT-001"
+      signal: "Tables with repeated groups violating 1NF"
+      evidence_pattern: "columns with numeric suffixes (field1, field2, field3)"
+      explanation: |
+        First Normal Form (1NF) violations indicate fundamental schema design
+        problems. Repeated column groups make queries brittle, limit scalability,
+        and cause maintenance nightmares when the number of items changes.
+      remediation: "Extract repeated groups into a separate table with proper foreign key relationship"
+
+    - id: "NORM-CRIT-002"
+      signal: "Partial key dependencies in tables with composite keys"
+      evidence_pattern: "Non-key columns dependent on only part of composite primary key"
+      explanation: |
+        Second Normal Form (2NF) violations cause update anomalies where changes
+        to dependent data must be made in multiple places, risking inconsistency.
+      remediation: "Split tables so all non-key attributes depend on the full primary key"
+
+  high:
+    - id: "NORM-HIGH-001"
+      signal: "Transitive dependencies between non-key columns"
+      evidence_pattern: "Column A determines B, B determines C (non-key)"
+      explanation: |
+        Third Normal Form (3NF) violations create redundancy and update anomalies.
+        Changes to transitive dependencies require updates across multiple rows.
+      remediation: "Extract transitively dependent columns into separate lookup tables"
+
+    - id: "NORM-HIGH-002"
+      signal: "Excessive join depth in common queries (4+ table joins)"
+      evidence_pattern: "SELECT.*FROM.*JOIN.*JOIN.*JOIN.*JOIN"
+      explanation: |
+        Over-normalization causes query complexity and performance issues.
+        While normalized for data integrity, excessive joins impact read performance.
+      remediation: "Consider strategic denormalization with computed columns or materialized views"
+
+  medium:
+    - id: "NORM-MED-001"
+      signal: "Redundant data storage across tables"
+      evidence_pattern: "Same non-key values repeated in multiple rows"
+      remediation: "Normalize redundant data into lookup tables with foreign key references"
+
+    - id: "NORM-MED-002"
+      signal: "Missing intermediate tables for many-to-many relationships"
+      evidence_pattern: "Comma-separated values or JSON arrays storing relationships"
+      remediation: "Create proper junction tables with foreign keys to both related tables"
+
+  low:
+    - id: "NORM-LOW-001"
+      signal: "Denormalization without documented justification"
+
+  positive:
+    - id: "NORM-POS-001"
+      signal: "Appropriate normalization with documented denormalization decisions"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Schema Discovery"
+      description: |
+        Locate and inventory all database schema definitions including
+        migrations, ORM models, and direct DDL statements.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find SQL migration files"
+          command: "find . -type f \\( -name '*.sql' -o -name '*.up.sql' \\) -path '*/migrations/*' 2>/dev/null | head -50"
+        - purpose: "Find ORM model files"
+          command: "find . -type f \\( -name '*.py' -o -name '*.ts' -o -name '*.java' \\) \\( -path '*/models/*' -o -path '*/entities/*' \\) 2>/dev/null | head -50"
+        - purpose: "Find Prisma schemas"
+          command: "find . -type f -name '*.prisma' 2>/dev/null"
+
+      expected_findings:
+        - "Complete list of schema definition files"
+        - "Schema definition methodology (migrations vs ORM)"
+
+    - id: "2"
+      name: "1NF Violation Analysis"
+      description: |
+        Check for First Normal Form violations: repeating groups,
+        multi-valued attributes, and lack of atomic values.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find columns with numeric suffixes suggesting repeating groups"
+          command: "grep -rE '(column|field|attr)[_]?[0-9]+|[a-z]+[0-9]+[[:space:]]+' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -30"
+        - purpose: "Find JSON or array column types"
+          command: "grep -riE '(JSON|JSONB|ARRAY|TEXT\\[\\]|VARCHAR\\[\\])' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Repeating column groups"
+        - "Multi-valued attributes stored as arrays or JSON"
+
+    - id: "3"
+      name: "Relationship Analysis"
+      description: |
+        Analyze table relationships for proper key dependencies
+        and identify potential 2NF/3NF violations.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find foreign key definitions"
+          command: "grep -riE '(FOREIGN KEY|REFERENCES|@ManyToOne|@OneToMany|belongsTo|hasMany)' --include='*.sql' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -50"
+        - purpose: "Find composite primary keys"
+          command: "grep -riE 'PRIMARY KEY[[:space:]]*\\([^)]+,[^)]+\\)' --include='*.sql' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Relationship mapping between tables"
+        - "Tables with composite keys requiring 2NF analysis"
+
+    - id: "4"
+      name: "Query Pattern Analysis"
+      description: |
+        Analyze query patterns to identify over-normalization
+        symptoms like excessive joins.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find queries with multiple joins"
+          command: "grep -riE 'JOIN.*JOIN.*JOIN' --include='*.sql' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -30"
+        - purpose: "Find N+1 query patterns"
+          command: "grep -riE 'for.*in.*:|forEach|map.*\\{' -A5 --include='*.ts' --include='*.py' . 2>/dev/null | grep -E '(find|select|query|get)' | head -20"
+
+      expected_findings:
+        - "Common join patterns and depth"
+        - "Potential N+1 query issues from over-normalization"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Normalization Level Assessment"
+        - "Identified Violations"
+        - "Performance Impact Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Schema violations directly observable in DDL with clear anomaly patterns"
+    medium: "Potential violations requiring query pattern analysis for confirmation"
+    low: "Suspected issues based on naming conventions or indirect evidence"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "codd-normal-forms"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed schema analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "normalization-001"
+    item: "All table definitions reviewed for 1NF compliance"
+    level: "CRITICAL"
+    verification: "find . -type f -name '*.sql' -path '*/migrations/*' -exec grep -l 'CREATE TABLE' {} \\; | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "normalization-002"
+    item: "Foreign key relationships documented"
+    level: "BLOCKING"
+    verification: "grep -riE '(FOREIGN KEY|REFERENCES)' --include='*.sql' . 2>/dev/null | wc -l | xargs -I{} test {} -ge 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "normalization-003"
+    item: "Multi-join queries identified and evaluated"
+    level: "WARNING"
+    verification: "grep -riE 'JOIN.*JOIN' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | wc -l | xargs -I{} echo PASS"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Data Quality Standards"
+      controls: ["DQ-001", "DQ-002"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-design.denormalization-justification"
+    - "data-state-management.schema-design.index-design"
+    - "data-state-management.schema-design.relationship-design"

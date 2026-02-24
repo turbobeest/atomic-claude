@@ -1,0 +1,305 @@
+# ============================================================
+# CRITICAL PATH ANALYSIS AUDIT
+# ============================================================
+# Evaluates the ability to identify and analyze critical paths
+# through distributed systems using trace data.
+
+audit:
+  id: "observability-instrumentation.distributed-tracing.critical-path-analysis"
+  name: "Critical Path Analysis Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "observability-instrumentation"
+  category_number: 5
+  subcategory: "distributed-tracing"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Reviews the capability to identify critical paths in request flows -
+    the chain of operations that determines overall request latency.
+    Examines trace depth, parallel operation visibility, and the ability
+    to distinguish blocking from non-blocking operations.
+
+  why_it_matters: |
+    Critical path analysis enables focused optimization efforts on the
+    operations that actually impact user experience. Without this capability,
+    teams may optimize non-critical paths while ignoring actual bottlenecks,
+    wasting engineering effort and missing performance improvements.
+
+  when_to_run:
+    - "Performance optimization initiatives"
+    - "After latency SLO breaches"
+    - "Quarterly performance review"
+    - "Before major traffic events"
+
+prerequisites:
+  required_artifacts:
+    - type: "tracing_backend"
+      description: "Access to trace analysis tools"
+    - type: "performance_requirements"
+      description: "Latency SLOs and requirements"
+
+  access_requirements:
+    - "Trace query and visualization access"
+    - "Performance metrics access"
+    - "Application architecture understanding"
+
+discovery:
+  metrics_queries:
+    - system: "Jaeger"
+      query: "traces with high span depth"
+      purpose: "Identify complex request flows"
+      threshold: "Critical paths instrumented"
+
+    - system: "Prometheus"
+      query: "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{path='/critical'}[5m]))"
+      purpose: "Identify latency on critical endpoints"
+      threshold: "Within SLO"
+
+  code_patterns:
+    - pattern: "await|Promise\\.all|parallel|concurrent"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify parallel execution patterns"
+
+    - pattern: "sequential|waterfall|chain"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify sequential patterns"
+
+  file_patterns:
+    - glob: "**/critical*.{py,rb,js,ts,java,go}"
+      purpose: "Critical path implementations"
+    - glob: "**/slo*.yaml"
+      purpose: "SLO definitions"
+
+knowledge_sources:
+  specifications:
+    - id: "critical-path-method"
+      name: "Critical Path Method"
+      url: "https://www.jaegertracing.io/docs/features/#critical-path"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "trace-analysis"
+      name: "Distributed Trace Analysis"
+      url: "https://opentelemetry.io/docs/concepts/signals/traces/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "jaeger"
+      purpose: "Analyze trace critical paths"
+      command: "curl -s 'http://jaeger:16686/api/traces/{traceId}' | jq '.data[0].spans | sort_by(.startTime)'"
+
+    - tool: "custom-analysis"
+      purpose: "Calculate critical path"
+      command: "python3 scripts/critical_path.py --trace-id {traceId}"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "topk(10, histogram_quantile(0.99, rate(span_duration_seconds_bucket[5m]))) by (operation)"
+      purpose: "Find slowest operations"
+
+signals:
+  critical:
+    - id: "CRITPATH-CRIT-001"
+      signal: "Cannot determine critical path from traces"
+      evidence_pattern: "Parallel operations not distinguishable from sequential"
+      explanation: |
+        Without clear critical path visibility, optimization efforts are
+        guesswork. Teams cannot determine which operations actually impact
+        user-perceived latency versus operations running in parallel.
+      remediation: "Add span links for parallel operations, improve span hierarchy"
+
+    - id: "CRITPATH-CRIT-002"
+      signal: "Critical business flows not instrumented"
+      evidence_pattern: "Checkout, payment, or auth flows lacking spans"
+      explanation: |
+        Critical business flows must have complete instrumentation to
+        enable performance analysis and incident debugging.
+      remediation: "Add comprehensive instrumentation to critical flows"
+
+  high:
+    - id: "CRITPATH-HIGH-001"
+      signal: "Parallel operations appear sequential"
+      evidence_pattern: "Concurrent calls shown as parent-child instead of siblings"
+      explanation: |
+        Incorrectly structured spans misrepresent the actual execution
+        model, leading to incorrect critical path identification.
+      remediation: "Use proper span hierarchy for concurrent operations"
+
+    - id: "CRITPATH-HIGH-002"
+      signal: "External call latency not isolated"
+      evidence_pattern: "Third-party API latency hidden within larger spans"
+      explanation: |
+        External dependencies often dominate critical paths. Without
+        isolation, their impact cannot be properly assessed.
+      remediation: "Add child spans for all external API calls"
+
+  medium:
+    - id: "CRITPATH-MED-001"
+      signal: "No critical path tooling available"
+      evidence_pattern: "Manual trace analysis required"
+      remediation: "Implement automated critical path calculation"
+
+    - id: "CRITPATH-MED-002"
+      signal: "Async operations break path continuity"
+      evidence_pattern: "Queue-based processing creates separate traces"
+      remediation: "Link async traces with span links"
+
+  low:
+    - id: "CRITPATH-LOW-001"
+      signal: "Critical path not documented"
+      remediation: "Document expected critical paths for key flows"
+
+  positive:
+    - id: "CRITPATH-POS-001"
+      signal: "Clear critical path visibility with optimization recommendations"
+      evidence_pattern: "Automated critical path calculation available"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify critical business flows"
+      description: |
+        Document the most important user journeys and business flows
+        that require critical path analysis capability.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "List high-traffic endpoints"
+          command: "curl -s 'http://prometheus:9090/api/v1/query?query=topk(20,sum(rate(http_requests_total[24h]))by(path))' | jq '.data.result[] | {path: .metric.path, rps: .value[1]}'"
+
+      expected_findings:
+        - "Critical flow inventory"
+        - "Traffic patterns"
+
+    - id: "2"
+      name: "Analyze trace structure"
+      description: |
+        Examine trace structure for critical flows to determine
+        if critical paths can be accurately identified.
+      duration_estimate: "45 min"
+
+      commands:
+        - purpose: "Get sample trace"
+          command: "curl -s 'http://jaeger:16686/api/traces?service=api&operation=POST%20/checkout&limit=1' | jq '.data[0].spans | map({op: .operationName, start: .startTime, dur: .duration, refs: .references})'"
+        - purpose: "Identify parallel operations"
+          command: "curl -s 'http://jaeger:16686/api/traces?service=api&limit=10' | jq '[.data[].spans | group_by(.references[0].spanID) | .[] | select(length > 1) | .[0].operationName] | unique'"
+
+      expected_findings:
+        - "Trace depth and structure"
+        - "Parallel operation patterns"
+
+    - id: "3"
+      name: "Calculate critical paths"
+      description: |
+        For sample traces, manually calculate or use tooling to
+        determine critical paths and validate accuracy.
+      duration_estimate: "40 min"
+
+      commands:
+        - purpose: "Analyze span timings"
+          command: "curl -s 'http://jaeger:16686/api/traces/{traceId}' | jq '.data[0].spans | sort_by(.startTime) | map({op: .operationName, start: .startTime, end: (.startTime + .duration)})'"
+
+      expected_findings:
+        - "Critical path identification"
+        - "Bottleneck operations"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Critical Flow Analysis"
+        - "Path Identification Capability"
+        - "Optimization Opportunities"
+
+  confidence_guidance:
+    high: "Automated critical path analysis with validation"
+    medium: "Manual trace analysis for sample requests"
+    low: "Configuration and structure review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "critical-path-method"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed trace analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "critpath-001"
+    item: "Critical flows identified"
+    level: "CRITICAL"
+    verification: "manual"
+    expected: "Key flows documented"
+
+  - id: "critpath-002"
+    item: "Critical path calculable from traces"
+    level: "BLOCKING"
+    verification: "manual"
+    expected: "Path calculation demonstrated"
+
+  - id: "critpath-003"
+    item: "Bottleneck operations identified"
+    level: "WARNING"
+    verification: "manual"
+    expected: "Top bottlenecks documented"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SRE Best Practices"
+      controls: ["Performance Analysis"]
+
+relationships:
+  commonly_combined:
+    - "observability-instrumentation.distributed-tracing.trace-latency-attribution"
+    - "observability-instrumentation.distributed-tracing.trace-coverage"
+    - "observability-instrumentation.distributed-tracing.service-map-accuracy"

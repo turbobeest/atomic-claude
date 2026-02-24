@@ -1,0 +1,491 @@
+audit:
+  id: security-trust.network-security.firewall-rules
+  name: Firewall Rule Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: network-security
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines firewall rulesets across all network boundaries
+    including perimeter firewalls, host-based firewalls, cloud security
+    groups, and container network policies. It validates rules against
+    security best practices, identifies overly permissive configurations,
+    checks for orphaned rules, and verifies proper logging and monitoring.
+  why_it_matters: |
+    Misconfigured firewall rules are a leading cause of security breaches.
+    Overly permissive rules (any/any), shadowed rules, and orphaned rules
+    create attack vectors that bypass network security controls. Regular
+    firewall audits are required by PCI-DSS, HIPAA, and SOC2. Poor firewall
+    hygiene enables lateral movement and data exfiltration after initial
+    compromise.
+  when_to_run:
+  - Quarterly security reviews
+  - After infrastructure changes
+  - Post-incident review
+  - Compliance audits
+  - Cloud migration projects
+  - Before production deployment
+prerequisites:
+  required_artifacts:
+  - type: firewall_export
+    description: Export of all firewall rules from each device/service
+  - type: network_diagram
+    description: Network architecture showing firewall placement
+  - type: security_policy
+    description: Documented security policy for allowed traffic
+  access_requirements:
+  - Firewall management console access
+  - Cloud console access for security groups
+  - Host access for local firewall review
+  - Change management records
+discovery:
+  code_patterns:
+  - pattern: allow.*any.*any|permit.*0\.0\.0\.0/0.*0\.0\.0\.0/0
+    type: regex
+    scope: config
+    purpose: Detect overly permissive any-to-any rules
+  - pattern: disabled|inactive|#.*permit|#.*allow
+    type: regex
+    scope: config
+    purpose: Find disabled or commented rules
+  - pattern: ACCEPT.*NEW.*dport|--dport.*ACCEPT
+    type: regex
+    scope: config
+    purpose: Find inbound port allowances
+  file_patterns:
+  - glob: '**/iptables.rules'
+    purpose: Linux iptables configurations
+  - glob: '**/firewalld/*.xml'
+    purpose: Firewalld zone configurations
+  - glob: '**/security-group*.tf'
+    purpose: Terraform security group definitions
+  - glob: '**/network-policy*.yaml'
+    purpose: Kubernetes network policies
+  - glob: '**/pf.conf'
+    purpose: BSD packet filter rules
+knowledge_sources:
+  specifications:
+  - id: nist-sp-800-41r1
+    name: NIST SP 800-41 Rev 1 - Guidelines on Firewalls and Firewall Policy
+    url: https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-41r1.pdf
+    offline_cache: true
+    priority: required
+  - id: cis-firewall-benchmark
+    name: CIS Firewall Benchmarks
+    url: https://www.cisecurity.org/benchmark/
+    offline_cache: true
+    priority: required
+  - id: nsa-network-infrastructure
+    name: NSA Network Infrastructure Security Guide
+    url: https://media.defense.gov/2022/Jun/15/2003018261/-1/-1/0/CTR_NSA_NETWORK_INFRASTRUCTURE_SECURITY_GUIDE_20220615.PDF
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: sans-firewall-checklist
+    name: SANS Firewall Checklist
+    url: https://www.sans.org/media/score/checklists/FirewallChecklist.pdf
+    offline_cache: true
+  - id: aws-security-groups
+    name: AWS Security Group Best Practices
+    url: https://docs.aws.amazon.com/vpc/latest/userguide/VPC_SecurityGroups.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: iptables
+    purpose: List and analyze Linux firewall rules
+    command: iptables -L -n -v --line-numbers
+  - tool: nmap
+    purpose: Verify which ports are accessible externally
+    command: nmap -sT -Pn -p- target_host
+  - tool: aws-cli
+    purpose: Export AWS security group rules
+    command: aws ec2 describe-security-groups --output json
+  scripts:
+  - id: find-permissive-rules
+    language: bash
+    purpose: Identify overly permissive firewall rules
+    source: inline
+    code: |
+      #!/bin/bash
+      # Find any/any rules in iptables
+      iptables -L -n 2>/dev/null | grep -E "ACCEPT.*0\.0\.0\.0/0.*0\.0\.0\.0/0"
+      # Find broad rules in security groups
+      aws ec2 describe-security-groups --query \
+        'SecurityGroups[*].IpPermissions[?IpRanges[?CidrIp==`0.0.0.0/0`]]' \
+        --output text 2>/dev/null
+signals:
+  critical:
+  - id: FWRULE-CRIT-001
+    signal: Any-to-any rule allows all traffic
+    cwe_id: CWE-284
+    evidence_pattern: permit.*any.*any|allow.*0\.0\.0\.0/0.*0\.0\.0\.0/0
+    explanation: |
+      Rules that allow any source to any destination on any port effectively
+      disable the firewall. This completely negates network security controls
+      and allows unrestricted attacker access.
+    remediation: Replace with specific source, destination, and port rules
+  - id: FWRULE-CRIT-002
+    signal: Management ports exposed to internet
+    cwe_id: CWE-284
+    evidence_pattern: 0\.0\.0\.0/0.*(22|3389|23|5900)
+    explanation: |
+      SSH, RDP, Telnet, and VNC exposed to the internet are prime targets
+      for brute-force attacks and exploitation. These services should only
+      be accessible from trusted networks or via VPN.
+    remediation: Restrict management ports to specific trusted IPs or VPN only
+  - id: FWRULE-CRIT-003
+    signal: Database ports exposed to internet
+    cwe_id: CWE-284
+    evidence_pattern: 0\.0\.0\.0/0.*(3306|5432|1433|27017|6379|9200)
+    explanation: |
+      Databases exposed directly to the internet are at severe risk of
+      data breaches. MySQL, PostgreSQL, SQL Server, MongoDB, Redis, and
+      Elasticsearch should never be internet-accessible.
+    remediation: Remove internet access to databases; use application layer proxies
+  - id: FWRULE-CRIT-004
+    signal: No default deny rule
+    cwe_id: CWE-284
+    evidence_indicators:
+    - Policy ACCEPT on INPUT chain
+    - No cleanup rule at end of ruleset
+    - Implicit allow for unmatched traffic
+    explanation: |
+      Without default deny, any traffic not explicitly blocked is allowed.
+      This inverts the security model and allows unknown threats through.
+    remediation: Implement default deny on all chains; explicitly allow required traffic
+  high:
+  - id: FWRULE-HIGH-001
+    signal: Logging disabled on firewall rules
+    cwe_id: CWE-778
+    evidence_indicators:
+    - No LOG target before DROP/REJECT
+    - Firewall logging disabled globally
+    - No hit counts on rules
+    explanation: |
+      Without logging, security teams cannot detect attacks, perform
+      forensics, or identify policy violations. Logging is essential
+      for incident response and compliance.
+    remediation: Enable logging on all DENY rules and critical ALLOW rules
+  - id: FWRULE-HIGH-002
+    signal: Shadowed rules never match traffic
+    cwe_id: CWE-284
+    evidence_indicators:
+    - More specific rule after broader rule
+    - Rules with zero hit count over time
+    - Contradictory overlapping rules
+    explanation: |
+      Shadowed rules indicate ruleset complexity issues and may represent
+      security controls that administrators believe are active but never
+      trigger. This creates a false sense of security.
+    remediation: Reorder rules to eliminate shadowing; remove redundant rules
+  - id: FWRULE-HIGH-003
+    signal: Outbound traffic not filtered
+    cwe_id: CWE-284
+    evidence_pattern: OUTPUT.*ACCEPT|egress.*allow.*all
+    explanation: |
+      Unrestricted outbound access enables data exfiltration, command-and-
+      control communications, and allows compromised hosts to attack others.
+      Egress filtering is a critical defense-in-depth control.
+    remediation: Implement egress filtering; allow only required outbound traffic
+  - id: FWRULE-HIGH-004
+    signal: Wide port ranges opened
+    cwe_id: CWE-284
+    evidence_pattern: 1024:65535|[0-9]+-[0-9]{4,}|portrange.*all
+    explanation: |
+      Rules allowing wide port ranges instead of specific ports increase
+      attack surface and may allow unintended access to services.
+    remediation: Replace port ranges with specific required ports
+  medium:
+  - id: FWRULE-MED-001
+    signal: Rules without descriptions or documentation
+    evidence_indicators:
+    - Empty comment fields
+    - No description on security group rules
+    - Rules not mapped to change tickets
+    explanation: |
+      Undocumented rules cannot be properly maintained or audited. Over
+      time, this leads to rule accumulation and security gaps.
+    remediation: Document all rules with purpose, requestor, and approval
+  - id: FWRULE-MED-002
+    signal: Orphaned rules for decommissioned systems
+    evidence_indicators:
+    - Rules for IPs no longer in use
+    - References to systems that don't exist
+    - Rules that never match traffic
+    explanation: |
+      Orphaned rules increase ruleset complexity and may be exploited if
+      those IPs are reused or if attackers can claim the addresses.
+    remediation: Implement rule lifecycle management; remove orphaned rules
+  - id: FWRULE-MED-003
+    signal: Inconsistent rules across similar systems
+    evidence_indicators:
+    - Different rules for identical server roles
+    - Varying port allowances for same application
+    - No rule templates or standards
+    explanation: |
+      Inconsistent rules make security assessment difficult and indicate
+      lack of centralized policy enforcement.
+    remediation: Implement rule templates and security groups for common patterns
+  low:
+  - id: FWRULE-LOW-001
+    signal: Rule ordering not optimized
+    evidence_indicators:
+    - Frequently matched rules at end of list
+    - Performance degradation from large rulesets
+    explanation: |
+      Inefficient rule ordering impacts firewall performance and may cause
+      latency issues under high load.
+    remediation: Order rules by frequency; most common rules first
+  positive:
+  - id: FWRULE-POS-001
+    signal: Default deny policy implemented
+    explanation: Default deny with explicit allow follows security best practices
+  - id: FWRULE-POS-002
+    signal: All rules documented with business justification
+    explanation: Documented rules enable proper auditing and lifecycle management
+  - id: FWRULE-POS-003
+    signal: Egress filtering implemented
+    explanation: Outbound traffic controls prevent data exfiltration
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Export All Firewall Rules
+    description: |
+      Collect firewall rules from all network security devices including
+      perimeter firewalls, host firewalls, and cloud security groups.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Export iptables rules
+      command: iptables-save > /tmp/iptables-export.txt
+    - purpose: Export firewalld rules
+      command: firewall-cmd --list-all-zones > /tmp/firewalld-export.txt
+    - purpose: Export AWS security groups
+      command: aws ec2 describe-security-groups --output json > /tmp/aws-sg-export.json
+    - purpose: List Azure NSG rules
+      command: az network nsg list --output json > /tmp/azure-nsg-export.json
+    expected_findings:
+    - Complete ruleset exports from all devices
+    - Baseline for rule analysis
+  - id: '2'
+    name: Check for Overly Permissive Rules
+    description: |
+      Identify rules that allow excessive access including any/any rules,
+      wide port ranges, and rules allowing internet access to sensitive ports.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find any/any rules in iptables
+      command: iptables -L -n | grep -E 'ACCEPT.*anywhere.*anywhere' | grep -v 'state RELATED,ESTABLISHED'
+    - purpose: Find 0.0.0.0/0 rules in AWS
+      command: aws ec2 describe-security-groups --query 'SecurityGroups[*].IpPermissions[?IpRanges[?CidrIp==`0.0.0.0/0`]]'
+    - purpose: Check for wide port ranges
+      command: iptables -L -n | grep -E 'dpts?:[0-9]+:[0-9]+'
+    expected_findings:
+    - List of overly permissive rules
+    - Rules exposing management or database ports
+  - id: '3'
+    name: Verify Default Deny Policy
+    description: |
+      Confirm that all firewall chains have a default deny policy and
+      that cleanup rules exist to block unmatched traffic.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check iptables default policies
+      command: iptables -L | grep 'policy'
+    - purpose: Verify cleanup rule exists
+      command: iptables -L -n --line-numbers | tail -5
+    - purpose: Check AWS default security group
+      command: aws ec2 describe-security-groups --group-names default --query 'SecurityGroups[*].IpPermissions'
+    expected_findings:
+    - Default DROP policy on INPUT and FORWARD chains
+    - Explicit cleanup/deny rules at end of ruleset
+  - id: '4'
+    name: Analyze Rule Documentation
+    description: |
+      Review rules for proper documentation including purpose, requestor,
+      approval, and expiration if applicable.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Extract rule comments from iptables
+      command: iptables-save | grep -E '^#|comment'
+    - purpose: List AWS security group descriptions
+      command: aws ec2 describe-security-groups --query 'SecurityGroups[*].[GroupName,Description]'
+    expected_findings:
+    - Documentation coverage assessment
+    - Undocumented rules requiring review
+  - id: '5'
+    name: Identify Orphaned and Shadowed Rules
+    description: |
+      Find rules that reference non-existent systems or are shadowed by
+      earlier rules and never match traffic.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find rules with zero hit count
+      command: iptables -L -n -v | awk '$1==0 && $2==0 {print}'
+    - purpose: Check for unused security groups
+      command: aws ec2 describe-network-interfaces --query 'NetworkInterfaces[*].Groups[*].GroupId' |
+        sort -u
+    expected_findings:
+    - Orphaned rules for cleanup
+    - Shadowed rules requiring reordering
+  - id: '6'
+    name: Verify Logging Configuration
+    description: |
+      Confirm that firewall logging is enabled for dropped/denied traffic
+      and for critical allow rules.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for LOG rules before DROP
+      command: iptables -L -n | grep -B1 DROP | grep LOG
+    - purpose: Verify firewalld logging
+      command: firewall-cmd --get-log-denied
+    - purpose: Check AWS VPC flow logs
+      command: aws ec2 describe-flow-logs
+    expected_findings:
+    - Logging status for all firewall rules
+    - Gaps in logging coverage
+  - id: '7'
+    name: Test Firewall Effectiveness
+    description: |
+      Perform controlled tests to verify that firewall rules are working
+      as intended and blocking unauthorized traffic.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Scan from external to verify blocked ports
+      command: nmap -sT -Pn -p 22,3389,3306,5432 external_target
+    - purpose: Test internal segmentation
+      command: nc -zv internal_target 3306 2>&1
+    expected_findings:
+    - Verification that rules are effective
+    - Any unexpected open ports
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Rule Analysis Results
+    - Risk Assessment
+    - Compliance Status
+    - Recommendations
+  confidence_guidance:
+    high: Direct rule export analysis with connectivity testing verification
+    medium: Rule export analysis without connectivity testing
+    low: Based on configuration documentation only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: nist-sp-800-41r1
+      priority: required
+    - source_id: cis-firewall-benchmark
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Firewall audits require comprehensive rule analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: fwrule-001
+  item: No any/any rules present
+  level: CRITICAL
+  verification: iptables -L -n 2>/dev/null | grep -E 'ACCEPT.*0\.0\.0\.0/0.*0\.0\.0\.0/0' | grep -v ESTABLISHED
+    && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: fwrule-002
+  item: Management ports not exposed to internet
+  level: CRITICAL
+  verification: aws ec2 describe-security-groups --query 'SecurityGroups[*].IpPermissions[?FromPort==`22`
+    || FromPort==`3389`].IpRanges[?CidrIp==`0.0.0.0/0`]' --output text 2>/dev/null | grep -q '0.0.0.0/0'
+    && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: fwrule-003
+  item: Database ports not exposed to internet
+  level: CRITICAL
+  verification: nmap -sT -Pn -p 3306,5432,1433,27017 $EXTERNAL_IP 2>/dev/null | grep -q 'open' && echo
+    'FAIL' || echo 'PASS'
+  expected: PASS
+- id: fwrule-004
+  item: Default deny policy implemented
+  level: CRITICAL
+  verification: iptables -L INPUT 2>/dev/null | head -1 | grep -q 'DROP\|REJECT' && echo 'PASS' || echo
+    'FAIL'
+  expected: PASS
+- id: fwrule-005
+  item: Firewall logging enabled
+  level: BLOCKING
+  verification: iptables -L -n 2>/dev/null | grep -q LOG && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: fwrule-006
+  item: All rules documented
+  level: WARNING
+  verification: manual
+  verification_notes: Review rule comments and documentation for completeness
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: PCI-DSS
+    controls:
+    - '1.1'
+    - '1.2'
+    - '1.3'
+  - framework: NIST-CSF
+    controls:
+    - PR.AC-5
+    - PR.PT-4
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.6
+  - framework: HIPAA
+    controls:
+    - 164.312(e)(1)
+relationships:
+  commonly_combined:
+  - security-trust.network-security.network-segmentation
+  - security-trust.network-security.egress-control
+  - security-trust.network-security.internal-network-exposure

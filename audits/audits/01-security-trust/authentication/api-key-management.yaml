@@ -1,0 +1,465 @@
+audit:
+  id: security-trust.authentication.api-key-management
+  name: API Key Management Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authentication
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines API key management practices including generation,
+    storage, transmission, rotation, scoping, and revocation. It evaluates
+    key entropy, exposure in code/logs/URLs, access control enforcement,
+    metadata tracking, and monitoring capabilities per OWASP Secrets
+    Management and Key Management guidelines.
+  why_it_matters: |
+    API keys are high-value credentials that often grant programmatic access
+    to sensitive systems. Unlike user passwords, API keys are frequently
+    hardcoded, committed to repositories, logged, or exposed in URLs. OWASP
+    notes that secrets hardcoded in source code are a growing organizational
+    risk. Leaked API keys enable unauthorized access, data exfiltration,
+    and can persist indefinitely if rotation is not enforced.
+  when_to_run:
+  - Before production deployment of API services
+  - After implementing API authentication
+  - During security assessments and penetration testing
+  - When migrating to secrets management solutions
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: API authentication and key management implementation code
+  - type: configuration
+    description: API gateway and service configuration files
+  access_requirements:
+  - Read access to API service codebase
+  - Access to environment configuration
+  - Access to secrets management configuration (if present)
+discovery:
+  code_patterns:
+  - pattern: api[_-]?key\s*[=:]\s*['"][a-zA-Z0-9_-]{16,}['"]
+    type: regex
+    scope: source
+    purpose: Detect hardcoded API keys in source code
+  - pattern: API[_-]?KEY|APIKEY|api_key|apiKey
+    type: regex
+    scope: source
+    purpose: Locate API key references
+  - pattern: x-api-key|X-API-Key|Authorization.*Bearer
+    type: regex
+    scope: source
+    purpose: Find API key transmission patterns
+  - pattern: secret[_-]?key\s*[=:]\s*['"][a-zA-Z0-9_-]{16,}['"]
+    type: regex
+    scope: source
+    purpose: Detect hardcoded secret keys
+  - pattern: process\.env\.|os\.environ|getenv|dotenv
+    type: regex
+    scope: source
+    purpose: Check for environment variable usage
+  - pattern: vault|secretsmanager|keyvault|parameter.*store
+    type: regex
+    scope: source
+    purpose: Identify secrets management integration
+  - pattern: rotate.*key|key.*rotation|expir.*key
+    type: regex
+    scope: source
+    purpose: Find key rotation implementation
+  - pattern: revoke.*key|invalidate.*key|delete.*key
+    type: regex
+    scope: source
+    purpose: Find key revocation implementation
+  - pattern: \?api[_-]?key=|&api[_-]?key=
+    type: regex
+    scope: source
+    purpose: Detect API keys in URL parameters
+  - pattern: log\.|logger\.|console\.log|print\(.*key
+    type: regex
+    scope: source
+    purpose: Check for key logging risks
+  file_patterns:
+  - glob: '**/.env*'
+    purpose: Environment files potentially containing API keys
+  - glob: '**/secrets*'
+    purpose: Secrets configuration files
+  - glob: '**/config*'
+    purpose: Configuration files
+  - glob: '**/*.key'
+    purpose: Key files
+  - glob: '**/credentials*'
+    purpose: Credentials files
+knowledge_sources:
+  specifications:
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-secrets
+    name: OWASP Secrets Management Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-key-management
+    name: OWASP Key Management Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Key_Management_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-rest-security
+    name: OWASP REST Security Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-api-security
+    name: OWASP API Security Top 10
+    url: https://owasp.org/www-project-api-security/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: gitleaks
+    purpose: Detect secrets in git history
+    offline_capable: true
+  - tool: trufflehog
+    purpose: Scan for high-entropy secrets
+    offline_capable: true
+  - tool: detect-secrets
+    purpose: Baseline and detect secrets in code
+    offline_capable: true
+  scripts:
+  - id: api-key-scanner
+    language: bash
+    purpose: Scan for potential hardcoded API keys
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== API Key Exposure Detection ==="
+      echo "Hardcoded API Keys:"
+      grep -rn 'api[_-]\?key\s*[=:]\s*["\x27][a-zA-Z0-9_-]\{16,\}' --include="*.js" --include="*.ts" --include="*.py" --include="*.java" .
+      echo ""
+      echo "API Keys in URLs:"
+      grep -rn '\?api[_-]\?key=\|&api[_-]\?key=' --include="*.js" --include="*.ts" --include="*.py" .
+      echo ""
+      echo "Environment Variable Usage:"
+      grep -rn 'process\.env\.\|os\.environ\|getenv' --include="*.js" --include="*.ts" --include="*.py" .
+signals:
+  critical:
+  - id: AUTH-APIKEY-CRIT-001
+    signal: API key hardcoded in source code
+    cwe: CWE-798
+    evidence_pattern: api[_-]?key\s*[=:]\s*['"][a-zA-Z0-9_-]{20,}['"]
+    explanation: |
+      Hardcoded API keys in source code are exposed to anyone with
+      repository access, including through version history. These
+      credentials are often committed accidentally and persist
+      indefinitely in git history even after removal.
+    remediation: |
+      Remove hardcoded keys immediately. Rotate exposed keys. Use
+      environment variables or secrets management (Vault, AWS Secrets
+      Manager, etc.). Implement pre-commit hooks with gitleaks or
+      trufflehog to prevent future exposure.
+  - id: AUTH-APIKEY-CRIT-002
+    signal: API key exposed in URL query parameters
+    cwe: CWE-598
+    evidence_pattern: \?api[_-]?key=|&api[_-]?key=|url.*\+.*api.*key
+    explanation: |
+      API keys in URLs are logged by web servers, proxies, browsers,
+      and analytics tools. They appear in referrer headers when
+      navigating to external sites. This exposure is difficult to
+      contain and often leads to credential leakage.
+    remediation: |
+      Transmit API keys in HTTP headers (X-API-Key, Authorization).
+      Never include secrets in URL query strings. Update all API
+      clients to use header-based authentication.
+  - id: AUTH-APIKEY-CRIT-003
+    signal: API key committed to version control (.env file)
+    cwe: CWE-540
+    evidence_pattern: \.env.*api.*key|api.*key.*\.env
+    explanation: |
+      .env files containing API keys committed to repositories expose
+      credentials to all repository viewers. Even private repositories
+      may be compromised through insider threats or repository cloning.
+    remediation: |
+      Add .env to .gitignore. Remove .env from git history using
+      git filter-branch or BFG Repo-Cleaner. Use .env.example with
+      placeholder values. Implement secrets management for production.
+  high:
+  - id: AUTH-APIKEY-HIGH-001
+    signal: API key with no expiration or rotation policy
+    cwe: CWE-324
+    evidence_pattern: api.*key(?!.*expir|.*rotat|.*ttl|.*validity)
+    explanation: |
+      API keys without expiration persist indefinitely, expanding the
+      attack window for compromised credentials. OWASP recommends
+      rotating keys on 30-90 day cycles.
+    remediation: |
+      Implement key expiration with configurable TTL. Set up automated
+      rotation schedules (30, 60, or 90 days). Provide key rotation
+      APIs for clients. Alert on keys approaching expiration.
+  - id: AUTH-APIKEY-HIGH-002
+    signal: API key without scope restrictions
+    cwe: CWE-250
+    evidence_pattern: api.*key.*scope.*[=:]\s*['"]?\*|full.*access.*key
+    explanation: |
+      API keys with unrestricted scope can access all resources and
+      perform any action. A single compromised key enables complete
+      system takeover.
+    remediation: |
+      Implement fine-grained scopes for API keys. Separate read and
+      write permissions. Scope keys to specific resources, endpoints,
+      or IP ranges. Apply principle of least privilege.
+  - id: AUTH-APIKEY-HIGH-003
+    signal: API key logged in application logs
+    cwe: CWE-532
+    evidence_pattern: log\.(info|debug|error).*api.*key|console\.log.*key|print.*api.*key
+    explanation: |
+      API keys in logs are exposed to log aggregation systems, support
+      staff, and potentially attackers who compromise logging
+      infrastructure. Log retention policies may preserve keys for
+      extended periods.
+    remediation: |
+      Implement log sanitization to mask or remove sensitive data.
+      Never log full API keys. Use request ID tracing instead of
+      key logging. Audit existing logs for exposed credentials.
+  - id: AUTH-APIKEY-HIGH-004
+    signal: Insufficient API key entropy
+    cwe: CWE-330
+    evidence_pattern: uuid\(\)|random.*string.*16|[a-zA-Z0-9]{16}"\s*$
+    explanation: |
+      Short or predictable API keys can be guessed through brute force.
+      Keys should be cryptographically random with at least 128 bits
+      of entropy.
+    remediation: |
+      Generate API keys using cryptographically secure random generators.
+      Use at least 256 bits (32 bytes) of random data. Include prefix
+      for identification but ensure suffix is fully random.
+  medium:
+  - id: AUTH-APIKEY-MED-001
+    signal: No API key usage monitoring or alerting
+    cwe: CWE-778
+    evidence_pattern: api.*key(?!.*monitor|.*audit|.*track|.*log.*usage)
+    remediation: |
+      Implement API key usage monitoring. Track creation, access,
+      rotation, and deletion events. Alert on unusual usage patterns
+      or access from unexpected IPs.
+  - id: AUTH-APIKEY-MED-002
+    signal: Missing API key metadata tracking
+    cwe: CWE-1059
+    evidence_pattern: create.*key(?!.*metadata|.*created|.*owner)
+    remediation: |
+      Store metadata for each API key: creation date, creator, purpose,
+      last used date, associated service account. Enable key attribution
+      and lifecycle management.
+  - id: AUTH-APIKEY-MED-003
+    signal: No differentiation between read and write API keys
+    cwe: CWE-269
+    evidence_pattern: api.*key(?!.*read|.*write|.*scope)
+    remediation: |
+      Issue separate API keys for read and write operations. Apply
+      stricter security controls to write keys. Enable key revocation
+      without disrupting read-only integrations.
+  - id: AUTH-APIKEY-MED-004
+    signal: API key validation without rate limiting
+    cwe: CWE-307
+    evidence_pattern: validate.*key(?!.*rate|.*limit|.*throttle)
+    remediation: |
+      Implement rate limiting on API key validation endpoints.
+      Prevent brute force key enumeration attacks. Apply stricter
+      limits for failed validation attempts.
+  low:
+  - id: AUTH-APIKEY-LOW-001
+    signal: API key prefix does not indicate key type
+    evidence_pattern: api[_-]?key.*[=:].*['"][a-zA-Z0-9]{32}
+    remediation: |
+      Use prefixes to identify key types (e.g., pk_ for public,
+      sk_ for secret, test_ for test keys). Aids in identifying
+      key exposure context.
+  positive:
+  - id: AUTH-APIKEY-POS-001
+    signal: Secrets management integration (Vault, AWS SM, etc.)
+    evidence_pattern: vault|secretsmanager|keyvault|parameter.*store
+  - id: AUTH-APIKEY-POS-002
+    signal: API key rotation mechanism implemented
+    evidence_pattern: rotate.*key|key.*rotation|refresh.*key
+  - id: AUTH-APIKEY-POS-003
+    signal: API keys transmitted in headers only
+    evidence_pattern: x-api-key|X-API-Key|headers.*api.*key
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Scan for Hardcoded Keys
+    description: |
+      Search codebase for hardcoded API keys and secrets.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find hardcoded API keys
+      command: grep -rn 'api[_-]\?key\s*[=:]\s*["\x27][a-zA-Z0-9_-]\{16,\}' --include='*.js' --include='*.ts'
+        --include='*.py' --include='*.java' --include='*.go' .
+    - purpose: Find hardcoded secrets
+      command: grep -rn 'secret[_-]\?key\s*[=:]\s*["\x27][a-zA-Z0-9_-]\{16,\}' --include='*.js' --include='*.ts'
+        --include='*.py' --include='*.java' .
+    - purpose: Check .env files for keys
+      command: find . -name '.env*' -exec grep -l 'API' {} \;
+    expected_findings:
+    - List of potential hardcoded credentials
+  - id: '2'
+    name: Verify Key Storage
+    description: |
+      Check if API keys are stored securely using environment
+      variables or secrets management.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find environment variable usage
+      command: grep -rn 'process\.env\|os\.environ\|getenv\|dotenv' --include='*.js' --include='*.ts'
+        --include='*.py' .
+    - purpose: Find secrets management integration
+      command: grep -rn 'vault\|secretsmanager\|keyvault\|parameter.*store' --include='*.js' --include='*.ts'
+        --include='*.py' --include='*.java' .
+    expected_findings:
+    - Secure key storage mechanisms in use
+  - id: '3'
+    name: Audit Key Transmission
+    description: |
+      Verify API keys are transmitted securely in headers,
+      not URLs.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for keys in URLs
+      command: grep -rn '\?api[_-]\?key=\|&api[_-]\?key=' --include='*.js' --include='*.ts' --include='*.py'
+        .
+    - purpose: Verify header-based transmission
+      command: grep -rn 'x-api-key\|X-API-Key\|headers.*api' --include='*.js' --include='*.ts' --include='*.py'
+        .
+    expected_findings:
+    - API keys transmitted via headers
+    - No keys in URL parameters
+  - id: '4'
+    name: Review Lifecycle Management
+    description: |
+      Assess API key rotation, expiration, and revocation
+      capabilities.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find rotation implementation
+      command: grep -rn 'rotate.*key\|key.*rotation\|expir.*key\|ttl.*key' --include='*.js' --include='*.ts'
+        --include='*.py' .
+    - purpose: Find revocation implementation
+      command: grep -rn 'revoke.*key\|invalidate.*key\|delete.*key' --include='*.js' --include='*.ts'
+        --include='*.py' .
+    expected_findings:
+    - Key rotation mechanism
+    - Key revocation capability
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Key Storage Assessment
+    - Key Lifecycle Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence of exposed or insecurely stored keys
+    medium: Configuration patterns requiring verification
+    low: Potential issues requiring manual investigation
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-secrets
+      priority: required
+    - source_id: owasp-key-management
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: API key exposure is a common critical vulnerability
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: apikey-001
+  item: No hardcoded API keys in source code
+  level: CRITICAL
+  verification: |
+    if grep -rq 'api[_-]\?key\s*[=:]\s*["\x27][a-zA-Z0-9_-]\{20,\}' --include='*.js' --include='*.ts' --include='*.py' --include='*.java' .; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: apikey-002
+  item: No API keys in URL query parameters
+  level: CRITICAL
+  verification: |
+    if grep -rq '\?api[_-]\?key=\|&api[_-]\?key=' --include='*.js' --include='*.ts' --include='*.py' .; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: apikey-003
+  item: API keys not committed in .env files
+  level: CRITICAL
+  verification: |
+    if git ls-files | xargs grep -l 'API_KEY=\|api_key=' 2>/dev/null | grep -q '.env'; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: apikey-004
+  item: Environment variables or secrets manager used
+  level: BLOCKING
+  verification: |
+    if grep -rq 'process\.env\.\|os\.environ\|vault\|secretsmanager' --include='*.js' --include='*.ts' --include='*.py' .; then echo "PASS"; else echo "WARNING - No secrets management found"; fi
+  expected: PASS
+- id: apikey-005
+  item: API key rotation mechanism exists
+  level: WARNING
+  verification: |
+    if grep -rq 'rotate.*key\|key.*rotation' --include='*.js' --include='*.ts' --include='*.py' .; then echo "PASS"; else echo "WARNING - No rotation found"; fi
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP ASVS
+    controls:
+    - V2.10
+  - framework: OWASP API Security Top 10
+    controls:
+    - API2:2023
+  - framework: SOC 2
+    controls:
+    - CC6.1
+relationships:
+  commonly_combined:
+  - security-trust.authentication.service-account-security
+  - security-trust.authentication.token-lifecycle
+  - security-trust.authentication.oauth2-implementation

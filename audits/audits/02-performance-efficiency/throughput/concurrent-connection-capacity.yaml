@@ -1,0 +1,281 @@
+audit:
+  id: performance-efficiency.throughput.concurrent-connection-capacity
+  name: Concurrent Connection Capacity Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: throughput
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures the system's capacity to handle concurrent
+    connections across all layers: load balancers, web servers,
+    application servers, database connections, and external service
+    connections. It identifies connection limits, pool configurations,
+    and potential exhaustion points.
+  why_it_matters: |
+    Connection exhaustion is a common cause of outages. When connection
+    pools are depleted, new requests fail immediately even though the
+    system has CPU and memory available. Understanding connection
+    limits and current utilization prevents surprise failures during
+    traffic spikes.
+  when_to_run:
+  - Before major traffic events
+  - After infrastructure changes
+  - When connection errors appear in logs
+  - During capacity planning
+prerequisites:
+  required_artifacts:
+  - type: connection_metrics
+    description: Metrics for connection pool utilization
+  - type: infrastructure_access
+    description: Access to load balancer and database configuration
+  access_requirements:
+  - Access to connection pool metrics
+  - Access to load balancer configuration
+  - Access to database connection limits
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: sum(pg_stat_activity_count) by (state)
+    purpose: PostgreSQL active connections
+    threshold: < 80% of max_connections
+  - system: Prometheus
+    query: hikaricp_connections_active / hikaricp_connections_max
+    purpose: HikariCP connection pool utilization
+    threshold: < 80%
+  - system: Prometheus
+    query: nginx_connections_active / nginx_connections_max
+    purpose: Nginx connection utilization
+    threshold: < 70%
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: postgres-connection-pooling
+    name: PostgreSQL Connection Pooling
+    url: https://www.postgresql.org/docs/current/runtime-config-connection.html
+    offline_cache: true
+  - id: hikari-configuration
+    name: HikariCP Configuration
+    url: https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing
+    offline_cache: true
+  - id: nginx-tuning
+    name: Nginx Performance Tuning
+    url: https://nginx.org/en/docs/http/ngx_http_core_module.html#worker_connections
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: psql
+    purpose: Check PostgreSQL connection count
+    command: |
+      psql -c "SELECT count(*), state FROM pg_stat_activity GROUP BY state;"
+  - tool: mysql
+    purpose: Check MySQL connection count
+    command: mysql -e 'SHOW STATUS LIKE "Threads_connected"; SHOW VARIABLES LIKE "max_connections";'
+  - tool: ss
+    purpose: Check TCP connection count
+    command: ss -s
+  - tool: netstat
+    purpose: Count connections by state
+    command: netstat -an | awk '/tcp/ {print $6}' | sort | uniq -c
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      (sum(pg_stat_activity_count) / pg_settings_max_connections) * 100
+    purpose: Database connection utilization percentage
+  - system: Prometheus
+    query: |
+      rate(connection_pool_timeout_total[5m])
+    purpose: Connection pool timeout rate
+signals:
+  critical:
+  - id: CONN-CRIT-001
+    signal: Connection pool exhausted (100% utilization)
+    evidence_threshold: pool_active / pool_max >= 1.0
+    explanation: |
+      When connection pools are exhausted, all new requests fail
+      with connection timeout errors. This causes immediate user
+      impact and cascading failures.
+    remediation: Increase pool size; reduce connection hold time; add pooler (PgBouncer)
+  - id: CONN-CRIT-002
+    signal: Database connection limit reached
+    evidence_threshold: active_connections >= max_connections
+    explanation: |
+      Database connection limits are hard caps. When reached, no
+      new connections can be established, causing application
+      failures across all services sharing the database.
+    remediation: Implement connection pooling; increase max_connections; consolidate connections
+  high:
+  - id: CONN-HIGH-001
+    signal: Connection pool utilization above 80%
+    evidence_threshold: pool_active / pool_max > 0.8
+    explanation: |
+      Operating at 80%+ utilization leaves insufficient headroom
+      for traffic spikes. A modest increase in load will cause
+      connection exhaustion.
+    remediation: Increase pool size; optimize connection usage; implement connection reuse
+  - id: CONN-HIGH-002
+    signal: Connection timeout errors occurring
+    evidence_threshold: connection_timeout_errors > 0
+    explanation: |
+      Timeout errors indicate requests are waiting too long for
+      connections, causing user-visible delays and failures.
+    remediation: Increase pool size; reduce connection wait timeout; investigate leaks
+  medium:
+  - id: CONN-MED-001
+    signal: Connection pool metrics not collected
+    remediation: Implement connection pool monitoring for all pools
+  - id: CONN-MED-002
+    signal: No connection limit alerting configured
+    remediation: Add alerts for connection utilization thresholds
+  low:
+  - id: CONN-LOW-001
+    signal: Connection pool sizing not documented
+  positive:
+  - id: CONN-POS-001
+    signal: Connection pool utilization consistently below 50%
+  - id: CONN-POS-002
+    signal: Connection pooler (PgBouncer/ProxySQL) in use
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Connection Points
+    description: |
+      Identify all connection pools and limits across the system.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check database max connections
+      command: psql -c "SHOW max_connections;"
+    - purpose: Find HikariCP configurations
+      command: grep -rn 'maximumPoolSize\|maxPoolSize' --include='*.yaml' --include='*.properties' .
+    expected_findings:
+    - Database connection limits
+    - Application pool configurations
+  - id: '2'
+    name: Measure Current Utilization
+    description: |
+      Measure current connection utilization across all pools.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query database connections
+      command: psql -c "SELECT count(*), state FROM pg_stat_activity GROUP BY state;"
+    - purpose: Query pool metrics from Prometheus
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=hikaricp_connections_active'
+    expected_findings:
+    - Current active connections
+    - Utilization percentages
+  - id: '3'
+    name: Load Test Connection Capacity
+    description: |
+      Run load tests to verify connection limits and identify
+      saturation points.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Load test with increasing connections
+      command: |
+        for c in 50 100 200 400 800; do
+          echo "=== Connections: $c ===" && \
+          hey -n 5000 -c $c https://staging.api.example.com/endpoint 2>&1 | grep -E 'Requests/sec|errors'
+        done
+    expected_findings:
+    - Maximum sustainable connections
+    - Error threshold
+  - id: '4'
+    name: Analyze Connection Leaks
+    description: |
+      Check for connection leaks causing pool exhaustion over time.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for idle connections
+      command: |
+        psql -c "SELECT count(*), state, query FROM pg_stat_activity WHERE state='idle' AND query != '' GROUP BY state, query ORDER BY count DESC LIMIT 10;"
+    - purpose: Check connection age
+      command: |
+        psql -c "SELECT pid, now() - backend_start as connection_age, state FROM pg_stat_activity ORDER BY connection_age DESC LIMIT 10;"
+    expected_findings:
+    - Long-lived idle connections
+    - Potential leak patterns
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Connection Pool Inventory
+    - Utilization Analysis
+    - Capacity Limits
+    - Recommendations
+  confidence_guidance:
+    high: Load test results with production-like configuration
+    medium: Production metrics analysis
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: hikari-configuration
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires load testing and infrastructure access
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: conn-001
+  item: Connection pool utilization under 80%
+  level: CRITICAL
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=hikaricp_connections_active/hikaricp_connections_max' | \
+      jq '.data.result[0].value[1] | tonumber < 0.8'
+  expected: 'true'
+- id: conn-002
+  item: No connection timeout errors in last hour
+  level: BLOCKING
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=increase(connection_pool_timeout_total[1h])' | \
+      jq '.data.result[0].value[1] | tonumber == 0'
+  expected: 'true'
+- id: conn-003
+  item: Connection pool monitoring configured
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm pool metrics and alerts exist
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+relationships:
+  commonly_combined:
+  - performance-efficiency.throughput.request-throughput
+  - performance-efficiency.database-performance.connection-pooling

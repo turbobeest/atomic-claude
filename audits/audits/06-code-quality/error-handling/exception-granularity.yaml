@@ -1,0 +1,337 @@
+# ============================================================
+# AUDIT: Exception Granularity Assessment
+# ============================================================
+
+audit:
+  id: "code-quality.error-handling.exception-granularity"
+  name: "Exception Granularity Assessment Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "error-handling"
+
+  tier: "expert"
+  estimated_duration: "40 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether exceptions in the codebase have appropriate granularity.
+    This includes checking for overly broad exception catches (catching Exception
+    or Throwable), missing specific exception types, and whether custom exceptions
+    provide enough context for debugging and handling.
+
+  why_it_matters: |
+    Catching overly broad exceptions hides bugs and makes debugging difficult.
+    Missing specific exceptions prevents proper error handling and recovery.
+    Well-designed exception hierarchies enable precise error handling, better
+    logging, and clearer communication of failure modes.
+
+  when_to_run:
+    - "During code reviews"
+    - "When designing error handling strategies"
+    - "After production incidents"
+    - "API design reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+
+  access_requirements:
+    - "Read access to source code repository"
+
+discovery:
+  code_patterns:
+    - pattern: "catch\\s*\\(\\s*(Exception|Error|Throwable|BaseException)\\s"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect overly broad exception catches"
+
+    - pattern: "except\\s*:"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect Python bare except"
+
+    - pattern: "catch\\s*\\(\\s*e\\s*\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect TypeScript catch-all"
+
+    - pattern: "class\\s+\\w*Exception\\s+extends"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect custom exception classes"
+
+  file_patterns:
+    - glob: "**/*.{java,cs,ts,py,rb,go}"
+      purpose: "Source code files"
+
+knowledge_sources:
+  specifications:
+    - id: "cwe-396"
+      name: "CWE-396: Declaration of Catch for Generic Exception"
+      url: "https://cwe.mitre.org/data/definitions/396.html"
+      offline_cache: true
+      priority: "required"
+
+    - id: "cwe-397"
+      name: "CWE-397: Declaration of Throws for Generic Exception"
+      url: "https://cwe.mitre.org/data/definitions/397.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "effective-java-exceptions"
+      name: "Effective Java - Exceptions"
+      url: "https://www.oreilly.com/library/view/effective-java/9780134686097/"
+      offline_cache: false
+
+tooling:
+  static_analysis:
+    - tool: "eslint"
+      purpose: "TypeScript exception handling rules"
+      offline_capable: true
+    - tool: "checkstyle"
+      purpose: "Java exception handling rules"
+      offline_capable: true
+    - tool: "pylint"
+      purpose: "Python exception handling analysis"
+      offline_capable: true
+    - tool: "sonarqube"
+      purpose: "Exception granularity rules"
+      offline_capable: false
+
+  scripts:
+    - id: "exception-granularity-scan"
+      language: "bash"
+      purpose: "Find broad exception catches"
+      source: "inline"
+      code: |
+        # Find broad exception catches
+        grep -rn --include="*.{java,ts,cs}" -E "catch\s*\(\s*(Exception|Error|Throwable)\s" . 2>/dev/null | head -50
+
+signals:
+  critical:
+    - id: "EH-GRAN-CRIT-001"
+      signal: "Catching base Exception/Throwable without re-throwing"
+      evidence_pattern: "catch\\s*\\(\\s*(Exception|Throwable).*(?!throw)"
+      cwe: "CWE-396"
+      explanation: |
+        Catching base exceptions silently consumes all errors including
+        programming bugs, OutOfMemoryError, and other fatal conditions.
+      remediation: "Catch specific exceptions or re-throw after logging"
+
+    - id: "EH-GRAN-CRIT-002"
+      signal: "Python bare except clause"
+      evidence_pattern: "except\\s*:"
+      cwe: "CWE-396"
+      explanation: |
+        Bare except catches SystemExit and KeyboardInterrupt, preventing
+        proper program termination and hiding critical errors.
+      remediation: "Use 'except Exception:' at minimum or specific types"
+
+  high:
+    - id: "EH-GRAN-HIGH-001"
+      signal: "Catching Exception in business logic"
+      evidence_pattern: "catch\\s*\\(\\s*Exception.*service|controller|handler"
+      cwe: "CWE-396"
+      explanation: |
+        Broad exception catches in business logic prevent proper error
+        handling and may mask bugs.
+      remediation: "Catch specific exceptions expected from operations"
+
+    - id: "EH-GRAN-HIGH-002"
+      signal: "Generic exception thrown without context"
+      evidence_pattern: "throw\\s+new\\s+(Exception|Error)\\s*\\("
+      cwe: "CWE-397"
+      explanation: |
+        Throwing generic exceptions provides no information about the
+        failure type to callers.
+      remediation: "Create and throw specific exception types"
+
+  medium:
+    - id: "EH-GRAN-MED-001"
+      signal: "Multiple exception types caught with same handler"
+      evidence_pattern: "catch\\s*\\(\\s*\\w+\\s*\\|\\s*\\w+\\s*\\|\\s*\\w+"
+      remediation: "Consider if handling should differ by type"
+
+    - id: "EH-GRAN-MED-002"
+      signal: "Exception classes without additional context fields"
+      evidence_pattern: "class\\s+\\w+Exception.*\\{\\s*\\}"
+      remediation: "Add contextual fields to custom exceptions"
+
+  low:
+    - id: "EH-GRAN-LOW-001"
+      signal: "Broad catch at top-level error boundary"
+      evidence_pattern: "catch\\s*\\(\\s*Exception.*error.*boundary"
+      remediation: "Acceptable at boundaries, ensure proper logging"
+
+  positive:
+    - id: "EH-GRAN-POS-001"
+      signal: "Specific exception types caught throughout"
+      evidence_pattern: "catch\\s*\\(\\s*[A-Z]\\w+Exception"
+    - id: "EH-GRAN-POS-002"
+      signal: "Custom exception hierarchy defined"
+      evidence_pattern: "class\\s+\\w+Exception\\s+extends\\s+\\w+Exception"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Find Broad Exception Catches"
+      description: |
+        Search for catch blocks that use overly broad exception types
+        like Exception, Error, or Throwable.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find Java/TypeScript broad catches"
+          command: |
+            grep -rn --include="*.{java,ts,cs}" -E "catch\s*\(\s*(Exception|Error|Throwable|any)\s" . 2>/dev/null | head -50
+        - purpose: "Find Python bare excepts"
+          command: |
+            grep -rn --include="*.py" -E "except\s*:" . 2>/dev/null | head -50
+      expected_findings:
+        - "Broad exception catches"
+        - "Bare except clauses"
+
+    - id: "2"
+      name: "Analyze Exception Types Thrown"
+      description: |
+        Identify what exception types are being thrown to assess
+        whether they're specific enough.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find throw statements"
+          command: |
+            grep -rn --include="*.{java,ts}" -E "throw\s+new\s+\w+" . 2>/dev/null | head -50
+        - purpose: "Find Python raise statements"
+          command: |
+            grep -rn --include="*.py" "raise\s+\w+" . 2>/dev/null | head -50
+      expected_findings:
+        - "Exception types thrown"
+        - "Generic vs specific exceptions"
+
+    - id: "3"
+      name: "Inventory Custom Exceptions"
+      description: |
+        Find all custom exception classes and evaluate their design.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find custom exception classes"
+          command: |
+            grep -rn --include="*.{java,ts,py}" -E "class\s+\w*(Exception|Error)\s+(extends|:)" . 2>/dev/null | head -50
+      expected_findings:
+        - "Custom exception inventory"
+        - "Exception hierarchy"
+
+    - id: "4"
+      name: "Generate Recommendations"
+      description: |
+        Create recommendations for improving exception granularity.
+      duration_estimate: "10 min"
+      expected_findings:
+        - "Catches to make specific"
+        - "Custom exceptions to create"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "location"
+        - "exception_type"
+        - "issue"
+        - "recommendation"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Broad Catch Analysis"
+        - "Exception Hierarchy Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear pattern violation detected"
+    medium: "Context-dependent, review recommended"
+    low: "May be acceptable in specific cases"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "cwe-396"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "exception-gran-001"
+    item: "Broad catch scan completed"
+    level: "BLOCKING"
+    verification: |
+      grep -rn --include="*.{java,ts}" -E "catch\s*\(\s*(Exception|Error|Throwable)\s" . 2>/dev/null | wc -l
+    expected: "Count documented"
+
+  - id: "exception-gran-002"
+    item: "No bare except clauses in Python"
+    level: "CRITICAL"
+    verification: |
+      grep -rn --include="*.py" -E "except\s*:" . 2>/dev/null | wc -l
+    expected: "0"
+
+  - id: "exception-gran-003"
+    item: "Custom exception hierarchy documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review exception class hierarchy"
+    expected: "Hierarchy documented"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "CWE"
+      controls: ["CWE-396", "CWE-397"]
+    - framework: "ISO 25010"
+      controls: ["Reliability", "Maintainability"]
+
+relationships:
+  commonly_combined:
+    - "code-quality.error-handling.empty-catch-block"
+    - "code-quality.error-handling.exception-swallowing"
+    - "code-quality.error-handling.error-type-hierarchy"

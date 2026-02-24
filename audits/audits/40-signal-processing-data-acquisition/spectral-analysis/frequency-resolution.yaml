@@ -1,0 +1,241 @@
+audit:
+  id: signal-processing-data-acquisition.spectral-analysis.frequency-resolution
+  name: Frequency Resolution Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: spectral-analysis
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates frequency resolution for spectral analysis
+    to ensure adequate discrimination between spectral components. It examines:
+    - Fundamental resolution limit (fs/N)
+    - Window function effect on resolution
+    - Zero-padding vs. true resolution
+    - Resolution requirements vs. configuration
+    - Trade-offs between resolution and time/computation
+  why_it_matters: |
+    Frequency resolution determines spectral discrimination capability:
+    - Resolution = fs/N (bin spacing)
+    - Window main lobe widens effective resolution
+    - Closely spaced frequencies may merge
+    - Zero-padding interpolates, doesn't improve true resolution
+    - Insufficient resolution corrupts spectral measurements
+
+    Applications requiring fine frequency discrimination must have
+    adequate resolution through appropriate FFT size and windowing.
+  when_to_run:
+  - Spectral analysis system design
+  - FFT size selection
+  - Frequency measurement applications
+  - Resolution troubleshooting
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: FFT configuration
+  - type: requirements
+    description: Frequency resolution requirements
+  - type: signal_specification
+    description: Expected frequency separations
+  access_requirements:
+  - Access to FFT configuration
+  - Resolution requirements
+  - Sample rate documentation
+discovery:
+  code_patterns:
+  - pattern: (fft_size|nfft|FFT_LENGTH|n_fft)
+    type: regex
+    scope: source
+    purpose: Detect FFT size
+  - pattern: (resolution|freq_bin|bin_width)
+    type: regex
+    scope: source
+    purpose: Detect resolution calculations
+  - pattern: (sample_rate|fs|sr).*fft|fft.*(sample_rate|fs)
+    type: regex
+    scope: source
+    purpose: Detect resolution context
+  file_patterns:
+  - glob: '**/fft*.{c,h,cpp,py}'
+    purpose: FFT configuration files
+  - glob: '**/spectrum*.{c,h,cpp,py}'
+    purpose: Spectral analysis files
+knowledge_sources:
+  guides:
+  - id: ni-resolution
+    name: National Instruments Frequency Resolution
+    url: https://www.ni.com/en-us/support/documentation/supplemental/frequency-resolution.html
+    offline_cache: true
+    priority: required
+signals:
+  critical:
+  - id: RES-CRIT-001
+    signal: Frequency resolution insufficient for requirements
+    evidence_indicators:
+    - Required frequency separation < fs/N
+    - Closely spaced frequencies merged
+    - Measurement errors from insufficient resolution
+    explanation: |
+      When required frequency discrimination is finer than fs/N,
+      spectral components merge and cannot be distinguished.
+      This causes measurement errors and missed detections.
+    remediation: |
+      - Increase FFT size to improve resolution
+      - Reduce sample rate if bandwidth allows
+      - Use longer data record
+      - Document resolution requirements and configuration
+    cwe: CWE-682
+  high:
+  - id: RES-HIGH-001
+    signal: Window main lobe wider than bin spacing
+    evidence_indicators:
+    - Effective resolution wider than fs/N
+    - Window not considered in resolution analysis
+    - Adjacent bins correlated
+    explanation: |
+      Window main lobe width adds to fundamental resolution.
+      Hann window has ~1.5 bin main lobe width. Effective
+      resolution is max(fs/N, main_lobe_width).
+    remediation: |
+      - Account for window in resolution analysis
+      - Use narrower main lobe window if needed
+      - Increase FFT size to compensate
+      - Document effective resolution
+  - id: RES-HIGH-002
+    signal: Zero-padding mistaken for resolution improvement
+    evidence_indicators:
+    - Zero-padding used to 'improve' resolution
+    - False confidence in resolution
+    - Interpolated bins treated as independent
+    explanation: |
+      Zero-padding increases FFT output points but does not
+      improve true resolution. It interpolates between samples
+      but cannot resolve frequencies closer than fs/N_actual.
+    remediation: |
+      - Understand zero-padding is interpolation
+      - Base resolution on actual data length
+      - Use longer records for better resolution
+      - Document true vs. interpolated resolution
+  medium:
+  - id: RES-MED-001
+    signal: Resolution not matched to application
+    evidence_indicators:
+    - Over-resolution wasting computation
+    - Under-resolution causing errors
+    - No analysis of requirements vs. configuration
+    explanation: |
+      Resolution should be matched to application needs.
+      Excessive resolution wastes computation and time;
+      insufficient resolution causes measurement errors.
+    remediation: |
+      - Analyze required frequency discrimination
+      - Configure FFT size to meet requirements
+      - Balance resolution against computation
+      - Document trade-off decisions
+  low:
+  - id: RES-LOW-001
+    signal: Resolution not documented
+    evidence_indicators:
+    - No resolution specification
+    - FFT size selected arbitrarily
+    - Requirements not compared to configuration
+    explanation: |
+      Undocumented resolution makes it difficult to verify
+      adequacy or troubleshoot frequency discrimination issues.
+    remediation: |
+      - Document resolution requirements
+      - Calculate and record actual resolution
+      - Compare to requirements
+      - Include in system specifications
+  positive:
+  - id: RES-POS-001
+    signal: Resolution properly matched to requirements
+    evidence_indicators:
+    - Resolution meets requirements
+    - Window effect accounted for
+    - Configuration documented
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: dsp-engineer
+  steps:
+  - id: '1'
+    name: Resolution Analysis
+    description: |
+      Calculate and verify frequency resolution.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find FFT size and sample rate
+      command: |
+        grep -rniE "(fft_size|nfft|sample_rate|fs)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - FFT size
+    - Sample rate
+    - Calculated resolution
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Resolution Analysis
+    - Requirements Comparison
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: res-001
+  item: Resolution meets application requirements
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify fs/N sufficient for required discrimination
+  expected: Confirmed by reviewer
+- id: res-002
+  item: Window effect on resolution considered
+  level: WARNING
+  verification: manual
+  verification_notes: Verify effective resolution includes window width
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - signal-processing
+    - scientific-instruments
+    - audio-systems
+relationships:
+  commonly_combined:
+  - signal-processing.spectral-analysis.fft-implementation
+  - signal-processing.spectral-analysis.windowing-function
+  - signal-processing.spectral-analysis.spectral-leakage
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

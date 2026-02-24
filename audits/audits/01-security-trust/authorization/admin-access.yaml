@@ -1,0 +1,394 @@
+audit:
+  id: security-trust.authorization.admin-access
+  name: Admin Access Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authorization
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    Examines administrative access controls, privileged operations, and
+    administrative interfaces for security vulnerabilities. Analyzes admin
+    authentication strength, admin endpoint protection, audit logging of
+    admin actions, separation of duties, and protection against admin
+    account compromise.
+  why_it_matters: |
+    Administrative access represents the highest privilege level and is a
+    primary target for attackers. Compromised admin accounts lead to complete
+    system takeover. Common vulnerabilities include weak admin authentication,
+    unprotected admin endpoints, lack of audit trails, and missing separation
+    of duties. CWE-269 (Improper Privilege Management) directly applies.
+  when_to_run:
+  - Initial security assessment
+  - After adding admin functionality
+  - Before production deployment
+  - During privileged access review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application with admin functionality
+  - type: configuration
+    description: Admin role and access configuration
+  access_requirements:
+  - Read access to source code repository
+  - Access to admin interface code
+  - Access to role definitions
+discovery:
+  code_patterns:
+  - pattern: (admin|Admin|ADMIN|administrator|superuser)
+    type: regex
+    scope: source
+    purpose: Find admin-related code
+  - pattern: '@(Admin|RequiresAdmin|AdminOnly|SuperUser)'
+    type: regex
+    scope: source
+    purpose: Locate admin authorization annotations
+  - pattern: \/admin\/|\/management\/|\/system\/
+    type: regex
+    scope: source
+    purpose: Find admin URL paths
+  - pattern: (isAdmin|hasAdminRole|isSuperUser|isRoot)
+    type: regex
+    scope: source
+    purpose: Find admin check methods
+  - pattern: (sudo|elevate|impersonate)
+    type: regex
+    scope: source
+    purpose: Locate privilege elevation patterns
+  file_patterns:
+  - glob: '**/admin/**'
+    purpose: Admin modules
+  - glob: '**/management/**'
+    purpose: Management interfaces
+  - glob: '**/superuser/**'
+    purpose: Superuser functionality
+  - glob: '**/backoffice/**'
+    purpose: Back-office administration
+knowledge_sources:
+  specifications:
+  - id: cwe-269
+    name: 'CWE-269: Improper Privilege Management'
+    url: https://cwe.mitre.org/data/definitions/269.html
+    offline_cache: true
+    priority: required
+  - id: cwe-250
+    name: 'CWE-250: Execution with Unnecessary Privileges'
+    url: https://cwe.mitre.org/data/definitions/250.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-authz
+    name: OWASP Authorization Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
+    offline_cache: true
+  - id: nist-sp-800-53-ac
+    name: NIST SP 800-53 Access Control
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect unprotected admin endpoints
+    offline_capable: true
+  scripts:
+  - id: admin-audit-search
+    language: bash
+    purpose: Find admin-related patterns
+    source: inline
+    code: |
+      # Search for admin-related code
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs}" \
+        -E "(admin|Admin|ADMIN|superuser|management)" .
+signals:
+  critical:
+  - id: ADMIN-CRIT-001
+    signal: Admin endpoint without admin authorization
+    evidence_pattern: \/admin\/.*(?!@PreAuthorize|requireAdmin|isAdmin|@Admin)
+    cwe: CWE-269
+    explanation: |
+      Admin endpoints are accessible without verifying admin role,
+      allowing any authenticated (or unauthenticated) user to access
+      administrative functionality.
+    remediation: Add admin role verification to all admin endpoints
+  - id: ADMIN-CRIT-002
+    signal: Hardcoded admin credentials
+    evidence_pattern: (admin|root).*password.*['"][^'"]{4,}['"]|password.*['"]admin
+    cwe: CWE-798
+    explanation: |
+      Admin credentials are hardcoded in source code, creating a
+      backdoor that cannot be changed without code deployment.
+    remediation: Remove hardcoded credentials; use secure credential management
+  - id: ADMIN-CRIT-003
+    signal: Admin bypass through hidden parameter
+    evidence_pattern: (admin|superuser|debug)\s*[=:]\s*(true|1|['"]true)
+    cwe: CWE-269
+    explanation: |
+      Admin privileges can be enabled through a request parameter,
+      allowing anyone who knows the parameter to gain admin access.
+    remediation: Remove parameter-based admin bypass; use proper authentication
+  high:
+  - id: ADMIN-HIGH-001
+    signal: Missing MFA for admin access
+    evidence_pattern: isAdmin.*(?!mfa|2fa|twoFactor|secondFactor)
+    cwe: CWE-306
+    explanation: |
+      Admin access doesn't require multi-factor authentication,
+      making admin accounts vulnerable to credential theft.
+    remediation: Require MFA for all admin authentication
+  - id: ADMIN-HIGH-002
+    signal: Admin actions not audited
+    evidence_pattern: (admin|Admin)\.(create|update|delete|modify)(?!.*audit|log)
+    cwe: CWE-778
+    explanation: |
+      Administrative actions are not logged, preventing detection
+      of unauthorized admin activity or forensic analysis.
+    remediation: Log all admin actions with user identity and timestamp
+  - id: ADMIN-HIGH-003
+    signal: No separation of duties for critical operations
+    evidence_pattern: (delete|destroy|purge).*(?!approve|review|confirm)
+    cwe: CWE-269
+    explanation: |
+      Critical destructive operations can be performed by a single
+      admin without approval or review from another party.
+    remediation: Implement dual-control for destructive operations
+  medium:
+  - id: ADMIN-MED-001
+    signal: Admin session timeout too long
+    evidence_pattern: admin.*session.*(timeout|expire).*['"]?(36000|86400)
+    cwe: CWE-613
+    remediation: Set shorter session timeout for admin sessions (15-30 minutes)
+  - id: ADMIN-MED-002
+    signal: Admin interface accessible from public network
+    evidence_pattern: admin.*listen.*0\.0\.0\.0|admin.*public.*true
+    cwe: CWE-668
+    remediation: Restrict admin interface to internal network or VPN
+  low:
+  - id: ADMIN-LOW-001
+    signal: Generic admin role without granularity
+    evidence_pattern: role.*=.*['"]admin['"](?!.*:)
+    remediation: Implement granular admin roles (user-admin, system-admin, etc.)
+  positive:
+  - id: ADMIN-POS-001
+    signal: Admin MFA required
+    evidence_pattern: (isAdmin|admin).*require.*mfa|mfa.*admin
+  - id: ADMIN-POS-002
+    signal: Admin action audit logging
+    evidence_pattern: (audit|log).*(admin|Admin).*action
+  - id: ADMIN-POS-003
+    signal: Privileged access management (PAM)
+    evidence_pattern: PAM|privileged.*access|just.*in.*time.*access
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map Admin Endpoints and Functions
+    description: |
+      Identify all administrative endpoints, interfaces, and
+      privileged functions.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find admin URL patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(\\/admin\\/|\\/management\\/|\\/system\\/|\\/backoffice\\/)" .
+    - purpose: Find admin controllers/handlers
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(AdminController|AdminHandler|AdminService|AdminRouter)" .
+    expected_findings:
+    - Complete admin endpoint inventory
+    - Admin functionality mapping
+  - id: '2'
+    name: Verify Admin Authorization
+    description: |
+      Ensure all admin endpoints verify admin role before
+      granting access.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find admin authorization checks
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(isAdmin|hasAdminRole|requireAdmin|@Admin)" .
+    - purpose: Check admin endpoints for authorization
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -B5 -A2 \
+          "\\/admin\\/" . | grep -E "(PreAuthorize|isAdmin|requireAuth)"
+    expected_findings:
+    - Authorization on all admin endpoints
+    - Consistent admin role verification
+  - id: '3'
+    name: Check Admin Authentication Strength
+    description: |
+      Verify that admin authentication includes strong
+      controls like MFA.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find MFA for admin
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(mfa|2fa|twoFactor|totp|otp).*(admin|Admin)" .
+    - purpose: Check admin session configuration
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "admin.*session.*(timeout|expire|idle)" .
+    expected_findings:
+    - MFA required for admin
+    - Appropriate session timeout
+  - id: '4'
+    name: Audit Admin Action Logging
+    description: |
+      Verify that all administrative actions are logged
+      for security audit.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find admin audit logging
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(audit|log).*(admin|Admin)" .
+    - purpose: Check critical operation logging
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(delete|modify|create).*admin.*log" .
+    expected_findings:
+    - Admin action audit logging
+    - Critical operation logging
+  - id: '5'
+    name: Review Separation of Duties
+    description: |
+      Check for controls that require multiple parties
+      for critical operations.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find dual-control patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(approve|review|confirm|dualControl|fourEyes)" .
+    - purpose: Check destructive operations
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(delete|destroy|purge|wipe)" . | head -30
+    expected_findings:
+    - Dual-control for destructive operations
+    - Approval workflows
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Admin Access Inventory
+    - Control Gap Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Admin access properly protected with MFA and audit logging
+    medium: Admin authorization present but controls incomplete
+    low: Admin patterns found but protection unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-269
+      priority: required
+    - source_id: owasp-authz
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Admin access audit requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: admin-001
+  item: All admin endpoints require admin role
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "/admin" . | wc -l && \
+    grep -rn --include="*.{js,ts,py,java,go}" "/admin.*isAdmin\|requireAdmin\|@Admin" . | wc -l
+  expected: Counts should match
+- id: admin-002
+  item: No hardcoded admin credentials
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "admin.*password.*['\"][^'\"]{4,}['\"]" . | wc -l
+  expected: '0'
+- id: admin-003
+  item: Admin actions are audit logged
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(audit\|log).*admin" . | wc -l
+  expected: Greater than 0
+- id: admin-004
+  item: MFA required for admin access
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(mfa\|2fa\|twoFactor).*admin" . | wc -l
+  expected: Greater than 0
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-269
+    - CWE-250
+    - CWE-798
+  - framework: NIST SP 800-53
+    controls:
+    - AC-6
+    - AU-2
+    - IA-2(1)
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.2
+relationships:
+  commonly_combined:
+  - security-trust.authorization.rbac-implementation
+  - security-trust.authorization.privilege-escalation
+  - security-trust.authentication.mfa-implementation

@@ -1,0 +1,380 @@
+# ============================================================
+# AUDIT: Build Artifact Generation
+# ============================================================
+# Evaluates how build artifacts are created, stored, and managed
+
+audit:
+  id: "devops-ci-cd.build-pipeline.build-artifact-generation"
+  name: "Build Artifact Generation"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "build-pipeline"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines how build artifacts are generated, versioned, signed,
+    stored, and made available for deployment. Includes analysis of
+    artifact naming conventions, versioning strategies, provenance
+    attestation, storage policies, and artifact promotion workflows.
+
+  why_it_matters: |
+    Build artifacts are the bridge between development and production.
+    Poor artifact management leads to deployment of wrong versions,
+    inability to rollback, security vulnerabilities from unsigned
+    artifacts, storage bloat, and compliance failures. Proper artifact
+    generation is essential for reliable, auditable deployments.
+
+  when_to_run:
+    - "Initial CI/CD audit"
+    - "Before compliance certifications"
+    - "After security incidents"
+    - "When implementing new deployment targets"
+
+prerequisites:
+  required_artifacts:
+    - type: "ci_configuration"
+      description: "CI/CD pipeline configuration"
+    - type: "artifact_repository"
+      description: "Access to artifact storage system"
+
+  access_requirements:
+    - "CI/CD pipeline configuration"
+    - "Artifact repository access"
+    - "Build signing configuration"
+
+discovery:
+  code_patterns:
+    - pattern: "upload-artifact|artifact:|artifacts:|publish"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify artifact upload steps"
+
+    - pattern: "docker push|docker build|buildx"
+      type: "regex"
+      scope: "config"
+      purpose: "Container image artifact generation"
+
+    - pattern: "npm publish|twine upload|cargo publish"
+      type: "regex"
+      scope: "config"
+      purpose: "Package publishing steps"
+
+  file_patterns:
+    - glob: "**/.github/workflows/*.yml"
+      purpose: "GitHub Actions artifact configuration"
+
+    - glob: "**/Dockerfile*"
+      purpose: "Container image definitions"
+
+    - glob: "**/.dockerignore"
+      purpose: "Docker build context exclusions"
+
+knowledge_sources:
+  specifications:
+    - id: "slsa"
+      name: "SLSA Framework"
+      url: "https://slsa.dev/"
+      offline_cache: true
+      priority: "required"
+    - id: "in-toto"
+      name: "in-toto Attestation Framework"
+      url: "https://in-toto.io/"
+      offline_cache: true
+      priority: "recommended"
+    - id: "nsa-cicd-security"
+      name: "NSA/CISA: Defending CI/CD Environments"
+      url: "https://media.defense.gov/2023/Jun/28/2003249466/-1/-1/0/CSI_DEFENDING_CI_CD_ENVIRONMENTS.PDF"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "sigstore"
+      name: "Sigstore Signing Guide"
+      url: "https://docs.sigstore.dev/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "cosign"
+      purpose: "Container image signing and verification"
+      offline_capable: true
+
+    - tool: "slsa-verifier"
+      purpose: "SLSA provenance verification"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "docker"
+      purpose: "Inspect container images and layers"
+      command: "docker inspect IMAGE"
+
+    - tool: "trivy"
+      purpose: "Scan artifacts for vulnerabilities"
+      command: "trivy image IMAGE"
+
+  scripts:
+    - id: "check-artifact-signing"
+      language: "bash"
+      purpose: "Verify artifact signing is configured"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        if grep -r 'cosign\|sigstore\|sign' .github/workflows/ 2>/dev/null; then
+          echo "PASS: Artifact signing configured"
+        else
+          echo "WARN: No artifact signing found"
+        fi
+
+signals:
+  critical:
+    - id: "CICD-ARTIFACT-CRIT-001"
+      signal: "Build artifacts not signed or verified"
+      evidence_pattern: "No cosign, GPG signing, or similar in CI configuration"
+      explanation: |
+        Unsigned artifacts cannot be verified as authentic, enabling
+        supply chain attacks where malicious artifacts replace legitimate
+        ones. SLSA Level 2+ requires artifact signing.
+      remediation: "Implement artifact signing using Sigstore/cosign or GPG"
+
+    - id: "CICD-ARTIFACT-CRIT-002"
+      signal: "No provenance attestation for artifacts"
+      evidence_pattern: "Missing SLSA provenance generation"
+      explanation: |
+        Without provenance, there's no verifiable record of how an
+        artifact was built, from what source, or by what process.
+        This is required for supply chain security.
+      remediation: "Generate SLSA provenance attestations for all artifacts"
+
+  high:
+    - id: "CICD-ARTIFACT-HIGH-001"
+      signal: "Artifacts use mutable tags like :latest"
+      evidence_pattern: "docker push.*:latest|tag: latest"
+      explanation: |
+        Mutable tags like :latest mean the same tag points to different
+        artifacts over time. This breaks reproducibility and makes
+        incident response difficult.
+      remediation: "Use immutable tags based on git SHA or semantic version"
+
+    - id: "CICD-ARTIFACT-HIGH-002"
+      signal: "No artifact retention policy"
+      evidence_pattern: "No retention configuration in artifact storage"
+      explanation: |
+        Without retention policies, artifact storage grows unbounded,
+        increasing costs and making it harder to identify relevant
+        artifacts.
+      remediation: "Configure retention policies based on release status"
+
+  medium:
+    - id: "CICD-ARTIFACT-MED-001"
+      signal: "Artifacts not scanned for vulnerabilities before storage"
+      evidence_pattern: "No trivy, grype, or vulnerability scanning step"
+      remediation: "Add vulnerability scanning before artifact publication"
+
+    - id: "CICD-ARTIFACT-MED-002"
+      signal: "Inconsistent artifact naming conventions"
+      remediation: "Establish and enforce artifact naming standards"
+
+  low:
+    - id: "CICD-ARTIFACT-LOW-001"
+      signal: "Build metadata not embedded in artifacts"
+
+    - id: "CICD-ARTIFACT-LOW-002"
+      signal: "Artifacts lack compression optimization"
+
+  positive:
+    - id: "CICD-ARTIFACT-POS-001"
+      signal: "All artifacts signed with verified keys"
+
+    - id: "CICD-ARTIFACT-POS-002"
+      signal: "SLSA Level 3 provenance generated"
+
+    - id: "CICD-ARTIFACT-POS-003"
+      signal: "Immutable artifact versioning enforced"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory artifact types"
+      description: |
+        Identify all artifact types produced by the build pipeline
+        (container images, packages, binaries, etc.).
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find artifact generation steps in CI"
+          command: |
+            grep -rE 'upload-artifact|docker push|npm publish|twine upload' .github/workflows/ .gitlab-ci.yml 2>/dev/null
+
+      expected_findings:
+        - "Complete list of artifact types produced"
+
+    - id: "2"
+      name: "Check artifact signing"
+      description: |
+        Verify that artifacts are signed and that signing
+        configuration is secure.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check for signing configuration"
+          command: |
+            grep -rE 'cosign|sigstore|gpg|sign' .github/workflows/ .gitlab-ci.yml 2>/dev/null || echo "No signing found"
+
+      expected_findings:
+        - "Signing status for each artifact type"
+
+    - id: "3"
+      name: "Verify provenance generation"
+      description: |
+        Check if SLSA provenance or equivalent attestations
+        are generated for artifacts.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for provenance generation"
+          command: |
+            grep -rE 'provenance|attest|slsa' .github/workflows/ .gitlab-ci.yml 2>/dev/null || echo "No provenance generation found"
+
+      expected_findings:
+        - "Provenance attestation status"
+
+    - id: "4"
+      name: "Review versioning strategy"
+      description: |
+        Analyze how artifacts are versioned and tagged.
+        Check for mutable vs immutable tagging.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check Docker tagging strategy"
+          command: |
+            grep -rE 'docker tag|tags:' .github/workflows/ Dockerfile* 2>/dev/null
+
+      expected_findings:
+        - "Versioning and tagging strategy assessment"
+
+    - id: "5"
+      name: "Assess artifact storage"
+      description: |
+        Review artifact storage configuration including
+        retention, access controls, and organization.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check artifact retention configuration"
+          command: |
+            grep -rE 'retention|expire|cleanup' .github/workflows/ .gitlab-ci.yml 2>/dev/null || echo "No retention config"
+
+      expected_findings:
+        - "Storage and retention policy status"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Artifact Inventory"
+        - "Security Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full artifact pipeline reviewed with signing verification"
+    medium: "Configuration reviewed, signing not verified end-to-end"
+    low: "Based on configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "slsa"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed artifact pipeline review"
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "build-artifact-generation-001"
+    item: "Artifacts are signed"
+    level: "CRITICAL"
+    verification: |
+      grep -rE 'cosign|sigstore|gpg.*sign' .github/workflows/ .gitlab-ci.yml 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "build-artifact-generation-002"
+    item: "Provenance attestations generated"
+    level: "CRITICAL"
+    verification: |
+      grep -rE 'provenance|slsa-github-generator|attest' .github/workflows/ 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "build-artifact-generation-003"
+    item: "No mutable tags like :latest used in production"
+    level: "BLOCKING"
+    verification: |
+      grep -rE 'push.*:latest|tag.*:latest' .github/workflows/ 2>/dev/null | grep -v '#' && echo "FAIL" || echo "PASS"
+    expected: "PASS"
+
+  - id: "build-artifact-generation-004"
+    item: "Vulnerability scanning before artifact storage"
+    level: "WARNING"
+    verification: |
+      grep -rE 'trivy|grype|snyk|vulnerability' .github/workflows/ 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SLSA"
+      controls: ["Build L2", "Build L3", "Provenance"]
+    - framework: "SSDF"
+      controls: ["PS.3.1", "PS.3.2"]
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC8.1"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.build-pipeline.build-reproducibility"
+    - "security.supply-chain.sbom-generation"

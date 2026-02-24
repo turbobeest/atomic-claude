@@ -1,0 +1,284 @@
+# ============================================================
+# AUDIT: Zero-Downtime Deployment Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.high-availability.zero-downtime-deployment"
+  name: "Zero-Downtime Deployment Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "high-availability"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Comprehensive evaluation of zero-downtime deployment capability
+    including database migration strategies, backward compatibility,
+    feature flags, blue-green or canary deployment patterns, connection
+    draining, and graceful shutdown. Verifies that deployments cause
+    no user-visible interruption.
+
+  why_it_matters: |
+    Zero-downtime deployment is essential for maintaining SLAs and user
+    experience during frequent releases. Deployments that cause outages
+    limit release frequency, require maintenance windows, and impact
+    customer trust. True zero-downtime requires coordination across
+    code, database, and infrastructure changes.
+
+  when_to_run:
+    - "Before moving to continuous deployment"
+    - "When evaluating deployment strategy changes"
+    - "After deployment-related incidents"
+    - "During production readiness review"
+
+prerequisites:
+  required_artifacts:
+    - type: "codebase"
+      description: "Application source code including migrations"
+    - type: "config"
+      description: "Deployment and CI/CD configuration"
+    - type: "documentation"
+      description: "Deployment procedures and runbooks"
+
+  access_requirements:
+    - "Source code repository access"
+    - "CI/CD pipeline configuration access"
+    - "Staging environment for deployment testing"
+
+discovery:
+  code_patterns:
+    - pattern: "migrate|migration|schema|alter\\s+table|add\\s+column"
+      type: "regex"
+      scope: "source"
+      purpose: "Find database migration files"
+    - pattern: "feature.*flag|toggle|LaunchDarkly|split\\.io"
+      type: "regex"
+      scope: "source"
+      purpose: "Find feature flag usage"
+
+  file_patterns:
+    - glob: "**/migrations/**/*.{sql,py,js}"
+      purpose: "Database migration files"
+    - glob: "**/k8s/**/*.yaml"
+      purpose: "Kubernetes deployment manifests"
+
+knowledge_sources:
+  guides:
+    - id: "expand-contract-pattern"
+      name: "Expand and Contract Pattern"
+      url: "https://martinfowler.com/bliki/ParallelChange.html"
+      offline_cache: true
+
+    - id: "blue-green-deployment"
+      name: "Blue-Green Deployment"
+      url: "https://martinfowler.com/bliki/BlueGreenDeployment.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Monitor deployment progress"
+      command: "kubectl rollout status deployment/<name>"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "rate(http_requests_total{status=~'5..'}[1m])"
+      purpose: "Detect errors during deployment"
+
+signals:
+  critical:
+    - id: "HA-ZD-CRIT-001"
+      signal: "Database migrations that lock tables or cause downtime"
+      evidence_pattern: "ALTER TABLE.*ADD COLUMN.*NOT NULL|DROP COLUMN|DROP TABLE"
+      explanation: |
+        Migrations that lock tables or break compatibility with running
+        code cause outages during deployment.
+      remediation: "Use expand-contract pattern: add nullable columns, backfill, then constrain"
+
+    - id: "HA-ZD-CRIT-002"
+      signal: "Breaking API changes deployed without versioning"
+      evidence_pattern: "Removed endpoints or changed response schemas without deprecation"
+      explanation: |
+        Breaking changes without versioning cause errors for clients
+        using the old API contract.
+      remediation: "Implement API versioning and deprecation process"
+
+  high:
+    - id: "HA-ZD-HIGH-001"
+      signal: "No backward compatibility between deployment versions"
+      explanation: "Mixed old/new versions during rolling update may cause errors"
+      remediation: "Ensure N and N-1 versions can operate together safely"
+
+    - id: "HA-ZD-HIGH-002"
+      signal: "Feature releases coupled to deployments without flags"
+      explanation: "Features cannot be gradually rolled out or quickly disabled"
+      remediation: "Use feature flags to decouple deployment from release"
+
+  medium:
+    - id: "HA-ZD-MED-001"
+      signal: "No canary or progressive rollout capability"
+      remediation: "Implement canary deployment to catch issues with limited blast radius"
+
+    - id: "HA-ZD-MED-002"
+      signal: "Deployment testing does not include traffic during migration"
+      remediation: "Test deployments under load to verify zero-downtime behavior"
+
+  low:
+    - id: "HA-ZD-LOW-001"
+      signal: "No deployment verification beyond health checks"
+
+  positive:
+    - id: "HA-ZD-POS-001"
+      signal: "Blue-green or canary deployment patterns implemented"
+    - id: "HA-ZD-POS-002"
+      signal: "Database migrations follow expand-contract pattern"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review Migration Strategy"
+      description: |
+        Examine database migration approach for zero-downtime compatibility.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find recent migrations"
+          command: "ls -la migrations/ | tail -20"
+        - purpose: "Check for dangerous patterns"
+          command: "grep -rn 'NOT NULL\\|DROP' migrations/"
+      expected_findings:
+        - "Migration patterns used"
+        - "Potential downtime-causing migrations"
+
+    - id: "2"
+      name: "Analyze Backward Compatibility"
+      description: |
+        Verify that code changes maintain compatibility during rolling updates.
+      duration_estimate: "45 min"
+      questions:
+        - "Can N-1 code work with N database schema?"
+        - "Can N code work with N-1 database schema?"
+        - "Are API contracts maintained during transition?"
+      expected_findings:
+        - "Compatibility analysis between versions"
+        - "Breaking change identification"
+
+    - id: "3"
+      name: "Evaluate Deployment Patterns"
+      description: |
+        Review deployment strategy for progressive rollout capability.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Check deployment strategy"
+          command: "grep -A15 'strategy:' k8s/deployment.yaml"
+      expected_findings:
+        - "Deployment pattern (rolling, blue-green, canary)"
+        - "Traffic shifting configuration"
+
+    - id: "4"
+      name: "Test Deployment Under Load"
+      description: |
+        Verify deployment behavior with active traffic (if staging available).
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Monitor error rate during deployment"
+          command: "Watch error metrics during staged deployment"
+      expected_findings:
+        - "Error rate during deployment"
+        - "Latency impact during deployment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Migration Strategy Assessment"
+        - "Backward Compatibility Analysis"
+        - "Deployment Pattern Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full code review with deployment testing under load"
+    medium: "Code and configuration review without live testing"
+    low: "Documentation and configuration review only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "expand-contract-pattern"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "zero-downtime-001"
+    item: "Database migrations follow expand-contract pattern"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review migration files for table-locking operations"
+    expected: "Confirmed by reviewer"
+
+  - id: "zero-downtime-002"
+    item: "N and N-1 versions can coexist during deployment"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify backward compatibility of recent changes"
+    expected: "Confirmed by reviewer"
+
+  - id: "zero-downtime-003"
+    item: "Deployment tested under load shows no errors"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review deployment test results or perform test"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC7.3"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.high-availability.rolling-deployment"
+    - "reliability-resilience.high-availability.load-balancer-configuration"

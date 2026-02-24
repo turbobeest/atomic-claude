@@ -1,0 +1,264 @@
+audit:
+  id: api-integration.api-design.url-design
+  name: URL Design Assessment
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: api-design
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - quick
+  parallelizable: true
+description:
+  what: |
+    Evaluates API URL structure for RESTful conventions, readability, and
+    consistency. Examines path segment naming, query parameter usage,
+    hierarchical relationships, URL length, and special character handling.
+  why_it_matters: |
+    Well-designed URLs are self-documenting, predictable, and enable proper
+    HTTP caching. Poor URL design leads to confusion, security issues from
+    query parameter abuse, and makes APIs harder to consume and maintain.
+  when_to_run:
+  - During API design reviews
+  - Before API documentation release
+  - When onboarding new API consumers
+prerequisites:
+  required_artifacts:
+  - type: api-source
+    description: API route definitions
+  access_requirements:
+  - Read access to API source code
+discovery:
+  code_patterns:
+  - pattern: '@(Get|Post|Put|Delete|Patch)Mapping\("[^"]+"'
+    type: regex
+    scope: source
+    purpose: Spring endpoint paths
+  - pattern: router\.(get|post|put|delete)\(['"][^'"]+['"]
+    type: regex
+    scope: source
+    purpose: Express/Node router paths
+  - pattern: '@app\.(get|post|put|delete)\([''"][^''"]+[''"]'
+    type: regex
+    scope: source
+    purpose: Flask/FastAPI paths
+  file_patterns:
+  - glob: '**/routes/**/*.{js,ts}'
+    purpose: Route definitions
+  - glob: '**/controllers/**/*.java'
+    purpose: Spring controllers
+  - glob: '**/*openapi*.{yaml,yml,json}'
+    purpose: OpenAPI specifications
+knowledge_sources:
+  specifications:
+  - id: rfc-3986
+    name: RFC 3986 - URI Generic Syntax
+    url: https://datatracker.ietf.org/doc/html/rfc3986
+    offline_cache: true
+    priority: required
+  - id: openapi-spec
+    name: OpenAPI Specification
+    url: https://spec.openapis.org/oas/latest.html
+    offline_cache: true
+    priority: recommended
+  - id: owasp-api-security
+    name: OWASP API Security Top 10
+    url: https://owasp.org/API-Security/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: api-url-design
+    name: Google API Design Guide - Resource Names
+    url: https://cloud.google.com/apis/design/resource_names
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: spectral
+    purpose: Lint OpenAPI URL patterns
+    offline_capable: true
+signals:
+  critical:
+  - id: URL-CRIT-001
+    signal: Sensitive data in URL path or query parameters
+    evidence_pattern: (password|token|secret|apikey|api_key)=[^&]+
+    explanation: |
+      URLs are logged, cached, and visible in browser history. Sensitive
+      data in URLs creates security vulnerabilities through log exposure,
+      referrer leakage, and browser history.
+    remediation: Move sensitive data to request headers or body
+  - id: URL-CRIT-002
+    signal: SQL-injectable patterns in URL structure
+    evidence_pattern: \?.*=(SELECT|INSERT|UPDATE|DELETE|DROP)
+    explanation: |
+      URLs accepting raw SQL or allowing query construction expose
+      the API to SQL injection attacks.
+    remediation: Parameterize queries, validate all URL inputs
+  high:
+  - id: URL-HIGH-001
+    signal: Verbs in URL paths instead of using HTTP methods
+    evidence_pattern: /(get|create|update|delete|fetch|save|add|remove)[A-Z_-]
+    explanation: |
+      URLs should identify resources, not actions. Verbs in URLs indicate
+      RPC-style design that doesn't leverage HTTP semantics properly.
+    remediation: 'Use HTTP methods for actions: POST /users instead of /createUser'
+  - id: URL-HIGH-002
+    signal: Inconsistent path segment casing
+    evidence_pattern: /[a-z]+[A-Z]|/[A-Z][a-z]+.*/
+    explanation: |
+      Mixed casing (camelCase, PascalCase, snake_case) in URL paths creates
+      confusion and potential 404 errors due to case sensitivity.
+    remediation: 'Standardize on lowercase with hyphens: /user-profiles'
+  medium:
+  - id: URL-MED-001
+    signal: Excessive URL length (>2000 characters)
+    evidence_pattern: url.*length.*>.*2000
+    remediation: Move complex queries to POST body, use pagination
+  - id: URL-MED-002
+    signal: File extensions in URLs (.json, .xml)
+    evidence_pattern: \.(json|xml|html)([?#]|$)
+    remediation: Use Accept header for content negotiation instead
+  low:
+  - id: URL-LOW-001
+    signal: Trailing slashes inconsistently handled
+    remediation: Configure URL normalization to handle trailing slashes consistently
+  positive:
+  - id: URL-POS-001
+    signal: Consistent lowercase-hyphen URL structure
+  - id: URL-POS-002
+    signal: Proper use of path for identification, query for filtering
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Extract All URL Patterns
+    description: |
+      Gather all endpoint URL patterns from route definitions.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Extract Spring endpoint URLs
+      command: grep -rEo '@(Get|Post|Put|Delete|Patch)Mapping\("[^"]+"' --include='*.java' . | grep -oE
+        '"[^"]+"'
+    - purpose: Extract Express route URLs
+      command: grep -rEo '\.(get|post|put|delete)\(['\''][^'\''"]+' --include='*.js' --include='*.ts'
+        .
+    - purpose: Extract OpenAPI paths
+      command: grep -E '^\s+/[a-zA-Z]' --include='*.yaml' --include='*.yml' . | head -50
+    expected_findings:
+    - Complete list of API URLs
+    - URL pattern variations
+  - id: '2'
+    name: Check for Security Issues
+    description: |
+      Identify sensitive data exposure in URLs.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find sensitive query parameters
+      command: grep -rEin '(password|token|secret|apikey|api_key|credential)\s*=' --include='*.java' --include='*.js'
+        --include='*.ts' .
+    - purpose: Check for inline credentials
+      command: grep -rn 'Authorization.*Basic.*http' --include='*.java' --include='*.js' --include='*.ts'
+        .
+    expected_findings:
+    - Sensitive data in URL patterns
+    - Hardcoded credentials in URLs
+  - id: '3'
+    name: Analyze Naming Conventions
+    description: |
+      Check URL segment naming for consistency.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find camelCase in URLs
+      command: grep -rEo '/[a-z]+[A-Z][a-zA-Z]*' --include='*.java' --include='*.js' --include='*.ts'
+        .
+    - purpose: Find verb-based URLs
+      command: grep -rEo '"/(get|create|update|delete|fetch|save|add|remove)[A-Za-z]+"' --include='*.java'
+        --include='*.js' --include='*.ts' .
+    expected_findings:
+    - Naming convention violations
+    - RPC-style URL patterns
+  - id: '4'
+    name: Evaluate URL Structure
+    description: |
+      Assess overall URL hierarchy and query parameter usage.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Count path segment depth
+      command: grep -rEo '"/[^"]+"' --include='*.java' --include='*.js' --include='*.ts' . | awk -F'/'
+        '{print NF-1, $0}' | sort -rn | head -10
+    - purpose: Find file extensions in URLs
+      command: grep -rEo '"[^"]+\.(json|xml|html)"' --include='*.java' --include='*.js' --include='*.ts'
+        .
+    expected_findings:
+    - URL depth analysis
+    - Extension usage patterns
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - URL Inventory
+    - Key Findings
+    - Recommendations
+  confidence_guidance:
+    high: Clear URL patterns extracted and analyzed
+    medium: Partial URL coverage
+    low: Limited route definitions found
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: rfc-3986
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: url-001
+  item: No sensitive data in URL parameters
+  level: CRITICAL
+  verification: |
+    if grep -rEiq '(password|token|secret|apikey)=' --include='*.java' --include='*.js' --include='*.ts' . 2>/dev/null; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: url-002
+  item: No verbs in URL paths
+  level: BLOCKING
+  verification: |
+    if grep -rEq '\"/(get|create|update|delete|fetch|save)[A-Z]' --include='*.java' --include='*.js' --include='*.ts' . 2>/dev/null; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: url-003
+  item: Consistent URL casing (lowercase-hyphen preferred)
+  level: WARNING
+  verification: manual
+  verification_notes: Reviewer confirms consistent casing across all endpoints
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - api-service
+    - microservice
+    - backend
+relationships:
+  commonly_combined:
+  - api-integration.api-design.rest-maturity-level
+  - api-integration.api-design.resource-modeling

@@ -1,0 +1,250 @@
+audit:
+  id: blockchain-distributed-ledger.smart-contract-quality.gas-optimization
+  name: Gas Optimization Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: blockchain-distributed-ledger
+  category_number: 41
+  subcategory: smart-contract-quality
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: software
+  default_profiles:
+  - full
+  - blockchain
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates smart contract gas efficiency to minimize
+    transaction costs and optimize execution. It examines:
+    - Storage vs. memory usage patterns
+    - Loop optimization and array handling
+    - Function visibility and call patterns
+    - State variable packing
+    - Unnecessary operations and redundant code
+    - Batch operation efficiency
+  why_it_matters: |
+    Gas optimization significantly impacts user experience:
+    - High gas costs deter users and reduce adoption
+    - Inefficient contracts waste user funds
+    - Storage operations are most expensive
+    - Poor optimization limits functionality
+    - L2 solutions still benefit from optimization
+
+    Well-optimized contracts provide better user experience.
+  when_to_run:
+  - Smart contract development
+  - Pre-deployment review
+  - Gas cost analysis
+  - Performance optimization
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Smart contract source code
+  - type: tests
+    description: Gas usage tests
+  access_requirements:
+  - Access to contract source
+  - Deployment cost targets
+discovery:
+  code_patterns:
+  - pattern: (storage|memory|calldata)
+    type: regex
+    scope: source
+    purpose: Detect data location
+  - pattern: for.*\+\+
+    type: regex
+    scope: source
+    purpose: Detect loops
+  - pattern: (public|external).*view
+    type: regex
+    scope: source
+    purpose: Detect view functions
+  file_patterns:
+  - glob: '**/*.sol'
+    purpose: Solidity contracts
+signals:
+  high:
+  - id: GAS-HIGH-001
+    signal: Storage in loops
+    evidence_indicators:
+    - SLOAD/SSTORE in loop body
+    - State variable read/write per iteration
+    - No caching of storage values
+    explanation: |
+      Storage operations are expensive (2100 gas cold, 100 warm).
+      Reading/writing storage in loops multiplies costs.
+    remediation: |
+      - Cache storage values in memory
+      - Batch storage updates
+      - Use memory for intermediate calculations
+      - Write to storage once after loop
+  - id: GAS-HIGH-002
+    signal: Unbounded loops
+    evidence_indicators:
+    - Loop over user-controlled array
+    - No iteration limit
+    - Gas limit denial of service possible
+    explanation: |
+      Unbounded loops can exceed block gas limits, making functions
+      uncallable. This can permanently break contracts.
+    remediation: |
+      - Add maximum iteration limits
+      - Use pagination for large arrays
+      - Implement batch processing
+      - Consider pull-over-push patterns
+  medium:
+  - id: GAS-MED-001
+    signal: State variable packing inefficient
+    evidence_indicators:
+    - Gaps in struct packing
+    - Variables not grouped by size
+    - Wasted storage slots
+    explanation: |
+      Storage slots are 32 bytes. Multiple smaller variables can
+      share slots if properly ordered.
+    remediation: |
+      - Group variables by size
+      - Pack structs efficiently
+      - Use smaller types where possible
+      - Review storage layout
+  - id: GAS-MED-002
+    signal: Redundant operations
+    evidence_indicators:
+    - Same computation repeated
+    - Unnecessary type conversions
+    - Dead code present
+    explanation: |
+      Redundant operations waste gas. Each opcode has a cost that
+      accumulates.
+    remediation: |
+      - Cache repeated computations
+      - Remove dead code
+      - Simplify expressions
+      - Use compiler optimizer
+  - id: GAS-MED-003
+    signal: Public instead of external
+    evidence_indicators:
+    - Public functions not called internally
+    - Calldata could replace memory
+    - Unnecessary parameter copying
+    explanation: |
+      External functions can use calldata directly, avoiding
+      memory copying. Public functions always copy to memory.
+    remediation: |
+      - Use external for non-internal calls
+      - Use calldata for array parameters
+      - Review function visibility
+      - Measure gas savings
+  low:
+  - id: GAS-LOW-001
+    signal: String vs. bytes32 usage
+    evidence_indicators:
+    - String for fixed-length data
+    - Dynamic string where bytes32 suffices
+    - Excessive string operations
+    explanation: |
+      bytes32 is much cheaper than string for fixed-length data.
+      Strings require dynamic memory allocation.
+    remediation: |
+      - Use bytes32 for fixed identifiers
+      - Use bytes for variable binary data
+      - Minimize string operations
+      - Consider off-chain string storage
+  - id: GAS-LOW-002
+    signal: Unoptimized events
+    evidence_indicators:
+    - Large data in non-indexed parameters
+    - Unnecessary event emissions
+    - Redundant event data
+    explanation: |
+      Events consume gas for each byte logged. Excessive or
+      redundant event data increases costs.
+    remediation: |
+      - Index frequently filtered parameters
+      - Minimize event payload size
+      - Remove redundant events
+      - Balance logging needs
+  positive:
+  - id: GAS-POS-001
+    signal: Well-optimized contract
+    evidence_indicators:
+    - Efficient storage patterns
+    - Bounded loops
+    - Appropriate data locations
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: performance-engineer
+  steps:
+  - id: '1'
+    name: Gas Optimization Review
+    description: |
+      Analyze gas usage patterns and optimization opportunities.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find storage patterns
+      command: |
+        grep -rniE "(storage|memory|calldata)" \
+          --include="*.sol" . 2>/dev/null | head -30
+    - purpose: Find loops
+      command: |
+        grep -rniE "for\s*\(|while\s*\(" \
+          --include="*.sol" . 2>/dev/null | head -20
+    expected_findings:
+    - Storage patterns
+    - Loop usage
+    - Optimization opportunities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Gas Analysis
+    - Optimization Opportunities
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    blockchain:
+      included: true
+      priority: 3
+closeout_checklist:
+- id: gas-001
+  item: No unbounded loops
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify all loops have bounds
+  expected: Confirmed by reviewer
+- id: gas-002
+  item: Storage optimized
+  level: WARNING
+  verification: manual
+  verification_notes: Verify storage patterns are efficient
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - blockchain
+    - defi
+    - token
+    - nft-platform
+relationships:
+  commonly_combined:
+  - blockchain.smart-contract-quality.code-complexity
+  - blockchain.smart-contract-security.integer-overflow-underflow
+  - blockchain.token-economic.token-standard-compliance

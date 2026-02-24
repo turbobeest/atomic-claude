@@ -1,0 +1,378 @@
+audit:
+  id: security-trust.cryptography.certificate-management
+  name: Certificate Management Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: cryptography
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines X.509 certificate management practices including certificate
+    validation, expiration handling, certificate authority trust, and
+    certificate lifecycle management. Verifies proper certificate validation,
+    chain verification, and automated renewal mechanisms.
+  why_it_matters: |
+    Certificate management failures cause service outages and security
+    vulnerabilities. CWE-295 (Improper Certificate Validation) and CWE-298
+    (Improper Validation of Certificate Expiration) are common weaknesses.
+    Expired certificates cause unplanned outages; improper validation enables
+    man-in-the-middle attacks.
+  when_to_run:
+  - Initial security assessment
+  - Before certificate renewals
+  - After TLS configuration changes
+  - When adding new services
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application with TLS/certificate usage
+  - type: configuration
+    description: Certificate and CA configuration
+  access_requirements:
+  - Read access to source code
+  - Access to certificate configuration
+  - Access to CA trust store configuration
+discovery:
+  code_patterns:
+  - pattern: (certificate|cert|Certificate)\.(load|parse|verify|validate)
+    type: regex
+    scope: source
+    purpose: Find certificate operations
+  - pattern: (CA|ca|CertificateAuthority|trust)
+    type: regex
+    scope: source
+    purpose: Locate CA trust configuration
+  - pattern: (expir|notAfter|notBefore|validity)
+    type: regex
+    scope: source
+    purpose: Find expiration handling
+  - pattern: (renew|refresh|rotate).*(cert|certificate)
+    type: regex
+    scope: source
+    purpose: Locate certificate renewal
+  - pattern: VERIFY_NONE|verify.*false|skip.*verify
+    type: regex
+    scope: source
+    purpose: Find disabled validation
+  file_patterns:
+  - glob: '**/*.crt'
+    purpose: Certificate files
+  - glob: '**/*.pem'
+    purpose: PEM certificate files
+  - glob: '**/certs/**'
+    purpose: Certificate directories
+  - glob: '**/ssl/**'
+    purpose: SSL configuration
+knowledge_sources:
+  specifications:
+  - id: rfc-5280
+    name: 'RFC 5280: X.509 Certificate Profile'
+    url: https://www.rfc-editor.org/rfc/rfc5280
+    offline_cache: true
+    priority: required
+  - id: cwe-295
+    name: 'CWE-295: Improper Certificate Validation'
+    url: https://cwe.mitre.org/data/definitions/295.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-tls
+    name: OWASP Transport Layer Security Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect certificate validation issues
+    offline_capable: true
+  infrastructure_tools:
+  - tool: openssl
+    purpose: Verify certificate configuration
+    command: openssl x509 -in cert.pem -text -noout
+  scripts:
+  - id: cert-search
+    language: bash
+    purpose: Find certificate patterns
+    source: inline
+    code: |
+      # Search for certificate-related patterns
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs}" \
+        -E "(certificate|cert|Certificate)" .
+signals:
+  critical:
+  - id: CERT-CRIT-001
+    signal: Certificate validation disabled
+    evidence_pattern: (VERIFY_NONE|verify.*false|rejectUnauthorized.*false|insecure)
+    cwe: CWE-295
+    explanation: |
+      Certificate validation is completely disabled, allowing any
+      certificate (including self-signed, expired, or forged) to be
+      accepted. This enables man-in-the-middle attacks.
+    remediation: Enable full certificate validation; use proper CA certificates
+  - id: CERT-CRIT-002
+    signal: Hostname verification disabled
+    evidence_pattern: (checkServerIdentity.*null|VERIFY_HOST.*false|verifyHostname.*false)
+    cwe: CWE-297
+    explanation: |
+      Certificate hostname verification is disabled, allowing a valid
+      certificate from one domain to be used for another.
+    remediation: Enable hostname verification on all TLS connections
+  - id: CERT-CRIT-003
+    signal: Expired certificate accepted
+    evidence_pattern: (allowExpired|ignoreExpir|skipExpiration)
+    cwe: CWE-298
+    explanation: |
+      Expired certificates are accepted, which may indicate compromised
+      keys or abandoned certificate management.
+    remediation: Reject expired certificates; implement renewal monitoring
+  high:
+  - id: CERT-HIGH-001
+    signal: Self-signed certificate in production
+    evidence_pattern: (self.?signed|selfSigned|allowInvalid).*true
+    cwe: CWE-295
+    explanation: |
+      Self-signed certificates don't provide identity verification
+      and can be easily forged by attackers.
+    remediation: Use certificates from trusted Certificate Authorities
+  - id: CERT-HIGH-002
+    signal: No certificate expiration monitoring
+    evidence_pattern: certificate(?!.*expir|.*monitor|.*alert|.*renew)
+    cwe: CWE-298
+    explanation: |
+      No monitoring for certificate expiration exists, risking
+      unexpected service outages when certificates expire.
+    remediation: Implement certificate expiration monitoring and alerting
+  - id: CERT-HIGH-003
+    signal: Certificate chain not validated
+    evidence_pattern: verify(?!.*chain)|chain.*(?!valid|verify)
+    cwe: CWE-296
+    explanation: |
+      Certificate chain validation is incomplete, potentially
+      accepting certificates with untrusted intermediate CAs.
+    remediation: Validate complete certificate chain to trusted root
+  medium:
+  - id: CERT-MED-001
+    signal: Hardcoded certificates
+    evidence_pattern: '-----BEGIN CERTIFICATE-----'
+    cwe: CWE-321
+    remediation: Load certificates from files or secrets manager
+  - id: CERT-MED-002
+    signal: Manual certificate renewal required
+    evidence_pattern: certificate(?!.*auto|.*renew|.*refresh)
+    cwe: CWE-324
+    remediation: Implement automated certificate renewal (Let's Encrypt, cert-manager)
+  low:
+  - id: CERT-LOW-001
+    signal: Certificate inventory not maintained
+    evidence_pattern: cert(?!.*inventory|.*list|.*catalog)
+    remediation: Maintain certificate inventory with expiration dates
+  positive:
+  - id: CERT-POS-001
+    signal: Automated certificate renewal
+    evidence_pattern: (certbot|letsencrypt|cert-manager|acme)
+  - id: CERT-POS-002
+    signal: Certificate expiration monitoring
+    evidence_pattern: (expir|notAfter).*(monitor|alert|check)
+  - id: CERT-POS-003
+    signal: Certificate pinning implemented
+    evidence_pattern: (pin|Pin|HPKP|pinning)
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Certificate Usage
+    description: |
+      Map all locations where certificates are loaded,
+      validated, or used for TLS.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find certificate loading
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(loadCertificate|readCert|parseCert|X509)" .
+    - purpose: Find certificate files
+      command: |
+        find . -type f \( -name "*.crt" -o -name "*.pem" -o -name "*.cer" \) 2>/dev/null
+    expected_findings:
+    - Certificate loading locations
+    - Certificate file inventory
+  - id: '2'
+    name: Analyze Certificate Validation
+    description: |
+      Verify that certificate validation is properly
+      implemented and not bypassed.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find validation configuration
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(verify|validate).*(cert|Certificate)" .
+    - purpose: Check for disabled validation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(VERIFY_NONE|verify.*false|rejectUnauthorized.*false)" .
+    expected_findings:
+    - Certificate validation enabled
+    - No validation bypass
+  - id: '3'
+    name: Review Expiration Handling
+    description: |
+      Check for certificate expiration monitoring
+      and renewal mechanisms.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find expiration handling
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(expir|notAfter|validity).*(cert|Certificate)" .
+    - purpose: Check for renewal automation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs,yaml,yml}" -E \
+          "(certbot|letsencrypt|cert-manager|acme|renew)" .
+    expected_findings:
+    - Expiration monitoring
+    - Automated renewal
+  - id: '4'
+    name: Check CA Trust Configuration
+    description: |
+      Verify proper CA trust store configuration
+      and chain validation.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find CA trust configuration
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(CA|ca|trustStore|caFile|caPath)" .
+    - purpose: Check chain validation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(chain|intermediate|root).*(cert|CA)" .
+    expected_findings:
+    - Proper CA trust configuration
+    - Chain validation enabled
+  - id: '5'
+    name: Audit Certificate Storage
+    description: |
+      Review how certificates and private keys
+      are stored and protected.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find certificate storage
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(store|save|persist).*(cert|Certificate)" .
+    - purpose: Check for private key protection
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(privateKey|private.?key|key.*file)" .
+    expected_findings:
+    - Secure certificate storage
+    - Protected private keys
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Certificate Validation Analysis
+    - Expiration Management
+    - Recommendations
+  confidence_guidance:
+    high: Full certificate validation with automated renewal
+    medium: Validation present but expiration concerns
+    low: Certificate patterns found but management unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: rfc-5280
+      priority: required
+    - source_id: owasp-tls
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cert-001
+  item: Certificate validation not disabled
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(VERIFY_NONE\|verify.*false\|rejectUnauthorized.*false)" . | wc -l
+  expected: '0'
+- id: cert-002
+  item: Hostname verification enabled
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(checkServerIdentity.*null\|verifyHostname.*false)" . | wc -l
+  expected: '0'
+- id: cert-003
+  item: Automated certificate renewal configured
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go,yaml,yml}" "(certbot\|letsencrypt\|cert-manager\|acme)" . | wc -l
+  expected: Greater than 0
+- id: cert-004
+  item: Certificate expiration monitoring exists
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(expir.*monitor\|monitor.*expir\|cert.*alert)" . | wc -l
+  expected: Greater than 0
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-295
+    - CWE-297
+    - CWE-298
+  - framework: NIST SP 800-52r2
+    controls:
+    - Certificate Management
+  - framework: RFC 5280
+    controls:
+    - X.509 Profile
+relationships:
+  commonly_combined:
+  - security-trust.cryptography.encryption-in-transit
+  - security-trust.cryptography.key-management
+  - security-trust.network-security.tls-configuration

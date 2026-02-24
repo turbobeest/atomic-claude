@@ -1,0 +1,371 @@
+# ============================================================
+# AUDIT: Integration Test Coverage
+# ============================================================
+# Evaluates the coverage and completeness of integration tests
+# across system boundaries.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.integration-testing.integration-test-coverage"
+  name: "Integration Test Coverage"
+  version: "1.0.0"
+  last_updated: "2026-01-22"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 26
+  subcategory: "integration-testing"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the coverage of integration tests that verify system
+    components work together correctly. Assesses coverage of service
+    boundaries, data flows between systems, component interactions,
+    and integration points with external dependencies.
+
+  why_it_matters: |
+    Integration bugs are among the most costly. Unit tests verify
+    components in isolation but miss interaction bugs. Integration
+    tests catch issues at boundaries where most production problems
+    occur: API mismatches, serialization bugs, timing issues, and
+    configuration drift.
+
+  when_to_run:
+    - "Pre-release validation"
+    - "After service interface changes"
+    - "New dependency integration"
+    - "CI/CD pipeline assessment"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Source code with integration tests"
+    - type: "architecture_docs"
+      description: "System architecture showing integration points"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Test environment access"
+    - "Integration test execution capability"
+
+discovery:
+  file_patterns:
+    - glob: "**/integration/**"
+      purpose: "Integration test directories"
+    - glob: "**/*.integration.{test,spec}.*"
+      purpose: "Integration test files"
+    - glob: "**/e2e/**"
+      purpose: "End-to-end test directories (often include integration)"
+
+  code_patterns:
+    - pattern: "@IntegrationTest|integration|Integration"
+      type: "regex"
+      scope: "test"
+      purpose: "Integration test markers"
+    - pattern: "testcontainers|docker-compose|localstack"
+      type: "regex"
+      scope: "test"
+      purpose: "Integration infrastructure"
+
+  metrics_queries:
+    - system: "SonarQube"
+      query: "component_measures?metricKeys=it_coverage"
+      purpose: "Integration test coverage"
+      threshold: ">= 70%"
+
+knowledge_sources:
+  guides:
+    - id: "integration-testing"
+      name: "Integration Testing Guide"
+      url: "https://martinfowler.com/bliki/IntegrationTest.html"
+      offline_cache: true
+    - id: "test-pyramid"
+      name: "The Practical Test Pyramid"
+      url: "https://martinfowler.com/articles/practical-test-pyramid.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "microservices-testing"
+      title: "Testing Microservices"
+      type: "article"
+      reference: "https://martinfowler.com/articles/microservice-testing/"
+
+tooling:
+  infrastructure_tools:
+    - tool: "Testcontainers"
+      purpose: "Docker-based test dependencies"
+      offline_capable: false
+    - tool: "LocalStack"
+      purpose: "AWS service emulation"
+      offline_capable: true
+    - tool: "WireMock"
+      purpose: "HTTP service mocking"
+      offline_capable: true
+
+  scripts:
+    - id: "integration-coverage"
+      language: "bash"
+      purpose: "Analyze integration test coverage"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Integration Test Coverage Analysis ==="
+
+        echo "Integration test files:"
+        find . -path '*integration*' -name '*.test.*' -o -name '*integration*.test.*' 2>/dev/null | wc -l
+
+        echo ""
+        echo "Services with integration tests:"
+        find . -path '*integration*' -name '*.test.*' 2>/dev/null | xargs -I{} dirname {} | sort -u
+
+        echo ""
+        echo "Testcontainers usage:"
+        grep -r 'testcontainers' --include='*.{js,ts,py,java}' . 2>/dev/null | wc -l
+
+signals:
+  critical:
+    - id: "INTCOV-CRIT-001"
+      signal: "No integration tests for critical service boundaries"
+      evidence_pattern: "Service APIs without integration test coverage"
+      explanation: |
+        Critical service boundaries without integration tests mean
+        component interactions are untested. Contract violations,
+        serialization bugs, and protocol mismatches will only be
+        discovered in production.
+      remediation: |
+        Add integration tests for all service boundaries:
+        1. Identify all external service integrations
+        2. Test happy path and error scenarios
+        3. Verify data serialization/deserialization
+        4. Test authentication/authorization at boundaries
+
+    - id: "INTCOV-CRIT-002"
+      signal: "Database integration untested"
+      evidence_pattern: "No tests verifying actual database operations"
+      explanation: |
+        ORM mappings, migrations, and queries may work in unit tests
+        with mocks but fail against real databases. Index issues,
+        constraint violations, and query performance problems hide
+        without real database tests.
+      remediation: |
+        Add database integration tests:
+        - Use test databases (Testcontainers recommended)
+        - Verify migration scripts
+        - Test complex queries with real data
+        - Check constraint enforcement
+
+  high:
+    - id: "INTCOV-HIGH-001"
+      signal: "External API integrations lack tests"
+      evidence_pattern: "Third-party API calls without integration coverage"
+      explanation: |
+        External API integrations fail in unique ways: rate limiting,
+        authentication changes, response format drift. Without tests,
+        these failures are discovered by users.
+      remediation: |
+        For each external API:
+        - Test authentication flow
+        - Test error response handling
+        - Verify timeout and retry logic
+        - Use contract tests or recorded responses
+
+    - id: "INTCOV-HIGH-002"
+      signal: "Message queue integrations untested"
+      evidence_pattern: "Pub/sub, event bus, or queue without integration tests"
+      explanation: |
+        Async messaging has unique failure modes: message loss,
+        ordering issues, poison messages. These are impossible to
+        catch without integration testing.
+      remediation: |
+        Test message queue integrations:
+        - Message serialization/deserialization
+        - Consumer error handling
+        - Dead letter queue behavior
+        - Message ordering when required
+
+  medium:
+    - id: "INTCOV-MED-001"
+      signal: "Cache integration untested"
+      evidence_pattern: "Redis/Memcached usage without integration tests"
+      remediation: "Test cache hit/miss scenarios with real cache instance"
+
+    - id: "INTCOV-MED-002"
+      signal: "File storage integration untested"
+      evidence_pattern: "S3/blob storage without integration coverage"
+      remediation: "Test upload, download, and error scenarios"
+
+  low:
+    - id: "INTCOV-LOW-001"
+      signal: "Logging/monitoring integrations untested"
+      evidence_pattern: "No verification of log format or metric emission"
+
+  positive:
+    - id: "INTCOV-POS-001"
+      signal: "All service boundaries have integration tests"
+      evidence_pattern: "Complete coverage of integration points"
+
+    - id: "INTCOV-POS-002"
+      signal: "Integration tests use realistic infrastructure"
+      evidence_pattern: "Testcontainers or similar for dependencies"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map integration points"
+      description: |
+        Identify all external dependencies and integration boundaries.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find external service calls"
+          command: "grep -r -l 'fetch\\|axios\\|HttpClient' --include='*.{js,ts,py,java}' . 2>/dev/null | head -20"
+        - purpose: "Find database connections"
+          command: "grep -r -l 'createConnection\\|connect\\|DataSource' --include='*.{js,ts,py,java}' . 2>/dev/null | head -20"
+      expected_findings:
+        - "List of integration points"
+        - "External dependency inventory"
+
+    - id: "2"
+      name: "Inventory integration tests"
+      description: |
+        Count and categorize existing integration tests.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find integration tests"
+          command: "find . -path '*integration*' -name '*.test.*' 2>/dev/null | wc -l"
+        - purpose: "Categorize by component"
+          command: "find . -path '*integration*' -name '*.test.*' 2>/dev/null | xargs -I{} dirname {} | sort | uniq -c"
+      expected_findings:
+        - "Integration test count"
+        - "Coverage by component"
+
+    - id: "3"
+      name: "Verify coverage alignment"
+      description: |
+        Check if integration tests exist for all identified integration points.
+      duration_estimate: "30 min"
+      questions:
+        - "Is each API endpoint integration tested?"
+        - "Are database operations tested against real DB?"
+        - "Are external service calls tested?"
+      expected_findings:
+        - "Coverage gaps"
+        - "Untested integration points"
+
+    - id: "4"
+      name: "Assess test infrastructure"
+      description: |
+        Evaluate integration test infrastructure maturity.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check for Testcontainers"
+          command: "grep -r 'testcontainers' . 2>/dev/null | head -10"
+        - purpose: "Check for docker-compose"
+          command: "find . -name 'docker-compose*.yml' -path '*test*' 2>/dev/null"
+      expected_findings:
+        - "Test infrastructure setup"
+        - "Dependency management approach"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "coverage_matrix"
+      format: "table"
+      sections:
+        - "Integration Points"
+        - "Test Coverage Status"
+        - "Infrastructure Assessment"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Coverage Analysis"
+        - "Gap Remediation Plan"
+
+  confidence_guidance:
+    high: "Systematic mapping and verification"
+    medium: "Sample-based analysis"
+    low: "Estimated from file patterns"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "integration-testing"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    production:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 5
+
+closeout_checklist:
+  - id: "intcov-001"
+    item: "Integration points mapped"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Document all external dependencies"
+    expected: "Confirmed by reviewer"
+
+  - id: "intcov-002"
+    item: "Test coverage assessed"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Match tests to integration points"
+    expected: "Confirmed by reviewer"
+
+  - id: "intcov-003"
+    item: "Gaps documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "List untested integration points"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Interoperability"]
+    - framework: "SOC2"
+      controls: ["CC7.1"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.integration-testing.api-integration-test"
+    - "testing-quality-assurance.integration-testing.database-integration-test"
+    - "testing-quality-assurance.integration-testing.contract-testing"

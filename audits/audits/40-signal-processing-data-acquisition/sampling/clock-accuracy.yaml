@@ -1,0 +1,306 @@
+audit:
+  id: signal-processing-data-acquisition.sampling.clock-accuracy
+  name: Clock Accuracy Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: sampling
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: hardware
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates sample clock accuracy, stability, and phase noise
+    characteristics that affect signal acquisition quality. It examines:
+    - Clock frequency accuracy and calibration
+    - Short-term stability (jitter, phase noise)
+    - Long-term stability (drift, aging)
+    - Clock source selection and distribution
+    - External reference synchronization
+    - Jitter impact on effective resolution
+  why_it_matters: |
+    Clock quality directly impacts measurement accuracy:
+    - Frequency accuracy affects timing and frequency measurements
+    - Jitter limits effective ADC resolution: SNR_jitter = -20*log(2*pi*f*tj)
+    - 1ns jitter at 10MHz signal limits SNR to ~24dB
+    - Clock drift causes timing errors in long acquisitions
+    - IEEE 1057 specifies clock requirements for waveform digitizers
+
+    Poor clock quality can negate the benefits of high-resolution ADCs
+    and make precision timing measurements impossible.
+  when_to_run:
+  - Signal acquisition system design
+  - After clock source changes
+  - Precision measurement applications
+  - System calibration reviews
+  - Long-duration acquisition planning
+prerequisites:
+  required_artifacts:
+  - type: schematic
+    description: Clock circuit schematic
+  - type: component_datasheet
+    description: Oscillator and clock buffer specifications
+  - type: requirements
+    description: Clock accuracy and stability requirements
+  access_requirements:
+  - Access to clock circuit documentation
+  - Test equipment for jitter measurement
+  - Phase noise analyzer access
+discovery:
+  code_patterns:
+  - pattern: (clock|clk|oscillator|xtal)_(source|config|freq)
+    type: regex
+    scope: source
+    purpose: Detect clock configuration
+  - pattern: (pll|phase_lock|vco)_(config|init)
+    type: regex
+    scope: source
+    purpose: Detect PLL configuration
+  - pattern: (jitter|phase_noise|stability)
+    type: regex
+    scope: source
+    purpose: Detect jitter considerations
+  - pattern: (tcxo|ocxo|mems)_(clock|osc)
+    type: regex
+    scope: source
+    purpose: Detect precision oscillator usage
+  file_patterns:
+  - glob: '**/clock*.{c,h,cpp,py}'
+    purpose: Clock configuration files
+  - glob: '**/pll*.{c,h,cpp}'
+    purpose: PLL configuration
+  - glob: '**/oscillator*.{c,h}'
+    purpose: Oscillator configuration
+knowledge_sources:
+  specifications:
+  - id: ieee-1057-timing
+    name: IEEE 1057 - Timing Requirements
+    url: https://standards.ieee.org/standard/1057-2017.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ti-clock-design
+    name: Texas Instruments Clock Design Guide
+    url: https://www.ti.com/lit/an/scaa120/scaa120.pdf
+    offline_cache: true
+  - id: analog-clock-jitter
+    name: Analog Devices Clock Jitter Analysis
+    url: https://www.analog.com/media/en/training-seminars/tutorials/MT-008.pdf
+    offline_cache: true
+signals:
+  critical:
+  - id: CLK-CRIT-001
+    signal: Clock jitter exceeds aperture limit for ADC resolution
+    evidence_indicators:
+    - RMS jitter > 1/(2^(N+1) * pi * fmax) where N is ADC bits
+    - SNR limited by jitter rather than quantization
+    - Effective number of bits (ENOB) reduced by jitter
+    explanation: |
+      Clock jitter creates aperture uncertainty that limits effective
+      resolution. For a 12-bit ADC at 10MHz input, jitter must be
+      < 1/(2^13 * pi * 10MHz) = 3.9ps RMS. Higher jitter reduces ENOB.
+    remediation: |
+      - Use low-jitter clock oscillator (TCXO or OCXO)
+      - Add clock buffer with low additive jitter
+      - Implement PLL-based clock conditioning
+      - Shield clock traces from noise sources
+    cwe: CWE-682
+  - id: CLK-CRIT-002
+    signal: Clock frequency accuracy exceeds measurement tolerance
+    evidence_indicators:
+    - Clock accuracy > measurement uncertainty budget
+    - No calibration for clock frequency
+    - Frequency measurements show systematic error
+    explanation: |
+      Clock frequency error directly translates to timing and frequency
+      measurement error. A 100ppm clock error causes 100ppm timing error.
+      For precision measurements, this may be the dominant error source.
+    remediation: |
+      - Use precision oscillator with specified accuracy
+      - Implement frequency calibration
+      - Synchronize to external reference (GPS, GPSDO)
+      - Document clock accuracy in measurement uncertainty
+    cwe: CWE-682
+  high:
+  - id: CLK-HIGH-001
+    signal: Clock distribution introduces jitter
+    evidence_indicators:
+    - Long clock traces without buffering
+    - Clock routed near switching circuits
+    - Missing clock distribution buffers
+    explanation: |
+      Poor clock distribution adds jitter through crosstalk, loading,
+      and impedance mismatches. Even excellent oscillator jitter can
+      be degraded by poor distribution to the ADC.
+    remediation: |
+      - Use dedicated clock distribution buffers
+      - Route clock away from switching circuits
+      - Match impedances and terminate clock traces
+      - Shield clock distribution from noise sources
+  - id: CLK-HIGH-002
+    signal: Clock drift affects long acquisition accuracy
+    evidence_indicators:
+    - Clock stability insufficient for acquisition duration
+    - Timing errors accumulate over long captures
+    - No compensation for temperature drift
+    explanation: |
+      Clock drift causes timing errors that accumulate over time.
+      For long acquisitions, drift of 10ppm causes 36ms error per
+      hour. Temperature variations accelerate drift in non-TCXO clocks.
+    remediation: |
+      - Use TCXO for temperature stability
+      - Implement drift compensation algorithms
+      - Synchronize to external reference periodically
+      - Limit acquisition duration for accuracy requirements
+  medium:
+  - id: CLK-MED-001
+    signal: Clock phase noise not characterized
+    evidence_indicators:
+    - No phase noise specification or measurement
+    - Clock quality assumed but not verified
+    - PLL configuration not optimized for phase noise
+    explanation: |
+      Phase noise characterizes clock quality at various offset
+      frequencies. Close-in phase noise affects narrowband signals;
+      broadband noise affects wideband signals differently.
+    remediation: |
+      - Measure or specify phase noise profile
+      - Optimize PLL bandwidth for phase noise requirements
+      - Select oscillator with appropriate phase noise
+      - Document phase noise in error analysis
+  - id: CLK-MED-002
+    signal: No external reference synchronization capability
+    evidence_indicators:
+    - No external clock input option
+    - Cannot synchronize to system reference
+    - Stand-alone clock without disciplining
+    explanation: |
+      External reference synchronization enables system-wide timing
+      coherence and access to high-quality references like GPS.
+      Without this capability, accuracy is limited to internal oscillator.
+    remediation: |
+      - Add external reference input capability
+      - Implement PLL to lock to external reference
+      - Consider GPSDO for precision applications
+      - Document synchronization requirements and options
+  low:
+  - id: CLK-LOW-001
+    signal: Clock specifications not documented
+    evidence_indicators:
+    - Oscillator selection rationale not recorded
+    - Jitter budget not allocated
+    - Clock requirements not specified
+    explanation: |
+      Without documentation, clock quality cannot be verified or
+      maintained. Component substitutions may inadvertently degrade
+      timing performance.
+    remediation: |
+      - Document clock requirements and selection rationale
+      - Specify jitter budget allocation
+      - Include clock in BOM with jitter specifications
+      - Add clock quality to verification procedures
+  positive:
+  - id: CLK-POS-001
+    signal: Well-designed clock system with appropriate accuracy
+    evidence_indicators:
+    - Oscillator jitter meets ADC aperture requirements
+    - Clock distribution maintains signal integrity
+    - Documented and characterized performance
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: timing-engineer
+  steps:
+  - id: '1'
+    name: Clock Configuration Review
+    description: |
+      Review clock source and distribution configuration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find clock configuration
+      command: |
+        grep -rniE "(clock|oscillator|pll|jitter)" \
+          --include="*.c" --include="*.h" . 2>/dev/null | head -30
+    expected_findings:
+    - Clock source configuration
+    - PLL settings if applicable
+    - Jitter specifications
+  - id: '2'
+    name: Jitter Budget Analysis
+    description: |
+      Analyze jitter budget against ADC requirements.
+    duration_estimate: 45 min
+    manual_verification: true
+    expected_findings:
+    - Oscillator jitter specification
+    - Distribution jitter contribution
+    - Total jitter vs. aperture requirement
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Clock System Analysis
+    - Jitter Budget Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: clk-001
+  item: Clock jitter meets ADC aperture requirements
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify jitter specification against ADC and signal frequency
+  expected: Confirmed by reviewer
+- id: clk-002
+  item: Clock frequency accuracy meets measurement requirements
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify clock accuracy is within measurement budget
+  expected: Confirmed by reviewer
+- id: clk-003
+  item: Clock stability adequate for acquisition duration
+  level: WARNING
+  verification: manual
+  verification_notes: Verify drift is acceptable for longest acquisition
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - scientific-instruments
+    - high-frequency-systems
+relationships:
+  commonly_combined:
+  - signal-processing.sampling.sampling-synchronization
+  - signal-processing.adc-dac.adc-resolution-adequacy
+  - signal-processing.data-integrity.timestamp-accuracy
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

@@ -1,0 +1,327 @@
+# ============================================================
+# AUDIT: Breaking Change Detection Assessment
+# ============================================================
+# Evaluates API breaking change detection and prevention mechanisms
+# ============================================================
+
+audit:
+  id: "api-integration.api-contracts.breaking-change-detection"
+
+  name: "Breaking Change Detection Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "api-contracts"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates mechanisms for detecting and preventing breaking API changes.
+    Examines schema diff tooling, CI/CD integration, change review processes,
+    and classification of changes as breaking vs non-breaking. Covers both
+    OpenAPI/JSON Schema and Protocol Buffer/gRPC changes.
+
+  why_it_matters: |
+    Undetected breaking changes cause production incidents, break client
+    integrations, and erode trust. Automated detection catches issues before
+    deployment. Understanding what constitutes a breaking change prevents
+    accidental backward-incompatible modifications.
+
+  when_to_run:
+    - "Before API deployments"
+    - "During PR reviews for API changes"
+    - "When setting up API governance"
+    - "After breaking change incidents"
+
+prerequisites:
+  required_artifacts:
+    - type: "api-spec"
+      description: "OpenAPI or Protocol Buffer specifications"
+    - type: "ci-config"
+      description: "CI/CD pipeline configurations"
+
+  access_requirements:
+    - "Read access to API specifications"
+    - "Read access to CI/CD configurations"
+    - "Access to API change history"
+
+discovery:
+  code_patterns:
+    - pattern: "openapi-diff|oasdiff|swagger-diff"
+      type: "regex"
+      scope: "config"
+      purpose: "OpenAPI diff tools"
+    - pattern: "buf breaking|buf-breaking|protobuf.*break"
+      type: "regex"
+      scope: "config"
+      purpose: "Protocol Buffer breaking change detection"
+    - pattern: "graphql-inspector|graphql.*break"
+      type: "regex"
+      scope: "config"
+      purpose: "GraphQL breaking change detection"
+    - pattern: "api.*break|breaking.*change|backward.*compat"
+      type: "regex"
+      scope: "config"
+      purpose: "Breaking change checks"
+
+  file_patterns:
+    - glob: "**/.github/workflows/*.{yml,yaml}"
+      purpose: "GitHub Actions workflows"
+    - glob: "**/buf.yaml"
+      purpose: "Buf configuration"
+    - glob: "**/.spectral.{yaml,yml,json}"
+      purpose: "Spectral configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "semver"
+      name: "Semantic Versioning"
+      url: "https://semver.org/"
+      offline_cache: true
+      priority: "required"
+    - id: "openapi-spec"
+      name: "OpenAPI Specification"
+      url: "https://spec.openapis.org/oas/latest.html"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "api-breaking-changes"
+      name: "OpenAPI Breaking Changes"
+      url: "https://oai.github.io/Documentation/oas-changes.html"
+      offline_cache: true
+    - id: "protobuf-compatibility"
+      name: "Protocol Buffers Wire Compatibility"
+      url: "https://protobuf.dev/programming-guides/compatibility/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "oasdiff"
+      purpose: "OpenAPI breaking change detection"
+      offline_capable: true
+    - tool: "buf"
+      purpose: "Protocol Buffer breaking change detection"
+      offline_capable: true
+    - tool: "graphql-inspector"
+      purpose: "GraphQL schema breaking changes"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "BREAK-CRIT-001"
+      signal: "No automated breaking change detection in CI/CD"
+      evidence_indicators:
+        - "No oasdiff, buf breaking, or similar in pipeline"
+        - "API specs can be changed without checks"
+      explanation: |
+        Without automated detection, breaking changes slip through review.
+        Developers may not recognize subtle breaking changes like adding
+        required fields or changing types.
+      remediation: "Add breaking change detection to CI/CD pipeline as a blocking check"
+
+    - id: "BREAK-CRIT-002"
+      signal: "Required field added to request schema"
+      evidence_pattern: "required.*\\[.*new_field|@NotNull.*new"
+      explanation: |
+        Adding required fields to requests breaks existing clients who don't
+        send them. This is one of the most common breaking changes.
+      remediation: "Add fields as optional; use defaults for server-side requirements"
+
+  high:
+    - id: "BREAK-HIGH-001"
+      signal: "Response field removed or made nullable"
+      evidence_pattern: "removed.*field|null.*true.*//.*was.*false"
+      explanation: |
+        Removing fields or making them nullable breaks clients that expect
+        them. Clients may throw NPE or fail validation.
+      remediation: "Deprecate fields before removal; never remove without major version"
+
+    - id: "BREAK-HIGH-002"
+      signal: "Endpoint path or method changed"
+      evidence_pattern: "renamed.*endpoint|moved.*to|changed.*path"
+      explanation: |
+        Changing endpoint paths or HTTP methods breaks all existing client
+        integrations immediately.
+      remediation: "Keep old endpoint as alias; use redirects or proxy"
+
+  medium:
+    - id: "BREAK-MED-001"
+      signal: "Enum values removed"
+      evidence_pattern: "enum.*removed|deprecated.*enum"
+      remediation: "Never remove enum values; deprecate and document"
+
+    - id: "BREAK-MED-002"
+      signal: "Response type changed (narrowing)"
+      evidence_pattern: "changed.*type|was.*anyOf.*now"
+      remediation: "Type changes require major version bump"
+
+  low:
+    - id: "BREAK-LOW-001"
+      signal: "No breaking change classification documented"
+      remediation: "Document what constitutes breaking vs non-breaking changes"
+
+  positive:
+    - id: "BREAK-POS-001"
+      signal: "Automated breaking change detection in CI/CD"
+    - id: "BREAK-POS-002"
+      signal: "Breaking changes require explicit approval"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Breaking Change Tooling"
+      description: |
+        Find tools configured for breaking change detection.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find oasdiff usage"
+          command: "grep -rn 'oasdiff\\|openapi-diff\\|swagger-diff' --include='*.yml' --include='*.yaml' --include='*.sh' ."
+        - purpose: "Find buf breaking"
+          command: "grep -rn 'buf.*breaking\\|breaking:' --include='*.yml' --include='*.yaml' --include='buf.yaml' ."
+        - purpose: "Find GraphQL inspector"
+          command: "grep -rn 'graphql-inspector\\|diff.*schema' --include='*.yml' --include='*.yaml' --include='package.json' ."
+      expected_findings:
+        - "Breaking change detection tools"
+        - "Tool configurations"
+
+    - id: "2"
+      name: "Check CI/CD Integration"
+      description: |
+        Verify breaking change checks run in the pipeline.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check GitHub Actions"
+          command: "grep -rn 'break\\|diff\\|api.*check' .github/workflows/*.yml 2>/dev/null || echo 'No GitHub Actions'"
+        - purpose: "Check other CI configs"
+          command: "grep -rn 'break\\|diff\\|api.*check' .gitlab-ci.yml Jenkinsfile azure-pipelines.yml 2>/dev/null || echo 'No other CI'"
+        - purpose: "Check for blocking enforcement"
+          command: "grep -rn 'fail.*on.*break\\|breaking.*error\\|--fail-on' --include='*.yml' --include='*.yaml' ."
+      expected_findings:
+        - "CI/CD breaking change stages"
+        - "Enforcement mechanism"
+
+    - id: "3"
+      name: "Analyze Recent API Changes"
+      description: |
+        Review recent commits for potential breaking changes.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find recent spec changes"
+          command: "git log --oneline -20 -- '*.yaml' '*.yml' '*.proto' '*.graphql' 2>/dev/null | head -10"
+        - purpose: "Check for breaking change commits"
+          command: "git log --oneline -50 2>/dev/null | grep -i 'break\\|remove\\|deprecat' | head -10"
+      expected_findings:
+        - "Recent API modifications"
+        - "Potential breaking changes"
+
+    - id: "4"
+      name: "Review Change Classification"
+      description: |
+        Check for documented breaking change guidelines.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find breaking change docs"
+          command: "find . -name '*BREAKING*' -o -name '*CHANGELOG*' -o -name '*MIGRATION*' 2>/dev/null | head -10"
+        - purpose: "Check for compatibility guidelines"
+          command: "grep -rn 'breaking.*change\\|backward.*compat\\|api.*compat' --include='*.md' ."
+      expected_findings:
+        - "Breaking change documentation"
+        - "Classification guidelines"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Detection Tooling Status"
+        - "Recent Change Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Tooling and processes thoroughly analyzed"
+    medium: "Partial tooling coverage found"
+    low: "Limited breaking change controls"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "semver"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires CI/CD and history analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "breaking-001"
+    item: "Breaking change detection tool is configured"
+    level: "CRITICAL"
+    verification: |
+      if grep -rq 'oasdiff\|buf.*breaking\|openapi-diff\|graphql-inspector' --include='*.yml' --include='*.yaml' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "breaking-002"
+    item: "Breaking change checks run in CI/CD"
+    level: "CRITICAL"
+    verification: |
+      if grep -rq 'break\|diff.*api\|api.*diff' .github/workflows/*.yml .gitlab-ci.yml 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "breaking-003"
+    item: "Breaking changes block deployment"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms breaking changes fail CI/CD pipeline"
+    expected: "Confirmed by reviewer"
+
+  - id: "breaking-004"
+    item: "Breaking change guidelines documented"
+    level: "WARNING"
+    verification: |
+      if find . -name '*BREAKING*' -o -name '*CHANGELOG*' 2>/dev/null | grep -q .; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["api-service", "microservice", "platform"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.api-contracts.contract-testing"
+    - "api-integration.versioning.versioning-strategy"
+    - "api-integration.versioning.deprecation-communication"

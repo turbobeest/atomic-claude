@@ -1,0 +1,300 @@
+# ============================================================
+# COMPOSITE ALERT AUDIT
+# ============================================================
+# Evaluates composite and multi-condition alerts that combine
+# multiple signals for more accurate incident detection.
+
+audit:
+  id: "observability-instrumentation.alerting.composite-alert"
+  name: "Composite Alert Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "observability-instrumentation"
+  category_number: 5
+  subcategory: "alerting"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Reviews composite alert configurations that combine multiple metrics,
+    conditions, or signals to create more accurate alerts. Examines
+    multi-condition logic, correlation-based alerts, and alert grouping.
+
+  why_it_matters: |
+    Single-metric alerts often generate false positives or miss complex
+    failure modes. Composite alerts that require multiple conditions reduce
+    noise while catching issues that single metrics miss. They better model
+    real-world failure scenarios that involve multiple symptoms.
+
+  when_to_run:
+    - "Alert accuracy review"
+    - "After false positive incidents"
+    - "When implementing new complex alerting"
+    - "Quarterly alerting optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "alert_rules"
+      description: "Alert rule configurations"
+    - type: "alert_history"
+      description: "Historical alert data"
+
+  access_requirements:
+    - "Alert rule configuration"
+    - "Alerting platform advanced features"
+    - "Cross-metric query access"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "alerts with multiple metrics"
+      purpose: "Find composite alert rules"
+      threshold: "Critical scenarios have composite alerts"
+
+  code_patterns:
+    - pattern: "and|or|unless|group_left|group_right"
+      type: "regex"
+      scope: "alert_rules"
+      purpose: "Identify multi-condition alerts"
+
+    - pattern: "vector.*vector|on\\s*\\(|ignoring\\s*\\("
+      type: "regex"
+      scope: "alert_rules"
+      purpose: "Identify metric correlations"
+
+  file_patterns:
+    - glob: "**/alerts*.yaml"
+      purpose: "Alert rule files"
+    - glob: "**/composite*.yaml"
+      purpose: "Composite alert definitions"
+
+knowledge_sources:
+  specifications:
+    - id: "promql-operators"
+      name: "PromQL Binary Operators"
+      url: "https://prometheus.io/docs/prometheus/latest/querying/operators/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "composite-alerts"
+      name: "Composite Alert Patterns"
+      url: "https://prometheus.io/docs/practices/alerting/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "promtool"
+      purpose: "Validate composite alert rules"
+      command: "promtool check rules /etc/prometheus/rules/composite-alerts.yaml"
+
+    - tool: "prometheus"
+      purpose: "Test composite queries"
+      command: "curl -s 'http://prometheus:9090/api/v1/query?query=rate(errors[5m])>0.01%20and%20rate(requests[5m])>100'"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "count(ALERTS{composite='true'})"
+      purpose: "Count composite alerts firing"
+
+signals:
+  critical:
+    - id: "COMPOSITE-CRIT-001"
+      signal: "No composite alerts for complex failure modes"
+      evidence_pattern: "All alerts are single-metric"
+      explanation: |
+        Complex failures often manifest across multiple metrics.
+        Single-metric alerts may fire for benign variations while
+        missing actual multi-faceted issues.
+      remediation: "Create composite alerts for critical failure scenarios"
+
+    - id: "COMPOSITE-CRIT-002"
+      signal: "Composite alert logic errors"
+      evidence_pattern: "Alert never fires or always fires"
+      explanation: |
+        Incorrect logic in composite alerts creates dangerous
+        blind spots or noise that undermines alerting effectiveness.
+      remediation: "Review and test composite alert logic"
+
+  high:
+    - id: "COMPOSITE-HIGH-001"
+      signal: "Overly complex composite conditions"
+      evidence_pattern: "More than 5 conditions in single alert"
+      explanation: |
+        Highly complex alerts are difficult to understand, debug,
+        and maintain. They may have logic errors and make
+        troubleshooting difficult.
+      remediation: "Simplify or split complex composite alerts"
+
+    - id: "COMPOSITE-HIGH-002"
+      signal: "Missing correlation alerts"
+      evidence_pattern: "Related symptoms not correlated"
+      explanation: |
+        Separate alerts for correlated symptoms create noise.
+        Correlating them provides clearer incident signals.
+      remediation: "Group related alerts with correlation logic"
+
+  medium:
+    - id: "COMPOSITE-MED-001"
+      signal: "Composite alerts not documented"
+      evidence_pattern: "Complex logic without explanation"
+      remediation: "Document composite alert rationale and logic"
+
+    - id: "COMPOSITE-MED-002"
+      signal: "Inhibition rules not used"
+      evidence_pattern: "Redundant alerts firing together"
+      remediation: "Add inhibition rules for dependent alerts"
+
+  low:
+    - id: "COMPOSITE-LOW-001"
+      signal: "No testing for composite alerts"
+      remediation: "Add unit tests for composite alert logic"
+
+  positive:
+    - id: "COMPOSITE-POS-001"
+      signal: "Well-designed composite alerts with clear logic"
+      evidence_pattern: "Composite alerts reduce noise while catching issues"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify composite alerts"
+      description: |
+        Find all alert rules that use multiple metrics,
+        conditions, or correlation logic.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find multi-metric alerts"
+          command: "kubectl get prometheusrules -A -o yaml | grep -B 5 -A 20 'and\\|or\\|unless\\|group_left'"
+        - purpose: "Count composite vs simple alerts"
+          command: "curl -s 'http://prometheus:9090/api/v1/rules' | jq '[.data.groups[].rules[] | select(.type==\"alerting\") | .query | test(\"and|or|unless\")] | [.[] | select(. == true)] | length'"
+
+      expected_findings:
+        - "Composite alert inventory"
+        - "Ratio of composite to simple alerts"
+
+    - id: "2"
+      name: "Review composite logic"
+      description: |
+        Examine composite alert logic for correctness,
+        clarity, and appropriate complexity.
+      duration_estimate: "50 min"
+
+      commands:
+        - purpose: "Extract composite alert queries"
+          command: "curl -s 'http://prometheus:9090/api/v1/rules' | jq '.data.groups[].rules[] | select(.type==\"alerting\" and (.query | test(\"and|or|unless\"))) | {name: .name, query: .query}'"
+
+      expected_findings:
+        - "Logic correctness"
+        - "Complexity assessment"
+
+    - id: "3"
+      name: "Test composite alerts"
+      description: |
+        Verify composite alerts fire correctly under
+        expected conditions.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Test composite query"
+          command: "curl -s 'http://prometheus:9090/api/v1/query?query=rate(http_errors_total[5m])>0.01%20and%20rate(http_requests_total[5m])>100'"
+
+      expected_findings:
+        - "Alert behavior verification"
+        - "Edge case handling"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Composite Alert Inventory"
+        - "Logic Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Logic review with runtime testing"
+    medium: "Configuration review with sample testing"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "promql-operators"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed logic review"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "composite-001"
+    item: "Composite alerts inventoried"
+    level: "CRITICAL"
+    verification: "manual"
+    expected: "All composite alerts documented"
+
+  - id: "composite-002"
+    item: "Logic correctness verified"
+    level: "BLOCKING"
+    verification: "manual"
+    expected: "Logic review complete"
+
+  - id: "composite-003"
+    item: "Test coverage adequate"
+    level: "WARNING"
+    verification: "manual"
+    expected: "Critical composites tested"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SRE Best Practices"
+      controls: ["Advanced Alerting"]
+
+relationships:
+  commonly_combined:
+    - "observability-instrumentation.alerting.alert-threshold"
+    - "observability-instrumentation.alerting.anomaly-detection"
+    - "observability-instrumentation.alerting.alert-fatigue"

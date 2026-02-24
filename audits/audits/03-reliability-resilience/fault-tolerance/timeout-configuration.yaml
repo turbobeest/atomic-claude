@@ -1,0 +1,364 @@
+audit:
+  id: reliability-resilience.fault-tolerance.timeout-configuration
+  name: Timeout Configuration Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: fault-tolerance
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: configuration
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates timeout configurations across all layers of the
+    system: HTTP clients, database connections, message queues, service calls,
+    and internal operations. It examines connection timeouts, read/write
+    timeouts, idle timeouts, and overall request timeouts. The audit verifies
+    timeouts are configured, appropriate for the operation, and consistent
+    across the call chain.
+  why_it_matters: |
+    Missing or misconfigured timeouts are the leading cause of cascade failures.
+    A missing timeout allows threads to block indefinitely on unresponsive
+    services, exhausting thread pools and causing system-wide hangs. Timeouts
+    that are too short cause false failures; too long wastes resources. Timeout
+    chains must be consistent: caller timeout should exceed callee timeout to
+    allow proper error handling.
+  when_to_run:
+  - During architecture design reviews
+  - When adding new dependencies
+  - After timeout-related incidents
+  - Quarterly reliability assessments
+prerequisites:
+  required_artifacts:
+  - type: source-code
+    description: Application source code for timeout analysis
+  - type: configuration
+    description: Application and infrastructure configurations
+  access_requirements:
+  - Read access to application source code
+  - Access to HTTP client configurations
+  - Access to database connection settings
+  - Access to service mesh configurations
+discovery:
+  code_patterns:
+  - pattern: timeout|Timeout|TIMEOUT
+    type: regex
+    scope: source
+    purpose: Timeout configuration points
+  - pattern: connectTimeout|connect_timeout|connection.*timeout
+    type: regex
+    scope: config
+    purpose: Connection timeout settings
+  - pattern: readTimeout|read_timeout|socket.*timeout
+    type: regex
+    scope: config
+    purpose: Read timeout settings
+  - pattern: writeTimeout|write_timeout
+    type: regex
+    scope: config
+    purpose: Write timeout settings
+  - pattern: requestTimeout|request_timeout|overall.*timeout
+    type: regex
+    scope: config
+    purpose: Overall request timeout settings
+  - pattern: idleTimeout|idle_timeout|keep.*alive
+    type: regex
+    scope: config
+    purpose: Idle connection timeout settings
+  file_patterns:
+  - glob: '**/src/**/*.{java,go,py,ts,js}'
+    purpose: Application source code
+  - glob: '**/config/**/*.{yaml,json,properties}'
+    purpose: Application configurations
+  - glob: '**/k8s/**/*.yaml'
+    purpose: Kubernetes service configurations
+  - glob: '**/istio/**/*.yaml'
+    purpose: Service mesh timeout configurations
+knowledge_sources:
+  specifications:
+  - id: istio-timeout
+    name: Istio Traffic Management - Timeouts
+    url: https://istio.io/latest/docs/concepts/traffic-management/#timeouts
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-timeout
+    name: AWS SDK Timeout Configuration
+    url: https://docs.aws.amazon.com/sdk-for-java/latest/developer-guide/configuration-client-timeout.html
+    offline_cache: true
+  - id: okhttp-timeout
+    name: OkHttp Timeouts
+    url: https://square.github.io/okhttp/recipes/#timeouts-kt-java
+    offline_cache: true
+  - id: postgres-timeout
+    name: PostgreSQL Timeout Settings
+    url: https://www.postgresql.org/docs/current/runtime-config-client.html
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  - id: sre-book
+    name: Site Reliability Engineering
+    url: https://sre.google/sre-book/table-of-contents/
+    offline_cache: true
+  learning_resources:
+  - id: release-it
+    title: Release It! Second Edition
+    type: book
+    reference: 'ISBN 978-1680502398 - Chapter 5: Timeouts'
+tooling:
+  static_analysis:
+  - tool: grep-analysis
+    purpose: Find timeout configurations
+    offline_capable: true
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: Check service mesh timeout settings
+    command: 'kubectl get virtualservices -A -o json | jq ''.items[] | {name: .metadata.name, timeout:
+      .spec.http[].timeout}'''
+  - tool: aws
+    purpose: Check load balancer timeout settings
+    command: aws elbv2 describe-load-balancer-attributes --load-balancer-arn ARN --query 'Attributes[?Key==`idle_timeout.timeout_seconds`]'
+  monitoring_queries:
+  - system: Prometheus
+    query: http_client_request_duration_seconds_bucket
+    purpose: Request duration distribution for timeout tuning
+signals:
+  critical:
+  - id: TOUT-CRIT-001
+    signal: No timeout configured for external service calls
+    evidence_pattern: httpClient.*timeout.*null|connect.*timeout.*0|read.*timeout.*-1
+    explanation: |
+      Missing timeouts allow threads to block indefinitely on unresponsive
+      external services. A single slow third-party API can exhaust all
+      available threads and cause complete system failure. Every external
+      call must have explicit timeouts.
+    remediation: Configure explicit connect, read, and overall timeouts for all external calls
+  - id: TOUT-CRIT-002
+    signal: Database connection without query timeout
+    evidence_pattern: statement_timeout.*0|query.*timeout.*null
+    explanation: |
+      Queries without timeouts can run indefinitely, consuming database
+      connections and blocking application threads. A single long-running
+      query can exhaust the connection pool. All database operations
+      should have query timeouts.
+    remediation: Configure statement_timeout or equivalent for all database connections
+  high:
+  - id: TOUT-HIGH-001
+    signal: Timeout longer than caller's timeout
+    evidence_pattern: downstream.*timeout.*60s.*upstream.*timeout.*30s
+    explanation: |
+      When a callee's timeout exceeds the caller's timeout, the caller
+      times out and retries while the callee is still processing. This
+      wastes resources and can cause duplicate processing. Timeout chains
+      should decrease as you go deeper.
+    remediation: Configure timeout chains where caller timeout > callee timeout + processing buffer
+  - id: TOUT-HIGH-002
+    signal: Connection timeout equals read timeout
+    evidence_pattern: connect.*timeout.*30s.*read.*timeout.*30s
+    explanation: |
+      Connection and read timeouts serve different purposes. Connection
+      timeout is for establishing a connection (typically 1-5 seconds).
+      Read timeout is for receiving a response (varies by operation).
+      Using the same value for both is usually incorrect.
+    remediation: Set connection timeout to 1-5 seconds, read timeout based on expected operation duration
+  - id: TOUT-HIGH-003
+    signal: Timeout too long for user-facing operations
+    evidence_pattern: request.*timeout.*120s|overall.*timeout.*300s
+    explanation: |
+      User-facing operations should have timeouts that align with user
+      expectations (typically 5-30 seconds). Longer timeouts waste user
+      time and resources. Background operations can have longer timeouts.
+    remediation: Configure user-facing timeouts to 5-30 seconds based on operation type
+  medium:
+  - id: TOUT-MED-001
+    signal: No idle connection timeout
+    explanation: |
+      Idle connections consume resources and may become stale. Idle
+      timeouts close unused connections and prevent issues with network
+      equipment that silently closes idle connections.
+    remediation: Configure idle connection timeouts (typically 60-300 seconds)
+  - id: TOUT-MED-002
+    signal: Timeout values hardcoded instead of configurable
+    explanation: |
+      Hardcoded timeouts cannot be adjusted without code changes.
+      Timeouts should be configurable to allow tuning based on
+      production behavior without deployment.
+    remediation: Externalize timeout configurations to config files or environment variables
+  - id: TOUT-MED-003
+    signal: No per-operation timeout customization
+    explanation: |
+      Different operations have different expected durations. A search
+      might take 5 seconds while a report might take 60 seconds. Using
+      a single timeout for all operations is suboptimal.
+    remediation: Configure operation-specific timeouts based on expected duration
+  low:
+  - id: TOUT-LOW-001
+    signal: Timeout configurations not documented
+    explanation: |
+      Documenting timeout values and rationale aids troubleshooting
+      and prevents inappropriate changes.
+  positive:
+  - id: TOUT-POS-001
+    signal: All external calls have explicit timeouts
+  - id: TOUT-POS-002
+    signal: Timeout chain properly configured (caller > callee)
+  - id: TOUT-POS-003
+    signal: Timeouts externalized and configurable
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory timeout configurations
+    description: |
+      Catalog all timeout configurations across the system including
+      HTTP clients, databases, and internal operations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find timeout configurations in code
+      command: |
+        grep -r "timeout\|Timeout" --include="*.java" --include="*.go" --include="*.py" --include="*.yaml" --include="*.properties" src/ config/
+    - purpose: Find HTTP client configurations
+      command: |
+        grep -r "HttpClient\|RestTemplate\|OkHttp\|axios" --include="*.java" --include="*.ts" --include="*.js" src/
+    expected_findings:
+    - Timeout configuration inventory
+    - Missing timeout configurations
+  - id: '2'
+    name: Verify connection timeouts
+    description: |
+      Check that connection timeouts are configured appropriately
+      for all external connections.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find connection timeout settings
+      command: |
+        grep -r "connectTimeout\|connect_timeout\|connection.*timeout" --include="*.yaml" --include="*.properties" --include="*.json" config/
+    expected_findings:
+    - Connection timeout values
+    - Missing connection timeouts
+  - id: '3'
+    name: Verify read/write timeouts
+    description: |
+      Check that read and write timeouts are configured for all
+      network operations.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find read/write timeout settings
+      command: |
+        grep -r "readTimeout\|writeTimeout\|read_timeout\|write_timeout\|socket.*timeout" --include="*.yaml" --include="*.properties" config/
+    expected_findings:
+    - Read/write timeout values
+    - Missing read/write timeouts
+  - id: '4'
+    name: Analyze timeout chains
+    description: |
+      Map the call chain and verify timeout values decrease as
+      you go deeper in the call stack.
+    duration_estimate: 30 min
+    questions:
+    - What is the timeout at each layer of the call chain?
+    - Does the caller timeout exceed callee timeout?
+    - Is there buffer time for processing?
+    expected_findings:
+    - Timeout chain mapping
+    - Chain consistency issues
+  - id: '5'
+    name: Review database timeouts
+    description: |
+      Verify database connection and query timeouts are configured
+      appropriately.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check database timeout settings
+      command: |
+        grep -r "statement_timeout\|query_timeout\|lock_timeout\|connectTimeout" --include="*.yaml" --include="*.properties" config/
+    expected_findings:
+    - Database timeout configuration
+    - Missing query timeouts
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Timeout Configuration Inventory
+    - Timeout Chain Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Configuration review with latency metrics
+    medium: Configuration review only
+    low: Partial configuration review
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: istio-timeout
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: tout-001
+  item: All external service calls have explicit timeouts
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify connect, read, and overall timeouts for HTTP clients
+  expected: Confirmed by reviewer
+- id: tout-002
+  item: Database queries have timeout configured
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify statement_timeout or equivalent is set
+  expected: Confirmed by reviewer
+- id: tout-003
+  item: Timeout chains are consistent (caller > callee)
+  level: BLOCKING
+  verification: manual
+  verification_notes: Map timeout chain and verify decreasing values
+  expected: Confirmed by reviewer
+- id: tout-004
+  item: Timeouts externalized and configurable
+  level: WARNING
+  verification: manual
+  verification_notes: Verify timeouts can be changed without code changes
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.fault-tolerance.circuit-breaker
+  - reliability-resilience.fault-tolerance.retry-policy
+  - reliability-resilience.fault-tolerance.bulkhead-pattern

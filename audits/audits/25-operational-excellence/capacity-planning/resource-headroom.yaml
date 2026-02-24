@@ -1,0 +1,386 @@
+audit:
+  id: operational-excellence.capacity-planning.resource-headroom
+  name: Resource Headroom Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: operational-excellence
+  category_number: 25
+  subcategory: capacity-planning
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines resource headroom practices including:
+    - Headroom targets by resource type
+    - Current utilization vs headroom targets
+    - Headroom monitoring and alerting
+    - Burst capacity availability
+    - Headroom policies and standards
+    - Seasonal headroom adjustments
+    - N+1 redundancy for critical resources
+    - Headroom compliance tracking
+  why_it_matters: |
+    Adequate headroom prevents capacity emergencies:
+    - Traffic spikes can exceed normal capacity
+    - Headroom absorbs unexpected demand
+    - Insufficient headroom causes degradation under load
+    - Headroom enables graceful handling of failures
+
+    Google SRE recommends maintaining 50% headroom for critical
+    services to handle traffic spikes and instance failures.
+    Running at high utilization leaves no room for variability.
+  when_to_run:
+  - Monthly capacity reviews
+  - Before peak traffic periods
+  - After capacity incidents
+  - When utilization increases
+  - During budget planning
+prerequisites:
+  required_artifacts:
+  - type: utilization_data
+    description: Current resource utilization metrics
+  - type: headroom_policy
+    description: Headroom standards documentation
+  - type: alerting_config
+    description: Capacity alerting configurations
+  access_requirements:
+  - Resource utilization metrics
+  - Headroom policy documentation
+  - Alerting configuration access
+  - Capacity dashboards
+discovery:
+  code_patterns:
+  - pattern: (headroom|buffer|spare|reserve).*(capacity|resource)
+    type: regex
+    scope: docs
+    purpose: Detect headroom documentation
+  - pattern: (utilization|usage).*(target|threshold|limit)
+    type: regex
+    scope: config
+    purpose: Detect utilization thresholds
+  file_patterns:
+  - glob: '**/capacity*/**/*.{md,yaml,yml}'
+    purpose: Capacity documentation
+  - glob: '**/alerts/**/*.yaml'
+    purpose: Alert configurations
+knowledge_sources:
+  specifications:
+  - id: google-sre-capacity
+    name: Google SRE - Capacity Planning
+    url: https://sre.google/workbook/non-abstract-design/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: headroom-practices
+    name: Resource Headroom Best Practices
+    url: https://cloud.google.com/architecture/framework/reliability
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: prometheus
+    purpose: Utilization metrics
+    command: promql rate(cpu_usage[5m])
+  - tool: cloudwatch
+    purpose: AWS utilization metrics
+    command: aws cloudwatch get-metric-statistics
+  scripts:
+  - id: headroom-scanner
+    language: bash
+    purpose: Find headroom configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Resource Headroom Configuration Scan ==="
+      grep -rniE "(headroom|buffer|utilization|threshold)" \
+        --include="*.yaml" --include="*.md" . 2>/dev/null | head -30
+signals:
+  critical:
+  - id: RH-CRIT-001
+    signal: Resources running at high utilization with no headroom
+    evidence_indicators:
+    - Sustained utilization >80%
+    - No burst capacity available
+    - Capacity alerts frequently firing
+    explanation: |
+      High utilization leaves no room for traffic spikes or failures.
+      Google SRE recommends 50% headroom for critical services.
+      Running at 80%+ means any spike causes degradation.
+    remediation: |
+      - Add capacity immediately
+      - Enable autoscaling with headroom
+      - Reduce load through optimization
+      - Implement load shedding
+      - Plan capacity increase
+  - id: RH-CRIT-002
+    signal: No headroom policy or targets
+    evidence_indicators:
+    - No headroom standards defined
+    - No utilization targets
+    - Headroom management ad-hoc
+    explanation: |
+      Without headroom policies, teams run at varying utilization
+      levels with inconsistent risk profiles. Standards ensure
+      consistent capacity management.
+    remediation: |
+      - Define headroom targets by criticality
+      - Document headroom policies
+      - Set utilization thresholds
+      - Configure headroom alerts
+      - Enforce policy compliance
+  high:
+  - id: RH-HIGH-001
+    signal: No headroom monitoring or alerting
+    evidence_indicators:
+    - Utilization not monitored continuously
+    - No alerts for approaching limits
+    - Capacity issues discovered reactively
+    explanation: |
+      Monitoring enables proactive headroom management. Without
+      alerts, teams learn about capacity issues during incidents
+      rather than before.
+    remediation: |
+      - Implement utilization monitoring
+      - Configure threshold alerts
+      - Create headroom dashboards
+      - Set warning and critical thresholds
+      - Enable trend alerting
+  - id: RH-HIGH-002
+    signal: Headroom insufficient for N+1 failure
+    evidence_indicators:
+    - Instance failure would exceed capacity
+    - No redundancy headroom calculated
+    - Failure scenarios not modeled
+    explanation: |
+      Critical services need headroom to handle instance failures.
+      If losing one instance exceeds remaining capacity, failures
+      cascade into outages.
+    remediation: |
+      - Model N+1 failure scenarios
+      - Include failure headroom in targets
+      - Test with simulated failures
+      - Document failure assumptions
+      - Size for failure tolerance
+  medium:
+  - id: RH-MED-001
+    signal: Headroom not adjusted for known events
+    evidence_indicators:
+    - Peak events hit limits
+    - No pre-event capacity increase
+    - Seasonal patterns not accommodated
+    explanation: |
+      Known events (holidays, sales, launches) require additional
+      headroom. Static headroom insufficient for predictable spikes.
+    remediation: |
+      - Plan headroom for known events
+      - Pre-scale before peaks
+      - Adjust seasonal baselines
+      - Create event capacity playbooks
+      - Monitor event capacity
+  - id: RH-MED-002
+    signal: Inconsistent headroom across services
+    evidence_indicators:
+    - Some services at 90%, others at 50%
+    - No tiered headroom standards
+    - Critical services not differentiated
+    explanation: |
+      Critical services need more headroom than less critical ones.
+      Inconsistent headroom creates uneven risk profiles across
+      the system.
+    remediation: |
+      - Tier services by criticality
+      - Set headroom targets per tier
+      - Prioritize critical service headroom
+      - Document tiering rationale
+      - Enforce tiered standards
+  low:
+  - id: RH-LOW-001
+    signal: Headroom compliance not tracked
+    evidence_indicators:
+    - Headroom violations unknown
+    - No compliance reporting
+    - Trends not analyzed
+    explanation: |
+      Tracking compliance identifies systematic issues and enables
+      improvement. Without tracking, headroom violations persist.
+    remediation: |
+      - Track headroom compliance
+      - Report violations
+      - Analyze trends
+      - Set improvement targets
+      - Review in capacity meetings
+  positive:
+  - id: RH-POS-001
+    signal: Appropriate headroom maintained with monitoring
+    evidence_indicators:
+    - Utilization targets met
+    - Headroom alerts configured
+    - N+1 failure tolerance verified
+  - id: RH-POS-002
+    signal: Dynamic headroom management
+    evidence_indicators:
+    - Event-based headroom adjustment
+    - Autoscaling with headroom targets
+    - Tiered headroom standards
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Policy and Target Review
+    description: |
+      Examine headroom policies and targets.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find headroom documentation
+      command: |
+        find . -type f \( -name "*headroom*" -o -name "*capacity*" \) \
+          -name "*.md" 2>/dev/null | head -20
+    - purpose: Search for utilization targets
+      command: |
+        grep -rniE "(headroom|utilization).*(target|threshold|policy)" \
+          --include="*.md" --include="*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Headroom policies
+    - Utilization targets
+    - Standards documentation
+  - id: '2'
+    name: Current Utilization Assessment
+    description: |
+      Review current resource utilization against targets.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find utilization configurations
+      command: |
+        grep -rniE "(utilization|usage|cpu|memory)" \
+          --include="*alert*.yaml" --include="*dashboard*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Utilization metrics
+    - Alert thresholds
+    - Dashboard configurations
+  - id: '3'
+    name: Alerting Configuration Review
+    description: |
+      Assess headroom alerting setup.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find capacity alerts
+      command: |
+        grep -rniE "(capacity|utilization|headroom).*(alert|warning)" \
+          --include="*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Alert definitions
+    - Threshold values
+    - Alert routing
+  - id: '4'
+    name: Failure Tolerance Review
+    description: |
+      Evaluate N+1 failure headroom.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find redundancy configurations
+      command: |
+        grep -rniE "(replica|instance|redundan|failover|n\\+1)" \
+          --include="*.yaml" --include="*.md" . 2>/dev/null | head -30
+    expected_findings:
+    - Replica counts
+    - Failure assumptions
+    - Redundancy configuration
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Policy Assessment
+    - Current State Analysis
+    - Alerting Review
+    - Recommendations
+  - type: headroom_report
+    format: table
+    description: Resources and their headroom status
+  confidence_guidance:
+    high: Utilization data and policies available
+    medium: Some metrics, policies inferred
+    low: Headroom status unclear, runtime verification needed
+offline:
+  capability: partial
+  runtime_required_for:
+  - Current utilization measurement
+  - Headroom calculation
+  - Alert verification
+  cache_manifest:
+    knowledge:
+    - source_id: google-sre-capacity
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Headroom audit requires utilization analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: rh-001
+  item: Headroom targets are defined
+  level: CRITICAL
+  verification: |
+    grep -rniE "(headroom|utilization).*(target|threshold)" \
+      --include="*.md" --include="*.yaml" . 2>/dev/null | wc -l | \
+      xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: rh-002
+  item: Current utilization meets targets
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify utilization within headroom targets
+  expected: Confirmed by reviewer
+- id: rh-003
+  item: Headroom alerting configured
+  level: BLOCKING
+  verification: |
+    grep -rniE "(capacity|utilization).*(alert)" \
+      --include="*.yaml" . 2>/dev/null | wc -l | \
+      xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: rh-004
+  item: N+1 failure tolerance verified
+  level: WARNING
+  verification: manual
+  verification_notes: Verify services can handle instance failure
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - A1.2
+  - framework: ITIL 4
+    controls:
+    - Capacity Management
+relationships:
+  commonly_combined:
+  - operational-excellence.capacity-planning.capacity-forecasting
+  - operational-excellence.capacity-planning.scaling-triggers
+  - operational-excellence.service-level-management.slo-definition

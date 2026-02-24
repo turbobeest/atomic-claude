@@ -1,0 +1,371 @@
+audit:
+  id: reliability-resilience.resilience-testing.network-partition-handling
+  name: Network Partition Handling Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: resilience-testing
+  tier: phd
+  estimated_duration: 5 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: true
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: true
+  parallelizable: false
+description:
+  what: |
+    This audit assesses how distributed systems behave during network partitions,
+    including split-brain scenarios, asymmetric partitions, and partial network
+    failures. It validates that systems make appropriate CAP theorem tradeoffs,
+    maintain data consistency or availability as designed, and recover correctly
+    when partitions heal.
+  why_it_matters: |
+    Network partitions are inevitable in distributed systems. Systems that are
+    not tested for partition tolerance can experience data loss, inconsistency,
+    or complete unavailability during network issues. The CAP theorem states
+    that systems must choose between consistency and availability during
+    partitions - this audit verifies that choice is intentional and correct.
+  when_to_run:
+  - Before deploying to multi-region or multi-zone architectures
+  - When implementing distributed consensus or coordination
+  - Quarterly for systems with strong consistency requirements
+  - After incidents involving network failures
+prerequisites:
+  required_artifacts:
+  - type: network-architecture
+    description: Network topology and zone/region layout
+  - type: consistency-requirements
+    description: Documented CAP/PACELC tradeoff decisions
+  - type: partition-experiments
+    description: Network partition chaos experiments
+  access_requirements:
+  - Access to network chaos tools (iptables, tc, Chaos Mesh)
+  - Read access to distributed system configurations
+  - Access to consistency verification tooling
+discovery:
+  code_patterns:
+  - pattern: partition|split.*brain|quorum|consensus
+    type: regex
+    scope: source
+    purpose: Identify partition-handling code
+  - pattern: raft|paxos|zab|gossip
+    type: keyword
+    scope: source
+    purpose: Find consensus protocol implementations
+  - pattern: network.*chaos|partition.*test|iptables
+    type: regex
+    scope: config
+    purpose: Find network partition experiments
+  file_patterns:
+  - glob: '**/chaos/network/**/*.yaml'
+    purpose: Network chaos experiment definitions
+  - glob: '**/partition/**/*'
+    purpose: Partition handling configurations
+  - glob: '**/consensus/**/*'
+    purpose: Consensus protocol configurations
+  documents_to_review:
+  - type: CAP theorem analysis
+    purpose: Understand consistency vs availability tradeoffs
+  - type: Data consistency requirements
+    purpose: Identify what consistency level is required
+  - type: Network partition runbooks
+    purpose: Documented procedures for partition scenarios
+knowledge_sources:
+  specifications:
+  - id: jepsen-testing
+    name: 'Jepsen: Distributed Systems Safety Research'
+    url: https://jepsen.io/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: chaos-mesh-network
+    name: Chaos Mesh Network Chaos
+    url: https://chaos-mesh.org/docs/simulate-network-chaos-on-kubernetes/
+    offline_cache: true
+  - id: gremlin-network-attacks
+    name: Gremlin Network Attacks
+    url: https://www.gremlin.com/docs/attacks/network/
+    offline_cache: true
+  papers:
+  - id: cap-theorem
+    title: 'CAP Twelve Years Later: How the ''Rules'' Have Changed'
+    url: https://www.infoq.com/articles/cap-twelve-years-later-how-the-rules-have-changed/
+  - id: pacelc
+    title: 'PACELC: Consistency and Availability Trade-off'
+    url: http://cs-www.cs.yale.edu/homes/dna/papers/abadi-pacelc.pdf
+  learning_resources:
+  - id: designing-data-intensive
+    title: Designing Data-Intensive Applications
+    type: book
+    reference: 'ISBN: 978-1449373320'
+tooling:
+  infrastructure_tools:
+  - tool: Chaos Mesh
+    purpose: Kubernetes network partitions
+    command: kubectl apply -f network-partition-chaos.yaml
+  - tool: iptables
+    purpose: Linux-level network blocking
+    command: iptables -A INPUT -s 10.0.1.0/24 -j DROP
+  - tool: tc (traffic control)
+    purpose: Network delay and packet loss
+    command: tc qdisc add dev eth0 root netem delay 100ms loss 10%
+  - tool: Jepsen
+    purpose: Distributed systems correctness testing
+    command: lein run test --nodes n1,n2,n3 --nemesis partition
+  monitoring_queries:
+  - system: Prometheus
+    query: sum(increase(raft_leader_elections_total[1h])) by (cluster)
+    purpose: Track leader elections during partitions
+    threshold: Minimal elections during normal operation
+  - system: Prometheus
+    query: sum(etcd_server_has_leader) by (cluster)
+    purpose: Monitor quorum health
+    threshold: Should always have leader in healthy state
+  scripts:
+  - id: partition-simulator
+    language: bash
+    purpose: Simulate network partitions between zones
+    source: inline
+    code: |
+      #!/bin/bash
+      # Network Partition Simulator
+      # Creates network partitions between specified IP ranges
+
+      ZONE_A="10.0.1.0/24"
+      ZONE_B="10.0.2.0/24"
+
+      create_partition() {
+          # Block traffic between zones
+          iptables -A INPUT -s $ZONE_A -d $ZONE_B -j DROP
+          iptables -A INPUT -s $ZONE_B -d $ZONE_A -j DROP
+      }
+
+      heal_partition() {
+          # Restore traffic between zones
+          iptables -D INPUT -s $ZONE_A -d $ZONE_B -j DROP
+          iptables -D INPUT -s $ZONE_B -d $ZONE_A -j DROP
+      }
+signals:
+  critical:
+  - id: NPH-CRIT-001
+    signal: No network partition testing exists
+    evidence_indicators:
+    - No chaos experiments for network partitions
+    - Partition behavior not documented or tested
+    explanation: |
+      Distributed systems without partition testing will have unknown
+      behavior during network failures. This can lead to data loss,
+      split-brain corruption, or complete unavailability.
+    remediation: Implement network partition chaos experiments
+  - id: NPH-CRIT-002
+    signal: Split-brain scenario causes data corruption
+    evidence_indicators:
+    - Multiple leaders elected during partition
+    - Conflicting writes accepted on both sides
+    explanation: |
+      Split-brain scenarios where both sides accept writes can cause
+      data corruption that is difficult or impossible to recover from.
+    remediation: Implement proper quorum-based consensus or fencing
+  - id: NPH-CRIT-003
+    signal: System does not detect or handle partition
+    evidence_indicators:
+    - No partition detection mechanism
+    - Services continue operating as if network is healthy
+    explanation: |
+      Systems that do not detect partitions may continue operations
+      that should be blocked, leading to inconsistency.
+    remediation: Implement partition detection and appropriate response
+  high:
+  - id: NPH-HIGH-001
+    signal: Partition recovery causes data loss
+    explanation: When partitions heal, some data is lost or overwritten incorrectly
+    remediation: Implement proper conflict resolution for partition recovery
+  - id: NPH-HIGH-002
+    signal: Asymmetric partition behavior untested
+    explanation: Only symmetric partitions tested, asymmetric may behave differently
+    remediation: Test various partition topologies
+  medium:
+  - id: NPH-MED-001
+    signal: CAP tradeoffs not documented
+    remediation: Document explicit consistency vs availability choices
+  - id: NPH-MED-002
+    signal: Partition duration limits not defined
+    remediation: Define behavior for short vs long partitions
+  low:
+  - id: NPH-LOW-001
+    signal: Partition experiment coverage incomplete
+  positive:
+  - id: NPH-POS-001
+    signal: Partition behavior tested and documented
+  - id: NPH-POS-002
+    signal: Quorum-based consensus correctly handles partitions
+  - id: NPH-POS-003
+    signal: Partition recovery preserves data integrity
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Document Network Topology
+    description: |
+      Map the network architecture including availability zones, regions,
+      and network boundaries where partitions could occur.
+    duration_estimate: 45 min
+    questions:
+    - What are the network boundaries in the architecture?
+    - Where are the distributed components located?
+    - What are the likely partition scenarios?
+    expected_findings:
+    - Network topology diagram with partition points
+    - List of components affected by each partition scenario
+  - id: '2'
+    name: Review CAP/PACELC Decisions
+    description: |
+      Verify that consistency vs availability tradeoffs have been
+      explicitly decided and documented for each distributed component.
+    duration_estimate: 30 min
+    questions:
+    - What consistency level is required for each data type?
+    - What is the expected behavior during partitions?
+    - Is availability or consistency prioritized?
+    expected_findings:
+    - CAP tradeoff documentation for each component
+    - Expected behavior during partition scenarios
+  - id: '3'
+    name: Inventory Partition Experiments
+    description: |
+      Catalog all existing network partition chaos experiments and
+      assess their coverage of partition scenarios.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find network chaos experiments
+      command: kubectl get networkchaos -A -o yaml
+    - purpose: List Gremlin network attacks
+      command: gremlin attack list --type network
+    expected_findings:
+    - Inventory of partition experiments
+    - Coverage of different partition scenarios
+  - id: '4'
+    name: Analyze Partition Behavior
+    description: |
+      Review experiment results to verify system behavior during
+      partitions matches expected CAP tradeoffs.
+    duration_estimate: 60 min
+    questions:
+    - Does the minority partition correctly reject writes?
+    - Does the majority partition continue operating?
+    - How is partition detected?
+    expected_findings:
+    - Verified partition behavior documentation
+    - Gaps between expected and actual behavior
+  - id: '5'
+    name: Verify Partition Recovery
+    description: |
+      Assess how systems recover when partitions heal, including
+      data reconciliation and leader election.
+    duration_estimate: 60 min
+    questions:
+    - How is data reconciled after partition heals?
+    - Are there any data consistency issues?
+    - How long does recovery take?
+    expected_findings:
+    - Partition recovery process documentation
+    - Data integrity verification results
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: partition_behavior_matrix
+    format: table
+    sections:
+    - Component
+    - Partition Scenario
+    - Expected Behavior
+    - Tested Behavior
+    - Status
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - CAP Analysis
+    - Partition Test Results
+    - Recovery Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Partition experiments executed with verified results
+    medium: Experiments defined but not recently executed
+    low: Based on code review and documentation only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: jepsen-testing
+      priority: required
+    - source_id: designing-data-intensive
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires extensive partition testing and analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: nph-001
+  item: Network topology and partition scenarios documented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm network architecture with partition points documented
+  expected: Confirmed by reviewer
+- id: nph-002
+  item: CAP tradeoffs explicitly documented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify consistency vs availability decisions documented
+  expected: Confirmed by reviewer
+- id: nph-003
+  item: Partition experiments cover critical scenarios
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm chaos experiments for key partition scenarios
+  expected: Confirmed by reviewer
+- id: nph-004
+  item: Partition recovery verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm data integrity after partition healing
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - distributed-system
+    - microservices
+    - multi-region
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+    - CC7.2
+  - framework: PCI DSS
+    controls:
+    - '10.5'
+    - '12.10'
+relationships:
+  commonly_combined:
+  - reliability-resilience.resilience-testing.failure-mode-coverage
+  - reliability-resilience.data-consistency.consistency-verification
+  - reliability-resilience.high-availability.failover-mechanisms

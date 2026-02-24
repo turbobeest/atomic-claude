@@ -1,0 +1,336 @@
+# ============================================================
+# AUDIT: Stale Feature Flag Detection
+# ============================================================
+
+audit:
+  id: "code-quality.dead-code.stale-feature-flag"
+  name: "Stale Feature Flag Detection Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "dead-code"
+
+  tier: "expert"
+  estimated_duration: "60 minutes"
+
+  completeness: "requires_discovery"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Identifies feature flags that have been fully rolled out, rolled back, or
+    abandoned. This includes flags that are always true/false in all environments,
+    flags referenced in code but not in flag configuration, and flags in config
+    but never referenced in code.
+
+  why_it_matters: |
+    Stale feature flags create technical debt, confuse developers, and add
+    unnecessary conditional complexity. They increase cognitive load when reading
+    code, can mask bugs, and create potential security issues if flag states are
+    misunderstood. Industry research shows that feature flag debt accumulates
+    faster than it is cleaned up.
+
+  when_to_run:
+    - "Monthly flag hygiene reviews"
+    - "Before major releases"
+    - "During code cleanup sprints"
+    - "When flag count exceeds threshold"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+    - type: "configuration"
+      description: "Feature flag configuration files or service"
+
+  access_requirements:
+    - "Read access to source code repository"
+    - "Access to feature flag management system"
+
+discovery:
+  code_patterns:
+    - pattern: "featureFlag\\s*\\(['\"]([^'\"]+)['\"]\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify feature flag checks"
+
+    - pattern: "isEnabled\\s*\\(['\"]([^'\"]+)['\"]\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify flag enabled checks"
+
+    - pattern: "if\\s*\\(\\s*FLAGS\\.[A-Z_]+\\s*\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify constant flag checks"
+
+    - pattern: "\\bFF_[A-Z_]+\\b"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify FF_ prefixed flags"
+
+  file_patterns:
+    - glob: "**/flags.{json,yaml,yml}"
+      purpose: "Feature flag configuration files"
+    - glob: "**/*feature*.{json,yaml,yml,js,ts}"
+      purpose: "Feature configuration"
+    - glob: "**/experiments.{json,yaml,yml}"
+      purpose: "Experiment configurations"
+
+knowledge_sources:
+  guides:
+    - id: "launchdarkly-cleanup"
+      name: "LaunchDarkly - Managing Feature Flag Debt"
+      url: "https://launchdarkly.com/blog/feature-flag-debt-management/"
+      offline_cache: true
+
+    - id: "martin-fowler-flags"
+      name: "Martin Fowler - Feature Toggles"
+      url: "https://martinfowler.com/articles/feature-toggles.html"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "grep"
+      purpose: "Pattern matching for flag references"
+      offline_capable: true
+    - tool: "ast-grep"
+      purpose: "AST-based flag detection"
+      offline_capable: true
+
+  scripts:
+    - id: "flag-inventory"
+      language: "bash"
+      purpose: "Create feature flag inventory"
+      source: "inline"
+      code: |
+        # Find all flag references in code
+        grep -rhoE "featureFlag\(['\"]([^'\"]+)['\"]\)" . 2>/dev/null | sort -u
+        grep -rhoE "isEnabled\(['\"]([^'\"]+)['\"]\)" . 2>/dev/null | sort -u
+        grep -rhoE "FF_[A-Z_]+" . 2>/dev/null | sort -u
+
+signals:
+  critical:
+    - id: "DC-FLAG-CRIT-001"
+      signal: "Feature flags older than 6 months still in code"
+      evidence_pattern: "flag.*created.*(6|7|8|9|10|11|12).*months.*ago"
+      explanation: |
+        Feature flags older than 6 months are likely stale and should be
+        cleaned up. Long-lived flags indicate incomplete rollout processes.
+      remediation: "Review flag status and remove if fully rolled out"
+
+    - id: "DC-FLAG-CRIT-002"
+      signal: "Security-related feature flags"
+      evidence_pattern: "(security|auth|permission|access).*flag"
+      explanation: |
+        Security feature flags that are stale may indicate disabled security
+        features or incomplete security implementations.
+      remediation: "Audit security flag status and finalize implementation"
+
+  high:
+    - id: "DC-FLAG-HIGH-001"
+      signal: "Flags referenced in code but not in configuration"
+      evidence_pattern: "code_flag_refs - config_flags != empty"
+      explanation: |
+        Flags used in code but missing from configuration will always
+        evaluate to default, making the conditional pointless.
+      remediation: "Remove flag checks or add to configuration"
+
+    - id: "DC-FLAG-HIGH-002"
+      signal: "Flags in configuration but never referenced in code"
+      evidence_pattern: "config_flags - code_flag_refs != empty"
+      explanation: |
+        Configured flags never used in code waste configuration space
+        and confuse operators.
+      remediation: "Remove from configuration or implement usage"
+
+  medium:
+    - id: "DC-FLAG-MED-001"
+      signal: "Flags with identical treatment in all environments"
+      evidence_pattern: "flag.*true.*all.*environments"
+      remediation: "Remove flag and keep winning treatment"
+
+    - id: "DC-FLAG-MED-002"
+      signal: "Nested feature flag checks"
+      evidence_pattern: "if.*flag.*{[^}]*if.*flag"
+      remediation: "Simplify nested flag logic"
+
+  low:
+    - id: "DC-FLAG-LOW-001"
+      signal: "Feature flags without documentation"
+      evidence_pattern: "flag.*no.*description|comment"
+      remediation: "Add documentation for flag purpose and cleanup plan"
+
+  positive:
+    - id: "DC-FLAG-POS-001"
+      signal: "Feature flags have expiration dates"
+      evidence_pattern: "flag.*expires|deadline|remove_by"
+    - id: "DC-FLAG-POS-002"
+      signal: "Flag cleanup process documented"
+      evidence_pattern: "flag.*cleanup.*process|runbook"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Code Flag References"
+      description: |
+        Search the codebase for all feature flag references to create
+        a comprehensive list of flags used in code.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find feature flag function calls"
+          command: |
+            grep -rhoE "featureFlag\(['\"][^'\"]+['\"]\)|isEnabled\(['\"][^'\"]+['\"]\)" . 2>/dev/null | sort -u
+        - purpose: "Find flag constants"
+          command: |
+            grep -rhoE "FLAGS\.[A-Z_]+|FF_[A-Z_]+" . 2>/dev/null | sort -u
+      expected_findings:
+        - "Complete list of flag references in code"
+        - "Reference counts per flag"
+
+    - id: "2"
+      name: "Inventory Configuration Flags"
+      description: |
+        Extract all flags defined in configuration files or flag
+        management service.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find flag config files"
+          command: |
+            find . \( find . -name "*flag*" -o -name "*feature*" \) | grep -E "\.(json|yaml|yml)$" 2>/dev/null
+      expected_findings:
+        - "List of configured flags"
+        - "Flag states per environment"
+
+    - id: "3"
+      name: "Cross-Reference Analysis"
+      description: |
+        Compare code references against configuration to identify
+        orphaned flags in either direction.
+      duration_estimate: "15 min"
+      expected_findings:
+        - "Flags in code but not config"
+        - "Flags in config but not code"
+        - "Always-on/always-off flags"
+
+    - id: "4"
+      name: "Age Analysis"
+      description: |
+        Determine the age of each flag using git history to identify
+        long-lived flags.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find flag introduction dates"
+          command: |
+            git log --all --oneline --source --remotes -- "*flag*" 2>/dev/null | head -20
+      expected_findings:
+        - "Flag ages"
+        - "Flags older than threshold"
+
+    - id: "5"
+      name: "Generate Cleanup Plan"
+      description: |
+        Create prioritized list of flags to clean up with impact assessment.
+      duration_estimate: "5 min"
+      expected_findings:
+        - "Prioritized cleanup list"
+        - "Code changes required"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "stale_flag_inventory"
+        - "flag_age"
+        - "flag_state"
+        - "cleanup_priority"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Flag Inventory"
+        - "Stale Flag Analysis"
+        - "Cleanup Roadmap"
+
+  confidence_guidance:
+    high: "Flag verified as always-on/off in all environments"
+    medium: "Flag age and low change frequency suggest staleness"
+    low: "Flag may be waiting for gradual rollout"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "martin-fowler-flags"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive analysis"
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "stale-flag-001"
+    item: "Flag inventory created"
+    level: "BLOCKING"
+    verification: |
+      grep -rhoE "featureFlag|isEnabled|FLAGS\." . 2>/dev/null | wc -l
+    expected: "Complete inventory documented"
+
+  - id: "stale-flag-002"
+    item: "No security flags older than 3 months"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review flag ages in inventory"
+    expected: "Zero stale security flags"
+
+  - id: "stale-flag-003"
+    item: "Cleanup plan generated"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify cleanup plan exists"
+    expected: "Plan documented"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability"]
+
+relationships:
+  commonly_combined:
+    - "code-quality.dead-code.unreachable-code"
+    - "code-quality.technical-debt.debt-assessment"
+    - "code-quality.documentation.code-documentation"

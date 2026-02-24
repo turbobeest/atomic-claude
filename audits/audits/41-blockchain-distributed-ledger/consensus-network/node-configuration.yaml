@@ -1,0 +1,255 @@
+audit:
+  id: blockchain-distributed-ledger.consensus-network.node-configuration
+  name: Node Configuration Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: blockchain-distributed-ledger
+  category_number: 41
+  subcategory: consensus-network
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - blockchain
+  - infrastructure
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates blockchain node configuration for security
+    and operational reliability. It examines:
+    - RPC endpoint security
+    - P2P network configuration
+    - Resource limits and monitoring
+    - Sync mode selection
+    - Pruning and archive settings
+    - Validator-specific hardening
+  why_it_matters: |
+    Node configuration affects security and reliability:
+    - Open RPC endpoints expose attacks
+    - P2P misconfig enables eclipse attacks
+    - Resource exhaustion causes downtime
+    - Wrong sync mode delays operation
+    - Improper pruning loses data
+
+    Secure node configuration protects infrastructure.
+  when_to_run:
+  - Node deployment
+  - Configuration review
+  - Security hardening
+  - Infrastructure audit
+prerequisites:
+  required_artifacts:
+  - type: configuration
+    description: Node configuration files
+  - type: documentation
+    description: Deployment documentation
+  access_requirements:
+  - Access to node configuration
+  - Infrastructure access
+discovery:
+  code_patterns:
+  - pattern: (rpc|api|http|ws).*port
+    type: regex
+    scope: config
+    purpose: Detect RPC configuration
+  - pattern: (p2p|peer|network).*config
+    type: regex
+    scope: config
+    purpose: Detect P2P configuration
+  file_patterns:
+  - glob: '**/config.toml'
+    purpose: Node configuration
+  - glob: '**/geth.toml'
+    purpose: Geth configuration
+  - glob: '**/.env'
+    purpose: Environment configuration
+signals:
+  critical:
+  - id: NODE-CRIT-001
+    signal: RPC endpoint publicly exposed
+    evidence_indicators:
+    - RPC bound to 0.0.0.0
+    - No authentication on RPC
+    - Admin methods enabled publicly
+    explanation: |
+      Publicly exposed RPC endpoints allow unauthorized access
+      to node functions, potentially enabling theft or DoS.
+    remediation: |
+      - Bind RPC to localhost only
+      - Use reverse proxy with auth
+      - Disable admin methods externally
+      - Implement IP allowlisting
+    cwe: CWE-284
+  - id: NODE-CRIT-002
+    signal: Validator keys exposed
+    evidence_indicators:
+    - Keys stored unencrypted
+    - Keys in accessible location
+    - No key management system
+    explanation: |
+      Exposed validator keys enable key theft, allowing attackers
+      to sign malicious messages or steal rewards.
+    remediation: |
+      - Encrypt keys at rest
+      - Use hardware security modules
+      - Restrict key file permissions
+      - Implement key rotation
+  high:
+  - id: NODE-HIGH-001
+    signal: Eclipse attack vulnerable
+    evidence_indicators:
+    - Low peer limit
+    - No trusted peers
+    - No peer diversity requirements
+    explanation: |
+      Eclipse attacks isolate nodes by controlling all peers,
+      enabling double-spend or censorship attacks.
+    remediation: |
+      - Increase minimum peer count
+      - Configure trusted/static peers
+      - Enable peer diversity
+      - Monitor peer distribution
+  - id: NODE-HIGH-002
+    signal: No resource limits configured
+    evidence_indicators:
+    - Unlimited RPC connections
+    - No rate limiting
+    - Memory/CPU unbounded
+    explanation: |
+      Without resource limits, nodes are vulnerable to DoS
+      attacks through resource exhaustion.
+    remediation: |
+      - Set connection limits
+      - Implement rate limiting
+      - Configure memory limits
+      - Monitor resource usage
+  medium:
+  - id: NODE-MED-001
+    signal: Sync mode inappropriate
+    evidence_indicators:
+    - Full sync when snap sufficient
+    - Light sync for validator
+    - Sync mode not documented
+    explanation: |
+      Wrong sync mode causes unnecessary delays or insufficient
+      security for the node's role.
+    remediation: |
+      - Choose mode appropriate to role
+      - Use snap sync for faster initial sync
+      - Use archive for indexers/explorers
+      - Document sync mode choice
+  - id: NODE-MED-002
+    signal: Pruning misconfigured
+    evidence_indicators:
+    - Archive when pruning sufficient
+    - Too aggressive pruning
+    - State trie issues
+    explanation: |
+      Incorrect pruning wastes storage or loses needed data.
+      Balance storage costs with data needs.
+    remediation: |
+      - Configure pruning for use case
+      - Keep sufficient state history
+      - Monitor disk usage
+      - Document pruning settings
+  low:
+  - id: NODE-LOW-001
+    signal: Logging insufficient
+    evidence_indicators:
+    - Debug logging disabled
+    - No log rotation
+    - Logs not monitored
+    explanation: |
+      Insufficient logging impedes troubleshooting and security
+      incident response.
+    remediation: |
+      - Enable appropriate log levels
+      - Configure log rotation
+      - Monitor logs for anomalies
+      - Archive logs for forensics
+  positive:
+  - id: NODE-POS-001
+    signal: Well-configured node
+    evidence_indicators:
+    - RPC secured
+    - Resource limits set
+    - Appropriate sync/prune
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: infrastructure-engineer
+  steps:
+  - id: '1'
+    name: Configuration Review
+    description: |
+      Review node configuration settings.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find node configuration
+      command: |
+        find . -name "config.toml" -o -name "*.env" 2>/dev/null | \
+          xargs cat 2>/dev/null | head -100
+    - purpose: Check RPC settings
+      command: |
+        grep -rniE "(rpc|http|ws).*host|port" \
+          --include="*.toml" --include="*.env" --include="*.yaml" . 2>/dev/null | head -20
+    expected_findings:
+    - RPC configuration
+    - P2P settings
+    - Resource limits
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Configuration Analysis
+    - Security Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+    full:
+      included: true
+      priority: 2
+    blockchain:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: node-001
+  item: RPC endpoints secured
+  level: CRITICAL
+  verification: |
+    grep -rniE "rpc.*host.*0\.0\.0\.0" \
+      --include="*.toml" --include="*.env" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -eq 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: node-002
+  item: Resource limits configured
+  level: WARNING
+  verification: manual
+  verification_notes: Verify resource limits are set
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - blockchain
+    - infrastructure
+    - validator
+relationships:
+  commonly_combined:
+  - blockchain.consensus-network.consensus-mechanism
+  - blockchain.key-management.private-key-security
+  - blockchain.integration.rpc-provider

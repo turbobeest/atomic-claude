@@ -1,0 +1,335 @@
+# ============================================================
+# PARALLEL PROCESSING EFFICIENCY AUDIT
+# ============================================================
+# Evaluates whether parallel processing is used effectively
+# and efficiently for appropriate workloads.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.concurrency-parallelism.parallel-processing-efficiency"
+  name: "Parallel Processing Efficiency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "concurrency-parallelism"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines whether parallel processing patterns are applied efficiently.
+    Analyzes parallelization overhead versus gains, work distribution uniformity,
+    synchronization costs, and whether sequential operations have been
+    unnecessarily parallelized or parallelizable operations remain sequential.
+
+  why_it_matters: |
+    Inefficient parallelization can be slower than sequential code due to
+    overhead. Parallel processing has costs: thread creation, synchronization,
+    memory for each worker. If work is too small or imbalanced, these costs
+    outweigh benefits. Proper parallelization can provide near-linear speedup.
+
+  when_to_run:
+    - "When optimizing batch processing"
+    - "When parallel code performs worse than expected"
+    - "When processing large datasets"
+    - "During performance optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code with parallel processing"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Understanding of workload characteristics"
+
+discovery:
+  code_patterns:
+    - pattern: "parallelStream|parallel\\(\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Java parallel streams"
+
+    - pattern: "go\\s+func|goroutine"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Go goroutine spawning"
+
+    - pattern: "multiprocessing|ProcessPoolExecutor|Pool\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find Python multiprocessing"
+
+    - pattern: "Promise\\.all|Promise\\.allSettled"
+      type: "regex"
+      scope: "source"
+      purpose: "Find JavaScript parallel execution"
+
+    - pattern: "rayon|par_iter"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Rust parallel iterators"
+
+  file_patterns:
+    - glob: "**/*.java"
+      purpose: "Java source files"
+    - glob: "**/*.go"
+      purpose: "Go source files"
+    - glob: "**/*.py"
+      purpose: "Python source files"
+    - glob: "**/*.js"
+      purpose: "JavaScript source files"
+    - glob: "**/*.rs"
+      purpose: "Rust source files"
+
+knowledge_sources:
+  guides:
+    - id: "java-parallel-streams"
+      name: "Java Parallel Streams Guide"
+      url: "https://docs.oracle.com/javase/tutorial/collections/streams/parallelism.html"
+      offline_cache: true
+
+    - id: "amdahl-law"
+      name: "Amdahl's Law"
+      url: "https://en.wikipedia.org/wiki/Amdahl%27s_law"
+      offline_cache: true
+
+  learning_resources:
+    - id: "parallel-patterns"
+      title: "Patterns for Parallel Programming"
+      type: "book"
+      reference: "ISBN 978-0321228116"
+
+tooling:
+  static_analysis:
+    - tool: "grep"
+      purpose: "Find parallel processing patterns"
+      offline_capable: true
+
+    - tool: "profiler"
+      purpose: "Measure parallel efficiency"
+      offline_capable: true
+
+  scripts:
+    - id: "find-parallel-patterns"
+      language: "bash"
+      purpose: "Locate parallel processing code"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find parallel processing patterns
+        grep -rn "parallelStream\|parallel()\|go func\|Promise.all" \
+          --include="*.java" --include="*.go" --include="*.js" .
+
+signals:
+  critical:
+    - id: "PARALLEL-CRIT-001"
+      signal: "Parallel processing with shared mutable state"
+      evidence_pattern: "parallelStream.*\\{[^}]*(\\+\\+|--|\\.add|\\.put)"
+      explanation: |
+        Modifying shared state in parallel operations causes race conditions.
+        Each parallel task must work on independent data or use proper
+        synchronization, which often negates parallelism benefits.
+      remediation: "Use reduce/collect patterns; avoid mutable shared state"
+
+    - id: "PARALLEL-CRIT-002"
+      signal: "Parallel stream with ordered terminal operation"
+      evidence_pattern: "parallelStream.*forEachOrdered|parallel.*sorted"
+      explanation: |
+        Ordered operations on parallel streams force sequential processing
+        or expensive reordering, negating parallelism benefits.
+      remediation: "Use unordered operations or evaluate if ordering is necessary"
+
+  high:
+    - id: "PARALLEL-HIGH-001"
+      signal: "Parallelizing trivial operations"
+      evidence_pattern: "parallelStream.*map.*simple|go func.*\\{.*return.*\\}"
+      explanation: |
+        Parallelizing operations that take microseconds incurs overhead
+        (thread scheduling, memory) greater than the operation itself.
+        Sequential execution would be faster.
+      remediation: "Only parallelize operations with sufficient work per task"
+
+    - id: "PARALLEL-HIGH-002"
+      signal: "Unbounded parallelism"
+      evidence_pattern: "for.*go func|for.*new Thread"
+      explanation: |
+        Creating a goroutine or thread per item in a large collection can
+        exhaust system resources. Parallelism should be bounded.
+      remediation: "Use worker pools with bounded concurrency"
+
+    - id: "PARALLEL-HIGH-003"
+      signal: "Sequential processing of independent operations"
+      evidence_pattern: "for.*await|for.*http\\.Get|for.*query"
+      explanation: |
+        Processing independent I/O operations sequentially wastes time.
+        If operations are independent, they can execute in parallel.
+      remediation: "Use parallel patterns (Promise.all, errgroup) for independent I/O"
+
+  medium:
+    - id: "PARALLEL-MED-001"
+      signal: "Imbalanced work distribution"
+      evidence_pattern: "parallel.*range|chunk.*size"
+      remediation: "Ensure work units are roughly equal in size for load balancing"
+
+    - id: "PARALLEL-MED-002"
+      signal: "Nested parallelism"
+      evidence_pattern: "parallelStream.*parallelStream|go func.*go func"
+      remediation: "Avoid nested parallelism; flatten to single parallel layer"
+
+  low:
+    - id: "PARALLEL-LOW-001"
+      signal: "Parallel stream on small collection"
+      evidence_pattern: "Arrays\\.asList.*parallelStream|List\\.of.*parallel"
+      remediation: "Use sequential for collections smaller than ~10,000 elements"
+
+  positive:
+    - id: "PARALLEL-POS-001"
+      signal: "Proper use of parallel reduce"
+      evidence_pattern: "parallelStream.*reduce|par_iter.*fold"
+
+    - id: "PARALLEL-POS-002"
+      signal: "Work-stealing with bounded parallelism"
+      evidence_pattern: "ForkJoinPool|workStealingPool"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory parallel processing"
+      description: |
+        Find all parallel processing patterns in the codebase.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find Java parallel streams"
+          command: "grep -rn 'parallelStream\\|parallel()' --include='*.java' ."
+        - purpose: "Find Go concurrency"
+          command: "grep -rn 'go func\\|errgroup' --include='*.go' ."
+        - purpose: "Find Python multiprocessing"
+          command: "grep -rn 'ProcessPoolExecutor\\|multiprocessing' --include='*.py' ."
+      expected_findings:
+        - "All parallel processing locations"
+        - "Pattern types used"
+
+    - id: "2"
+      name: "Analyze work characteristics"
+      description: |
+        For each parallel operation, determine work size and independence.
+      duration_estimate: "30 min"
+      questions:
+        - "How much work does each parallel task perform?"
+        - "Are tasks truly independent?"
+        - "What is the expected speedup?"
+      expected_findings:
+        - "Work size per task"
+        - "Task independence analysis"
+
+    - id: "3"
+      name: "Check for shared state"
+      description: |
+        Identify any mutable shared state accessed in parallel operations.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find mutations in parallel streams"
+          command: "grep -rn -A10 'parallelStream' --include='*.java' . | grep -E '\\+\\+|--|add\\(|put\\('"
+      expected_findings:
+        - "Shared state in parallel code"
+        - "Potential race conditions"
+
+    - id: "4"
+      name: "Identify sequential bottlenecks"
+      description: |
+        Find operations that could benefit from parallelization but are sequential.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find sequential I/O loops"
+          command: "grep -rn -B2 -A5 'for.*{' --include='*.java' --include='*.go' . | grep -E 'http|query|request'"
+      expected_findings:
+        - "Parallelization opportunities"
+        - "Sequential bottlenecks"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Parallel Processing Analysis"
+        - "Optimization Opportunities"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear anti-pattern with measurable impact"
+    medium: "Pattern suggests inefficiency"
+    low: "Potential improvement requiring benchmarking"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "java-parallel-streams"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "parallel-001"
+    item: "No shared mutable state in parallel operations"
+    level: "CRITICAL"
+    verification: "grep -rn -A10 'parallelStream' --include='*.java' . | grep -c '\\+\\+\\|add('"
+    expected: "0"
+
+  - id: "parallel-002"
+    item: "Parallelism bounded appropriately"
+    level: "BLOCKING"
+    verification: "grep -rn 'for.*go func' --include='*.go' . | wc -l"
+    expected: "0 (use worker pools instead)"
+
+  - id: "parallel-003"
+    item: "Sequential bottlenecks evaluated for parallelization"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms sequential I/O operations were evaluated"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["api", "service", "batch"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.concurrency-parallelism.worker-pool-sizing"
+    - "performance-efficiency.concurrency-parallelism.thread-safety"

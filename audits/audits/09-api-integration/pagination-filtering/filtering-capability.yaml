@@ -1,0 +1,359 @@
+audit:
+  id: api-integration.pagination-filtering.filtering-capability
+  name: Filtering Capability Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: pagination-filtering
+  tier: phd
+  estimated_duration: 90 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - api
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates API filtering capabilities including filter syntax,
+    supported operators, field whitelisting, filter injection protection,
+    and database query optimization. Analyzes whether filtering is
+    flexible, secure, and performant.
+  why_it_matters: |
+    Poor filtering implementations create security vulnerabilities
+    (SQL injection, NoSQL injection), performance issues (unindexed
+    filters), and usability problems (limited filter operators).
+    Proper filtering is essential for efficient data retrieval
+    and API usability.
+  when_to_run:
+  - API design or review
+  - Security assessments
+  - Performance optimization
+  - After injection vulnerability reports
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: API endpoint implementations
+  - type: configuration
+    description: Database schema and indexes
+  access_requirements:
+  - Read access to API source code
+  - Access to database schema
+discovery:
+  code_patterns:
+  - pattern: filter|where|query|search
+    type: regex
+    scope: source
+    purpose: Detect filter implementations
+  - pattern: \$eq|\$ne|\$gt|\$lt|\$in|\$regex
+    type: regex
+    scope: source
+    purpose: Detect MongoDB-style operators
+  - pattern: 'eq:|ne:|gt:|lt:|contains:|like:'
+    type: regex
+    scope: source
+    purpose: Detect filter operator syntax
+  - pattern: allowedFields|filterableFields|whitelist
+    type: regex
+    scope: source
+    purpose: Detect field whitelisting
+  file_patterns:
+  - glob: '**/api/**'
+    purpose: API implementations
+  - glob: '**/filters/**'
+    purpose: Filter modules
+  - glob: '**/query/**'
+    purpose: Query builders
+knowledge_sources:
+  specifications:
+  - id: odata-filter
+    name: OData Filter Syntax
+    url: https://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part2-url-conventions.html
+    offline_cache: true
+    priority: optional
+  guides:
+  - id: graphql-filtering
+    name: GraphQL Filtering Patterns
+    url: https://graphql.org/learn/queries/
+    offline_cache: true
+  - id: rest-filtering
+    name: REST API Filtering Best Practices
+    url: https://www.moesif.com/blog/technical/api-design/REST-API-Design-Filtering-Sorting-and-Pagination/
+    offline_cache: true
+  learning_resources:
+  - id: injection-prevention
+    title: Query Injection Prevention
+    type: article
+    reference: OWASP Foundation
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect SQL/NoSQL injection patterns
+    offline_capable: true
+  - tool: eslint-plugin-security
+    purpose: Security-focused linting
+    offline_capable: true
+  scripts:
+  - id: filter-scan
+    language: bash
+    purpose: Analyze filtering patterns
+    source: inline
+    code: |
+      echo "=== Filtering Capability Analysis ==="
+      echo "--- Filter parameter handling ---"
+      grep -rn "filter\|query\|where\|search" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -30
+
+      echo "--- Field whitelisting ---"
+      grep -rn "allowedFields\|filterableFields\|whitelist\|validFields" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Query building ---"
+      grep -rn "buildQuery\|createFilter\|parseFilter" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: FC-CRIT-001
+    signal: Filter values directly interpolated into queries
+    evidence_pattern: String concatenation with user filter input in SQL/NoSQL
+    explanation: |
+      Direct string interpolation of filter values enables SQL injection
+      or NoSQL injection attacks. Attackers can extract, modify, or
+      delete arbitrary data.
+    remediation: Use parameterized queries or ORM methods exclusively
+  - id: FC-CRIT-002
+    signal: No field whitelist allowing arbitrary field filtering
+    evidence_pattern: Filter field name from user input without validation
+    explanation: |
+      Allowing users to filter on arbitrary fields can expose sensitive
+      data (filtering by password_hash, internal_status) and enable
+      data enumeration attacks.
+    remediation: Implement explicit whitelist of filterable fields
+  high:
+  - id: FC-HIGH-001
+    signal: Filters on unindexed fields in large tables
+    evidence_pattern: Filter fields without corresponding database indexes
+    explanation: |
+      Filtering on unindexed fields causes full table scans, severely
+      degrading performance. Attackers can exploit this for denial-of-
+      service by requesting filters on unindexed columns.
+    remediation: Add indexes for filterable fields or restrict filtering
+  - id: FC-HIGH-002
+    signal: Complex filter expressions without depth limits
+    evidence_pattern: Nested AND/OR operators without max depth
+    explanation: |
+      Deeply nested filter expressions can create complex queries that
+      overwhelm database query planners or exhaust memory during parsing.
+    remediation: Limit filter expression depth and complexity
+  - id: FC-HIGH-003
+    signal: Regex filters without timeout or complexity limits
+    evidence_pattern: $regex or LIKE with user-provided patterns
+    explanation: |
+      User-provided regex patterns can cause catastrophic backtracking
+      (ReDoS) or expensive full-text scans, enabling denial-of-service.
+    remediation: Limit regex complexity or use full-text search instead
+  medium:
+  - id: FC-MED-001
+    signal: Inconsistent filter syntax across endpoints
+    evidence_pattern: Different endpoints use different filter formats
+    remediation: Standardize filter syntax across API
+  - id: FC-MED-002
+    signal: Limited filter operators
+    evidence_pattern: Only equality filters supported
+    remediation: 'Support common operators: eq, ne, gt, lt, in, contains'
+  - id: FC-MED-003
+    signal: No filter validation error messages
+    evidence_pattern: Invalid filters return generic 400 error
+    remediation: Return descriptive errors explaining filter syntax issues
+  low:
+  - id: FC-LOW-001
+    signal: Filter syntax not documented
+    evidence_pattern: No documentation of available filter operators
+    remediation: Document filter syntax, operators, and filterable fields
+  positive:
+  - id: FC-POS-001
+    signal: Parameterized queries for all filters
+    evidence_pattern: Query builder with bound parameters
+  - id: FC-POS-002
+    signal: Explicit field whitelist enforced
+    evidence_pattern: Filterable fields defined and validated
+  - id: FC-POS-003
+    signal: Filter complexity limits in place
+    evidence_pattern: Max filter depth and term count enforced
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Filter Entry Points
+    description: |
+      Find all endpoints that accept filter parameters.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find filter parameters
+      command: |
+        grep -rn "filter\|query\|where\|search" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | grep -v test | head -40
+    - purpose: Find API routes with filtering
+      command: |
+        grep -rn "@Get\|@Query\|app\.get\|router\.get" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Filter entry points
+    - Parameter names
+  - id: '2'
+    name: Analyze Query Construction
+    description: |
+      Review how filters are translated to database queries.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find query builders
+      command: |
+        grep -rn "buildQuery\|where\|find\|select" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -40
+    - purpose: Check for parameterization
+      command: |
+        grep -rn "\?\|\\$[0-9]\|:param\|bindValue" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Query construction method
+    - Parameterization usage
+  - id: '3'
+    name: Review Field Whitelisting
+    description: |
+      Check if filterable fields are explicitly defined.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find field whitelists
+      command: |
+        grep -rn "allowedFields\|filterableFields\|whitelist\|FILTERABLE" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Whitelist implementation
+    - Field restrictions
+  - id: '4'
+    name: Verify Index Coverage
+    description: |
+      Check that filterable fields have appropriate indexes.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find index definitions
+      command: |
+        grep -rn "CREATE INDEX\|@Index\|index:\s*true\|createIndex" \
+          --include="*.ts" --include="*.java" --include="*.py" --include="*.sql" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Index coverage
+    - Missing indexes
+  - id: '5'
+    name: Check Filter Complexity Limits
+    description: |
+      Verify limits on filter expression complexity.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find complexity limits
+      command: |
+        grep -rn "maxDepth\|maxFilters\|MAX_FILTER\|complexity" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Depth limits
+    - Term count limits
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - filter_entry_points
+    - injection_risks
+    - index_coverage
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Security Analysis
+    - Performance Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct string interpolation or missing whitelist found
+    medium: Query builder used but edge cases uncertain
+    low: Requires penetration testing to confirm vulnerability
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: injection-prevention
+      priority: required
+    - source_id: rest-filtering
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed code analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: fc-001
+  item: No direct query string interpolation
+  level: CRITICAL
+  verification: |
+    grep -rn "'\s*\+\s*\|\"\\s*\\+\\s*\|f\"\|\\$\\{" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -i "sql\|query\|where\|select" | grep -v node_modules | \
+      wc -l | xargs -I {} test {} -lt 3 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: fc-002
+  item: Filterable fields whitelisted
+  level: CRITICAL
+  verification: |
+    grep -rn "allowedFields\|filterableFields\|whitelist\|FILTERABLE" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: fc-003
+  item: Indexes exist for filterable fields
+  level: WARNING
+  verification: |
+    grep -rn "INDEX\|@Index\|createIndex" \
+      --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP
+    controls:
+    - A03:2021-Injection
+  - framework: ISO 25010
+    controls:
+    - Security
+    - Performance Efficiency
+relationships:
+  commonly_combined:
+  - api-integration.pagination-filtering.pagination-strategy
+  - api-integration.pagination-filtering.query-complexity-limits
+  - security-trust.injection-prevention.sql-injection

@@ -1,0 +1,337 @@
+# ============================================================
+# Memory Utilization Audit
+# ============================================================
+# Evaluates memory resource allocation, consumption patterns, and
+# OOM risk across containerized and bare-metal infrastructure.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.resource-utilization.memory-utilization"
+  name: "Memory Utilization Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "resource-utilization"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines memory utilization patterns, resource requests/limits
+    configurations, and OOM (Out of Memory) risk across infrastructure. It
+    analyzes Kubernetes memory requests/limits, JVM heap configurations,
+    container memory consumption, and identifies workloads at risk of
+    memory exhaustion or inefficient allocation.
+
+  why_it_matters: |
+    Memory misconfiguration leads to OOMKilled containers, application crashes,
+    and unpredictable service behavior. Unlike CPU throttling which causes
+    slowdowns, memory exhaustion causes immediate termination. Over-provisioning
+    wastes expensive memory resources while under-provisioning causes outages.
+
+  when_to_run:
+    - "After deploying new services or workloads"
+    - "Following OOMKilled events"
+    - "During capacity planning exercises"
+    - "Monthly infrastructure health checks"
+
+prerequisites:
+  required_artifacts:
+    - type: "metrics-system"
+      description: "Access to Prometheus, CloudWatch, or equivalent metrics platform"
+    - type: "container-orchestration"
+      description: "Kubernetes cluster access or Docker daemon metrics"
+
+  access_requirements:
+    - "Read access to Kubernetes API"
+    - "Read access to metrics server or Prometheus"
+    - "Access to container runtime metrics"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "container_memory_working_set_bytes{container!=''}"
+      purpose: "Current working set memory per container"
+      threshold: "< 85% of limit"
+    - system: "Prometheus"
+      query: "kube_pod_container_status_last_terminated_reason{reason='OOMKilled'}"
+      purpose: "Identify OOMKilled containers"
+      threshold: "Should be zero"
+    - system: "Prometheus"
+      query: "kube_pod_container_resource_limits{resource='memory'}"
+      purpose: "Memory limits configuration"
+      threshold: "Should be set for all production pods"
+    - system: "Prometheus"
+      query: "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes"
+      purpose: "Node-level memory availability"
+      threshold: "> 15% available recommended"
+
+  file_patterns:
+    - glob: "**/deployment*.yaml"
+      purpose: "Kubernetes deployment configurations"
+    - glob: "**/values*.yaml"
+      purpose: "Helm chart values with resource definitions"
+    - glob: "**/jvm.options"
+      purpose: "JVM heap configuration files"
+
+knowledge_sources:
+  specifications:
+    - id: "k8s-resource-management"
+      name: "Kubernetes Resource Management for Pods and Containers"
+      url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "k8s-oom"
+      name: "Kubernetes Out of Resource Handling"
+      url: "https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/"
+      offline_cache: true
+    - id: "jvm-containers"
+      name: "JVM in Containers Best Practices"
+      url: "https://www.eclipse.org/openj9/docs/xxusecontainersupport/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Inspect pod memory configurations and utilization"
+      command: "kubectl top pods --all-namespaces --sort-by=memory"
+    - tool: "docker stats"
+      purpose: "Monitor container memory usage in real-time"
+      command: "docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}'"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        (container_memory_working_set_bytes{container!='POD',container!=''}
+        / kube_pod_container_resource_limits{resource='memory'}) * 100
+      purpose: "Memory utilization as percentage of limit"
+
+signals:
+  critical:
+    - id: "MEM-CRIT-001"
+      signal: "Containers experiencing OOMKilled terminations"
+      evidence_threshold: "kube_pod_container_status_last_terminated_reason{reason='OOMKilled'} > 0"
+      explanation: |
+        OOMKilled indicates containers exhausted their memory limit and were
+        forcibly terminated. This causes immediate service disruption, potential
+        data loss, and cascading failures in dependent services.
+      remediation: "Increase memory limits, fix memory leaks, or implement proper memory management"
+
+    - id: "MEM-CRIT-002"
+      signal: "No memory limits configured for production workloads"
+      evidence_pattern: "resources.limits.memory: null or missing"
+      explanation: |
+        Without memory limits, containers can consume all available node memory,
+        triggering system OOM killer which may terminate critical system processes
+        or other important workloads unpredictably.
+      remediation: "Configure appropriate memory limits in deployment specifications"
+
+  high:
+    - id: "MEM-HIGH-001"
+      signal: "Memory utilization exceeding 85% of limit"
+      evidence_threshold: "container_memory_working_set_bytes > 85% of limit"
+      explanation: |
+        High memory utilization approaching the limit indicates elevated OOM risk.
+        Memory spikes or growth patterns may push containers over the limit,
+        causing termination without warning.
+      remediation: "Increase memory limits or optimize memory usage patterns"
+
+    - id: "MEM-HIGH-002"
+      signal: "Memory requests significantly lower than actual usage"
+      evidence_threshold: "actual_usage > 1.5x requests consistently"
+      explanation: |
+        When memory requests are too low, Kubernetes scheduler makes poor placement
+        decisions. This leads to node memory pressure and eviction of pods when
+        actual usage exceeds what was promised.
+      remediation: "Adjust memory requests to match actual usage patterns (P99)"
+
+  medium:
+    - id: "MEM-MED-001"
+      signal: "Memory utilization consistently below 40% of allocated resources"
+      evidence_threshold: "avg(memory_usage) < 40% of requests over 7 days"
+      remediation: "Right-size memory requests to reduce waste and cost"
+
+    - id: "MEM-MED-002"
+      signal: "JVM heap not properly sized for container limits"
+      evidence_pattern: "-Xmx not set or exceeds container limit"
+      remediation: "Configure JVM heap to ~75% of container memory limit"
+
+  low:
+    - id: "MEM-LOW-001"
+      signal: "Missing memory metrics collection for some workloads"
+
+  positive:
+    - id: "MEM-POS-001"
+      signal: "Well-tuned memory requests matching actual utilization"
+    - id: "MEM-POS-002"
+      signal: "Zero OOMKilled events in past 30 days"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory memory configurations"
+      description: |
+        Collect memory requests and limits from all deployments, statefulsets,
+        and daemonsets. Identify workloads with missing or misconfigured
+        resource specifications.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List all pods with memory requests and limits"
+          command: |
+            kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.containers[*].resources.requests.memory}{"\t"}{.spec.containers[*].resources.limits.memory}{"\n"}{end}'
+        - purpose: "Find pods without memory limits"
+          command: |
+            kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].resources.limits.memory == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+      expected_findings:
+        - "List of all workload memory configurations"
+        - "Identification of missing resource specifications"
+
+    - id: "2"
+      name: "Check for OOMKilled history"
+      description: |
+        Investigate containers that have been terminated due to memory exhaustion.
+        Analyze patterns and identify recurring issues.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find recently OOMKilled containers"
+          command: |
+            kubectl get pods -A -o json | jq -r '.items[] | select(.status.containerStatuses[]?.lastState.terminated.reason == "OOMKilled") | "\(.metadata.namespace)/\(.metadata.name)"'
+        - purpose: "Check events for OOM"
+          command: |
+            kubectl get events -A --field-selector reason=OOMKilling --sort-by='.lastTimestamp'
+      expected_findings:
+        - "List of OOMKilled containers"
+        - "Patterns in OOM events"
+
+    - id: "3"
+      name: "Analyze current utilization"
+      description: |
+        Query metrics to understand actual memory consumption patterns across
+        workloads. Compare against configured requests and limits.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Get current memory utilization per pod"
+          command: "kubectl top pods -A --sort-by=memory"
+        - purpose: "Check high memory consumers (Prometheus)"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=topk(10,container_memory_working_set_bytes{container!="POD"})' | jq '.data.result'
+      expected_findings:
+        - "Current memory usage by workload"
+        - "Top memory consumers"
+
+    - id: "4"
+      name: "Evaluate node-level memory pressure"
+      description: |
+        Assess memory pressure at the node level. Identify nodes at risk of
+        eviction cascades or system instability.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check node memory conditions"
+          command: |
+            kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="MemoryPressure")].status}{"\n"}{end}'
+        - purpose: "Node memory allocations"
+          command: "kubectl describe nodes | grep -A 5 'Allocated resources' | grep memory"
+      expected_findings:
+        - "Node memory pressure status"
+        - "Memory allocation percentages"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Memory Configuration Analysis"
+        - "Utilization Findings"
+        - "OOM Risk Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct metrics observation, verified OOMKilled events"
+    medium: "Metrics available but limited historical data"
+    low: "Configuration analysis without runtime verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-resource-management"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime metrics collection"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "mem-001"
+    item: "All production pods have memory limits configured"
+    level: "CRITICAL"
+    verification: |
+      kubectl get pods -A -o json | jq '[.items[] | select(.spec.containers[].resources.limits.memory == null and .metadata.namespace != "kube-system")] | length == 0'
+    expected: "true"
+
+  - id: "mem-002"
+    item: "No pods OOMKilled in past 7 days"
+    level: "CRITICAL"
+    verification: |
+      kubectl get events -A --field-selector reason=OOMKilling -o json | jq '[.items[] | select(.lastTimestamp > (now - 604800 | todate))] | length == 0'
+    expected: "true"
+
+  - id: "mem-003"
+    item: "No nodes under memory pressure"
+    level: "BLOCKING"
+    verification: |
+      kubectl get nodes -o json | jq '[.items[].status.conditions[] | select(.type == "MemoryPressure" and .status == "True")] | length == 0'
+    expected: "true"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "FinOps Foundation"
+      controls: ["Resource Optimization"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.resource-utilization.cpu-utilization"
+    - "performance-efficiency.resource-utilization.memory-leak-detection"
+    - "performance-efficiency.resource-utilization.container-resource-limits"

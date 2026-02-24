@@ -1,0 +1,409 @@
+audit:
+  id: security-trust.application-security.csrf-protection
+  name: CSRF Protection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: application-security
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines Cross-Site Request Forgery (CSRF) protection mechanisms
+    in web applications. It evaluates synchronizer token implementation,
+    SameSite cookie attributes, custom header requirements, and framework-
+    specific CSRF defenses. The audit covers all state-changing endpoints
+    to ensure proper CSRF protection.
+  why_it_matters: |
+    CSRF attacks trick authenticated users into performing unintended actions.
+    Attackers can transfer funds, change passwords, or modify data by
+    exploiting the trust a site has in a user's browser. CSRF is classified
+    as CWE-352 and remains a significant web application vulnerability.
+    Proper CSRF protection is required by OWASP guidelines and most
+    security compliance frameworks.
+  when_to_run:
+  - New application development
+  - Security assessment
+  - After authentication changes
+  - Before production deployment
+  - Annual security review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  - type: api_documentation
+    description: API endpoint documentation
+  - type: running_application
+    description: Access to running application for testing
+  access_requirements:
+  - Application source code access
+  - Test account with authentication
+  - Browser developer tools
+discovery:
+  code_patterns:
+  - pattern: csrf|xsrf|anti.?forgery|synchronizer.?token
+    type: regex
+    scope: source
+    purpose: Identify CSRF protection implementations
+  - pattern: '@csrf_exempt|csrf_exempt|disabled.*csrf'
+    type: regex
+    scope: source
+    purpose: Find CSRF protection exemptions
+  - pattern: SameSite.*None|samesite.*none
+    type: regex
+    scope: source
+    purpose: Find cookies without SameSite protection
+  file_patterns:
+  - glob: '**/middleware/csrf*.py'
+    purpose: Python CSRF middleware
+  - glob: '**/config/csrf*.js'
+    purpose: JavaScript CSRF configuration
+  - glob: '**/security/*.java'
+    purpose: Java security configurations
+knowledge_sources:
+  specifications:
+  - id: cwe-352
+    name: 'CWE-352: Cross-Site Request Forgery'
+    url: https://cwe.mitre.org/data/definitions/352.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-csrf-cheatsheet
+    name: OWASP CSRF Prevention Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-csrf-attack
+    name: OWASP CSRF Attack Description
+    url: https://owasp.org/www-community/attacks/csrf
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect CSRF vulnerabilities in code
+    offline_capable: true
+  - tool: bandit
+    purpose: Python CSRF vulnerability scanning
+    offline_capable: true
+  infrastructure_tools:
+  - tool: curl
+    purpose: Test CSRF token requirements
+    command: 'curl -X POST -H ''Cookie: session=abc'' https://target/api/action'
+  - tool: burp
+    purpose: CSRF attack simulation
+    command: Manual testing with Burp Suite
+signals:
+  critical:
+  - id: CSRF-CRIT-001
+    signal: No CSRF protection on state-changing endpoints
+    cwe_id: CWE-352
+    evidence_pattern: POST.*without.*csrf|@csrf_exempt|csrf.*disabled
+    explanation: |
+      State-changing operations (POST, PUT, DELETE) without CSRF tokens
+      allow attackers to perform actions on behalf of authenticated users.
+      This is the primary CSRF vulnerability.
+    remediation: Implement synchronizer token pattern on all state-changing endpoints
+  - id: CSRF-CRIT-002
+    signal: CSRF token validation missing or bypassable
+    cwe_id: CWE-352
+    evidence_indicators:
+    - Token present but not validated
+    - Token validation can be bypassed by removing token
+    - Same token valid for multiple sessions
+    explanation: |
+      CSRF tokens must be validated server-side for every request.
+      Tokens that aren't validated or can be bypassed provide no protection.
+    remediation: Implement strict server-side token validation; reject requests without valid tokens
+  - id: CSRF-CRIT-003
+    signal: Predictable or weak CSRF tokens
+    cwe_id: CWE-330
+    evidence_indicators:
+    - Sequential token generation
+    - Timestamp-based tokens
+    - Tokens derived from session ID
+    explanation: |
+      Predictable tokens can be guessed by attackers, bypassing protection.
+      Tokens must be cryptographically random and unique per session.
+    remediation: Generate tokens using cryptographically secure random number generator
+  high:
+  - id: CSRF-HIGH-001
+    signal: SameSite cookie attribute not set or set to None
+    cwe_id: CWE-1275
+    evidence_pattern: SameSite.*None|Set-Cookie.*(?!SameSite)
+    explanation: |
+      SameSite=None allows cookies to be sent in cross-site requests,
+      enabling CSRF attacks. Modern browsers default to Lax, but explicit
+      None negates this protection.
+    remediation: Set SameSite=Strict or SameSite=Lax on session cookies
+  - id: CSRF-HIGH-002
+    signal: State change operations using GET method
+    cwe_id: CWE-352
+    evidence_pattern: '@app\.get.*delete|GET.*update|href.*action=delete'
+    explanation: |
+      GET requests should be idempotent and safe. Using GET for state
+      changes makes CSRF trivial via image tags, links, or redirects.
+    remediation: Use POST/PUT/DELETE for state-changing operations
+  - id: CSRF-HIGH-003
+    signal: CSRF token in URL query parameter
+    cwe_id: CWE-598
+    evidence_pattern: \?.*csrf|\?.*token=|GET.*csrf_token
+    explanation: |
+      CSRF tokens in URLs are exposed in browser history, Referer headers,
+      and server logs. This leaks tokens to third parties.
+    remediation: Send CSRF tokens in request body or custom header, not URL
+  - id: CSRF-HIGH-004
+    signal: Framework CSRF protection disabled
+    cwe_id: CWE-352
+    evidence_pattern: CSRF_ENABLED.*false|csrf.protection.*disabled|@csrf_exempt
+    explanation: |
+      Disabling framework CSRF protection removes built-in safeguards.
+      This is often done for convenience but creates vulnerabilities.
+    remediation: Enable framework CSRF protection; implement alternatives for APIs
+  medium:
+  - id: CSRF-MED-001
+    signal: Token not tied to user session
+    evidence_indicators:
+    - Global tokens used across users
+    - Token doesn't change on login
+    - Token valid after logout
+    explanation: |
+      CSRF tokens should be unique per user session. Shared tokens
+      could allow one user to craft attacks against another.
+    remediation: Generate unique token per session; invalidate on logout
+  - id: CSRF-MED-002
+    signal: Missing double submit cookie for stateless apps
+    evidence_indicators:
+    - API without CSRF token
+    - No custom header requirement
+    - Stateless auth without CSRF protection
+    explanation: |
+      Stateless applications should use double submit cookies or
+      custom header requirements to prevent CSRF.
+    remediation: Implement double submit cookie pattern or require custom header
+  - id: CSRF-MED-003
+    signal: CSRF token not rotated
+    evidence_indicators:
+    - Same token throughout session
+    - Token survives privilege changes
+    - No token rotation on sensitive actions
+    explanation: |
+      Token rotation limits the window of opportunity if a token
+      is compromised through other vulnerabilities like XSS.
+    remediation: Rotate CSRF tokens periodically and after privilege changes
+  low:
+  - id: CSRF-LOW-001
+    signal: CSRF token expiration too long
+    evidence_indicators:
+    - Tokens valid for days
+    - No expiration on CSRF tokens
+    explanation: |
+      Long-lived tokens increase the window for token theft exploitation.
+    remediation: Set reasonable token expiration (e.g., session lifetime)
+  positive:
+  - id: CSRF-POS-001
+    signal: Synchronizer token pattern properly implemented
+    explanation: Industry-standard CSRF protection with unique tokens per session
+  - id: CSRF-POS-002
+    signal: SameSite=Strict on session cookies
+    explanation: Browser-level protection against cross-site cookie sending
+  - id: CSRF-POS-003
+    signal: Custom header required for API requests
+    explanation: Additional protection layer for API endpoints
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify State-Changing Endpoints
+    description: |
+      Enumerate all endpoints that perform state changes including
+      POST, PUT, DELETE operations and any GET endpoints with side effects.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find POST/PUT/DELETE handlers
+      command: grep -rn '@app\.post\|@app\.put\|@app\.delete\|@PostMapping\|@PutMapping' src/
+    - purpose: Find form submissions
+      command: grep -rn '<form.*method' templates/
+    expected_findings:
+    - List of state-changing endpoints
+    - Form submission points
+  - id: '2'
+    name: Review CSRF Token Implementation
+    description: |
+      Examine how CSRF tokens are generated, stored, and validated
+      in the application framework.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find CSRF middleware configuration
+      command: grep -rn 'csrf\|CSRF' config/ settings/
+    - purpose: Check token generation
+      command: grep -rn 'generate.*token\|random.*csrf' src/
+    - purpose: Find CSRF exemptions
+      command: grep -rn 'csrf_exempt\|@csrf_exempt\|IgnoreAntiforgeryToken' src/
+    expected_findings:
+    - CSRF configuration settings
+    - Token generation method
+    - Any CSRF exemptions
+  - id: '3'
+    name: Test CSRF Protection
+    description: |
+      Attempt to submit state-changing requests without valid CSRF
+      tokens to verify protection is working.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test endpoint without CSRF token
+      command: 'curl -X POST -H ''Cookie: session=valid'' -d ''data=test'' https://target/api/action'
+    - purpose: Test with invalid token
+      command: 'curl -X POST -H ''Cookie: session=valid'' -d ''csrf=invalid&data=test'' https://target/api/action'
+    - purpose: Test token from different session
+      command: 'curl -X POST -H ''Cookie: session=user2'' -d ''csrf=user1_token&data=test'' https://target/api/action'
+    expected_findings:
+    - Requests without token rejected (403)
+    - Invalid tokens rejected
+    - Cross-session tokens rejected
+  - id: '4'
+    name: Check Cookie Attributes
+    description: |
+      Verify SameSite attribute and other security settings on
+      session cookies.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Inspect Set-Cookie headers
+      command: curl -sI https://target/login | grep -i 'set-cookie'
+    - purpose: Check for SameSite attribute
+      command: curl -sI https://target/login | grep -i 'samesite'
+    expected_findings:
+    - SameSite attribute present
+    - Appropriate SameSite value (Strict/Lax)
+  - id: '5'
+    name: Review API CSRF Protection
+    description: |
+      Examine CSRF protection for API endpoints, including custom
+      header requirements or double submit cookies.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Test API without custom header
+      command: 'curl -X POST -H ''Content-Type: application/json'' -d ''{"data":"test"}'' https://target/api/action'
+    - purpose: Test with required custom header
+      command: 'curl -X POST -H ''X-Requested-With: XMLHttpRequest'' -H ''Content-Type: application/json''
+        -d ''{"data":"test"}'' https://target/api/action'
+    expected_findings:
+    - API CSRF protection method
+    - Header requirements
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - CSRF Protection Assessment
+    - Cookie Configuration
+    - API Security
+    - Recommendations
+  confidence_guidance:
+    high: Direct testing confirms CSRF protection, code reviewed
+    medium: Code review completed without runtime testing
+    low: Based on configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-csrf-cheatsheet
+      priority: required
+    - source_id: cwe-352
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: CSRF audit requires comprehensive endpoint testing
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: csrf-001
+  item: All state-changing endpoints have CSRF protection
+  level: CRITICAL
+  verification: grep -rn '@csrf_exempt\|csrf.*disabled' src/ && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: csrf-002
+  item: CSRF tokens validated on server side
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test that requests without tokens return 403
+  expected: Confirmed by reviewer
+- id: csrf-003
+  item: SameSite cookie attribute set
+  level: BLOCKING
+  verification: curl -sI https://$HOST/login 2>/dev/null | grep -qi 'samesite' && echo 'PASS' || echo
+    'FAIL'
+  expected: PASS
+- id: csrf-004
+  item: No state changes via GET requests
+  level: BLOCKING
+  verification: grep -rn '@app\.get.*delete\|@GetMapping.*delete' src/ && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: csrf-005
+  item: CSRF tokens cryptographically random
+  level: WARNING
+  verification: manual
+  verification_notes: Review token generation uses CSPRNG
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP-ASVS
+    controls:
+    - 4.2.1
+    - 4.2.2
+  - framework: PCI-DSS
+    controls:
+    - 6.5.9
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-5
+relationships:
+  commonly_combined:
+  - security-trust.application-security.security-headers
+  - security-trust.authentication.session-management
+  - security-trust.input-validation.xss-prevention

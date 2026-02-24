@@ -1,0 +1,312 @@
+# ============================================================
+# AUDIT: Shared State Management Audit
+# Category: Scalability & Capacity > Horizontal Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.horizontal-scaling.shared-state-management"
+  name: "Shared State Management Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "horizontal-scaling"
+
+  tier: "expert"
+  estimated_duration: "4 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates how shared state is managed across horizontally scaled instances.
+    Examines distributed caching strategies, database access patterns, distributed
+    locks, leader election, and consistency mechanisms. Identifies race conditions,
+    cache coherency issues, and data synchronization problems.
+
+  why_it_matters: |
+    When applications scale horizontally, shared state becomes a critical challenge.
+    Without proper management, race conditions cause data corruption, cache
+    inconsistencies lead to stale data, and lack of coordination causes duplicate
+    processing. Proper shared state management is essential for correct distributed
+    system behavior.
+
+  when_to_run:
+    - "Before deploying to multi-instance environments"
+    - "After introducing shared data structures"
+    - "When debugging data consistency issues"
+    - "During distributed systems architecture review"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+    - type: "architecture_docs"
+      description: "Distributed system architecture documentation"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Cache and database configuration access"
+
+discovery:
+  code_patterns:
+    - pattern: "(synchronized|ReentrantLock|@Lock|mutex)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect local synchronization (won't work distributed)"
+
+    - pattern: "(Redisson|Hazelcast|ZooKeeper|etcd).*Lock"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect distributed lock usage"
+
+    - pattern: "(@Cacheable|@CacheEvict|@CachePut|cache\\.put|cache\\.get)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect cache usage patterns"
+
+    - pattern: "(optimistic.*lock|version|@Version|ETag)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect optimistic concurrency control"
+
+    - pattern: "(SELECT.*FOR UPDATE|LOCK IN SHARE MODE)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect database-level locking"
+
+  file_patterns:
+    - glob: "**/cache*.xml"
+      purpose: "Cache configuration files"
+    - glob: "**/ehcache*.xml"
+      purpose: "EhCache configuration"
+    - glob: "**/hazelcast*.xml"
+      purpose: "Hazelcast configuration"
+
+knowledge_sources:
+  guides:
+    - id: "redis-distlock"
+      name: "Distributed Locks with Redis"
+      url: "https://redis.io/docs/manual/patterns/distributed-locks/"
+      offline_cache: true
+
+  papers:
+    - id: "lamport-clocks"
+      title: "Time, Clocks, and the Ordering of Events in a Distributed System"
+      url: "https://lamport.azurewebsites.net/pubs/time-clocks.pdf"
+
+  learning_resources:
+    - id: "designing-data-intensive"
+      title: "Designing Data-Intensive Applications - Ch. 8-9"
+      type: "book"
+      reference: "ISBN: 978-1449373320"
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Pattern-based state management detection"
+      offline_capable: true
+
+    - tool: "semgrep"
+      purpose: "Complex concurrency pattern detection"
+      offline_capable: true
+
+  scripts:
+    - id: "distributed-state-analyzer"
+      language: "bash"
+      purpose: "Analyze shared state patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Local Synchronization (may not work distributed) ==="
+        rg -l "(synchronized|ReentrantLock)" --type java
+        echo "=== Distributed Locks ==="
+        rg -l "(Redisson|distributed.*lock|DLock)" --type java
+        echo "=== Cache Operations ==="
+        rg -l "(@Cacheable|cache\\.)" --type java
+
+signals:
+  critical:
+    - id: "STATE-CRIT-001"
+      signal: "Local synchronization used for distributed coordination"
+      evidence_pattern: "synchronized.*shared|ReentrantLock.*global"
+      explanation: |
+        Java synchronized blocks and local locks only work within a single JVM.
+        In horizontally scaled environments, they provide no protection against
+        concurrent access from other instances.
+      remediation: "Use distributed locks (Redisson, ZooKeeper, etcd) for cross-instance coordination"
+
+    - id: "STATE-CRIT-002"
+      signal: "Local cache without distributed invalidation"
+      evidence_pattern: "ConcurrentHashMap|Caffeine|Guava.*Cache"
+      explanation: |
+        Local caches become stale when data is updated by other instances.
+        Without distributed invalidation, different instances serve different data.
+      remediation: "Use distributed cache (Redis, Hazelcast) or implement cache invalidation"
+
+  high:
+    - id: "STATE-HIGH-001"
+      signal: "Missing optimistic concurrency control on shared entities"
+      evidence_pattern: "UPDATE.*WHERE id = .*[^version]"
+      explanation: |
+        Without version checks, concurrent updates from multiple instances
+        can silently overwrite each other (lost updates).
+      remediation: "Add @Version field and optimistic locking to shared entities"
+
+    - id: "STATE-HIGH-002"
+      signal: "Race condition in cache-aside pattern"
+      evidence_pattern: "cache\\.get.*==.*null.*then.*db.*cache\\.put"
+      explanation: |
+        Cache-aside without proper locking can cause thundering herd
+        problems and database overload during cache misses.
+      remediation: "Implement distributed locks or use cache frameworks with built-in protection"
+
+  medium:
+    - id: "STATE-MED-001"
+      signal: "No cache TTL configured"
+      evidence_pattern: "@Cacheable(?!.*expire)(?!.*ttl)"
+      remediation: "Configure appropriate TTL for cached data to prevent unbounded growth"
+
+  positive:
+    - id: "STATE-POS-001"
+      signal: "Proper distributed lock usage"
+      evidence_pattern: "RLock|DistributedLock.*try.*finally.*unlock"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify shared state access points"
+      description: |
+        Map all locations where shared state is accessed, including databases,
+        caches, and in-memory structures accessed concurrently.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Find cache usage"
+          command: "rg '(@Cacheable|@CacheEvict|cache\\.)' --type java"
+        - purpose: "Find synchronization points"
+          command: "rg '(synchronized|Lock|mutex)' --type java"
+      expected_findings:
+        - "Complete map of shared state access points"
+        - "Identification of coordination mechanisms"
+
+    - id: "2"
+      name: "Analyze concurrency control mechanisms"
+      description: |
+        Evaluate whether concurrency control mechanisms are appropriate
+        for distributed environments.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Find distributed lock usage"
+          command: "rg '(Redisson|Hazelcast|ZooKeeper)' --type java"
+        - purpose: "Find optimistic locking"
+          command: "rg '@Version|version.*=|ETag'"
+      expected_findings:
+        - "Assessment of lock scope (local vs distributed)"
+        - "Optimistic vs pessimistic locking strategy"
+
+    - id: "3"
+      name: "Review cache consistency strategy"
+      description: |
+        Evaluate cache invalidation and consistency mechanisms for
+        multi-instance deployments.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Find cache configuration"
+          command: "rg -l 'cache|Cache' --type yaml --type xml"
+        - purpose: "Find cache invalidation"
+          command: "rg '@CacheEvict|cache\\.invalidate|cache\\.remove'"
+      expected_findings:
+        - "Cache topology (local, distributed, hybrid)"
+        - "Cache invalidation strategy effectiveness"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Shared State Inventory"
+        - "Concurrency Control Assessment"
+        - "Cache Consistency Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct code evidence of patterns with verified context"
+    medium: "Pattern matches found requiring runtime verification"
+    low: "Indirect indicators of potential issues"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "redis-distlock"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires deep distributed systems analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "shared-state-001"
+    item: "No local synchronization for cross-instance coordination"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review all synchronized blocks and verify they don't protect shared state"
+    expected: "Confirmed by reviewer"
+
+  - id: "shared-state-002"
+    item: "Distributed cache or invalidation configured"
+    level: "CRITICAL"
+    verification: "rg -l 'redis|hazelcast|distributed.*cache' --type yaml || echo 'NOT_FOUND'"
+    expected: "Configuration files found"
+
+  - id: "shared-state-003"
+    item: "Optimistic locking on shared database entities"
+    level: "BLOCKING"
+    verification: "rg '@Version' --type java | wc -l"
+    expected: "Matches count > 0 for shared entities"
+
+governance:
+  applicable_to:
+    archetypes: ["web-service", "api-service", "microservice", "distributed-system"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["REL-6", "REL-9"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.horizontal-scaling.stateless-design"
+    - "scalability-capacity.horizontal-scaling.service-discovery"

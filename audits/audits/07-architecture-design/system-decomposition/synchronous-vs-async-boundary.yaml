@@ -1,0 +1,373 @@
+# ============================================================
+# AUDIT: Synchronous vs Asynchronous Boundary Assessment
+# ============================================================
+# Evaluates whether communication patterns between components
+# appropriately use sync vs async for their requirements.
+# ============================================================
+
+audit:
+  id: "architecture-design.system-decomposition.synchronous-vs-async-boundary"
+  name: "Synchronous vs Asynchronous Boundary Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "system-decomposition"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "architecture"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates whether communication boundaries between
+    components appropriately use synchronous (request-response) vs
+    asynchronous (event-driven, message queue) patterns. It identifies
+    inappropriate sync calls that should be async, and unnecessary
+    async complexity where sync would suffice.
+
+  why_it_matters: |
+    Wrong communication pattern causes:
+    - Sync where async needed: Latency chains, failure cascades, scaling limits
+    - Async where sync needed: Unnecessary complexity, eventual consistency issues
+    - Missing patterns: Lost events, data inconsistency, debugging difficulty
+    Right patterns enable resilience, scalability, and appropriate consistency.
+
+  when_to_run:
+    - "During distributed system design"
+    - "When experiencing latency or reliability issues"
+    - "Before adding message queues or event buses"
+    - "When evaluating system resilience"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Service source code"
+    - type: "architecture_documentation"
+      description: "Communication patterns documentation"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Understanding of business requirements"
+
+discovery:
+  code_patterns:
+    - pattern: "RestTemplate|WebClient|HttpClient|FeignClient"
+      type: "regex"
+      scope: "source"
+      purpose: "Find synchronous HTTP calls"
+
+    - pattern: "KafkaTemplate|RabbitTemplate|SqsClient|publish\\(|emit\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find asynchronous messaging"
+
+    - pattern: "@Async|CompletableFuture|Promise|Observable"
+      type: "regex"
+      scope: "source"
+      purpose: "Find async programming patterns"
+
+  file_patterns:
+    - glob: "**/kafka/**"
+      purpose: "Kafka configuration"
+    - glob: "**/rabbitmq/**"
+      purpose: "RabbitMQ configuration"
+    - glob: "**/sqs/**"
+      purpose: "AWS SQS configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "async-patterns"
+      name: "Asynchronous Messaging Patterns"
+      url: "https://www.enterpriseintegrationpatterns.com/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "event-driven"
+      name: "Event-Driven Architecture"
+      url: "https://martinfowler.com/articles/201701-event-driven.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "eip-book"
+      title: "Enterprise Integration Patterns"
+      type: "book"
+      reference: "Hohpe & Woolf"
+
+    - id: "designing-data"
+      title: "Designing Data-Intensive Applications"
+      type: "book"
+      reference: "Martin Kleppmann - Chapter on Messaging"
+
+    - id: "building-microservices"
+      title: "Building Microservices"
+      type: "book"
+      reference: "Sam Newman - 2nd Edition"
+
+    - id: "ddd-evans"
+      title: "Domain-Driven Design"
+      type: "book"
+      reference: "Eric Evans"
+
+tooling:
+  static_analysis:
+    - tool: "Structure101"
+      purpose: "Analyze communication patterns"
+      offline_capable: true
+
+  scripts:
+    - id: "comm-pattern-analyzer"
+      language: "bash"
+      purpose: "Analyze sync vs async patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Synchronous Calls ==="
+        grep -rn "RestTemplate\|WebClient\|FeignClient\|HttpClient" --include="*.java" | wc -l
+
+        echo "=== Asynchronous Messaging ==="
+        grep -rn "KafkaTemplate\|RabbitTemplate\|JmsTemplate\|SqsClient" --include="*.java" | wc -l
+
+        echo "=== Async Programming ==="
+        grep -rn "@Async\|CompletableFuture\|Mono<\|Flux<" --include="*.java" | wc -l
+
+signals:
+  critical:
+    - id: "SYNC-CRIT-001"
+      signal: "Long synchronous call chains for non-critical operations"
+      evidence_pattern: "Fire-and-forget operations using HTTP POST with response wait"
+      explanation: |
+        Operations that don't need immediate response (logging, analytics,
+        notifications) should be async. Sync calls create unnecessary
+        latency and failure coupling.
+      remediation: "Use message queue for fire-and-forget; return early to caller"
+
+    - id: "SYNC-CRIT-002"
+      signal: "Synchronous calls creating distributed transactions"
+      evidence_pattern: "Multi-service update requiring rollback on failure"
+      explanation: |
+        Distributed transactions via sync calls are error-prone and
+        don't scale. They create tight coupling and partial failure states.
+      remediation: "Use Saga pattern with compensating transactions; embrace eventual consistency"
+
+  high:
+    - id: "SYNC-HIGH-001"
+      signal: "Missing circuit breaker on synchronous external calls"
+      evidence_pattern: "HTTP client without timeout or circuit breaker"
+      explanation: |
+        Sync calls to external services without protection can cascade
+        failures through the system when the external service is slow or down.
+      remediation: "Add circuit breaker, timeout, and retry with backoff"
+
+    - id: "SYNC-HIGH-002"
+      signal: "Async messaging without proper error handling"
+      evidence_pattern: "Message consumer without dead letter queue"
+      explanation: |
+        Async messaging requires explicit error handling. Without DLQ,
+        poison messages can block queues or be silently lost.
+      remediation: "Configure dead letter queues; implement retry policies"
+
+  medium:
+    - id: "SYNC-MED-001"
+      signal: "Query operations using async unnecessarily"
+      evidence_pattern: "Simple read using message queue"
+      remediation: "Use sync HTTP for simple queries; async adds latency and complexity"
+
+    - id: "SYNC-MED-002"
+      signal: "Event consumers without idempotency"
+      evidence_pattern: "Event handler modifies state without duplicate check"
+      remediation: "Make handlers idempotent; use event IDs for deduplication"
+
+  low:
+    - id: "SYNC-LOW-001"
+      signal: "Inconsistent timeout configurations"
+      remediation: "Standardize timeout values across services"
+
+  positive:
+    - id: "SYNC-POS-001"
+      signal: "Appropriate sync for queries, async for commands"
+    - id: "SYNC-POS-002"
+      signal: "Circuit breakers on all external calls"
+    - id: "SYNC-POS-003"
+      signal: "Dead letter queues for all async processing"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory communication patterns"
+      description: |
+        Catalog all inter-service communication and classify
+        as sync or async.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find sync HTTP clients"
+          command: "grep -rn 'RestTemplate\\|WebClient\\|FeignClient' --include='*.java' | head -40"
+        - purpose: "Find async messaging"
+          command: "grep -rn 'KafkaTemplate\\|RabbitTemplate\\|SqsClient\\|publish(' --include='*.java' | head -40"
+      expected_findings:
+        - "Communication pattern inventory"
+        - "Sync vs async distribution"
+
+    - id: "2"
+      name: "Analyze operation characteristics"
+      description: |
+        For each communication, assess whether sync or async
+        is appropriate based on operation requirements.
+      duration_estimate: "35 min"
+      questions:
+        - "Does the caller need the response immediately?"
+        - "Can the operation fail without user impact?"
+        - "Is strong consistency required?"
+      expected_findings:
+        - "Operation classification"
+        - "Pattern appropriateness"
+
+    - id: "3"
+      name: "Check resilience patterns"
+      description: |
+        Verify that sync calls have proper protection (circuit
+        breaker, timeout, retry).
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find circuit breaker usage"
+          command: "grep -rn 'CircuitBreaker\\|@Retry\\|Resilience4j' --include='*.java' | head -20"
+        - purpose: "Find timeout configuration"
+          command: "grep -rn 'timeout\\|Timeout' --include='*.java' --include='*.yaml' | head -30"
+      expected_findings:
+        - "Resilience coverage"
+        - "Missing protection"
+
+    - id: "4"
+      name: "Verify async error handling"
+      description: |
+        Check that async processing has proper error handling,
+        including dead letter queues and retry policies.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find DLQ configuration"
+          command: "grep -rn 'dead.letter\\|dlq\\|DLQ' --include='*.yaml' --include='*.properties' | head -20"
+        - purpose: "Find retry configuration"
+          command: "grep -rn 'retry\\|backoff' --include='*.yaml' --include='*.properties' | head -20"
+      expected_findings:
+        - "Error handling coverage"
+        - "Missing DLQ configurations"
+
+    - id: "5"
+      name: "Document recommendations"
+      description: |
+        Based on findings, recommend pattern changes for
+        inappropriate sync/async usage.
+      duration_estimate: "25 min"
+      expected_findings:
+        - "Pattern change recommendations"
+        - "Migration priority"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "communication_matrix"
+      format: "tabular"
+      sections:
+        - "Communication"
+        - "Current Pattern"
+        - "Recommended Pattern"
+        - "Rationale"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Pattern Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear pattern mismatch with requirements"
+    medium: "Pattern may be suboptimal"
+    low: "Pattern acceptable but could improve"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "async-patterns"
+        priority: "required"
+      - source_id: "event-driven"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed communication analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "sync-001"
+    item: "Fire-and-forget operations use async"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Non-critical operations don't block on response"
+    expected: "Confirmed by reviewer"
+
+  - id: "sync-002"
+    item: "Sync external calls have circuit breakers"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "All HTTP clients have timeout and circuit breaker"
+    expected: "Confirmed by reviewer"
+
+  - id: "sync-003"
+    item: "Async consumers have dead letter queues"
+    level: "BLOCKING"
+    verification: "grep -rn 'dead.letter\\|DLQ' --include='*.yaml' | wc -l"
+    expected: ">0 if async messaging used"
+
+  - id: "sync-004"
+    item: "Event handlers are idempotent"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Duplicate message handling documented"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["distributed", "microservices"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Reliability", "Performance"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.system-decomposition.service-granularity"
+    - "architecture-design.coupling.tight-coupling-detection"
+    - "architecture-design.cross-cutting-concerns.cross-cutting-concern-handling"

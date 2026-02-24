@@ -1,0 +1,321 @@
+# ============================================================
+# AUDIT: Server-Side Session State
+# ============================================================
+# Evaluates how server-side session state is managed including
+# storage, security, scalability, and lifecycle management.
+# ============================================================
+
+audit:
+  id: "data-state-management.application-state.server-side-session-state"
+
+  name: "Server-Side Session State"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "application-state"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates server-side session state management including
+    session storage backends, session security practices, session lifecycle,
+    and scalability considerations. It examines how user sessions are
+    created, maintained, invalidated, and synchronized across servers.
+
+  why_it_matters: |
+    Session state security directly impacts authentication and authorization.
+    Insecure session handling enables session hijacking, fixation attacks,
+    and unauthorized access. Improper session storage prevents horizontal
+    scaling. Session leaks expose sensitive user data. Proper session
+    management is foundational to application security.
+
+  when_to_run:
+    - "During security audits"
+    - "When implementing authentication"
+    - "Before horizontal scaling"
+    - "After session-related security incidents"
+
+prerequisites:
+  required_artifacts:
+    - type: "application-code"
+      description: "Backend application code with session handling"
+    - type: "session-config"
+      description: "Session configuration"
+
+  access_requirements:
+    - "Read access to backend code"
+    - "Access to session storage configuration"
+    - "Security configuration access"
+
+discovery:
+  code_patterns:
+    - pattern: "session|Session|express-session|passport|jwt"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify session handling code"
+    - pattern: "redis|memcached|connect-redis|session.*store"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify session storage"
+    - pattern: "cookie|Cookie|httpOnly|secure|sameSite"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify cookie configuration"
+
+  file_patterns:
+    - glob: "**/session/**/*"
+      purpose: "Session-related code"
+    - glob: "**/auth/**/*"
+      purpose: "Authentication code"
+    - glob: "**/middleware/**/*"
+      purpose: "Session middleware"
+
+knowledge_sources:
+  specifications:
+    - id: "owasp-session"
+      name: "OWASP Session Management Cheat Sheet"
+      url: "https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "express-session-security"
+      name: "Express Session Security"
+      url: "https://expressjs.com/en/advanced/best-practice-security.html"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "semgrep"
+      purpose: "Detect session security issues"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "SESSION-CRIT-001"
+      signal: "Session cookies without httpOnly flag"
+      evidence_pattern: "cookie.*httpOnly.*false|missing httpOnly"
+      explanation: |
+        Without httpOnly, session cookies are accessible via JavaScript.
+        XSS attacks can steal session tokens and hijack user sessions.
+        This is a fundamental session security requirement.
+      remediation: "Set httpOnly: true on all session cookies"
+
+    - id: "SESSION-CRIT-002"
+      signal: "Session cookies without secure flag in production"
+      evidence_pattern: "cookie.*secure.*false in production config"
+      explanation: |
+        Without the secure flag, session cookies are sent over HTTP,
+        allowing network attackers to intercept and steal sessions.
+        HTTPS without secure cookies provides false sense of security.
+      remediation: "Set secure: true for production; use HTTPS exclusively"
+
+  high:
+    - id: "SESSION-HIGH-001"
+      signal: "Session ID not regenerated after authentication"
+      evidence_pattern: "login without session regeneration"
+      explanation: |
+        Without session regeneration, session fixation attacks are possible.
+        Attacker provides a known session ID, user authenticates, attacker
+        now has authenticated session.
+      remediation: "Regenerate session ID after successful authentication"
+
+    - id: "SESSION-HIGH-002"
+      signal: "In-memory session storage without distributed backend"
+      evidence_pattern: "MemoryStore in multi-server deployment"
+      explanation: |
+        In-memory session storage doesn't work with multiple servers.
+        Users get logged out when requests hit different servers.
+        This prevents horizontal scaling and causes reliability issues.
+      remediation: "Use distributed session store (Redis, Memcached) for multi-server deployments"
+
+  medium:
+    - id: "SESSION-MED-001"
+      signal: "Session timeout not configured or too long"
+      evidence_pattern: "No maxAge or session lasting days/weeks"
+      remediation: "Configure appropriate session timeout based on security requirements"
+
+    - id: "SESSION-MED-002"
+      signal: "No session revocation mechanism"
+      evidence_pattern: "Unable to invalidate sessions on password change/logout"
+      remediation: "Implement session revocation; invalidate sessions on security events"
+
+  low:
+    - id: "SESSION-LOW-001"
+      signal: "Session data not encrypted at rest"
+
+  positive:
+    - id: "SESSION-POS-001"
+      signal: "Secure session configuration with distributed storage"
+    - id: "SESSION-POS-002"
+      signal: "Session regeneration and proper lifecycle management"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Session Configuration Discovery"
+      description: |
+        Identify session management approach and configuration
+        including storage and security settings.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find session configuration"
+          command: "grep -riE 'session|express-session|passport|connect-session' --include='*.ts' --include='*.js' --include='*.py' --include='*.java' . 2>/dev/null | head -50"
+        - purpose: "Find cookie configuration"
+          command: "grep -riE 'cookie|httpOnly|secure|sameSite|maxAge' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | head -40"
+        - purpose: "Find session storage configuration"
+          command: "grep -riE 'session.*store|redis|memcached|connect-redis|SessionStore' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Session management approach"
+        - "Cookie security settings"
+
+    - id: "2"
+      name: "Security Flag Analysis"
+      description: |
+        Verify session security flags are properly configured
+        for production environments.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Check httpOnly setting"
+          command: "grep -riE 'httpOnly' --include='*.ts' --include='*.js' --include='*.py' -A2 -B2 . 2>/dev/null | head -40"
+        - purpose: "Check secure flag"
+          command: "grep -riE 'secure.*cookie|cookie.*secure' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | head -30"
+        - purpose: "Check sameSite setting"
+          command: "grep -riE 'sameSite|samesite' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Security flag configuration"
+        - "Environment-specific settings"
+
+    - id: "3"
+      name: "Session Lifecycle Analysis"
+      description: |
+        Evaluate session lifecycle management including
+        creation, regeneration, and invalidation.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find session regeneration"
+          command: "grep -riE 'regenerate|session\\.destroy|rotate.*session|session.*rotate' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | head -30"
+        - purpose: "Find logout handling"
+          command: "grep -riE 'logout|signout|session\\.destroy|req\\.logout' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | head -30"
+        - purpose: "Find session timeout"
+          command: "grep -riE 'maxAge|ttl|expire|timeout' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | grep -iE 'session|cookie' | head -20"
+
+      expected_findings:
+        - "Session lifecycle handling"
+        - "Regeneration on authentication"
+
+    - id: "4"
+      name: "Scalability Analysis"
+      description: |
+        Evaluate session storage for horizontal scalability.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find session store type"
+          command: "grep -riE 'MemoryStore|FileStore|RedisStore|MongoStore|connect-redis' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | head -30"
+        - purpose: "Find Redis configuration"
+          command: "grep -riE 'redis|REDIS_URL|ioredis' --include='*.ts' --include='*.js' --include='*.env' --include='*.yml' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Session storage backend"
+        - "Scalability assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Security Analysis"
+        - "Lifecycle Management"
+        - "Scalability Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of insecure configuration"
+    medium: "Configuration appears secure but environment verification needed"
+    low: "Potential issues based on patterns, production config needed"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "owasp-session"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires security-focused analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "session-001"
+    item: "Session cookies have httpOnly flag"
+    level: "CRITICAL"
+    verification: "grep -riE 'httpOnly.*true' --include='*.ts' --include='*.js' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "session-002"
+    item: "Session cookies have secure flag in production"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify secure flag is set for production"
+    expected: "Confirmed by reviewer"
+
+  - id: "session-003"
+    item: "Session storage supports horizontal scaling"
+    level: "WARNING"
+    verification: "grep -riE 'redis|RedisStore|connect-redis' --include='*.ts' --include='*.js' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "api"]
+
+  compliance_frameworks:
+    - framework: "OWASP"
+      controls: ["A07:2021"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.application-state.state-persistence"
+    - "data-state-management.application-state.state-recovery"

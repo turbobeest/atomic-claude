@@ -1,0 +1,354 @@
+# ============================================================
+# AUDIT: Build Caching
+# ============================================================
+# Evaluates caching strategies to optimize build performance
+
+audit:
+  id: "devops-ci-cd.build-pipeline.build-caching"
+  name: "Build Caching"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "build-pipeline"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes build caching strategies including dependency caching,
+    build artifact caching, Docker layer caching, and remote build
+    caches. Evaluates cache hit rates, invalidation strategies,
+    cache key design, and storage efficiency.
+
+  why_it_matters: |
+    Effective caching can reduce build times by 50-90%. Without proper
+    caching, builds repeatedly download dependencies and recompile
+    unchanged code. Poor cache key design leads to cache misses,
+    while overly aggressive caching can cause stale artifacts.
+    Build caching directly impacts developer productivity and CI costs.
+
+  when_to_run:
+    - "Initial CI/CD optimization"
+    - "After build time degradation"
+    - "When CI costs increase unexpectedly"
+    - "During performance reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "ci_configuration"
+      description: "CI/CD pipeline configuration files"
+    - type: "build_configuration"
+      description: "Build tool configuration (webpack, gradle, etc.)"
+
+  access_requirements:
+    - "CI/CD system cache configuration"
+    - "Build logs with cache hit/miss information"
+
+discovery:
+  code_patterns:
+    - pattern: "actions/cache|cache:|restore_cache|save_cache"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify cache configuration in CI"
+
+    - pattern: "DOCKER_BUILDKIT|--cache-from|--cache-to"
+      type: "regex"
+      scope: "config"
+      purpose: "Docker build caching configuration"
+
+  file_patterns:
+    - glob: "**/.github/workflows/*.yml"
+      purpose: "GitHub Actions cache configuration"
+
+    - glob: "**/.gitlab-ci.yml"
+      purpose: "GitLab CI cache configuration"
+
+    - glob: "**/Jenkinsfile"
+      purpose: "Jenkins cache configuration"
+
+    - glob: "**/docker-compose*.yml"
+      purpose: "Docker Compose build caching"
+
+knowledge_sources:
+  specifications:
+    - id: "nsa-cicd-security"
+      name: "NSA/CISA: Defending CI/CD Environments"
+      url: "https://media.defense.gov/2023/Jun/28/2003249466/-1/-1/0/CSI_DEFENDING_CI_CD_ENVIRONMENTS.PDF"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "github-actions-cache"
+      name: "GitHub Actions Caching Guide"
+      url: "https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows"
+      offline_cache: true
+    - id: "docker-buildkit"
+      name: "Docker BuildKit Caching"
+      url: "https://docs.docker.com/build/cache/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "gh"
+      purpose: "Analyze GitHub Actions cache usage"
+      command: "gh cache list"
+
+    - tool: "docker"
+      purpose: "Inspect Docker build cache"
+      command: "docker builder prune --dry-run"
+
+  monitoring_queries:
+    - system: "GitHub Actions"
+      query: "Cache hit rate over time"
+      purpose: "Measure caching effectiveness"
+
+  scripts:
+    - id: "check-cache-config"
+      language: "bash"
+      purpose: "Verify cache configuration in workflows"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        for workflow in .github/workflows/*.yml; do
+          if grep -q 'actions/cache' "$workflow"; then
+            echo "PASS: $workflow uses caching"
+          else
+            echo "WARN: $workflow may be missing cache configuration"
+          fi
+        done
+
+signals:
+  critical:
+    - id: "CICD-CACHE-CRIT-001"
+      signal: "No build caching configured for dependencies"
+      evidence_pattern: "No actions/cache, cache:, or equivalent in CI config"
+      explanation: |
+        Without dependency caching, every build downloads all dependencies
+        from scratch. This wastes bandwidth, increases build time by
+        minutes to tens of minutes, and creates unnecessary load on
+        package registries.
+      remediation: "Configure dependency caching appropriate to your package managers"
+
+    - id: "CICD-CACHE-CRIT-002"
+      signal: "Cache keys include volatile data causing constant misses"
+      evidence_pattern: "Cache key includes timestamp, random, or frequently changing values"
+      explanation: |
+        Cache keys that include volatile data like timestamps or build
+        numbers will never hit, rendering caching useless while still
+        consuming storage.
+      remediation: "Design cache keys based on stable inputs like lockfile hashes"
+
+  high:
+    - id: "CICD-CACHE-HIGH-001"
+      signal: "Docker builds not using layer caching"
+      evidence_pattern: "DOCKER_BUILDKIT=0 or missing --cache-from"
+      explanation: |
+        Docker layer caching can dramatically reduce image build times.
+        Without it, every layer is rebuilt from scratch on each build.
+      remediation: "Enable BuildKit and configure cache export/import"
+
+    - id: "CICD-CACHE-HIGH-002"
+      signal: "Cache hit rate below 50%"
+      evidence_threshold: "cache_hit_rate < 50%"
+      explanation: |
+        Low cache hit rates indicate ineffective caching strategy.
+        The effort of saving and restoring caches provides minimal
+        benefit while adding overhead.
+      remediation: "Audit cache key design and invalidation triggers"
+
+  medium:
+    - id: "CICD-CACHE-MED-001"
+      signal: "No remote build cache for compiled languages"
+      evidence_pattern: "Missing gradle remote cache, bazel remote cache"
+      remediation: "Configure remote build cache for sharing across CI runners"
+
+    - id: "CICD-CACHE-MED-002"
+      signal: "Cache not scoped appropriately (too broad or too narrow)"
+      remediation: "Balance cache granularity for optimal hit rate"
+
+  low:
+    - id: "CICD-CACHE-LOW-001"
+      signal: "Cache size approaching limits"
+
+    - id: "CICD-CACHE-LOW-002"
+      signal: "No cache cleanup policy configured"
+
+  positive:
+    - id: "CICD-CACHE-POS-001"
+      signal: "Cache hit rate above 80%"
+
+    - id: "CICD-CACHE-POS-002"
+      signal: "Multi-level caching strategy implemented (dependencies + build outputs)"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory caching configuration"
+      description: |
+        Identify all caching configurations in CI/CD pipelines.
+        Document what is being cached and cache key design.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find cache configurations in GitHub Actions"
+          command: |
+            grep -A 10 'actions/cache' .github/workflows/*.yml 2>/dev/null || echo "No GitHub Actions cache found"
+
+        - purpose: "Find cache configurations in GitLab CI"
+          command: |
+            grep -A 5 'cache:' .gitlab-ci.yml 2>/dev/null || echo "No GitLab CI cache found"
+
+      expected_findings:
+        - "Complete inventory of cache configurations"
+
+    - id: "2"
+      name: "Analyze cache key design"
+      description: |
+        Review cache keys for each cache configuration.
+        Identify volatile components that may cause unnecessary misses.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Extract cache keys from workflows"
+          command: |
+            grep -E 'key:|restore-keys:' .github/workflows/*.yml 2>/dev/null
+
+      expected_findings:
+        - "Cache key patterns and potential issues"
+
+    - id: "3"
+      name: "Measure cache effectiveness"
+      description: |
+        Gather cache hit/miss statistics from recent builds.
+        Calculate overall cache hit rate.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "List GitHub Actions caches"
+          command: "gh cache list --limit 50 2>/dev/null || echo 'gh CLI not available'"
+
+      expected_findings:
+        - "Cache hit rates and storage usage"
+
+    - id: "4"
+      name: "Review Docker caching"
+      description: |
+        Analyze Docker build caching configuration.
+        Check for BuildKit usage and layer optimization.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for BuildKit in Docker builds"
+          command: |
+            grep -r 'DOCKER_BUILDKIT\|--cache-from\|--cache-to' .github/workflows/ Dockerfile* 2>/dev/null || echo "No BuildKit configuration found"
+
+      expected_findings:
+        - "Docker caching strategy assessment"
+
+    - id: "5"
+      name: "Identify caching gaps"
+      description: |
+        Identify build steps that could benefit from caching
+        but currently do not have it configured.
+      duration_estimate: "20 min"
+
+      questions:
+        - "Are all package manager dependencies being cached?"
+        - "Are compiled outputs being cached where appropriate?"
+        - "Is there opportunity for remote build cache?"
+
+      expected_findings:
+        - "List of caching improvement opportunities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Current Caching Strategy"
+        - "Cache Effectiveness Analysis"
+        - "Optimization Recommendations"
+
+  confidence_guidance:
+    high: "Cache hit metrics analyzed from 30+ days of builds"
+    medium: "Cache configuration reviewed with limited metrics"
+    low: "Based on configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "github-actions-cache"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires metrics analysis for full assessment"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "build-caching-001"
+    item: "Dependency caching configured"
+    level: "CRITICAL"
+    verification: |
+      grep -r 'actions/cache\|cache:' .github/workflows/ .gitlab-ci.yml 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "build-caching-002"
+    item: "Cache keys based on stable inputs"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify cache keys use lockfile hashes or similar stable inputs"
+    expected: "Confirmed by reviewer"
+
+  - id: "build-caching-003"
+    item: "Docker BuildKit enabled for image builds"
+    level: "WARNING"
+    verification: |
+      grep -r 'DOCKER_BUILDKIT=1\|BUILDKIT' .github/workflows/ Dockerfile* docker-compose* 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "DORA"
+      controls: ["Lead Time for Changes"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.build-pipeline.build-speed"
+    - "devops-ci-cd.build-pipeline.build-reproducibility"

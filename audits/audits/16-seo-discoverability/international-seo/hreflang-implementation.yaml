@@ -1,0 +1,345 @@
+audit:
+  id: seo-discoverability.international-seo.hreflang-implementation
+  name: Hreflang Implementation Audit
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: seo-discoverability
+  category_number: 16
+  subcategory: international-seo
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates hreflang tag implementation for websites targeting
+    multiple languages or regions. It examines HTML link elements, HTTP headers,
+    and XML sitemaps for proper hreflang annotations, validates language/region
+    codes against ISO standards, checks for bidirectional linking (return tags),
+    and identifies x-default implementation for international fallback.
+  why_it_matters: |
+    Hreflang tags tell search engines which language and regional versions of
+    pages to show users based on their location and language preferences.
+    Incorrect implementation leads to the wrong language version appearing in
+    search results, duplicate content issues across language versions, and
+    wasted crawl budget. Proper hreflang is essential for international SEO
+    success and user experience for global audiences.
+  when_to_run:
+  - When launching multilingual or multi-regional sites
+  - When adding new language versions
+  - When international traffic or rankings decline
+  - During quarterly international SEO audits
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: HTML source files with hreflang tags
+  - type: sitemap
+    description: XML sitemap(s) for hreflang verification
+  - type: deployed_website
+    description: Live site for HTTP header inspection
+  access_requirements:
+  - Source code repository access
+  - Access to all language versions of the site
+  - Google Search Console access for hreflang errors
+discovery:
+  code_patterns:
+  - pattern: hreflang\s*=\s*["'][^"']+["']
+    type: regex
+    scope: source
+    purpose: Detect hreflang attribute usage
+  - pattern: <link[^>]*rel=["']alternate["'][^>]*hreflang
+    type: regex
+    scope: source
+    purpose: Find hreflang link tags
+  - pattern: x-default
+    type: regex
+    scope: source
+    purpose: Detect x-default fallback implementation
+  - pattern: xhtml:link[^>]*hreflang
+    type: regex
+    scope: source
+    purpose: Find hreflang in XML sitemaps
+  file_patterns:
+  - glob: '**/*.html'
+    purpose: HTML files for hreflang tags
+  - glob: '**/sitemap*.xml'
+    purpose: XML sitemaps with hreflang annotations
+  - glob: '**/head.html'
+    purpose: Common head template for hreflang
+knowledge_sources:
+  specifications:
+  - id: google-hreflang
+    name: Google Hreflang Documentation
+    url: https://developers.google.com/search/docs/specialty/international/localized-versions
+    offline_cache: true
+    priority: required
+  - id: iso-639-1
+    name: ISO 639-1 Language Codes
+    url: https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes
+    offline_cache: true
+    priority: required
+  - id: iso-3166-1
+    name: ISO 3166-1 Country Codes
+    url: https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ahrefs-hreflang
+    name: Ahrefs Hreflang Guide
+    url: https://ahrefs.com/blog/hreflang-tags/
+    offline_cache: true
+  - id: moz-hreflang
+    name: Moz International SEO Guide
+    url: https://moz.com/learn/seo/hreflang-tag
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: Screaming Frog
+    purpose: Crawl and validate hreflang implementation
+    offline_capable: false
+  - tool: Sitebulb
+    purpose: Visual hreflang cluster analysis
+    offline_capable: false
+  infrastructure_tools:
+  - tool: curl
+    purpose: Inspect HTTP headers for hreflang
+    command: curl -sI URL | grep -i hreflang
+  scripts:
+  - id: hreflang-extractor
+    language: bash
+    purpose: Extract all hreflang declarations
+    source: inline
+    code: |
+      #!/bin/bash
+      # Extract hreflang values from HTML files
+      grep -rohE 'hreflang="[^"]+"' --include='*.html' . | \
+      sort | uniq -c | sort -rn
+  - id: hreflang-validator
+    language: python
+    purpose: Validate hreflang language codes
+    source: inline
+    code: |
+      import re
+      import sys
+
+      valid_langs = ['en', 'es', 'fr', 'de', 'it', 'pt', 'zh', 'ja', 'ko', 'ar', 'ru']
+
+      with open(sys.argv[1]) as f:
+          content = f.read()
+
+      hrefs = re.findall(r'hreflang="([^"]+)"', content)
+      for h in hrefs:
+          lang = h.split('-')[0].lower()
+          if lang not in valid_langs and h != 'x-default':
+              print(f"WARN: Unusual language code: {h}")
+signals:
+  critical:
+  - id: SEO-HREF-CRIT-001
+    signal: Missing return hreflang tags (non-bidirectional)
+    evidence_pattern: Page A links to Page B with hreflang, but Page B doesn't link back to Page A
+    explanation: |
+      Hreflang tags must be bidirectional - every page in a cluster must
+      reference every other page in that cluster. Missing return tags cause
+      Google to ignore hreflang annotations entirely.
+    remediation: Ensure all pages in a hreflang cluster reference each other
+  - id: SEO-HREF-CRIT-002
+    signal: Invalid language or region codes
+    evidence_pattern: hreflang values not matching ISO 639-1/ISO 3166-1 codes
+    explanation: |
+      Invalid language codes (e.g., 'uk' instead of 'en-GB', 'en-UK' incorrect)
+      cause Google to ignore the hreflang tag entirely.
+    remediation: Use valid ISO 639-1 language codes and ISO 3166-1 region codes
+  high:
+  - id: SEO-HREF-HIGH-001
+    signal: Missing x-default hreflang
+    explanation: |
+      x-default indicates the fallback URL for users whose language/region
+      doesn't match any specified hreflang. Without it, Google may show
+      an arbitrary version to unmatched users.
+    remediation: Add hreflang="x-default" pointing to default language or language selector
+  - id: SEO-HREF-HIGH-002
+    signal: Hreflang pointing to non-canonical URLs
+    explanation: |
+      Hreflang tags should point to canonical URLs. If they point to
+      non-canonical versions, it creates conflicting signals for search engines.
+    remediation: Ensure all hreflang URLs match canonical URLs
+  medium:
+  - id: SEO-HREF-MED-001
+    signal: Inconsistent hreflang implementation method
+    remediation: Standardize on one implementation method (HTML, HTTP headers, or sitemap)
+  - id: SEO-HREF-MED-002
+    signal: Self-referencing hreflang missing
+    remediation: Each page must include a self-referencing hreflang tag
+  low:
+  - id: SEO-HREF-LOW-001
+    signal: Hreflang in sitemap but not in HTML
+  positive:
+  - id: SEO-HREF-POS-001
+    signal: Complete bidirectional hreflang implementation
+  - id: SEO-HREF-POS-002
+    signal: Valid language codes with proper regional targeting
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Hreflang Detection and Inventory
+    description: |
+      Identify all hreflang implementations across HTML, HTTP headers,
+      and XML sitemaps. Create inventory of all language/region versions.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find hreflang in HTML
+      command: grep -r 'hreflang' --include='*.html' . | head -50
+    - purpose: Find hreflang in sitemaps
+      command: grep -r 'hreflang' --include='*.xml' . | head -50
+    - purpose: Check HTTP headers
+      command: curl -sI URL | grep -i 'link.*hreflang'
+    expected_findings:
+    - Implementation method(s) used
+    - Complete list of language/region versions
+  - id: '2'
+    name: Language Code Validation
+    description: |
+      Validate all hreflang language and region codes against
+      ISO 639-1 and ISO 3166-1 standards.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Extract unique hreflang values
+      command: grep -rohE 'hreflang="[^"]+"' --include='*.html' . | sort -u
+    expected_findings:
+    - Valid vs invalid language codes
+    - Proper regional code formatting
+  - id: '3'
+    name: Bidirectional Link Verification
+    description: |
+      For each page in a hreflang cluster, verify all other pages
+      in the cluster reference it back (return tags).
+    duration_estimate: 45 min
+    questions:
+    - Does every page reference all other language versions?
+    - Are there any orphaned pages missing from clusters?
+    - Do all pages include self-referencing hreflang?
+    expected_findings:
+    - Bidirectional linking completeness
+    - Pages with missing return tags
+  - id: '4'
+    name: x-default Implementation Check
+    description: |
+      Verify x-default hreflang is implemented and points to
+      appropriate default content (language selector or main language).
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find x-default usage
+      command: grep -r 'x-default' --include='*.html' --include='*.xml' .
+    expected_findings:
+    - x-default implementation status
+    - x-default target URL appropriateness
+  - id: '5'
+    name: Search Console Error Review
+    description: |
+      Review Google Search Console for any hreflang-related errors
+      or warnings flagged by Google.
+    duration_estimate: 20 min
+    questions:
+    - Are there any hreflang errors in Search Console?
+    - Which pages have the most hreflang issues?
+    - What specific error types are flagged?
+    expected_findings:
+    - Google-identified hreflang errors
+    - Priority pages for remediation
+  - id: '6'
+    name: Canonical and Hreflang Alignment
+    description: |
+      Verify hreflang URLs align with canonical URLs and there
+      are no conflicting signals.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Extract canonical URLs
+      command: grep -roh 'rel="canonical"[^>]*href="[^"]*"' --include='*.html' . | head -20
+    expected_findings:
+    - Canonical-hreflang alignment status
+    - Conflicting URL signals
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Hreflang Coverage Matrix
+    - Validation Errors
+    - Bidirectional Link Status
+    - Recommendations
+  confidence_guidance:
+    high: Complete crawl with bidirectional verification and Search Console data
+    medium: Code analysis with spot-check verification
+    low: Partial file analysis without runtime verification
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-hreflang
+      priority: required
+    - source_id: iso-639-1
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive crawl for bidirectional verification
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: hreflang-implementation-001
+  item: All hreflang language codes are valid ISO 639-1
+  level: CRITICAL
+  verification: manual
+  verification_notes: Validate extracted hreflang codes against ISO 639-1 list
+  expected: Confirmed by reviewer
+- id: hreflang-implementation-002
+  item: Bidirectional hreflang linking complete
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify each page references all pages in its cluster
+  expected: Confirmed by reviewer
+- id: hreflang-implementation-003
+  item: x-default implemented for fallback
+  level: BLOCKING
+  verification: grep -r 'x-default' --include='*.html' . | wc -l
+  expected: '> 0'
+- id: hreflang-implementation-004
+  item: No hreflang errors in Google Search Console
+  level: WARNING
+  verification: manual
+  verification_notes: Check Search Console International Targeting report
+  expected: 0 errors
+governance:
+  applicable_to:
+    archetypes:
+    - marketing-site
+    - e-commerce
+    - saas
+  compliance_frameworks:
+  - framework: Google Webmaster Guidelines
+    controls:
+    - International Targeting
+relationships:
+  commonly_combined:
+  - seo-discoverability.international-seo.language-targeting
+  - seo-discoverability.international-seo.international-url-structure
+  - seo-discoverability.technical-seo.canonical-url

@@ -1,0 +1,382 @@
+# ============================================================
+# AUDIT FILE: Security Monitoring
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.cloud-security.security-monitoring"
+  name: "Security Monitoring"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "cloud-security"
+
+  tier: "expert"
+  estimated_duration: "3-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates cloud security monitoring capabilities including threat detection
+    services (GuardDuty, Security Hub, Azure Defender), SIEM integration,
+    security alerting, incident response automation, anomaly detection,
+    and security operations workflows. Examines detection coverage,
+    alert fidelity, and response capabilities.
+
+  why_it_matters: |
+    Security monitoring is essential for detecting and responding to threats.
+    Without effective monitoring, breaches go undetected for extended periods
+    (industry average 200+ days). Early detection significantly reduces
+    breach impact and cost. Automated response can contain threats before
+    they spread.
+
+  when_to_run:
+    - "During initial security setup"
+    - "Regular security assessments (quarterly minimum)"
+    - "After security incidents to assess detection gaps"
+    - "When onboarding new services"
+
+prerequisites:
+  required_artifacts:
+    - type: "cloud-account"
+      description: "Access to cloud security services"
+    - type: "security-config"
+      description: "Security monitoring configurations"
+
+  access_requirements:
+    - "Access to security monitoring services"
+    - "Permissions to view security findings"
+    - "Access to alerting configurations"
+
+discovery:
+  file_patterns:
+    - glob: "**/guardduty*.tf"
+      purpose: "GuardDuty configurations"
+    - glob: "**/securityhub*.tf"
+      purpose: "Security Hub configurations"
+    - glob: "**/cloudwatch-alarms*.yaml"
+      purpose: "CloudWatch alarm configurations"
+    - glob: "**/eventbridge*.yaml"
+      purpose: "EventBridge rule configurations"
+
+  code_patterns:
+    - pattern: "aws_guardduty_detector"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find GuardDuty configurations"
+    - pattern: "aws_securityhub_account"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find Security Hub configurations"
+
+knowledge_sources:
+  specifications:
+    - id: "aws-guardduty"
+      name: "AWS GuardDuty Documentation"
+      url: "https://docs.aws.amazon.com/guardduty/latest/ug/"
+      offline_cache: true
+      priority: "required"
+    - id: "mitre-attack"
+      name: "MITRE ATT&CK Framework"
+      url: "https://attack.mitre.org/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "security-hub-guide"
+      name: "AWS Security Hub User Guide"
+      url: "https://docs.aws.amazon.com/securityhub/latest/userguide/"
+      offline_cache: true
+    - id: "incident-response"
+      name: "AWS Security Incident Response Guide"
+      url: "https://docs.aws.amazon.com/whitepapers/latest/aws-security-incident-response-guide/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Query security services"
+      command: "aws guardduty list-detectors"
+    - tool: "security-hub"
+      purpose: "Aggregate security findings"
+      command: "aws securityhub get-findings"
+
+  scripts:
+    - id: "security-monitor-audit"
+      language: "bash"
+      purpose: "Audit security monitoring"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== GuardDuty Status ==="
+        aws guardduty list-detectors --query 'DetectorIds' --output text | while read detector; do
+          aws guardduty get-detector --detector-id $detector --query '{DetectorId: DetectorId, Status: Status, FindingPublishingFrequency: FindingPublishingFrequency}'
+        done
+        echo "=== Security Hub Status ==="
+        aws securityhub describe-hub
+        echo "=== Recent Critical Findings ==="
+        aws securityhub get-findings --filters '{"SeverityLabel": [{"Value": "CRITICAL", "Comparison": "EQUALS"}]}' --query 'Findings[0:5].[Title,Severity.Label]' --output table
+
+signals:
+  critical:
+    - id: "SEC-MON-CRIT-001"
+      signal: "GuardDuty not enabled"
+      evidence_pattern: "No GuardDuty detectors found"
+      explanation: |
+        Without GuardDuty, there is no automated threat detection for
+        account compromise, data exfiltration, or malicious activity.
+        This is a fundamental security control.
+      remediation: "Enable GuardDuty in all regions"
+    - id: "SEC-MON-CRIT-002"
+      signal: "Critical security findings unaddressed"
+      evidence_pattern: "CRITICAL findings older than 24 hours"
+      explanation: |
+        Unaddressed critical findings indicate potential active threats
+        or severe vulnerabilities requiring immediate attention.
+      remediation: "Investigate and remediate critical findings immediately"
+    - id: "SEC-MON-CRIT-003"
+      signal: "No security alerting configured"
+      evidence_pattern: "No CloudWatch alarms or SNS topics for security events"
+      explanation: |
+        Without alerting, security findings are not communicated to
+        responders. Detection is meaningless without notification.
+      remediation: "Configure alerting for critical security events"
+
+  high:
+    - id: "SEC-MON-HIGH-001"
+      signal: "Security Hub not aggregating findings"
+      evidence_pattern: "Security Hub disabled or no integrations"
+      explanation: |
+        Security Hub provides centralized view of security posture.
+        Without it, findings are scattered across services.
+      remediation: "Enable Security Hub and configure integrations"
+    - id: "SEC-MON-HIGH-002"
+      signal: "GuardDuty not enabled in all regions"
+      evidence_pattern: "GuardDuty missing in some regions"
+      explanation: |
+        Attackers can operate in unmonitored regions. GuardDuty should
+        be enabled everywhere regardless of resource presence.
+      remediation: "Enable GuardDuty in all regions"
+    - id: "SEC-MON-HIGH-003"
+      signal: "No automated remediation for common threats"
+      evidence_pattern: "Missing automation for known threat patterns"
+      explanation: |
+        Manual response is slow and inconsistent. Automated remediation
+        can contain threats immediately.
+      remediation: "Implement automated response for common threats"
+
+  medium:
+    - id: "SEC-MON-MED-001"
+      signal: "Findings not integrated with SIEM"
+      evidence_pattern: "No SIEM integration configured"
+      remediation: "Integrate security findings with central SIEM"
+    - id: "SEC-MON-MED-002"
+      signal: "Alert fatigue from high finding volume"
+      evidence_pattern: ">100 open findings without triage"
+      remediation: "Implement finding triage and prioritization workflow"
+    - id: "SEC-MON-MED-003"
+      signal: "No regular security review cadence"
+      evidence_pattern: "Findings reviewed ad-hoc"
+      remediation: "Establish regular security review meetings"
+
+  low:
+    - id: "SEC-MON-LOW-001"
+      signal: "Custom GuardDuty findings not configured"
+      remediation: "Consider custom threat detection rules"
+    - id: "SEC-MON-LOW-002"
+      signal: "Finding suppression rules not documented"
+      remediation: "Document rationale for suppressed findings"
+
+  positive:
+    - id: "SEC-MON-POS-001"
+      signal: "GuardDuty enabled in all regions"
+    - id: "SEC-MON-POS-002"
+      signal: "Security findings integrated with SIEM"
+    - id: "SEC-MON-POS-003"
+      signal: "Automated remediation for common threats"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Assess threat detection coverage"
+      description: |
+        Evaluate enabled threat detection services and their configuration.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check GuardDuty status"
+          command: "aws guardduty list-detectors"
+        - purpose: "Get detector configuration"
+          command: "aws guardduty get-detector --detector-id <id>"
+        - purpose: "Check enabled regions"
+          command: "for region in $(aws ec2 describe-regions --query 'Regions[*].RegionName' --output text); do aws guardduty list-detectors --region $region --query 'DetectorIds' --output text; done"
+      expected_findings:
+        - "Detection service coverage"
+        - "Regional deployment status"
+
+    - id: "2"
+      name: "Review security findings"
+      description: |
+        Analyze current security findings by severity and age.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Get finding summary"
+          command: "aws securityhub get-findings --query 'Findings | group_by(Severity.Label) | {Critical: length(@[?contains(keys(@), `CRITICAL`)]), High: length(@[?contains(keys(@), `HIGH`)])}'"
+        - purpose: "Get critical findings"
+          command: "aws securityhub get-findings --filters '{\"SeverityLabel\": [{\"Value\": \"CRITICAL\", \"Comparison\": \"EQUALS\"}]}' --query 'Findings[*].[Title,CreatedAt,ProductName]'"
+      expected_findings:
+        - "Finding severity distribution"
+        - "Unaddressed critical issues"
+
+    - id: "3"
+      name: "Evaluate alerting configuration"
+      description: |
+        Check that security events trigger appropriate alerts.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List CloudWatch alarms"
+          command: "aws cloudwatch describe-alarms --query 'MetricAlarms[*].[AlarmName,MetricName,Namespace]'"
+        - purpose: "Check EventBridge rules"
+          command: "aws events list-rules --query 'Rules[?contains(EventPattern, `guardduty`) || contains(EventPattern, `securityhub`)]'"
+        - purpose: "Check SNS topics"
+          command: "aws sns list-topics"
+      expected_findings:
+        - "Alert coverage assessment"
+        - "Notification configuration"
+
+    - id: "4"
+      name: "Assess incident response automation"
+      description: |
+        Review automated response capabilities for common threats.
+      duration_estimate: "35 min"
+      commands:
+        - purpose: "Check Lambda functions for remediation"
+          command: "aws lambda list-functions --query 'Functions[?contains(FunctionName, `security`) || contains(FunctionName, `remediation`)]'"
+        - purpose: "Check Step Functions"
+          command: "aws stepfunctions list-state-machines --query 'stateMachines[?contains(name, `security`)]'"
+      expected_findings:
+        - "Automation inventory"
+        - "Response capability assessment"
+
+    - id: "5"
+      name: "Review SIEM integration"
+      description: |
+        Verify security findings are integrated with central monitoring.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check Security Hub integrations"
+          command: "aws securityhub list-enabled-products-for-import"
+        - purpose: "Check CloudWatch log subscriptions"
+          command: "aws logs describe-subscription-filters --log-group-name /aws/guardduty"
+      expected_findings:
+        - "Integration status"
+        - "Data flow to SIEM"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Detection Coverage Analysis"
+        - "Alert and Response Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct service queries, finding analysis"
+    medium: "Configuration review, inferred coverage"
+    low: "Based on missing elements"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-guardduty"
+        priority: "required"
+      - source_id: "mitre-attack"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive security service analysis"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "security-monitoring-001"
+    item: "GuardDuty enabled in all regions"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check GuardDuty detector exists in each region"
+    expected: "Confirmed by reviewer"
+  - id: "security-monitoring-002"
+    item: "No critical findings older than 24 hours"
+    level: "CRITICAL"
+    verification: "aws securityhub get-findings --filters '{\"SeverityLabel\": [{\"Value\": \"CRITICAL\", \"Comparison\": \"EQUALS\"}], \"CreatedAt\": [{\"DateRange\": {\"Value\": 1, \"Unit\": \"DAYS\"}}]}' --query 'length(Findings)' | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "security-monitoring-003"
+    item: "Security alerting configured"
+    level: "CRITICAL"
+    verification: "aws events list-rules --query 'Rules' | jq 'length' | awk '{print ($1>0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "security-monitoring-004"
+    item: "Security Hub aggregating findings"
+    level: "BLOCKING"
+    verification: "aws securityhub describe-hub --query HubArn && echo PASS || echo FAIL"
+    expected: "PASS"
+  - id: "security-monitoring-005"
+    item: "Automated remediation for common threats"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify automation exists for top threat patterns"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1", "CC7.2", "CC7.3", "CC7.4"]
+    - framework: "PCI-DSS"
+      controls: ["10.6", "11.4", "12.10"]
+    - framework: "HIPAA"
+      controls: ["164.308(a)(1)(ii)(D)", "164.308(a)(6)(ii)"]
+    - framework: "NIST-CSF"
+      controls: ["DE.AE", "DE.CM", "DE.DP", "RS.AN"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.cloud-security.cloud-audit-logging"
+    - "cloud-infrastructure.cloud-security.iam-configuration"
+    - "cloud-infrastructure.service-mesh.observability-integration"

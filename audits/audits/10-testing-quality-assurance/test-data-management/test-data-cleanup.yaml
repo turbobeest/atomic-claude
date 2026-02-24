@@ -1,0 +1,315 @@
+# ============================================================
+# AUDIT: Test Data Cleanup
+# ============================================================
+# Evaluates practices for cleaning up test data after test
+# execution to maintain environment hygiene.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.test-data-management.test-data-cleanup"
+  name: "Test Data Cleanup"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 10
+  subcategory: "test-data-management"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "yes"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines test data cleanup practices including teardown procedures,
+    orphaned data detection, cleanup timing, and resource reclamation.
+    Reviews how test data is removed after test execution to prevent
+    accumulation and interference.
+
+  why_it_matters: |
+    Accumulated test data causes slow tests, resource exhaustion, and
+    test interference. Proper cleanup ensures consistent test environments,
+    prevents disk space issues, and enables reliable parallel execution.
+    Missing cleanup creates long-term maintenance burden.
+
+  when_to_run:
+    - "Test infrastructure setup"
+    - "When test performance degrades"
+    - "After resource exhaustion issues"
+    - "During test maintenance reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "cleanup-scripts"
+      description: "Test data cleanup scripts and configurations"
+    - type: "test-suite"
+      description: "Automated test suite with teardown"
+
+  access_requirements:
+    - "Test environment access"
+    - "Database access"
+    - "File system access"
+
+discovery:
+  file_patterns:
+    - glob: "**/cleanup*/**"
+      purpose: "Cleanup directories"
+    - glob: "**/*cleanup*.{sh,py,js}"
+      purpose: "Cleanup scripts"
+    - glob: "**/teardown*"
+      purpose: "Teardown configurations"
+
+  code_patterns:
+    - pattern: "cleanup|teardown|afterAll|afterEach"
+      type: "keyword"
+      scope: "source"
+      purpose: "Cleanup hooks"
+    - pattern: "DELETE FROM|TRUNCATE|DROP|rm -rf"
+      type: "keyword"
+      scope: "source"
+      purpose: "Data removal operations"
+    - pattern: "finally|ensure|__del__"
+      type: "keyword"
+      scope: "source"
+      purpose: "Cleanup guarantee patterns"
+
+knowledge_sources:
+  guides:
+    - id: "jest-teardown"
+      name: "Jest Teardown"
+      url: "https://jestjs.io/docs/setup-teardown"
+      offline_cache: true
+    - id: "pytest-teardown"
+      name: "pytest Teardown"
+      url: "https://docs.pytest.org/en/stable/fixture.html#teardown-cleanup"
+      offline_cache: true
+
+tooling:
+  scripts:
+    - id: "cleanup-db"
+      language: "bash"
+      purpose: "Clean up test database"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Clean up test database tables
+        psql $TEST_DATABASE_URL << EOF
+        TRUNCATE users, orders, products RESTART IDENTITY CASCADE;
+        EOF
+        echo "Database cleaned"
+
+    - id: "cleanup-files"
+      language: "bash"
+      purpose: "Clean up test files"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Clean up test file artifacts
+        rm -rf /tmp/test-*
+        rm -rf ./test-output/*
+        echo "Test files cleaned"
+
+signals:
+  critical:
+    - id: "CLEANUP-CRIT-001"
+      signal: "No cleanup mechanism exists"
+      evidence_pattern: "Tests without teardown or cleanup hooks"
+      explanation: |
+        Without cleanup, test data accumulates indefinitely. This leads to
+        disk exhaustion, database bloat, and interference between tests.
+        Over time, the test environment becomes unusable.
+      remediation: "Implement cleanup hooks in test suite teardown"
+
+    - id: "CLEANUP-CRIT-002"
+      signal: "Cleanup failures silently ignored"
+      evidence_pattern: "Cleanup errors caught but not handled"
+      explanation: |
+        Silent cleanup failures mask accumulating problems. Resources leak,
+        state accumulates, and eventually tests fail for unclear reasons.
+        Cleanup errors should be visible and actionable.
+      remediation: "Log and alert on cleanup failures"
+
+  high:
+    - id: "CLEANUP-HIGH-001"
+      signal: "Cleanup only runs on success"
+      evidence_pattern: "Cleanup in finally blocks or guaranteed teardown missing"
+      explanation: |
+        Cleanup that only runs on success leaves orphaned data after failures.
+        Test failures already require investigation; orphaned data makes
+        subsequent runs unreliable and debugging harder.
+      remediation: "Ensure cleanup runs regardless of test outcome"
+
+    - id: "CLEANUP-HIGH-002"
+      signal: "Orphaned test data detected"
+      evidence_pattern: "Old test records accumulating in database"
+      explanation: |
+        Orphaned data indicates incomplete cleanup. This wastes resources,
+        slows queries, and may cause test interference. Regular detection
+        reveals cleanup gaps.
+      remediation: "Audit for orphaned data and fix cleanup coverage"
+
+  medium:
+    - id: "CLEANUP-MED-001"
+      signal: "Cleanup timing inefficient"
+      evidence_pattern: "Cleanup after every test instead of suite-level"
+      remediation: "Optimize cleanup timing based on isolation requirements"
+
+    - id: "CLEANUP-MED-002"
+      signal: "External resources not cleaned"
+      evidence_pattern: "Files, queues, or caches left behind"
+      remediation: "Extend cleanup to all external resources"
+
+  low:
+    - id: "CLEANUP-LOW-001"
+      signal: "Cleanup process not documented"
+      remediation: "Document cleanup procedures and troubleshooting"
+
+  positive:
+    - id: "CLEANUP-POS-001"
+      signal: "Comprehensive guaranteed cleanup on all paths"
+    - id: "CLEANUP-POS-002"
+      signal: "Efficient cleanup with minimal overhead"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify cleanup infrastructure"
+      description: |
+        Search for cleanup scripts, teardown hooks, and cleanup
+        configurations.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find cleanup files"
+          command: "find . -type f \\( -name '*cleanup*' -o -name '*teardown*' \\) -not -path '*/node_modules/*' 2>/dev/null"
+        - purpose: "Find teardown hooks"
+          command: "grep -r 'afterAll\\|afterEach\\|tearDown\\|@pytest.fixture' . --include='*.py' --include='*.js' --include='*.ts' 2>/dev/null | head -20"
+      expected_findings:
+        - "Cleanup scripts"
+        - "Teardown hooks"
+
+    - id: "2"
+      name: "Review cleanup coverage"
+      description: |
+        Examine which resources are cleaned up and which might be
+        missed.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check database cleanup"
+          command: "grep -r 'TRUNCATE\\|DELETE\\|cleanup.*table' . --include='*.sql' --include='*.py' --include='*.js' 2>/dev/null | head -20"
+        - purpose: "Check file cleanup"
+          command: "grep -r 'rm -rf\\|unlink\\|remove.*file' . --include='*.sh' --include='*.py' --include='*.js' 2>/dev/null | head -15"
+      expected_findings:
+        - "Database cleanup operations"
+        - "File cleanup operations"
+
+    - id: "3"
+      name: "Verify guaranteed cleanup"
+      description: |
+        Check that cleanup runs regardless of test success or failure.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check for finally blocks"
+          command: "grep -r 'finally\\|ensure\\|yield' . --include='*.py' --include='conftest.py' 2>/dev/null | head -20"
+      expected_findings:
+        - "Guaranteed cleanup patterns"
+        - "Exception handling in cleanup"
+
+    - id: "4"
+      name: "Check for orphaned data"
+      description: |
+        Look for evidence of orphaned test data or cleanup gaps.
+      duration_estimate: "15 min"
+      questions:
+        - "Are there test records older than expected in databases?"
+        - "Are test files accumulating in temp directories?"
+        - "Are there stale resources in external services?"
+      expected_findings:
+        - "Orphaned data indicators"
+        - "Cleanup gap identification"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Cleanup Coverage Analysis"
+        - "Reliability Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Cleanup verified, coverage confirmed, no orphaned data"
+    medium: "Scripts reviewed but execution not observed"
+    low: "Limited visibility into cleanup practices"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "pytest-teardown"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires resource state analysis"
+    full:
+      included: true
+      priority: 3
+
+closeout_checklist:
+  - id: "data-cleanup-001"
+    item: "Cleanup mechanisms exist"
+    level: "CRITICAL"
+    verification: "grep -r 'cleanup\\|teardown\\|afterAll' . --include='*.py' --include='*.js' 2>/dev/null | grep -q . && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "data-cleanup-002"
+    item: "Cleanup runs on all test outcomes"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms cleanup runs regardless of test pass/fail"
+    expected: "Confirmed by reviewer"
+
+  - id: "data-cleanup-003"
+    item: "No orphaned test data"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms no accumulating test data"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Internal"
+      controls: ["QA-006"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.test-data-management.database-seeding"
+    - "testing-quality-assurance.test-data-management.test-fixture-management"
+    - "testing-quality-assurance.test-automation.test-environment-provisioning"

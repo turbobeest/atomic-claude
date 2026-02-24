@@ -1,0 +1,269 @@
+audit:
+  id: real-time-embedded.memory-management.memory-mapped-io
+  name: Memory-Mapped I/O Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: real-time-embedded
+  category_number: 39
+  subcategory: memory-management
+  tier: expert
+  estimated_duration: 3-5 hours  # median: 4h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: embedded-systems
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews memory-mapped I/O register access patterns and implementations.
+    Examines use of volatile qualifiers, proper access width, read-modify-write
+    sequences, and compiler optimization barriers. Analyzes register definition
+    structures, bit manipulation patterns, and hardware abstraction layers.
+  why_it_matters: |
+    Memory-mapped I/O requires special handling that differs from normal memory
+    access. Missing volatile causes optimizer to eliminate or reorder critical
+    accesses. Wrong access width triggers bus errors or incorrect behavior.
+    Improper read-modify-write corrupts registers with side effects. These
+    subtle bugs are difficult to diagnose and cause intermittent failures.
+  when_to_run:
+  - During driver development
+  - After peripheral debugging
+  - Before safety certification
+  - When porting to new hardware
+  - During code review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Driver and HAL source code
+  - type: hardware_manual
+    description: Peripheral register documentation
+  - type: register_headers
+    description: Register definition files
+  - type: compiler_info
+    description: Compiler optimization settings
+  access_requirements:
+  - Access to source code
+  - Access to hardware documentation
+  - Compiler settings access
+  - Debug capability
+discovery:
+  file_patterns:
+  - glob: '**/hal_*.c'
+    purpose: Find HAL implementations
+  - glob: '**/drv_*.c'
+    purpose: Find driver implementations
+  - glob: '**/*_regs.h'
+    purpose: Find register definitions
+  - glob: '**/peripheral*.h'
+    purpose: Find peripheral headers
+  - glob: '**/*.svd'
+    purpose: Find system view description
+knowledge_sources:
+  guides:
+  - id: mmio-access
+    name: Memory-Mapped I/O Best Practices
+    url: https://www.embedded.com/mmio-access
+  - id: volatile-guide
+    name: Proper Use of Volatile
+    url: https://www.embedded.com/proper-volatile
+  standards:
+  - id: misra-c
+    name: MISRA C Guidelines
+    relevance: Volatile usage rules
+  - id: cert-c
+    name: CERT C Coding Standard
+    relevance: Hardware access rules
+tooling:
+  analysis_tools:
+  - tool: pc-lint
+    purpose: Volatile and access analysis
+  - tool: polyspace
+    purpose: MMIO verification
+  - tool: svd2c
+    purpose: Register definition generation
+signals:
+  critical:
+  - id: MMIO-CRIT-001
+    signal: Missing volatile on hardware register
+    evidence_indicators:
+    - Register pointer not volatile
+    - Compiler may optimize away access
+    - Intermittent peripheral failures
+    explanation: |
+      Without volatile, the compiler may cache register values, skip
+      repeated reads, or eliminate "useless" writes. Hardware is not
+      updated or read correctly.
+    remediation: Add volatile qualifier to all register pointers
+  - id: MMIO-CRIT-002
+    signal: Incorrect access width for register
+    evidence_indicators:
+    - Byte access to word-only register
+    - Bus error or fault
+    - Adjacent bits corrupted
+    explanation: |
+      Some peripherals require specific access width. Wrong width
+      causes bus errors, partial updates, or data corruption.
+    remediation: Use access width required by hardware
+  high:
+  - id: MMIO-HIGH-001
+    signal: Unprotected read-modify-write sequence
+    evidence_indicators:
+    - Read-modify-write on shared register
+    - No interrupt disable around sequence
+    - Race condition possible
+    explanation: |
+      If interrupted during read-modify-write, ISR modifications are
+      lost when task completes the sequence with stale data.
+    remediation: Protect read-modify-write with interrupt disable
+  - id: MMIO-HIGH-002
+    signal: Optimizer barrier missing
+    evidence_indicators:
+    - Memory barrier not used
+    - Accesses potentially reordered
+    - Sequence-dependent operations
+    explanation: |
+      Compilers may reorder memory operations. Hardware accesses
+      with ordering requirements need explicit barriers.
+    remediation: Add memory barriers where ordering is required
+  medium:
+  - id: MMIO-MED-001
+    signal: Register definitions not type-safe
+    evidence_indicators:
+    - Raw pointer arithmetic
+    - Magic numbers for offsets
+    - No structure overlay
+    explanation: |
+      Type-safe register definitions prevent offset errors and
+      enable static analysis of access patterns.
+    remediation: Use structured register definitions
+  - id: MMIO-MED-002
+    signal: Bit manipulation patterns error-prone
+    evidence_indicators:
+    - Inline bit shifting
+    - No defined bit positions
+    - Error-prone expressions
+    explanation: |
+      Complex bit manipulation is error-prone. Defined bit positions
+      and accessors improve clarity and reduce errors.
+    remediation: Define bit positions and use accessor macros
+  low:
+  - id: MMIO-LOW-001
+    signal: Register access patterns not documented
+    evidence_indicators:
+    - Side effects not noted
+    - Access sequence requirements missing
+    - Special handling not explained
+    explanation: |
+      Hardware registers often have non-obvious requirements that
+      must be documented for correct usage.
+    remediation: Document register access requirements
+  positive:
+  - id: MMIO-POS-001
+    signal: Type-safe register definitions used
+    evidence_indicators:
+    - Structured register overlays
+    - Defined bit positions
+    - Volatile correctly applied
+  - id: MMIO-POS-002
+    signal: Robust register access patterns
+    evidence_indicators:
+    - Protected read-modify-write
+    - Correct access widths
+    - Proper barriers used
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review Register Definitions
+    description: Examine register header files and structures
+    duration_estimate: 1 hour
+  - id: '2'
+    name: Check Volatile Usage
+    description: Verify volatile on all hardware accesses
+    duration_estimate: 1 hour
+  - id: '3'
+    name: Analyze Access Patterns
+    description: Review read-modify-write and access width
+    duration_estimate: 1 hour
+  - id: '4'
+    name: Verify Barrier Usage
+    description: Check for required memory barriers
+    duration_estimate: 30 minutes
+  - id: '5'
+    name: Check Bit Manipulation
+    description: Review bit field access patterns
+    duration_estimate: 30 minutes
+  - id: '6'
+    name: Document Findings
+    description: Compile analysis results and recommendations
+    duration_estimate: 30 minutes
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Register Definition Review
+    - Access Pattern Analysis
+    - Volatile and Barrier Audit
+    - Recommendations
+closeout_checklist:
+- id: mmio-001
+  item: Register definitions reviewed
+  level: HIGH
+  verification: manual
+- id: mmio-002
+  item: Volatile usage verified
+  level: CRITICAL
+  verification: automated
+- id: mmio-003
+  item: Access patterns analyzed
+  level: HIGH
+  verification: manual
+- id: mmio-004
+  item: Barrier usage checked
+  level: HIGH
+  verification: manual
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - driver-development
+    - bare-metal
+  compliance_mappings:
+  - framework: MISRA C
+    control: Rule 2.2, 8.1
+    description: Volatile and side effects
+  - framework: CERT C
+    control: EXP32-C
+    description: Volatile objects
+  - framework: AUTOSAR
+    control: MCAL
+    description: Driver guidelines
+relationships:
+  commonly_combined:
+  - real-time-embedded.interrupt-handling.isr-design-review
+  - real-time-embedded.firmware-quality.misra-compliance
+  depends_on:
+  - hardware.peripheral-documentation
+  feeds_into:
+  - reliability.hardware-interface-reliability
+  - quality.driver-quality
+
+# Glossary of domain-specific terms:
+glossary:
+  "WCET": "Worst-Case Execution Time - maximum possible execution time for a code path"
+  "ISR": "Interrupt Service Routine - function executed in response to hardware interrupt"
+  "jitter": "Variation in timing between expected and actual execution"

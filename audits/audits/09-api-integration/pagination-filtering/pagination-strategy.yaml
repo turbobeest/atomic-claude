@@ -1,0 +1,354 @@
+audit:
+  id: api-integration.pagination-filtering.pagination-strategy
+  name: Pagination Strategy Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: pagination-filtering
+  tier: expert
+  estimated_duration: 90 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - api
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the API pagination strategy including pagination type
+    (offset, cursor, keyset), page size limits, total count handling,
+    deep pagination protection, and consistency guarantees. Analyzes
+    whether pagination scales efficiently with large datasets.
+  why_it_matters: |
+    Poor pagination strategies cause severe performance degradation
+    at scale. Offset-based pagination becomes slower with larger offsets,
+    cursor pagination can break with concurrent modifications, and
+    missing page size limits enable denial-of-service attacks. Proper
+    pagination is essential for API performance and reliability.
+  when_to_run:
+  - API design or review
+  - Performance issues with list endpoints
+  - Scaling beyond initial data volumes
+  - Reports of slow pagination at depth
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: API endpoint implementations
+  - type: documentation
+    description: API specification or OpenAPI docs
+  access_requirements:
+  - Read access to API source code
+  - Access to API documentation
+discovery:
+  code_patterns:
+  - pattern: offset|skip|page|limit|cursor|after|before
+    type: regex
+    scope: source
+    purpose: Detect pagination parameters
+  - pattern: pageSize|per_page|perPage|page_size
+    type: regex
+    scope: source
+    purpose: Detect page size configuration
+  - pattern: nextCursor|prevCursor|hasNext|hasPrevious
+    type: regex
+    scope: source
+    purpose: Detect cursor-based pagination
+  - pattern: totalCount|total_count|totalPages|count\(
+    type: regex
+    scope: source
+    purpose: Detect total count queries
+  file_patterns:
+  - glob: '**/api/**'
+    purpose: API implementations
+  - glob: '**/controllers/**'
+    purpose: Controller implementations
+  - glob: '**/resolvers/**'
+    purpose: GraphQL resolvers
+knowledge_sources:
+  specifications:
+  - id: json-api-pagination
+    name: JSON:API Pagination
+    url: https://jsonapi.org/format/#fetching-pagination
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: cursor-pagination
+    name: Cursor-based Pagination
+    url: https://relay.dev/graphql/connections.htm
+    offline_cache: true
+  - id: pagination-patterns
+    name: API Pagination Best Practices
+    url: https://www.moesif.com/blog/technical/api-design/REST-API-Design-Filtering-Sorting-and-Pagination/
+    offline_cache: true
+  learning_resources:
+  - id: pagination-at-scale
+    title: Pagination at Scale
+    type: article
+    reference: Slack Engineering Blog
+tooling:
+  static_analysis:
+  - tool: openapi-validator
+    purpose: Validate pagination in API specs
+    offline_capable: true
+  scripts:
+  - id: pagination-scan
+    language: bash
+    purpose: Analyze pagination patterns
+    source: inline
+    code: |
+      echo "=== Pagination Strategy Analysis ==="
+      echo "--- Offset-based pagination ---"
+      grep -rn "offset\|skip\|OFFSET\|SKIP" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Cursor-based pagination ---"
+      grep -rn "cursor\|after\|before" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Page size configuration ---"
+      grep -rn "limit\|pageSize\|per_page" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: PS-CRIT-001
+    signal: No page size limit allowing unbounded queries
+    evidence_pattern: Page size from user input without max validation
+    explanation: |
+      Allowing unlimited page sizes enables clients to request millions
+      of records in a single query, causing out-of-memory errors,
+      database overload, and denial-of-service conditions.
+    remediation: Enforce maximum page size (e.g., max 100 items per page)
+  - id: PS-CRIT-002
+    signal: Deep offset pagination without protection
+    evidence_pattern: OFFSET $value without depth limit
+    explanation: |
+      Offset-based pagination becomes progressively slower as offset
+      increases. OFFSET 1000000 still scans and skips 1 million rows.
+      Without limits, attackers can exhaust database resources.
+    remediation: Limit max offset or switch to keyset/cursor pagination
+  high:
+  - id: PS-HIGH-001
+    signal: COUNT(*) query on every paginated request
+    explanation: |
+      Computing total count requires full table scan or index scan.
+      On large tables, this adds significant latency to every paginated
+      request. Consider caching counts or making them optional.
+    remediation: Cache total counts, make optional, or estimate for large datasets
+    evidence_description: SELECT COUNT(*) executed for totalCount on large tables
+  - id: PS-HIGH-002
+    signal: Cursor pagination with unstable sort order
+    evidence_pattern: Cursor without unique, stable sort field
+    explanation: |
+      Cursor pagination requires a stable, unique sort order. Without it,
+      items can be duplicated or skipped when data changes between
+      page fetches.
+    remediation: Include unique ID in cursor sort to ensure stability
+  - id: PS-HIGH-003
+    signal: Pagination state not encoded in cursor
+    evidence_pattern: Cursor is just an ID without sort context
+    explanation: |
+      Cursors should encode all pagination state including sort order
+      and filter context. Plain ID cursors break when sort order changes
+      or filters are modified.
+    remediation: Encode full pagination context in opaque cursor token
+  medium:
+  - id: PS-MED-001
+    signal: Inconsistent pagination across endpoints
+    evidence_pattern: Some endpoints use offset, others use cursor
+    remediation: Standardize pagination approach across API
+  - id: PS-MED-002
+    signal: No pagination metadata in response
+    evidence_pattern: List response without page info or links
+    remediation: Include hasNext, hasPrevious, and navigation links
+  - id: PS-MED-003
+    signal: Page numbering without size flexibility
+    evidence_pattern: Fixed page size without client control
+    remediation: Allow clients to specify page size within limits
+  low:
+  - id: PS-LOW-001
+    signal: Pagination not documented in API specification
+    evidence_pattern: OpenAPI spec missing pagination parameters
+    remediation: Document pagination parameters and response format
+  positive:
+  - id: PS-POS-001
+    signal: Cursor-based pagination with stable sort
+    evidence_pattern: Cursor encodes position with unique sort key
+  - id: PS-POS-002
+    signal: Enforced page size limits
+    evidence_pattern: Max page size validated before query execution
+  - id: PS-POS-003
+    signal: Pagination links in response
+    evidence_pattern: next, prev, first, last links included
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Pagination Patterns
+    description: |
+      Find all paginated endpoints and their pagination type.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find pagination parameters
+      command: |
+        grep -rn "offset\|limit\|cursor\|page" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | grep -v test | head -40
+    - purpose: Find pagination in API specs
+      command: |
+        grep -rn "pageSize\|offset\|cursor" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | \
+          grep -i "api\|openapi\|swagger" | head -20
+    expected_findings:
+    - Pagination types used
+    - Endpoint coverage
+  - id: '2'
+    name: Analyze Page Size Limits
+    description: |
+      Check for page size validation and limits.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find page size validation
+      command: |
+        grep -rn "max.*page\|limit.*100\|maxLimit\|MAX_PAGE" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Page size limits
+    - Validation logic
+  - id: '3'
+    name: Review Deep Pagination Protection
+    description: |
+      Check for offset limits and deep pagination handling.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find offset usage
+      command: |
+        grep -rn "OFFSET\|offset\|skip" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    - purpose: Find max offset limits
+      command: |
+        grep -rn "maxOffset\|MAX_OFFSET\|offset.*limit\|max.*skip" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Offset protection
+    - Alternative strategies
+  - id: '4'
+    name: Evaluate Total Count Strategy
+    description: |
+      Review how total counts are computed and returned.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find count queries
+      command: |
+        grep -rn "COUNT\|count\(\|totalCount\|total_count" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Count query efficiency
+    - Caching strategy
+  - id: '5'
+    name: Verify Cursor Implementation
+    description: |
+      If cursor pagination is used, verify correct implementation.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find cursor encoding
+      command: |
+        grep -rn "cursor\|encode\|decode\|base64" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Cursor content
+    - Stability guarantees
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - pagination_type_inventory
+    - page_size_limits
+    - deep_pagination_protection
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Pagination Strategies
+    - Performance Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Clear missing limits or unbounded offset usage
+    medium: Pagination exists but edge cases uncertain
+    low: Requires load testing to confirm issues
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: json-api-pagination
+      priority: recommended
+    - source_id: cursor-pagination
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    api:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ps-001
+  item: Page size limits enforced
+  level: CRITICAL
+  verification: |
+    grep -rn "max.*limit\|MAX.*PAGE\|limit.*validation" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: ps-002
+  item: Deep pagination protected
+  level: CRITICAL
+  verification: |
+    grep -rn "cursor\|keyset\|MAX.*OFFSET\|max.*offset" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: ps-003
+  item: Pagination metadata included in responses
+  level: WARNING
+  verification: |
+    grep -rn "hasNext\|hasPrevious\|pageInfo\|links" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Performance Efficiency
+    - Reliability
+relationships:
+  commonly_combined:
+  - api-integration.pagination-filtering.filtering-capability
+  - api-integration.pagination-filtering.sorting-capability
+  - performance-efficiency.query-optimization.query-performance

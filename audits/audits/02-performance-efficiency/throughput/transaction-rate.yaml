@@ -1,0 +1,282 @@
+audit:
+  id: performance-efficiency.throughput.transaction-rate
+  name: Transaction Rate Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: throughput
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures the transaction processing rate - the number of
+    successful business transactions per second (TPS) the system can
+    handle. Transactions include database transactions, financial
+    operations, order processing, and other atomic business operations.
+    It evaluates current throughput, identifies bottlenecks, and
+    determines capacity for growth.
+  why_it_matters: |
+    Transaction rate directly correlates with business capacity. An
+    e-commerce system that can only process 100 orders/minute cannot
+    handle a flash sale. A payment processor with 50 TPS cannot scale
+    to enterprise customers. Understanding transaction capacity enables
+    business growth decisions.
+  when_to_run:
+  - Before high-volume business events
+  - When adding new transaction types
+  - During capacity planning for business growth
+  - After database or infrastructure changes
+prerequisites:
+  required_artifacts:
+  - type: transaction_metrics
+    description: Metrics for transaction counts and rates
+  - type: database_access
+    description: Access to database transaction metrics
+  access_requirements:
+  - Access to transaction metrics
+  - Access to database performance metrics
+  - Business transaction definitions
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: sum(rate(transactions_total{status="success"}[5m]))
+    purpose: Successful transaction rate
+    threshold: Meeting business requirements
+  - system: Prometheus
+    query: |
+      sum(rate(transactions_total{status=\"failed\"}[5m])) /
+      sum(rate(transactions_total[5m]))
+    purpose: Transaction failure rate
+    threshold: < 0.1%
+  - system: PostgreSQL
+    query: SELECT sum(xact_commit + xact_rollback) FROM pg_stat_database
+    purpose: Database transaction rate
+    threshold: Within tested limits
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: tpc-benchmarks
+    name: TPC Transaction Processing Benchmarks
+    url: https://www.tpc.org/tpc_documents_current_versions/current_specifications5.asp
+    offline_cache: true
+  - id: postgres-transaction-isolation
+    name: PostgreSQL Transaction Isolation
+    url: https://www.postgresql.org/docs/current/transaction-iso.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: pgbench
+    purpose: PostgreSQL transaction benchmark
+    command: pgbench -c 50 -j 4 -T 60 mydb
+  - tool: sysbench
+    purpose: Database transaction benchmark
+    command: sysbench oltp_read_write --db-driver=pgsql --tables=10 --table-size=100000 run
+  - tool: hey
+    purpose: HTTP load testing for transaction endpoints
+    command: |
+      hey -n 5000 -c 100 -m POST -H "Content-Type: application/json" \
+        -d '{"amount": 100}' https://api.example.com/v1/orders
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.99,
+        sum(rate(transaction_duration_seconds_bucket[5m])) by (le, type)
+      )
+    purpose: P99 transaction duration by type
+  - system: Prometheus
+    query: |
+      sum(rate(transactions_total[5m])) by (type, status)
+    purpose: Transaction rate by type and status
+signals:
+  critical:
+  - id: TXN-CRIT-001
+    signal: Transaction rate declining under constant load
+    evidence_threshold: deriv(transaction_rate[1h]) < 0 AND load stable
+    explanation: |
+      Declining transaction rate under constant load indicates
+      resource exhaustion, lock contention, or degrading system
+      health. Without intervention, the system will eventually
+      stop processing transactions.
+    remediation: Investigate resource bottlenecks; check for locks; scale resources
+  - id: TXN-CRIT-002
+    signal: Transaction failure rate exceeds 5%
+    evidence_threshold: failure_rate > 0.05
+    explanation: |
+      High failure rates indicate systemic issues affecting business
+      operations. Failed transactions may represent lost revenue,
+      data inconsistency, or customer impact.
+    remediation: Investigate failure causes; implement retry logic; fix root cause
+  high:
+  - id: TXN-HIGH-001
+    signal: Transaction rate at 90% of tested capacity
+    evidence_threshold: current_tps / max_tested_tps > 0.9
+    explanation: |
+      Operating near capacity limits leaves no headroom for business
+      growth or traffic spikes. Scaling is urgently needed.
+    remediation: Scale database and application; optimize transaction processing
+  - id: TXN-HIGH-002
+    signal: Transaction processing time increasing over time
+    evidence_threshold: deriv(transaction_duration[24h]) > 0
+    explanation: |
+      Increasing transaction times indicate growing contention or
+      data volume issues that will eventually impact throughput.
+    remediation: Profile transaction processing; optimize queries; add indexes
+  medium:
+  - id: TXN-MED-001
+    signal: Transaction metrics not differentiated by type
+    remediation: Add transaction type labels to metrics
+  - id: TXN-MED-002
+    signal: No transaction rate baseline established
+    remediation: Run benchmarks to establish capacity baseline
+  low:
+  - id: TXN-LOW-001
+    signal: Transaction processing SLO not defined
+  positive:
+  - id: TXN-POS-001
+    signal: Transaction rate stable with 50%+ headroom
+  - id: TXN-POS-002
+    signal: Transaction failure rate consistently under 0.01%
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Define Transaction Types
+    description: |
+      Identify all transaction types and their business importance.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Query transaction types from metrics
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/label/type/values' | jq
+    - purpose: Check transaction table patterns
+      command: |
+        psql -c "SELECT relname FROM pg_stat_user_tables WHERE relname LIKE '%transaction%' OR relname LIKE '%order%';"
+    expected_findings:
+    - List of transaction types
+    - Business criticality
+  - id: '2'
+    name: Measure Current Transaction Rate
+    description: |
+      Measure current production transaction rates by type.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query transaction rate
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(transactions_total[5m]))by(type)'
+    - purpose: Query database transaction rate
+      command: psql -c "SELECT datname, xact_commit, xact_rollback FROM pg_stat_database WHERE datname='mydb';"
+    expected_findings:
+    - Current TPS by type
+    - Success/failure breakdown
+  - id: '3'
+    name: Run Transaction Benchmarks
+    description: |
+      Run load tests to determine maximum transaction capacity.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Run pgbench
+      command: pgbench -c 50 -j 4 -T 60 -r mydb
+    - purpose: Load test transaction endpoint
+      command: |
+        hey -n 10000 -c 100 -m POST -H "Content-Type: application/json" \
+          -d '{"test": true}' https://staging.api.example.com/v1/transactions
+    expected_findings:
+    - Maximum sustainable TPS
+    - Latency at peak throughput
+  - id: '4'
+    name: Analyze Bottlenecks
+    description: |
+      Identify what limits transaction throughput.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for lock contention
+      command: |
+        psql -c "SELECT relation::regclass, mode, granted FROM pg_locks WHERE NOT granted;"
+    - purpose: Check transaction duration breakdown
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(transaction_duration_seconds_bucket[5m]))by(le,phase))'
+    expected_findings:
+    - Primary bottleneck
+    - Optimization opportunities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Transaction Type Inventory
+    - Throughput Analysis
+    - Capacity Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Production metrics with benchmark validation
+    medium: Benchmark results from staging
+    low: Production metrics only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: postgres-transaction-isolation
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires benchmarking and detailed analysis
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: txn-001
+  item: Transaction failure rate under 0.1%
+  level: CRITICAL
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(transactions_total{status="failed"}[5m]))/sum(rate(transactions_total[5m]))' | \
+      jq '.data.result[0].value[1] | tonumber < 0.001'
+  expected: 'true'
+- id: txn-002
+  item: Operating below 80% of tested capacity
+  level: BLOCKING
+  verification: manual
+  verification_notes: Compare current TPS to benchmark results
+  expected: Confirmed by reviewer
+- id: txn-003
+  item: Transaction rate monitoring configured
+  level: WARNING
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/label/__name__/values' | grep -q transactions && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - transactional
+    - e-commerce
+    - financial
+relationships:
+  commonly_combined:
+  - performance-efficiency.throughput.request-throughput
+  - performance-efficiency.database-performance.transaction-isolation

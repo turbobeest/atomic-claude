@@ -1,0 +1,292 @@
+audit:
+  id: performance-efficiency.throughput.stream-processing-throughput
+  name: Stream Processing Throughput Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: throughput
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures the throughput of streaming data processing
+    systems (Apache Flink, Spark Streaming, Kafka Streams, Kinesis
+    Data Analytics). It evaluates records processed per second,
+    processing latency, checkpoint performance, and the ability to
+    maintain throughput under varying loads and failures.
+  why_it_matters: |
+    Stream processing systems must maintain throughput to provide
+    real-time insights. Falling behind causes growing latency, stale
+    analytics, and potential data loss when buffers overflow. Stream
+    processing is often on the critical path for real-time features
+    and monitoring.
+  when_to_run:
+  - When stream processing lag increases
+  - After topology or configuration changes
+  - During capacity planning for streaming workloads
+  - Before events expected to increase stream volume
+prerequisites:
+  required_artifacts:
+  - type: streaming_platform_access
+    description: Access to Flink, Spark, or Kinesis metrics
+  - type: stream_metrics
+    description: Throughput and latency metrics for streams
+  access_requirements:
+  - Access to stream processing platform UI/API
+  - Access to stream metrics
+  - Job configuration access
+discovery:
+  metrics_queries:
+  - system: Flink
+    query: flink_taskmanager_job_task_numRecordsInPerSecond
+    purpose: Records processed per second
+    threshold: Meeting input rate
+  - system: Prometheus
+    query: |
+      sum(rate(stream_records_processed_total[5m])) by (job, operator)
+    purpose: Stream processing rate by job and operator
+    threshold: '>= input rate'
+  - system: Kinesis
+    query: GetRecords.IteratorAgeMilliseconds
+    purpose: Stream processing lag
+    threshold: < 60000ms (1 minute)
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: flink-performance
+    name: Apache Flink Performance Tuning
+    url: https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/production_ready/
+    offline_cache: true
+  - id: spark-streaming-tuning
+    name: Spark Streaming Performance Tuning
+    url: https://spark.apache.org/docs/latest/streaming-programming-guide.html#performance-tuning
+    offline_cache: true
+  - id: kafka-streams-scaling
+    name: Kafka Streams Scaling
+    url: https://kafka.apache.org/documentation/streams/developer-guide/memory-mgmt.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: flink-cli
+    purpose: Check Flink job status
+    command: flink list -r
+  - tool: spark-submit
+    purpose: Check Spark streaming job
+    command: spark-submit --status application_id
+  - tool: aws-cli
+    purpose: Check Kinesis Analytics metrics
+    command: |
+      aws cloudwatch get-metric-statistics --namespace AWS/KinesisAnalytics \
+        --metric-name millisBehindLatest --dimensions Name=Id,Value=job-id \
+        --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) \
+        --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 60 --statistics Maximum
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      flink_taskmanager_job_task_numRecordsInPerSecond /
+      flink_taskmanager_job_task_numRecordsOutPerSecond
+    purpose: Input/output ratio (should be ~1 for most operators)
+  - system: Prometheus
+    query: |
+      rate(flink_jobmanager_job_lastCheckpointDuration[5m])
+    purpose: Checkpoint duration trends
+signals:
+  critical:
+  - id: STRM-CRIT-001
+    signal: Stream processing lag exceeding 5 minutes
+    evidence_threshold: iterator_age > 300000ms OR lag > 5m
+    explanation: |
+      Five minutes of lag means real-time features are showing
+      stale data. Users see outdated dashboards, alerts fire late,
+      and downstream systems make decisions on old information.
+    remediation: Scale parallelism; optimize operators; increase resources
+  - id: STRM-CRIT-002
+    signal: Streaming job failing repeatedly
+    evidence_threshold: restarts > 3 in 1h
+    explanation: |
+      Repeated job failures cause data loss, duplicate processing,
+      and extended outages. Each restart reprocesses from the last
+      checkpoint, wasting resources.
+    remediation: Investigate failure cause; fix data issues; add error handling
+  high:
+  - id: STRM-HIGH-001
+    signal: Throughput dropping while input rate increases
+    evidence_threshold: deriv(output_rate) < 0 AND deriv(input_rate) > 0
+    explanation: |
+      Throughput not keeping up with input indicates the pipeline
+      is at capacity. Without scaling, lag will grow continuously.
+    remediation: Scale parallelism; add taskmanagers; optimize bottleneck operators
+  - id: STRM-HIGH-002
+    signal: Checkpoint duration exceeding checkpoint interval
+    evidence_threshold: checkpoint_duration > checkpoint_interval
+    explanation: |
+      Checkpoints taking longer than the interval means they will
+      start overlapping, consuming resources and potentially
+      failing the job.
+    remediation: Increase checkpoint interval; optimize state size; use incremental checkpoints
+  medium:
+  - id: STRM-MED-001
+    signal: Stream processing metrics not collected
+    remediation: Enable metrics reporting for stream processing platform
+  - id: STRM-MED-002
+    signal: No alerting on stream processing lag
+    remediation: Configure alerts for lag thresholds
+  low:
+  - id: STRM-LOW-001
+    signal: Stream processing capacity not documented
+  positive:
+  - id: STRM-POS-001
+    signal: Processing rate consistently exceeds input rate
+  - id: STRM-POS-002
+    signal: Stream processing lag consistently under 10 seconds
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Streaming Jobs
+    description: |
+      Identify all streaming jobs, their inputs, outputs, and
+      throughput requirements.
+    duration_estimate: 15 min
+    commands:
+    - purpose: List Flink jobs
+      command: flink list -r
+    - purpose: List Kinesis Analytics applications
+      command: aws kinesisanalytics list-applications
+    expected_findings:
+    - List of streaming jobs
+    - Input/output streams
+  - id: '2'
+    name: Measure Throughput
+    description: |
+      Measure current throughput for all streaming jobs.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query Flink throughput
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(flink_taskmanager_job_task_numRecordsInPerSecond)by(job_name)'
+    - purpose: Check input vs output rates
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(stream_records_processed_total[5m]))by(job)'
+    expected_findings:
+    - Records per second by job
+    - Input vs output balance
+  - id: '3'
+    name: Check Processing Lag
+    description: |
+      Measure end-to-end processing latency and consumer lag.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query iterator age
+      command: |
+        aws cloudwatch get-metric-statistics --namespace AWS/Kinesis \
+          --metric-name GetRecords.IteratorAgeMilliseconds \
+          --dimensions Name=StreamName,Value=my-stream \
+          --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) \
+          --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 60 --statistics Average
+    - purpose: Query Kafka consumer lag
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(kafka_consumer_group_lag)by(consumergroup)'
+    expected_findings:
+    - Processing lag by stream
+    - Lag trends
+  - id: '4'
+    name: Analyze Checkpointing
+    description: |
+      Review checkpoint performance for exactly-once processing
+      guarantees.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query checkpoint duration
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=flink_jobmanager_job_lastCheckpointDuration'
+    - purpose: Check checkpoint failures
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=increase(flink_jobmanager_job_numberOfFailedCheckpoints[24h])'
+    expected_findings:
+    - Checkpoint performance
+    - Failure rate
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Streaming Job Inventory
+    - Throughput Analysis
+    - Lag Assessment
+    - Checkpoint Health
+    - Recommendations
+  confidence_guidance:
+    high: Production metrics with >24h of data during peak load
+    medium: Metrics from normal operation period
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: flink-performance
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires streaming platform access and detailed analysis
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: stream-001
+  item: Processing lag under 1 minute
+  level: CRITICAL
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=max(stream_processing_lag_seconds)' | \
+      jq '.data.result[0].value[1] | tonumber < 60'
+  expected: 'true'
+- id: stream-002
+  item: Throughput meeting input rate
+  level: BLOCKING
+  verification: |
+    OUTPUT=$(curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(stream_records_out_total[5m]))' | jq -r '.data.result[0].value[1]')
+    INPUT=$(curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(stream_records_in_total[5m]))' | jq -r '.data.result[0].value[1]')
+    echo "scale=2; $OUTPUT >= $INPUT * 0.95" | bc
+  expected: '1'
+- id: stream-003
+  item: Checkpoint health monitoring configured
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm checkpoint metrics and alerts exist
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - streaming
+    - real-time-analytics
+relationships:
+  commonly_combined:
+  - performance-efficiency.throughput.data-ingestion-rate
+  - performance-efficiency.throughput.event-processing-rate

@@ -1,0 +1,393 @@
+# ============================================================
+# AUDIT: Documentation Accuracy
+# ============================================================
+
+audit:
+  id: "api-integration.api-documentation.documentation-accuracy"
+  name: "Documentation Accuracy Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "api-documentation"
+
+  tier: "expert"
+  estimated_duration: "120 minutes"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "documentation"
+
+  default_profiles:
+    - "full"
+    - "api"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether API documentation accurately reflects actual API
+    behavior including endpoint paths, request/response formats, field
+    names, validation rules, and error codes. Analyzes synchronization
+    between documentation and implementation.
+
+  why_it_matters: |
+    Inaccurate documentation is worse than no documentation because
+    it actively misleads developers. They waste time debugging issues
+    caused by following incorrect documentation, eroding trust in
+    the documentation and the API team.
+
+  when_to_run:
+    - "After API changes"
+    - "Before API releases"
+    - "When integration issues reported"
+    - "Periodic accuracy audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "documentation"
+      description: "API documentation (OpenAPI, Swagger, etc.)"
+    - type: "source_code"
+      description: "API endpoint implementations"
+
+  access_requirements:
+    - "Read access to API documentation"
+    - "Read access to API source code"
+    - "Ability to make test API calls (optional)"
+
+discovery:
+  code_patterns:
+    - pattern: "@Get|@Post|@Put|@Delete|app\\.(get|post|put|delete)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect API routes in code"
+
+    - pattern: "paths:|/api/"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect documented routes"
+
+  file_patterns:
+    - glob: "**/openapi.yaml"
+      purpose: "OpenAPI specification"
+    - glob: "**/routes/**"
+      purpose: "Route definitions"
+    - glob: "**/controllers/**"
+      purpose: "Controller implementations"
+
+knowledge_sources:
+  specifications:
+    - id: "openapi-spec"
+      name: "OpenAPI Specification"
+      url: "https://spec.openapis.org/oas/latest.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "doc-sync"
+      name: "Keeping Documentation in Sync"
+      url: "https://swagger.io/blog/api-strategy/keeping-api-documentation-in-sync/"
+      offline_cache: true
+
+    - id: "contract-testing"
+      name: "API Contract Testing"
+      url: "https://pactflow.io/blog/what-is-contract-testing/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "openapi-generator"
+      title: "OpenAPI Generator"
+      type: "article"
+      reference: "OpenAPI Tools"
+
+tooling:
+  static_analysis:
+    - tool: "openapi-diff"
+      purpose: "Compare OpenAPI specs"
+      offline_capable: true
+
+    - tool: "dredd"
+      purpose: "Validate API against documentation"
+      offline_capable: false
+
+  scripts:
+    - id: "doc-accuracy-scan"
+      language: "bash"
+      purpose: "Compare routes in code vs documentation"
+      source: "inline"
+      code: |
+        echo "=== Documentation Accuracy Analysis ==="
+        echo "--- Routes in code ---"
+        grep -rn "@Get\|@Post\|@Put\|@Delete" \
+          --include="*.ts" --include="*.java" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+        echo "--- Routes in documentation ---"
+        grep -rn "paths:\|/api/" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | \
+          grep -i "openapi\|swagger" | grep -v node_modules | head -20
+
+signals:
+  critical:
+    - id: "DA-CRIT-001"
+      signal: "Documented endpoints do not exist in code"
+      evidence_pattern: "Routes in OpenAPI spec not found in implementation"
+      explanation: |
+        Documented endpoints that don't exist cause immediate integration
+        failures. Developers waste significant time trying to use
+        non-existent functionality.
+      remediation: "Synchronize documentation with implementation"
+
+    - id: "DA-CRIT-002"
+      signal: "Response format differs from documentation"
+      evidence_pattern: "Actual response structure doesn't match schema"
+      explanation: |
+        When response format differs from documentation, client code
+        fails to parse responses correctly. This breaks integrations
+        and causes data loss or corruption.
+      remediation: "Update schemas to match actual response format"
+
+  high:
+    - id: "DA-HIGH-001"
+      signal: "Undocumented endpoints in production"
+      evidence_pattern: "Routes in code not present in documentation"
+      explanation: |
+        Undocumented endpoints may be discovered by attackers but not
+        by legitimate users. They also can't be properly integrated,
+        limiting API adoption.
+      remediation: "Document all production endpoints"
+
+    - id: "DA-HIGH-002"
+      signal: "Incorrect HTTP methods documented"
+      evidence_pattern: "POST in docs but GET in implementation"
+      explanation: |
+        Wrong HTTP methods cause immediate 405 errors. Developers
+        troubleshoot basic connectivity issues instead of building
+        integrations.
+      remediation: "Verify HTTP methods match implementation"
+
+    - id: "DA-HIGH-003"
+      signal: "Authentication requirements mismatch"
+      evidence_pattern: "Docs say public but endpoint requires auth"
+      explanation: |
+        Authentication mismatches cause 401/403 errors that confuse
+        developers. They may assume the API is broken rather than
+        the documentation being wrong.
+      remediation: "Accurately document authentication requirements"
+
+  medium:
+    - id: "DA-MED-001"
+      signal: "Field names differ between docs and implementation"
+      evidence_pattern: "camelCase in docs, snake_case in response"
+      remediation: "Align field naming between docs and implementation"
+
+    - id: "DA-MED-002"
+      signal: "Validation rules not current"
+      evidence_pattern: "Docs say max 100 chars, code enforces 50"
+      remediation: "Update validation documentation"
+
+    - id: "DA-MED-003"
+      signal: "Error codes differ from documentation"
+      evidence_pattern: "Documented 400, but throws 422"
+      remediation: "Align error codes with documentation"
+
+  low:
+    - id: "DA-LOW-001"
+      signal: "Examples don't match current schema"
+      evidence_pattern: "Example response missing new required fields"
+      remediation: "Update examples to match current schema"
+
+  positive:
+    - id: "DA-POS-001"
+      signal: "Documentation generated from code"
+      evidence_pattern: "OpenAPI spec auto-generated from annotations"
+
+    - id: "DA-POS-002"
+      signal: "Contract tests validate documentation"
+      evidence_pattern: "Dredd or Pact tests in CI pipeline"
+
+    - id: "DA-POS-003"
+      signal: "Documentation updated in same PR as code"
+      evidence_pattern: "Git history shows synchronized changes"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Extract Routes from Code"
+      description: |
+        List all API routes defined in the codebase.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find route definitions"
+          command: |
+            grep -rn "@Get\|@Post\|@Put\|@Delete\|@Patch" \
+              --include="*.ts" --include="*.java" . 2>/dev/null | \
+              grep -v node_modules | grep -v test | head -50
+        - purpose: "Find Express/Fastify routes"
+          command: |
+            grep -rn "app\.\(get\|post\|put\|delete\|patch\)\|router\." \
+              --include="*.ts" --include="*.js" . 2>/dev/null | \
+              grep -v node_modules | grep -v test | head -50
+
+      expected_findings:
+        - "Route inventory from code"
+        - "HTTP methods used"
+
+    - id: "2"
+      name: "Extract Routes from Documentation"
+      description: |
+        List all routes in API documentation.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find documented paths"
+          command: |
+            grep -rn "^\s*/\|paths:" \
+              --include="openapi*.yaml" --include="swagger*.yaml" . 2>/dev/null | \
+              grep -v node_modules | head -50
+
+      expected_findings:
+        - "Route inventory from docs"
+        - "Documentation format"
+
+    - id: "3"
+      name: "Compare Route Coverage"
+      description: |
+        Identify discrepancies between code and documentation.
+      duration_estimate: "25 min"
+      questions:
+        - "Are all code routes documented?"
+        - "Are all documented routes implemented?"
+        - "Do HTTP methods match?"
+
+      expected_findings:
+        - "Missing documentation"
+        - "Stale documentation"
+
+    - id: "4"
+      name: "Verify Schema Accuracy"
+      description: |
+        Compare documented schemas to actual data structures.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find response DTOs"
+          command: |
+            grep -rn "class.*Response\|interface.*Response\|type.*Response" \
+              --include="*.ts" --include="*.java" . 2>/dev/null | \
+              grep -v node_modules | head -30
+        - purpose: "Find documented schemas"
+          command: |
+            grep -rn "schema:\|type: object" \
+              --include="*.yaml" --include="*.json" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Schema alignment"
+        - "Field name consistency"
+
+    - id: "5"
+      name: "Check for Contract Tests"
+      description: |
+        Verify automated documentation validation exists.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find contract testing"
+          command: |
+            grep -rn "dredd\|pact\|prism\|openapi.*validate" \
+              --include="*.yaml" --include="*.json" --include="package.json" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "Contract test presence"
+        - "CI integration"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "route_discrepancies"
+        - "schema_mismatches"
+        - "contract_test_status"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Route Comparison"
+        - "Schema Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear discrepancy between docs and code"
+    medium: "Potential mismatch requiring verification"
+    low: "Requires runtime testing to confirm"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "doc-sync"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed comparison"
+    full:
+      included: true
+      priority: 1
+    api:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "da-001"
+    item: "All code routes are documented"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Compare route count in code vs documentation"
+    expected: "Confirmed by reviewer"
+
+  - id: "da-002"
+    item: "Response schemas match implementation"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify schema fields match DTO/model definitions"
+    expected: "Confirmed by reviewer"
+
+  - id: "da-003"
+    item: "Contract tests validate documentation"
+    level: "WARNING"
+    verification: |
+      grep -rn "dredd\|pact\|prism" \
+        --include="*.yaml" --include="*.json" --include="package.json" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Usability"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.api-documentation.documentation-completeness"
+    - "api-integration.api-documentation.changelog-maintenance"
+    - "code-quality.documentation.synchronization"

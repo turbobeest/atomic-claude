@@ -1,0 +1,307 @@
+# ============================================================
+# TRACE LATENCY ATTRIBUTION AUDIT
+# ============================================================
+# Evaluates the ability to accurately attribute latency to
+# specific services, operations, and components within traces.
+
+audit:
+  id: "observability-instrumentation.distributed-tracing.trace-latency-attribution"
+  name: "Trace Latency Attribution Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "observability-instrumentation"
+  category_number: 5
+  subcategory: "distributed-tracing"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Reviews trace instrumentation quality for latency analysis, examining span
+    timing accuracy, clock synchronization, proper span boundaries, and the
+    ability to pinpoint latency sources within complex request flows.
+
+  why_it_matters: |
+    Inaccurate latency attribution leads to optimizing the wrong components,
+    wasted engineering effort, and unresolved performance issues. Clock skew
+    between services can show impossible negative durations or hide actual
+    bottlenecks behind timing inconsistencies.
+
+  when_to_run:
+    - "Performance investigation"
+    - "After infrastructure changes"
+    - "When trace timings seem inconsistent"
+    - "New datacenter or region deployment"
+
+prerequisites:
+  required_artifacts:
+    - type: "tracing_backend"
+      description: "Access to trace query interface"
+    - type: "ntp_configuration"
+      description: "Time synchronization configuration"
+
+  access_requirements:
+    - "Trace query access"
+    - "NTP server configuration"
+    - "Application timing instrumentation code"
+
+discovery:
+  metrics_queries:
+    - system: "Jaeger"
+      query: "traces with negative span durations"
+      purpose: "Identify clock skew issues"
+      threshold: "Zero negative durations"
+
+    - system: "Prometheus"
+      query: "histogram_quantile(0.99, rate(span_duration_seconds_bucket[5m]))"
+      purpose: "Identify latency distribution"
+      threshold: "Consistent with SLOs"
+
+  code_patterns:
+    - pattern: "span\\.start|span\\.end|span\\.finish"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify span boundary timing"
+
+    - pattern: "time\\.Now|Date\\.now|System\\.currentTimeMillis"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify custom timing code"
+
+  file_patterns:
+    - glob: "**/ntp*.conf"
+      purpose: "NTP configuration"
+    - glob: "**/chrony*.conf"
+      purpose: "Chrony time sync configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "otel-span-timing"
+      name: "OpenTelemetry Span Timing"
+      url: "https://opentelemetry.io/docs/specs/otel/trace/api/#span"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "clock-sync-best-practices"
+      name: "NTP Best Practices"
+      url: "https://chrony-project.org/doc/4.0/chrony.conf.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "ntpq"
+      purpose: "Check NTP synchronization"
+      command: "ntpq -p"
+
+    - tool: "chronyc"
+      purpose: "Check Chrony time sync"
+      command: "chronyc tracking"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "node_timex_offset_seconds"
+      purpose: "Monitor clock offset across hosts"
+
+signals:
+  critical:
+    - id: "TRACE-LAT-CRIT-001"
+      signal: "Negative span durations in traces"
+      evidence_pattern: "span.end_time < span.start_time"
+      explanation: |
+        Negative durations indicate severe clock skew between services.
+        This makes latency analysis impossible and can mask real
+        performance issues with impossible timing data.
+      remediation: "Implement NTP synchronization across all hosts"
+
+    - id: "TRACE-LAT-CRIT-002"
+      signal: "Child spans longer than parent spans"
+      evidence_pattern: "child.duration > parent.duration"
+      explanation: |
+        Child operations cannot logically take longer than their parent.
+        This indicates clock skew or incorrect span boundaries that
+        invalidate latency analysis.
+      remediation: "Review clock sync and span boundary instrumentation"
+
+  high:
+    - id: "TRACE-LAT-HIGH-001"
+      signal: "Clock offset exceeds 10ms between services"
+      evidence_threshold: "abs(clock_offset) > 10ms"
+      explanation: |
+        Significant clock offset between services makes microsecond-level
+        latency analysis unreliable and can misattribute latency.
+      remediation: "Configure stricter NTP polling intervals"
+
+    - id: "TRACE-LAT-HIGH-002"
+      signal: "Missing intermediate spans hide latency"
+      evidence_pattern: "Large gaps between child spans"
+      explanation: |
+        Uninstrumented code between spans hides latency sources. The gap
+        appears as parent time but cannot be further investigated.
+      remediation: "Add instrumentation for significant operations"
+
+  medium:
+    - id: "TRACE-LAT-MED-001"
+      signal: "Network time not separated from processing time"
+      evidence_pattern: "No client/server span pairs"
+      remediation: "Instrument both client and server sides of calls"
+
+    - id: "TRACE-LAT-MED-002"
+      signal: "Queue wait time not instrumented"
+      evidence_pattern: "Message processing without enqueue timestamp"
+      remediation: "Add queue wait time as span attribute"
+
+  low:
+    - id: "TRACE-LAT-LOW-001"
+      signal: "Span names don't indicate operation type"
+      remediation: "Use descriptive span names for latency analysis"
+
+  positive:
+    - id: "TRACE-LAT-POS-001"
+      signal: "Accurate latency attribution at sub-millisecond level"
+      evidence_pattern: "Consistent timing with no negative durations"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Verify clock synchronization"
+      description: |
+        Check NTP or Chrony synchronization status across all hosts
+        and verify clock offset is within acceptable bounds.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Check NTP sync status"
+          command: "ansible all -m shell -a 'ntpq -p || chronyc tracking'"
+        - purpose: "Check Prometheus clock offset metrics"
+          command: "curl -s 'http://prometheus:9090/api/v1/query?query=node_timex_offset_seconds' | jq '.data.result[] | {instance: .metric.instance, offset: .value[1]}'"
+
+      expected_findings:
+        - "Clock sync status per host"
+        - "Maximum clock offset"
+
+    - id: "2"
+      name: "Analyze trace timing consistency"
+      description: |
+        Query traces for timing anomalies including negative durations,
+        child spans exceeding parent spans, and unexplained gaps.
+      duration_estimate: "45 min"
+
+      commands:
+        - purpose: "Find traces with timing anomalies"
+          command: "curl -s 'http://jaeger:16686/api/traces?service=api&limit=500' | jq '[.data[].spans[] | select(.duration < 0)] | length'"
+        - purpose: "Check parent-child timing consistency"
+          command: "curl -s 'http://jaeger:16686/api/traces/{traceId}' | jq '.data[0].spans | map({op: .operationName, dur: .duration})'"
+
+      expected_findings:
+        - "Timing anomaly count"
+        - "Anomaly patterns"
+
+    - id: "3"
+      name: "Review span boundary instrumentation"
+      description: |
+        Examine how spans are started and finished to ensure timing
+        boundaries accurately reflect operation duration.
+      duration_estimate: "45 min"
+
+      commands:
+        - purpose: "Find span timing code"
+          command: "grep -r 'span\\.start\\|span\\.end\\|WithSpan' /app/src/ --include='*.py' --include='*.java'"
+
+      expected_findings:
+        - "Span boundary patterns"
+        - "Timing accuracy assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Clock Synchronization Status"
+        - "Timing Anomaly Analysis"
+        - "Attribution Accuracy Assessment"
+
+  confidence_guidance:
+    high: "Statistical analysis of trace timing with clock sync verification"
+    medium: "Sample-based trace timing review"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "otel-span-timing"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime trace analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "trace-lat-001"
+    item: "Clock synchronization verified"
+    level: "CRITICAL"
+    verification: "chronyc tracking | grep -q 'Leap status.*Normal' && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "trace-lat-002"
+    item: "No negative span durations"
+    level: "CRITICAL"
+    verification: "manual"
+    expected: "Zero negative durations in sample"
+
+  - id: "trace-lat-003"
+    item: "Latency attribution accuracy documented"
+    level: "BLOCKING"
+    verification: "manual"
+    expected: "Attribution accuracy assessment complete"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SRE Best Practices"
+      controls: ["Latency Analysis"]
+
+relationships:
+  commonly_combined:
+    - "observability-instrumentation.distributed-tracing.trace-coverage"
+    - "observability-instrumentation.distributed-tracing.critical-path-analysis"
+    - "observability-instrumentation.distributed-tracing.trace-error-flagging"

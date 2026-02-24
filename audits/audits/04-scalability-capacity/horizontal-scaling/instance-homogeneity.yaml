@@ -1,0 +1,289 @@
+# ============================================================
+# AUDIT: Instance Homogeneity Audit
+# Category: Scalability & Capacity > Horizontal Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.horizontal-scaling.instance-homogeneity"
+  name: "Instance Homogeneity Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "horizontal-scaling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether horizontally scaled instances are truly homogeneous and
+    interchangeable. Examines configuration consistency, resource allocation,
+    deployed versions, feature flags, and runtime state to ensure any instance
+    can handle any request identically.
+
+  why_it_matters: |
+    Heterogeneous instances cause unpredictable behavior - some requests succeed,
+    others fail depending on which instance handles them. Configuration drift
+    leads to debugging nightmares and inconsistent user experiences. True
+    horizontal scaling requires identical, interchangeable instances.
+
+  when_to_run:
+    - "After configuration changes"
+    - "During debugging inconsistent behavior"
+    - "After deployments to verify consistency"
+    - "During operational health reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Instance/pod configuration files"
+    - type: "deployment_config"
+      description: "Deployment configuration and CI/CD pipelines"
+
+  access_requirements:
+    - "Kubernetes/cloud infrastructure access"
+    - "Configuration management system access"
+    - "Access to running instances for verification"
+
+discovery:
+  code_patterns:
+    - pattern: "(env:|environment:|envFrom:)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect environment variable configuration"
+
+    - pattern: "(nodeSelector|affinity|tolerations)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect node placement constraints"
+
+    - pattern: "(configMap|secret|volume)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect configuration injection"
+
+  file_patterns:
+    - glob: "**/k8s/**/*.yaml"
+      purpose: "Kubernetes manifests"
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Terraform configurations"
+    - glob: "**/.env*"
+      purpose: "Environment files"
+
+knowledge_sources:
+  guides:
+    - id: "12factor-config"
+      name: "The Twelve-Factor App - Config"
+      url: "https://12factor.net/config"
+      offline_cache: true
+
+    - id: "immutable-infrastructure"
+      name: "Immutable Infrastructure Principles"
+      url: "https://www.hashicorp.com/resources/what-is-mutable-vs-immutable-infrastructure"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Compare pod configurations"
+      command: "kubectl get pods -o yaml | diff -"
+
+    - tool: "kubectl"
+      purpose: "Check pod resource allocation"
+      command: "kubectl top pods"
+
+  scripts:
+    - id: "homogeneity-checker"
+      language: "bash"
+      purpose: "Compare instance configurations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        DEPLOY=$1
+        NAMESPACE=$2
+        PODS=$(kubectl get pods -n $NAMESPACE -l app=$DEPLOY -o name)
+        FIRST_CONFIG=$(kubectl get $(echo $PODS | cut -d' ' -f1) -n $NAMESPACE -o json | jq '.spec.containers[0].env')
+        for POD in $PODS; do
+          CONFIG=$(kubectl get $POD -n $NAMESPACE -o json | jq '.spec.containers[0].env')
+          if [ "$FIRST_CONFIG" != "$CONFIG" ]; then
+            echo "Configuration mismatch: $POD"
+          fi
+        done
+
+signals:
+  critical:
+    - id: "HOMOG-CRIT-001"
+      signal: "Different application versions running simultaneously"
+      evidence_indicators:
+        - "Pods with different image tags"
+        - "Version mismatch in health endpoints"
+      explanation: |
+        Different versions handling the same traffic causes unpredictable
+        behavior and makes debugging nearly impossible.
+      remediation: "Ensure rolling deployments complete fully before traffic routing"
+
+  high:
+    - id: "HOMOG-HIGH-001"
+      signal: "Configuration drift between instances"
+      evidence_indicators:
+        - "Different environment variables per instance"
+        - "Instance-specific configuration files"
+      explanation: |
+        Configuration drift causes some instances to behave differently,
+        leading to intermittent failures and inconsistent responses.
+      remediation: "Use ConfigMaps/Secrets consistently; avoid instance-specific configuration"
+
+    - id: "HOMOG-HIGH-002"
+      signal: "Resource allocation varies between instances"
+      evidence_pattern: "resources.*limits.*cpu|resources.*requests.*memory"
+      explanation: |
+        Unequal resource allocation causes performance variance and
+        unfair load distribution across instances.
+      remediation: "Ensure all replicas have identical resource requests and limits"
+
+  medium:
+    - id: "HOMOG-MED-001"
+      signal: "Feature flags varying between instances"
+      evidence_indicators:
+        - "Different feature flag states per instance"
+        - "Instance-local feature flag cache"
+      remediation: "Use centralized feature flag service with consistent state"
+
+  positive:
+    - id: "HOMOG-POS-001"
+      signal: "All instances running identical configuration"
+      evidence_pattern: "replicas.*[2-9]|spec.*containers.*image"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Compare instance configurations"
+      description: |
+        Collect and compare configuration from all running instances
+        to identify any differences.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "List all pods with versions"
+          command: "kubectl get pods -o custom-columns='NAME:.metadata.name,IMAGE:.spec.containers[0].image'"
+        - purpose: "Compare environment variables"
+          command: "kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{\"\\n\"}{.spec.containers[0].env}{\"\\n\\n\"}{end}'"
+      expected_findings:
+        - "Version consistency across instances"
+        - "Configuration consistency verification"
+
+    - id: "2"
+      name: "Verify resource allocation consistency"
+      description: |
+        Check that all instances have identical resource requests and limits.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check resource allocation"
+          command: "kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{.spec.containers[0].resources}{\"\\n\"}{end}'"
+      expected_findings:
+        - "Resource allocation per instance"
+        - "Identification of any discrepancies"
+
+    - id: "3"
+      name: "Test request handling consistency"
+      description: |
+        Send identical requests and verify all instances return
+        consistent results.
+      duration_estimate: "30 min"
+      questions:
+        - "Do all instances return the same response for identical requests?"
+        - "Are feature flags consistent across instances?"
+        - "Do health check endpoints report identical configurations?"
+      expected_findings:
+        - "Response consistency verification"
+        - "Feature flag state consistency"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Configuration Comparison"
+        - "Resource Allocation Analysis"
+        - "Consistency Recommendations"
+
+  confidence_guidance:
+    high: "Direct comparison of running instance configurations"
+    medium: "Configuration file analysis without runtime verification"
+    low: "Single instance examined, consistency assumed"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "12factor-config"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires multi-instance comparison"
+    full:
+      included: true
+      priority: 3
+
+closeout_checklist:
+  - id: "homogeneity-001"
+    item: "All instances running same image version"
+    level: "CRITICAL"
+    verification: "kubectl get pods -o jsonpath='{.items[*].spec.containers[0].image}' | tr ' ' '\\n' | sort -u | wc -l"
+    expected: "1"
+
+  - id: "homogeneity-002"
+    item: "Configuration consistent across instances"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Compare environment variables and ConfigMaps across all pods"
+    expected: "Identical configuration"
+
+  - id: "homogeneity-003"
+    item: "Resource allocation identical for all replicas"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify resource requests/limits are the same"
+    expected: "Identical resource specifications"
+
+governance:
+  applicable_to:
+    archetypes: ["web-service", "api-service", "microservice"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["REL-6", "OPS-5"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.horizontal-scaling.stateless-design"
+    - "scalability-capacity.horizontal-scaling.service-discovery"

@@ -1,0 +1,255 @@
+audit:
+  id: observability-instrumentation.alerting.alert-escalation
+  name: Alert Escalation Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: alerting
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: operations
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews alert escalation policies including escalation timeouts,
+    escalation paths, multi-level escalation, and management notification.
+    Ensures critical alerts don't go unacknowledged.
+  why_it_matters: |
+    Without proper escalation, alerts can go unacknowledged if the primary
+    responder is unavailable. Escalation policies ensure that someone always
+    responds to critical alerts, preventing extended outages from simply
+    being missed.
+  when_to_run:
+  - After unacknowledged alert incidents
+  - On-call rotation changes
+  - Quarterly alerting review
+  - Management escalation path changes
+prerequisites:
+  required_artifacts:
+  - type: escalation_policies
+    description: PagerDuty/Opsgenie escalation configuration
+  - type: on_call_schedule
+    description: On-call rotation schedules
+  access_requirements:
+  - Incident management platform admin
+  - On-call schedule access
+  - Escalation policy configuration
+discovery:
+  metrics_queries:
+  - system: PagerDuty
+    query: incidents escalated
+    purpose: Track escalation frequency
+    threshold: Escalations due to no response only
+  - system: Prometheus
+    query: pagerduty_incidents_escalated_total
+    purpose: Count escalated incidents
+    threshold: Low escalation rate
+  code_patterns:
+  - pattern: escalation|escalate|repeat_interval
+    type: regex
+    scope: alertmanager_config
+    purpose: Identify escalation configuration
+  file_patterns:
+  - glob: '**/escalation*.yaml'
+    purpose: Escalation policy files
+  - glob: '**/pagerduty*.yaml'
+    purpose: PagerDuty configuration
+  - glob: '**/opsgenie*.yaml'
+    purpose: Opsgenie configuration
+knowledge_sources:
+  specifications:
+  - id: pagerduty-escalation
+    name: PagerDuty Escalation Policies
+    url: https://support.pagerduty.com/docs/escalation-policies
+    offline_cache: true
+    priority: required
+  guides:
+  - id: opsgenie-escalation
+    name: Opsgenie Escalation Policies
+    url: https://support.atlassian.com/opsgenie/docs/what-are-escalation-policies/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: pd-cli
+    purpose: Query PagerDuty escalation policies
+    command: pd escalation-policy list --output json
+  - tool: curl
+    purpose: Query Opsgenie escalations
+    command: 'curl -s -H ''Authorization: GenieKey ${OPSGENIE_KEY}'' ''https://api.opsgenie.com/v2/escalations'''
+  monitoring_queries:
+  - system: PagerDuty
+    query: escalation_time_seconds
+    purpose: Track time to escalation
+signals:
+  critical:
+  - id: ALERT-ESC-CRIT-001
+    signal: No escalation policy for critical alerts
+    evidence_pattern: Critical alerts without escalation configuration
+    explanation: |
+      Critical alerts without escalation can remain unacknowledged
+      indefinitely if the primary responder is unavailable, leading
+      to extended outages.
+    remediation: Configure multi-level escalation for all critical alerts
+  - id: ALERT-ESC-CRIT-002
+    signal: Escalation path ends with unavailable responders
+    evidence_pattern: Final escalation level has no active responders
+    explanation: |
+      If escalation reaches a level with no available responders,
+      the alert effectively has nowhere to go.
+    remediation: Ensure all escalation levels have available responders
+  high:
+  - id: ALERT-ESC-HIGH-001
+    signal: Escalation timeout too long
+    evidence_threshold: escalation_timeout > 30 minutes
+    explanation: |
+      Long escalation timeouts delay additional responder notification,
+      extending incident duration unnecessarily.
+    remediation: Reduce escalation timeout to 10-15 minutes for critical alerts
+  - id: ALERT-ESC-HIGH-002
+    signal: No management escalation for extended incidents
+    evidence_pattern: No escalation to management after 1 hour
+    explanation: |
+      Extended incidents need management visibility for resource
+      allocation and communication purposes.
+    remediation: Add management notification after 30-60 minutes
+  medium:
+  - id: ALERT-ESC-MED-001
+    signal: Single escalation level only
+    evidence_pattern: Only one escalation step configured
+    remediation: Add multiple escalation levels for redundancy
+  - id: ALERT-ESC-MED-002
+    signal: No cross-team escalation for shared services
+    evidence_pattern: Shared services escalate within single team
+    remediation: Add cross-team escalation for shared dependencies
+  low:
+  - id: ALERT-ESC-LOW-001
+    signal: Escalation policies not tested regularly
+    remediation: Schedule regular escalation drills
+  positive:
+  - id: ALERT-ESC-POS-001
+    signal: Multi-level escalation with management notification
+    evidence_pattern: 3+ levels with management at final level
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review escalation policies
+    description: |
+      Examine escalation policy configuration for all services
+      including timeout values and escalation levels.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List PagerDuty escalation policies
+      command: 'curl -s -H ''Authorization: Token token=${PD_TOKEN}'' ''https://api.pagerduty.com/escalation_policies''
+        | jq ''.escalation_policies[] | {name: .name, levels: [.escalation_rules[] | {delay: .escalation_delay_in_minutes,
+        targets: [.targets[].summary]}]}'''
+    - purpose: Check AlertManager repeat interval
+      command: kubectl get secret alertmanager-config -o jsonpath='{.data.alertmanager\.yaml}' | base64
+        -d | grep repeat_interval
+    expected_findings:
+    - Escalation policy inventory
+    - Timeout configurations
+  - id: '2'
+    name: Verify escalation paths
+    description: |
+      Verify that escalation paths have active responders at
+      all levels and appropriate coverage.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check on-call coverage
+      command: 'curl -s -H ''Authorization: Token token=${PD_TOKEN}'' ''https://api.pagerduty.com/oncalls''
+        | jq ''[.oncalls[] | {schedule: .schedule.summary, user: .user.summary}]'''
+    expected_findings:
+    - Escalation path coverage
+    - Active responder verification
+  - id: '3'
+    name: Analyze escalation history
+    description: |
+      Review historical escalations to identify patterns
+      and effectiveness of current policies.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get escalation statistics
+      command: 'curl -s -H ''Authorization: Token token=${PD_TOKEN}'' ''https://api.pagerduty.com/analytics/metrics/incidents/all?time_zone=UTC''
+        | jq ''.data | {escalations: .mean_time_to_engage}'''
+    expected_findings:
+    - Escalation frequency
+    - Escalation effectiveness
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Escalation Policy Review
+    - Coverage Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Policy review with historical analysis
+    medium: Policy review with coverage verification
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: pagerduty-escalation
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires escalation policy analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: alert-esc-001
+  item: Escalation policies documented
+  level: CRITICAL
+  verification: manual
+  expected: All policies listed
+- id: alert-esc-002
+  item: Critical alert escalation verified
+  level: CRITICAL
+  verification: manual
+  expected: Multi-level escalation confirmed
+- id: alert-esc-003
+  item: Escalation timeouts appropriate
+  level: BLOCKING
+  verification: manual
+  expected: < 15 min for critical alerts
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Incident Response
+  - framework: SOC 2
+    controls:
+    - Incident Management
+relationships:
+  commonly_combined:
+  - observability-instrumentation.alerting.alert-routing
+  - observability-instrumentation.alerting.alert-runbook-linking
+  - observability-instrumentation.alerting.alert-fatigue

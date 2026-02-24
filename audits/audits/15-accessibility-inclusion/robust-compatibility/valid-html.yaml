@@ -1,0 +1,389 @@
+audit:
+  id: accessibility-inclusion.robust-compatibility.valid-html
+  name: Valid HTML Markup
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: accessibility-inclusion
+  category_number: 15
+  subcategory: robust-compatibility
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quick
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit validates HTML markup to ensure it conforms to specification
+    and will be correctly interpreted by assistive technologies. Per WCAG
+    Success Criterion 4.1.1 (Parsing), content implemented using markup
+    languages must have elements with:
+
+    - Complete start and end tags (where required)
+    - Proper nesting according to specification
+    - No duplicate attributes
+    - Unique ID values within the document
+
+    The audit uses automated validation tools to check HTML output against
+    the HTML5 specification and identifies markup errors that could cause
+    assistive technology failures.
+  why_it_matters: |
+    Valid HTML ensures:
+    - Assistive technologies can reliably parse page structure
+    - Browser accessibility APIs receive correct information
+    - Screen readers can navigate and announce content correctly
+    - Keyboard navigation works as expected
+    - ARIA attributes function properly
+
+    Invalid HTML can cause:
+    - Screen readers to skip content or announce incorrectly
+    - Keyboard focus to become trapped or lost
+    - Accessibility tree to misrepresent page structure
+    - Different browsers to interpret markup inconsistently
+  when_to_run:
+  - During continuous integration
+  - After template modifications
+  - Before production deployments
+  - During accessibility audits
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: HTML templates or generated HTML output
+  access_requirements:
+  - Access to source templates
+  - Build process to generate final HTML (if applicable)
+discovery:
+  code_patterns:
+  - pattern: id=['"]([^'"]+)['"]
+    type: regex
+    scope: source
+    purpose: Find ID attributes for duplicate checking
+  - pattern: <[a-z]+[^>]*\s([a-z-]+)=[^>]*\1=
+    type: regex
+    scope: source
+    purpose: Find duplicate attributes on elements
+  - pattern: <([a-z]+)[^>]*>(?:(?!</\1>).)*$
+    type: regex
+    scope: source
+    purpose: Find potentially unclosed tags
+  file_patterns:
+  - glob: '**/*.html'
+    purpose: HTML files
+  - glob: '**/*.htm'
+    purpose: HTM files
+  - glob: '**/*.jsx'
+    purpose: React JSX files
+  - glob: '**/*.tsx'
+    purpose: TypeScript JSX files
+  - glob: '**/*.vue'
+    purpose: Vue single-file components
+  - glob: '**/templates/**'
+    purpose: Template directories
+knowledge_sources:
+  specifications:
+  - id: wcag-4.1.1
+    name: 'WCAG 2.2 Success Criterion 4.1.1: Parsing'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/parsing.html
+    offline_cache: true
+    priority: required
+  - id: html5-spec
+    name: HTML Living Standard
+    url: https://html.spec.whatwg.org/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: w3c-validator
+    name: W3C Markup Validation Service
+    url: https://validator.w3.org/
+    offline_cache: false
+  - id: html-accessibility
+    name: HTML Accessibility Features
+    url: https://www.w3.org/TR/html-aam-1.0/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: html-validate
+    purpose: Validate HTML against specification
+    offline_capable: true
+  - tool: vnu-jar
+    purpose: Nu HTML Checker for spec compliance
+    offline_capable: true
+  - tool: htmlhint
+    purpose: HTML linting and validation
+    offline_capable: true
+  - tool: axe-core
+    purpose: Accessibility-focused HTML validation
+    offline_capable: true
+  scripts:
+  - id: html-validator
+    language: bash
+    purpose: Run HTML validation on source files
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check for Nu HTML Checker
+      if command -v vnu &> /dev/null; then
+        echo "=== Nu HTML Checker Results ==="
+        find . -name "*.html" -exec vnu --errors-only {} \;
+      fi
+
+      echo ""
+      echo "=== Duplicate ID Check ==="
+      grep -rn --include="*.html" --include="*.jsx" --include="*.tsx" \
+        -o 'id="[^"]*"' . | sort | uniq -d
+
+      echo ""
+      echo "=== Potential Missing Closing Tags ==="
+      grep -rn --include="*.html" -E "<(div|span|p|li|a)[^/]*$" . | head -20
+  - id: duplicate-id-finder
+    language: bash
+    purpose: Find duplicate ID attributes across files
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Duplicate IDs ==="
+      grep -rohn --include="*.html" --include="*.jsx" --include="*.tsx" \
+        'id="[^"]*"' . | sort | uniq -c | sort -rn | \
+        awk '$1 > 1 {print}'
+signals:
+  critical:
+  - id: A11Y-HTML-CRIT-001
+    signal: Duplicate ID attributes in document
+    evidence_pattern: id="([^"]+)".*id="\1"
+    explanation: |
+      Duplicate ID values violate HTML specification and cause assistive
+      technology failures. ARIA attributes reference elements by ID, and
+      duplicates cause unpredictable behavior. Screen readers may skip
+      content or announce incorrect information.
+    remediation: |
+      Ensure every ID attribute value is unique within the document.
+      Use more specific IDs (e.g., "user-profile-name" instead of "name").
+      For dynamic content, generate unique IDs programmatically.
+  - id: A11Y-HTML-CRIT-002
+    signal: Malformed ARIA attribute references
+    evidence_pattern: aria-(labelledby|describedby|controls|owns)=['"][^'"]*['"]
+    explanation: |
+      ARIA attributes reference element IDs that don't exist or are
+      duplicated, causing the ARIA relationship to fail silently.
+      Screen readers won't announce the related content.
+    remediation: |
+      Verify all ARIA ID references point to existing, unique elements.
+      Add automated tests to verify ARIA reference integrity.
+  high:
+  - id: A11Y-HTML-HIGH-001
+    signal: Missing required closing tags
+    evidence_pattern: Unclosed element detected
+    explanation: |
+      Missing closing tags cause browsers to auto-close elements in
+      unpredictable ways, potentially breaking the accessibility tree
+      structure and causing content to be announced incorrectly.
+    remediation: |
+      Ensure all elements requiring closing tags have them. Use HTML
+      validators in CI/CD pipeline. Consider using self-closing syntax
+      for void elements in XHTML-style.
+  - id: A11Y-HTML-HIGH-002
+    signal: Improper element nesting
+    evidence_pattern: Element nested incorrectly
+    explanation: |
+      Elements nested against specification (e.g., block elements inside
+      inline elements, invalid parent-child relationships) cause parsing
+      errors that may corrupt the accessibility tree.
+    remediation: |
+      Follow HTML specification for element nesting rules. Common issues:
+      - No <div> inside <p>
+      - No <p> directly inside <p>
+      - <li> must be child of <ul> or <ol>
+      - Table structure must be correct
+  medium:
+  - id: A11Y-HTML-MED-001
+    signal: Duplicate attributes on same element
+    evidence_pattern: \s([a-z-]+)=[^>]*\1=
+    explanation: |
+      Duplicate attributes cause the second value to be ignored, which
+      may result in missing accessibility information if the first
+      attribute was the duplicate.
+    remediation: |
+      Remove duplicate attributes. If merging content from multiple
+      sources, implement proper attribute merging logic.
+  - id: A11Y-HTML-MED-002
+    signal: Obsolete or deprecated HTML elements
+    evidence_pattern: <(font|center|marquee|blink)
+    explanation: |
+      Deprecated elements may not be properly supported by assistive
+      technologies and indicate code that may have other issues.
+    remediation: |
+      Replace deprecated elements with semantic HTML5 equivalents and CSS.
+  low:
+  - id: A11Y-HTML-LOW-001
+    signal: Missing optional doctype or lang attribute
+    evidence_indicators:
+    - No <!DOCTYPE html> declaration
+    - Missing lang attribute on html element
+    explanation: |
+      While not strictly parsing errors, missing doctype can trigger
+      quirks mode, and missing lang affects screen reader pronunciation.
+    remediation: |
+      Add <!DOCTYPE html> and lang attribute to html element.
+  positive:
+  - id: A11Y-HTML-POS-001
+    signal: HTML validates without errors
+    evidence_indicators:
+    - Nu HTML Checker reports no errors
+    - All IDs unique within documents
+  - id: A11Y-HTML-POS-002
+    signal: Semantic HTML structure used
+    evidence_indicators:
+    - Proper heading hierarchy
+    - Landmark elements used appropriately
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Run automated HTML validation
+    description: |
+      Use HTML validation tools to check all HTML output against
+      the HTML5 specification.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Run Nu HTML Checker if available
+      command: |
+        find . -name "*.html" -exec vnu --errors-only {} \; 2>&1 || echo "vnu not installed"
+    - purpose: Run html-validate if available
+      command: |
+        npx html-validate "**/*.html" 2>&1 || echo "html-validate not configured"
+    expected_findings:
+    - List of HTML validation errors
+    - Error locations and types
+  - id: '2'
+    name: Check for duplicate IDs
+    description: |
+      Scan all HTML files for duplicate ID attributes which cause
+      ARIA and accessibility API failures.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find duplicate IDs
+      command: |
+        grep -rohn --include="*.html" --include="*.jsx" --include="*.tsx" \
+          'id="[^"]*"' . | sort | uniq -c | sort -rn | awk '$1 > 1'
+    expected_findings:
+    - List of any duplicate ID values
+    - File locations of duplicates
+  - id: '3'
+    name: Verify ARIA ID references
+    description: |
+      Check that all ARIA attributes referencing IDs point to
+      existing elements.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Extract ARIA ID references
+      command: |
+        grep -rohn --include="*.html" --include="*.jsx" --include="*.tsx" \
+          'aria-\(labelledby\|describedby\|controls\|owns\)="[^"]*"' . | head -50
+    expected_findings:
+    - List of ARIA ID references
+    - Any broken references identified
+  - id: '4'
+    name: Check element nesting
+    description: |
+      Review common nesting violations that affect accessibility.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find potential nesting issues
+      command: |
+        grep -rn --include="*.html" -E "<p[^>]*>.*<div|<a[^>]*>.*<a" . | head -20
+    expected_findings:
+    - Any nesting violations found
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: validation_report
+    format: structured
+    sections:
+    - Validation Errors
+    - Duplicate ID Report
+    - ARIA Reference Check
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Key Findings
+    - Recommendations
+  confidence_guidance:
+    high: Automated validation completed on all HTML output
+    medium: Validation on sample of pages or source templates only
+    low: Manual inspection without automated validation
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: wcag-4.1.1
+      priority: required
+    - source_id: html5-spec
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: valid-html-001
+  item: HTML validates without critical errors
+  level: CRITICAL
+  verification: |
+    vnu --errors-only index.html 2>&1 | grep -c "error" | \
+      xargs -I {} sh -c '[ {} -eq 0 ] && echo "PASS" || echo "FAIL"'
+  expected: PASS
+- id: valid-html-002
+  item: No duplicate ID attributes
+  level: CRITICAL
+  verification: |
+    grep -rohn --include="*.html" 'id="[^"]*"' . | sort | uniq -d | wc -l | \
+      xargs -I {} sh -c '[ {} -eq 0 ] && echo "PASS" || echo "FAIL"'
+  expected: PASS
+- id: valid-html-003
+  item: All ARIA ID references valid
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify ARIA labelledby/describedby/controls/owns reference existing IDs
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - website
+    - web-application
+    - spa
+    - static-site
+  compliance_frameworks:
+  - framework: WCAG 2.2
+    controls:
+    - 4.1.1
+  - framework: Section 508
+    controls:
+    - 1194.22(n)
+  - framework: EN 301 549
+    controls:
+    - 9.4.1.1
+relationships:
+  commonly_combined:
+  - accessibility-inclusion.robust-compatibility.aria-usage
+  - accessibility-inclusion.robust-compatibility.aria-label-completeness
+  - accessibility-inclusion.robust-compatibility.role-attribute

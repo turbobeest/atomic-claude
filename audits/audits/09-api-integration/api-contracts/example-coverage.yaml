@@ -1,0 +1,264 @@
+audit:
+  id: api-integration.api-contracts.example-coverage
+  name: Example Coverage Assessment
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: api-contracts
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: medium
+  scope: documentation
+  default_profiles:
+  - full
+  - quick
+  parallelizable: true
+description:
+  what: |
+    Evaluates the completeness and quality of examples in API documentation.
+    Examines request/response examples, parameter examples, error examples,
+    and example realism. Checks that examples are valid, realistic, and
+    cover various scenarios including edge cases.
+  why_it_matters: |
+    Examples are often the first thing developers look at. Good examples
+    accelerate integration, reduce support burden, and prevent common
+    mistakes. Missing or unrealistic examples force developers to guess,
+    leading to integration errors and frustration.
+  when_to_run:
+  - Before API documentation release
+  - During developer experience reviews
+  - When onboarding new API consumers
+prerequisites:
+  required_artifacts:
+  - type: api-spec
+    description: OpenAPI specification with examples
+  access_requirements:
+  - Read access to API documentation
+discovery:
+  code_patterns:
+  - pattern: example:|examples:|x-examples
+    type: regex
+    scope: config
+    purpose: OpenAPI example definitions
+  - pattern: '"example":|''example'':'
+    type: regex
+    scope: config
+    purpose: JSON Schema examples
+  file_patterns:
+  - glob: '**/*openapi*.{yaml,yml,json}'
+    purpose: OpenAPI specifications
+  - glob: '**/examples/**/*.json'
+    purpose: Standalone example files
+knowledge_sources:
+  specifications:
+  - id: openapi-spec
+    name: OpenAPI Specification
+    url: https://spec.openapis.org/oas/latest.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: openapi-examples
+    name: OpenAPI Examples Best Practices
+    url: https://swagger.io/docs/specification/adding-examples/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: spectral
+    purpose: Check for missing examples
+    offline_capable: true
+signals:
+  critical:
+  - id: EXAMPLE-CRIT-001
+    signal: API endpoints have no request/response examples
+    evidence_indicators:
+    - No example property in schemas
+    - No examples in media type objects
+    explanation: |
+      Endpoints without examples force developers to construct requests
+      through trial and error. This dramatically slows integration and
+      increases support load.
+    remediation: Add realistic examples for all request bodies and responses
+  - id: EXAMPLE-CRIT-002
+    signal: Examples contain placeholder/fake data
+    evidence_pattern: example.*string|example.*test|example.*foo|example.*bar
+    explanation: |
+      Placeholder examples like "string" or "test" don't help developers
+      understand expected formats, valid values, or realistic data patterns.
+    remediation: Use realistic example data that reflects actual usage
+  high:
+  - id: EXAMPLE-HIGH-001
+    signal: Error responses lack examples
+    evidence_indicators:
+    - 4xx/5xx responses without example property
+    - No error example in specification
+    explanation: |
+      Without error examples, developers don't know error response structure
+      and can't properly handle failures in their integration.
+    remediation: Add examples for all error responses showing error format
+  - id: EXAMPLE-HIGH-002
+    signal: Examples don't match schema constraints
+    evidence_pattern: example.*violates|example.*invalid
+    explanation: |
+      Examples that violate their own schema constraints confuse developers
+      and break code generators. They indicate documentation drift.
+    remediation: Validate examples against schemas; keep them synchronized
+  medium:
+  - id: EXAMPLE-MED-001
+    signal: Only success case examples provided
+    evidence_indicators:
+    - Only 200/201 responses have examples
+    - No edge case examples
+    remediation: 'Add examples for various scenarios: success, validation error, not found'
+  - id: EXAMPLE-MED-002
+    signal: Parameter examples missing
+    evidence_indicators:
+    - Path/query parameters without examples
+    - Header parameters undocumented
+    remediation: Add examples for all parameters showing valid values
+  low:
+  - id: EXAMPLE-LOW-001
+    signal: No named examples for different scenarios
+    remediation: Use named examples to show different valid request variants
+  positive:
+  - id: EXAMPLE-POS-001
+    signal: Multiple named examples showing various scenarios
+  - id: EXAMPLE-POS-002
+    signal: Examples validated against schemas
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Count Example Coverage
+    description: |
+      Measure example coverage across the specification.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Count example properties
+      command: grep -c 'example:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null || echo '0'
+    - purpose: Count schemas vs examples
+      command: echo 'Schemas:' && grep -c 'type:\s*object' $(find . -name '*openapi*.yaml' | head -1)
+        2>/dev/null; echo 'Examples:' && grep -c 'example:' $(find . -name '*openapi*.yaml' | head -1)
+        2>/dev/null
+    - purpose: Find named examples
+      command: grep -n 'examples:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null || echo 'No
+        named examples'
+    expected_findings:
+    - Example count
+    - Coverage ratio
+  - id: '2'
+    name: Identify Missing Examples
+    description: |
+      Find endpoints and schemas lacking examples.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find schemas without examples
+      command: grep -B5 -A10 'type:\s*object' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null |
+        grep -v 'example:' | head -30
+    - purpose: Find responses without examples
+      command: grep -A5 'responses:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null | grep -v
+        'example' | head -20
+    expected_findings:
+    - Missing example locations
+    - Coverage gaps
+  - id: '3'
+    name: Evaluate Example Quality
+    description: |
+      Check if examples are realistic and helpful.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find placeholder examples
+      command: grep -n 'example:.*string\|example:.*test\|example:.*foo\|example:.*example' $(find . -name
+        '*openapi*.yaml' | head -1) 2>/dev/null || echo 'None found'
+    - purpose: Check for realistic data
+      command: grep -A2 'example:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null | head -30
+    expected_findings:
+    - Placeholder usage
+    - Example realism
+  - id: '4'
+    name: Check Error Examples
+    description: |
+      Verify error responses have examples.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find error response examples
+      command: grep -A10 "'4[0-9][0-9]':\|'5[0-9][0-9]':" $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null
+        | grep -c 'example:' || echo '0'
+    - purpose: Count error responses
+      command: grep -c "'4[0-9][0-9]':\|'5[0-9][0-9]':" $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null
+        || echo '0'
+    expected_findings:
+    - Error example coverage
+    - Missing error examples
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coverage Metrics
+    - Quality Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Full specification analyzed
+    medium: Partial specification coverage
+    low: Limited specification found
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: openapi-examples
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: example-001
+  item: Request body examples present
+  level: CRITICAL
+  verification: |
+    schemas=$(grep -c 'type:\s*object' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null || echo '0'); examples=$(grep -c 'example:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null || echo '0'); if [ "$examples" -ge "$((schemas / 2))" ]; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+- id: example-002
+  item: No placeholder example values
+  level: BLOCKING
+  verification: |
+    if grep -q 'example:\s*string\|example:\s*test' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: example-003
+  item: Error responses have examples
+  level: WARNING
+  verification: |
+    errors=$(grep -c "'4[0-9][0-9]':\|'5[0-9][0-9]':" $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null || echo '0'); if [ "$errors" -eq 0 ]; then echo "PASS"; else err_examples=$(grep -A10 "'4[0-9][0-9]':\|'5[0-9][0-9]':" $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null | grep -c 'example:' || echo '0'); if [ "$err_examples" -gt 0 ]; then echo "PASS"; else echo "FAIL"; fi; fi
+  expected: PASS
+- id: example-004
+  item: Named examples for different scenarios
+  level: WARNING
+  verification: |
+    if grep -q 'examples:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - api-service
+    - microservice
+    - backend
+relationships:
+  commonly_combined:
+  - api-integration.api-contracts.openapi-swagger-completeness
+  - api-integration.error-handling.error-documentation

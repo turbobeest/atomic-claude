@@ -1,0 +1,371 @@
+# ============================================================
+# AUDIT: Connection Reuse Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.network-efficiency.connection-reuse"
+  name: "Connection Reuse Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "network-efficiency"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates TCP and HTTP connection reuse efficiency across the application
+    stack. Analyzes keep-alive configurations, connection pooling in application
+    code, and HTTP connection headers. Identifies connection churn patterns
+    and missed opportunities for connection persistence.
+
+  why_it_matters: |
+    TCP connection establishment involves a 3-way handshake adding 1-2 RTT
+    latency. TLS adds another 1-2 RTT for handshake. On a 100ms RTT connection,
+    this means 200-400ms overhead per new connection. Proper connection reuse
+    can reduce request latency by 50-80% for subsequent requests. Connection
+    churn also wastes server resources handling unnecessary socket operations.
+
+  when_to_run:
+    - "After API client library changes"
+    - "When observing high connection counts"
+    - "Performance regression investigations"
+    - "Quarterly infrastructure audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "codebase"
+      description: "Application code with HTTP client implementations"
+    - type: "infrastructure_config"
+      description: "Web server and load balancer configuration"
+
+  access_requirements:
+    - "Application source code"
+    - "Server configuration files"
+    - "Network monitoring access for connection metrics"
+
+discovery:
+  code_patterns:
+    - pattern: "http\\.Client|axios\\.create|fetch|HttpClient"
+      type: "regex"
+      scope: "source"
+      purpose: "Locate HTTP client instantiation patterns"
+    - pattern: "new.*Connection|createConnection|ConnectionPool"
+      type: "regex"
+      scope: "source"
+      purpose: "Find connection creation code"
+    - pattern: "keepalive|keep-alive|persistent"
+      type: "keyword"
+      scope: "config"
+      purpose: "Locate connection persistence settings"
+
+  file_patterns:
+    - glob: "**/nginx*.conf"
+      purpose: "Nginx keepalive configuration"
+    - glob: "**/*client*.{ts,js,go,py}"
+      purpose: "HTTP client implementations"
+    - glob: "**/pool*.{ts,js,go,py}"
+      purpose: "Connection pooling code"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc7230"
+      name: "RFC 7230 - HTTP/1.1 Message Syntax and Routing"
+      url: "https://datatracker.ietf.org/doc/html/rfc7230"
+      offline_cache: true
+      priority: "required"
+    - id: "rfc9112"
+      name: "RFC 9112 - HTTP/1.1"
+      url: "https://datatracker.ietf.org/doc/html/rfc9112"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "nginx-keepalive"
+      name: "Nginx Keepalive Connections"
+      url: "https://nginx.org/en/docs/http/ngx_http_upstream_module.html#keepalive"
+      offline_cache: true
+    - id: "go-transport"
+      name: "Go HTTP Transport Documentation"
+      url: "https://pkg.go.dev/net/http#Transport"
+      offline_cache: true
+
+  learning_resources:
+    - id: "high-perf-browser"
+      title: "High Performance Browser Networking"
+      type: "book"
+      reference: "O'Reilly, Ilya Grigorik, Chapter 11"
+
+tooling:
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Test keep-alive support"
+      command: "curl -v -o /dev/null -s https://example.com 2>&1 | grep -i 'keep-alive\\|connection'"
+    - tool: "ss"
+      purpose: "Monitor socket states"
+      command: "ss -tn state established | grep ':443' | wc -l"
+    - tool: "netstat"
+      purpose: "Connection state analysis"
+      command: "netstat -an | grep ESTABLISHED | wc -l"
+
+  scripts:
+    - id: "connection-analyzer"
+      language: "bash"
+      purpose: "Analyze connection reuse over multiple requests"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL="$1"
+        echo "=== Connection Reuse Analysis for $URL ==="
+
+        # Multiple requests, same connection
+        curl -v -o /dev/null -s "$URL" "$URL" "$URL" 2>&1 | grep -E 'Connected to|Re-using|TCP_NODELAY'
+
+        # Check headers
+        curl -sI "$URL" | grep -iE 'connection|keep-alive'
+
+signals:
+  critical:
+    - id: "CONN-CRIT-001"
+      signal: "Connection: close header sent on all responses"
+      evidence_pattern: "HTTP response contains 'Connection: close'"
+      explanation: |
+        Sending 'Connection: close' forces a new TCP+TLS handshake for every
+        request. This adds 200-400ms latency per request on typical connections.
+        For a page with 50 resources, this could add 10+ seconds of unnecessary
+        latency. Keep-alive has been default since HTTP/1.1 (1999).
+      remediation: "Remove Connection: close headers. Ensure keep-alive is enabled in server config."
+
+    - id: "CONN-CRIT-002"
+      signal: "HTTP client creates new connection per request in code"
+      evidence_pattern: "new HttpClient() or http.Client{} inside request handlers"
+      explanation: |
+        Creating new HTTP clients per request bypasses connection pooling
+        entirely. Each request incurs full connection establishment overhead.
+        This is a common mistake that causes severe performance degradation
+        under load and can exhaust file descriptors.
+      remediation: "Create HTTP clients at initialization time and reuse them. Use connection pools."
+
+  high:
+    - id: "CONN-HIGH-001"
+      signal: "Keep-alive timeout too short (<30 seconds)"
+      evidence_pattern: "keepalive_timeout < 30 in nginx config"
+      explanation: |
+        Very short keep-alive timeouts cause unnecessary connection churn.
+        Clients often make requests within seconds of each other, and a
+        60-120 second timeout typically provides better reuse without
+        excessive resource consumption.
+      remediation: "Set keepalive_timeout to 60-120 seconds based on traffic patterns"
+
+    - id: "CONN-HIGH-002"
+      signal: "Connection pool size insufficient for load"
+      evidence_pattern: "MaxIdleConnsPerHost < expected concurrent requests"
+      explanation: |
+        Undersized connection pools force new connections under load.
+        When pool is exhausted, requests must wait for connection establishment.
+        This creates latency spikes during traffic bursts.
+      remediation: "Size connection pools based on expected concurrent requests per host"
+
+  medium:
+    - id: "CONN-MED-001"
+      signal: "No upstream keepalive configured for reverse proxy"
+      evidence_pattern: "Missing keepalive directive in nginx upstream block"
+      remediation: "Add 'keepalive N' directive to upstream blocks in nginx"
+
+    - id: "CONN-MED-002"
+      signal: "DNS lookup on every request"
+      evidence_pattern: "No DNS caching configured for HTTP clients"
+      remediation: "Enable DNS caching or use connection pools that cache DNS"
+
+  low:
+    - id: "CONN-LOW-001"
+      signal: "TCP_NODELAY not enabled for latency-sensitive connections"
+
+  positive:
+    - id: "CONN-POS-001"
+      signal: "Connection pooling properly configured with appropriate sizes"
+    - id: "CONN-POS-002"
+      signal: "Keep-alive enabled with sensible timeouts"
+    - id: "CONN-POS-003"
+      signal: "HTTP/2 connections reused across multiple streams"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Test Server Keep-Alive Support"
+      description: |
+        Verify that the server properly supports HTTP keep-alive
+        and doesn't close connections prematurely.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check Connection header in response"
+          command: "curl -sI https://example.com | grep -iE '^connection'"
+        - purpose: "Test connection reuse with multiple requests"
+          command: "curl -v -o /dev/null -s https://example.com https://example.com 2>&1 | grep -E 'Connected|Re-using'"
+        - purpose: "Check Keep-Alive header"
+          command: "curl -sI https://example.com | grep -iE '^keep-alive'"
+
+      expected_findings:
+        - "Connection: keep-alive or no Connection header (default)"
+        - "Connection reused for subsequent requests"
+
+    - id: "2"
+      name: "Review Server Configuration"
+      description: |
+        Examine web server configuration for keep-alive settings
+        including timeout values and connection limits.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check nginx keepalive settings"
+          command: "grep -rn 'keepalive' /etc/nginx/ 2>/dev/null"
+        - purpose: "Check upstream keepalive"
+          command: "grep -A5 'upstream' /etc/nginx/nginx.conf 2>/dev/null | grep keepalive"
+        - purpose: "Check timeout settings"
+          command: "grep -rn 'timeout' /etc/nginx/ 2>/dev/null | grep -E 'keepalive|proxy_read|proxy_connect'"
+
+      expected_findings:
+        - "keepalive_timeout configured (60-120s recommended)"
+        - "Upstream keepalive for reverse proxy scenarios"
+
+    - id: "3"
+      name: "Audit Application HTTP Clients"
+      description: |
+        Review application code for HTTP client usage patterns
+        to identify connection pooling issues or client reuse problems.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find HTTP client instantiation in Go"
+          command: "grep -rn 'http\\.Client{\\|http\\.DefaultClient' --include='*.go' src/"
+        - purpose: "Find HTTP client instantiation in Node.js"
+          command: "grep -rn 'axios\\|fetch\\|http\\.request' --include='*.ts' --include='*.js' src/"
+        - purpose: "Check for connection pool configuration"
+          command: "grep -rn 'MaxIdleConns\\|keepAlive\\|pool' --include='*.go' --include='*.ts' src/"
+
+      expected_findings:
+        - "HTTP clients created at initialization, not per-request"
+        - "Connection pool sizes configured appropriately"
+
+    - id: "4"
+      name: "Monitor Connection Metrics"
+      description: |
+        Analyze actual connection metrics to identify connection
+        churn or excessive connection counts.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Count established connections"
+          command: "ss -tn state established | wc -l"
+        - purpose: "Count TIME_WAIT connections (churn indicator)"
+          command: "ss -tn state time-wait | wc -l"
+        - purpose: "Connection states distribution"
+          command: "ss -s"
+
+      expected_findings:
+        - "Low TIME_WAIT count relative to ESTABLISHED"
+        - "Stable connection count under load"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Server Configuration Analysis"
+        - "Application Client Analysis"
+        - "Connection Metrics"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct testing of connection behavior"
+    medium: "Configuration file analysis"
+    low: "Inferred from code patterns"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "rfc7230"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "Keep-alive check is fast and impactful"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "connection-001"
+    item: "Server does not send Connection: close header"
+    level: "CRITICAL"
+    verification: |
+      CONN=$(curl -sI https://example.com | grep -i '^connection: close')
+      if [ -z "$CONN" ]; then echo "PASS"; else echo "FAIL: Connection: close present"; fi
+    expected: "PASS"
+
+  - id: "connection-002"
+    item: "Keep-alive timeout >= 30 seconds"
+    level: "BLOCKING"
+    verification: |
+      TIMEOUT=$(grep 'keepalive_timeout' /etc/nginx/nginx.conf 2>/dev/null | grep -oE '[0-9]+' | head -1)
+      if [ "${TIMEOUT:-0}" -ge 30 ]; then echo "PASS: ${TIMEOUT}s"; else echo "FAIL: ${TIMEOUT:-0}s"; fi
+    expected: "PASS"
+
+  - id: "connection-003"
+    item: "Connection reuse working for multiple requests"
+    level: "BLOCKING"
+    verification: |
+      REUSE=$(curl -v -o /dev/null -s https://example.com https://example.com 2>&1 | grep -c 'Re-using')
+      if [ "$REUSE" -gt 0 ]; then echo "PASS"; else echo "FAIL: No connection reuse"; fi
+    expected: "PASS"
+
+  - id: "connection-004"
+    item: "TIME_WAIT connections under control"
+    level: "WARNING"
+    verification: |
+      TW=$(ss -tn state time-wait | wc -l)
+      EST=$(ss -tn state established | wc -l)
+      if [ "$TW" -lt "$EST" ]; then echo "PASS: $TW TIME_WAIT vs $EST ESTABLISHED"; else echo "FAIL: High churn"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.network-efficiency.http2-http3-utilization"
+    - "performance-efficiency.latency.tcp-optimization"

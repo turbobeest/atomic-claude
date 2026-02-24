@@ -1,0 +1,370 @@
+# ============================================================
+# AUDIT: Canary Deployment
+# ============================================================
+# Evaluates canary deployment implementation and practices
+
+audit:
+  id: "devops-ci-cd.deployment-pipeline.canary-deployment"
+  name: "Canary Deployment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "deployment-pipeline"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates canary deployment implementation including traffic
+    splitting mechanisms, canary analysis criteria, promotion and
+    rollback automation, and metrics collection. Assesses whether
+    canary deployments provide effective risk mitigation for new
+    releases.
+
+  why_it_matters: |
+    Canary deployments limit blast radius by exposing only a small
+    percentage of traffic to new code. This enables catching issues
+    before they affect all users. Without proper canary implementation,
+    problems affect 100% of users immediately. Effective canary
+    deployments dramatically reduce change failure rate and MTTR.
+
+  when_to_run:
+    - "When implementing canary capability"
+    - "Before high-risk deployments"
+    - "Quarterly deployment strategy review"
+    - "After canary-related incidents"
+
+prerequisites:
+  required_artifacts:
+    - type: "deployment_configuration"
+      description: "Canary deployment configuration"
+    - type: "traffic_management"
+      description: "Service mesh or load balancer configuration"
+
+  access_requirements:
+    - "Deployment system access"
+    - "Traffic management configuration"
+    - "Monitoring system access"
+
+discovery:
+  code_patterns:
+    - pattern: "canary|weight:|trafficSplit|analysis"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify canary deployment configuration"
+
+    - pattern: "Rollout|AnalysisTemplate|AnalysisRun"
+      type: "regex"
+      scope: "config"
+      purpose: "Argo Rollouts canary configuration"
+
+  file_patterns:
+    - glob: "**/rollout*.yaml"
+      purpose: "Argo Rollouts definitions"
+
+    - glob: "**/virtualservice*.yaml"
+      purpose: "Istio traffic management"
+
+    - glob: "**/trafficSplit*.yaml"
+      purpose: "SMI traffic split resources"
+
+knowledge_sources:
+  guides:
+    - id: "argo-rollouts"
+      name: "Argo Rollouts Canary Strategy"
+      url: "https://argoproj.github.io/argo-rollouts/features/canary/"
+      offline_cache: true
+
+    - id: "istio-canary"
+      name: "Istio Traffic Management"
+      url: "https://istio.io/latest/docs/tasks/traffic-management/"
+      offline_cache: true
+
+    - id: "flagger"
+      name: "Flagger Progressive Delivery"
+      url: "https://docs.flagger.app/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Check rollout status"
+      command: "kubectl argo rollouts get rollout NAME"
+
+    - tool: "istioctl"
+      purpose: "Analyze Istio traffic routing"
+      command: "istioctl analyze"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "sum(rate(http_requests_total{version='canary'}[5m])) / sum(rate(http_requests_total[5m]))"
+      purpose: "Verify canary traffic percentage"
+
+  scripts:
+    - id: "check-canary-config"
+      language: "bash"
+      purpose: "Identify canary deployment configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        if grep -r 'Rollout\|canary' k8s/ 2>/dev/null | head -1; then
+          echo "PASS: Canary configuration found"
+        else
+          echo "INFO: No canary configuration found"
+        fi
+
+signals:
+  critical:
+    - id: "CICD-CANARY-CRIT-001"
+      signal: "Canary promotion not based on metrics analysis"
+      evidence_pattern: "Manual promotion or time-based only without metric validation"
+      explanation: |
+        Canary without metrics analysis is just delayed rollout. Without
+        automated analysis, bad canaries are promoted because they
+        "look okay" during a brief observation period.
+      remediation: "Implement automated canary analysis with clear success criteria"
+
+    - id: "CICD-CANARY-CRIT-002"
+      signal: "No automatic rollback on canary failure"
+      evidence_pattern: "Manual intervention required to rollback failed canary"
+      explanation: |
+        If canary failure requires manual intervention, the benefit of
+        canary deployment is reduced. Automatic rollback ensures fast
+        recovery when metrics indicate problems.
+      remediation: "Configure automatic rollback on analysis failure"
+
+  high:
+    - id: "CICD-CANARY-HIGH-001"
+      signal: "Canary receives insufficient traffic for statistical significance"
+      evidence_pattern: "Canary weight too low (<1%) or evaluation period too short"
+      explanation: |
+        With very low traffic percentage or short evaluation, there may
+        not be enough data to detect issues. False confidence leads to
+        promoting bad releases.
+      remediation: "Ensure canary receives meaningful traffic volume and duration"
+
+    - id: "CICD-CANARY-HIGH-002"
+      signal: "Canary metrics do not include key indicators"
+      evidence_pattern: "Missing error rate, latency, or business metrics from analysis"
+      explanation: |
+        Canary analysis limited to basic health checks misses performance
+        degradation and business impact that users would experience.
+      remediation: "Include error rate, latency percentiles, and business metrics"
+
+  medium:
+    - id: "CICD-CANARY-MED-001"
+      signal: "No canary baking period before promotion"
+      evidence_pattern: "Immediate or very short canary evaluation window"
+      remediation: "Allow sufficient bake time for issues to manifest"
+
+    - id: "CICD-CANARY-MED-002"
+      signal: "Canary steps not gradual enough"
+      evidence_pattern: "Large traffic jumps (e.g., 0% -> 50% -> 100%)"
+      remediation: "Use gradual traffic increases (e.g., 5%, 10%, 25%, 50%, 100%)"
+
+  low:
+    - id: "CICD-CANARY-LOW-001"
+      signal: "Canary deployment not used for all services"
+
+    - id: "CICD-CANARY-LOW-002"
+      signal: "No canary deployment history tracking"
+
+  positive:
+    - id: "CICD-CANARY-POS-001"
+      signal: "Automated canary analysis with metric-based promotion"
+
+    - id: "CICD-CANARY-POS-002"
+      signal: "Gradual traffic increase with multiple analysis steps"
+
+    - id: "CICD-CANARY-POS-003"
+      signal: "Automatic rollback on metric degradation"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify canary implementation"
+      description: |
+        Determine what canary deployment tooling and strategy
+        is in use (Argo Rollouts, Flagger, Istio, etc.).
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for Argo Rollouts"
+          command: |
+            grep -r 'kind: Rollout' k8s/ --include='*.yaml' 2>/dev/null | head -5
+
+        - purpose: "Check for Istio VirtualService"
+          command: |
+            grep -r 'VirtualService' k8s/ --include='*.yaml' 2>/dev/null | head -5
+
+        - purpose: "Check for Flagger"
+          command: |
+            grep -r 'kind: Canary' k8s/ --include='*.yaml' 2>/dev/null | head -5
+
+      expected_findings:
+        - "Canary implementation tooling identification"
+
+    - id: "2"
+      name: "Analyze canary strategy"
+      description: |
+        Review canary traffic split steps, timing, and
+        progression strategy.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Extract canary steps configuration"
+          command: |
+            grep -rA 20 'steps:' k8s/ --include='*rollout*' 2>/dev/null
+
+      expected_findings:
+        - "Canary progression strategy"
+
+    - id: "3"
+      name: "Review canary analysis"
+      description: |
+        Examine what metrics are used for canary analysis
+        and what thresholds trigger rollback.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find analysis templates"
+          command: |
+            grep -rA 30 'AnalysisTemplate\|metrics:' k8s/ --include='*.yaml' 2>/dev/null | head -50
+
+      expected_findings:
+        - "Canary analysis metrics and thresholds"
+
+    - id: "4"
+      name: "Verify rollback mechanism"
+      description: |
+        Confirm that automatic rollback is configured
+        and has been tested.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for abort/rollback configuration"
+          command: |
+            grep -rE 'abortScaleDownDelay|failureLimit' k8s/ --include='*.yaml' 2>/dev/null
+
+      expected_findings:
+        - "Rollback mechanism assessment"
+
+    - id: "5"
+      name: "Assess canary effectiveness"
+      description: |
+        Review canary deployment history to determine if
+        canaries have caught issues before full rollout.
+      duration_estimate: "20 min"
+
+      questions:
+        - "How many canary deployments have been rolled back?"
+        - "What issues were caught by canary analysis?"
+        - "Have any bad releases made it past canary?"
+
+      expected_findings:
+        - "Canary effectiveness metrics"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Canary Implementation Review"
+        - "Analysis Criteria Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full canary configuration reviewed with historical analysis"
+    medium: "Configuration reviewed without historical effectiveness data"
+    low: "Based on configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "argo-rollouts"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed canary analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "canary-deployment-001"
+    item: "Canary deployment configured with traffic splitting"
+    level: "CRITICAL"
+    verification: |
+      grep -rE 'Rollout|canary|weight:' k8s/ --include='*.yaml' 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "canary-deployment-002"
+    item: "Canary analysis metrics defined"
+    level: "CRITICAL"
+    verification: |
+      grep -rE 'AnalysisTemplate|metrics:' k8s/ --include='*.yaml' 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "canary-deployment-003"
+    item: "Automatic rollback configured"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify automatic rollback triggers on analysis failure"
+    expected: "Confirmed by reviewer"
+
+  - id: "canary-deployment-004"
+    item: "Canary includes error rate and latency metrics"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify analysis includes error rate and latency, not just availability"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "DORA"
+      controls: ["Change Failure Rate"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.deployment-pipeline.deployment-verification"
+    - "devops-ci-cd.deployment-pipeline.rollback-capability"
+    - "devops-ci-cd.deployment-pipeline.blue-green-deployment"

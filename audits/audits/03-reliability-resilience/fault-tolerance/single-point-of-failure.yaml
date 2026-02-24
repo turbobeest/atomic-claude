@@ -1,0 +1,391 @@
+audit:
+  id: reliability-resilience.fault-tolerance.single-point-of-failure
+  name: Single Point of Failure Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: fault-tolerance
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: architecture
+  default_profiles:
+  - full
+  - production
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit systematically identifies Single Points of Failure (SPOFs) across
+    the system architecture. It examines infrastructure components, services,
+    databases, network paths, dependencies, and operational processes that lack
+    redundancy. A SPOF is any component whose failure would result in complete
+    system unavailability or significant loss of functionality.
+  why_it_matters: |
+    Single Points of Failure represent critical vulnerabilities in system design.
+    When a SPOF fails, it causes cascading failures, outages, and potential data
+    loss. Financial impact includes lost revenue, SLA violations, and reputational
+    damage. Many high-profile outages (AWS S3 2017, Facebook 2021) trace back to
+    SPOFs. Identifying and eliminating SPOFs is fundamental to building resilient
+    systems that meet availability requirements.
+  when_to_run:
+  - During architecture reviews for new systems
+  - Before production deployment
+  - After significant infrastructure changes
+  - During availability improvement initiatives
+  - Post-incident reviews where SPOF contributed to outage
+prerequisites:
+  required_artifacts:
+  - type: architecture-diagrams
+    description: System architecture documentation showing components and dependencies
+  - type: infrastructure-config
+    description: Infrastructure as Code or cloud console access
+  access_requirements:
+  - Read access to infrastructure configurations (Terraform, CloudFormation, etc.)
+  - Read access to Kubernetes manifests or container orchestration configs
+  - Read access to network topology diagrams
+  - Access to service dependency maps
+discovery:
+  code_patterns:
+  - pattern: replicas:\s*1\b
+    type: regex
+    scope: config
+    purpose: Kubernetes deployments with single replica
+  - pattern: min_size\s*=\s*1\b
+    type: regex
+    scope: config
+    purpose: Auto-scaling groups with min size of 1
+  - pattern: DesiredCapacity.*1|desired_count.*1
+    type: regex
+    scope: config
+    purpose: Single instance configurations
+  - pattern: multi_az\s*=\s*false
+    type: regex
+    scope: config
+    purpose: Single-AZ deployments
+  - pattern: availability_zone\s*=\s*"[^"]+"(?!.*availability_zones)
+    type: regex
+    scope: config
+    purpose: Resources pinned to single availability zone
+  file_patterns:
+  - glob: '**/terraform/**/*.tf'
+    purpose: Terraform infrastructure definitions
+  - glob: '**/k8s/**/*.yaml'
+    purpose: Kubernetes manifests
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/docker-compose*.yaml'
+    purpose: Docker Compose configurations
+  infrastructure_analysis:
+  - component: Load Balancers
+    check: Verify cross-zone load balancing and multiple LB nodes
+  - component: Databases
+    check: Verify multi-AZ deployment and read replicas
+  - component: Message Queues
+    check: Verify clustered deployment across zones
+  - component: Cache Layers
+    check: Verify Redis Cluster or ElastiCache multi-AZ
+  - component: DNS
+    check: Verify multiple nameservers and failover records
+  - component: Certificate Management
+    check: Verify automated renewal and backup certificates
+knowledge_sources:
+  specifications:
+  - id: aws-well-architected
+    name: AWS Well-Architected Framework - Reliability Pillar
+    url: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: gcp-reliability
+    name: Google Cloud Architecture Framework - Reliability
+    url: https://cloud.google.com/architecture/framework/reliability
+    offline_cache: true
+  - id: azure-reliability
+    name: Azure Well-Architected Framework - Reliability
+    url: https://learn.microsoft.com/en-us/azure/well-architected/reliability/
+    offline_cache: true
+  - id: sre-book
+    name: Site Reliability Engineering
+    url: https://sre.google/sre-book/table-of-contents/
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  learning_resources:
+  - id: designing-data-intensive
+    title: Designing Data-Intensive Applications
+    type: book
+    reference: 'ISBN 978-1449373320 - Chapter 8: The Trouble with Distributed Systems'
+tooling:
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: Check Kubernetes deployment replicas
+    command: kubectl get deployments -A -o jsonpath='{range .items[?(@.spec.replicas==1)]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}'
+  - tool: aws
+    purpose: Check RDS multi-AZ status
+    command: aws rds describe-db-instances --query 'DBInstances[?MultiAZ==`false`].DBInstanceIdentifier'
+  - tool: aws
+    purpose: Check ELB cross-zone status
+    command: aws elb describe-load-balancer-attributes --load-balancer-name NAME --query 'LoadBalancerAttributes.CrossZoneLoadBalancing'
+  - tool: terraform
+    purpose: Review infrastructure state
+    command: terraform show -json | jq '.values.root_module.resources[] | select(.values.multi_az == false)'
+  static_analysis:
+  - tool: tfsec
+    purpose: Terraform security and reliability checks
+    offline_capable: true
+  - tool: checkov
+    purpose: Infrastructure as Code analysis
+    offline_capable: true
+signals:
+  critical:
+  - id: SPOF-CRIT-001
+    signal: Database deployed without high availability configuration
+    evidence_pattern: 'multi_az = false|MultiAZ: false|replicas: 1.*database'
+    explanation: |
+      A single-instance database is the most common and dangerous SPOF.
+      Database failure causes complete application unavailability. Recovery
+      from backups can take hours and results in data loss. Production
+      databases must be deployed with multi-AZ or equivalent HA configuration.
+    remediation: Enable multi-AZ deployment, configure synchronous replication, or use managed HA database
+      services
+  - id: SPOF-CRIT-002
+    signal: Critical service running with single replica in production
+    evidence_pattern: 'replicas: 1|DesiredCapacity: 1|min_size = 1'
+    explanation: |
+      Services running as a single instance cannot survive node failures,
+      deployments, or scaling events. A single unhealthy container or VM
+      causes complete service outage. This violates basic availability
+      requirements for production systems.
+    remediation: Increase replica count to minimum of 2, preferably 3+ spread across availability zones
+  - id: SPOF-CRIT-003
+    signal: Single availability zone deployment for critical infrastructure
+    evidence_pattern: availability_zone.*single|subnets.*count.*1
+    explanation: |
+      Deploying in a single availability zone exposes the entire system to
+      zone-level failures (power, network, cooling). Major cloud providers
+      experience zone failures multiple times per year. Multi-AZ deployment
+      is essential for production workloads.
+    remediation: Spread resources across at least 2, preferably 3 availability zones
+  high:
+  - id: SPOF-HIGH-001
+    signal: Load balancer without cross-zone load balancing
+    evidence_pattern: cross_zone_load_balancing.*false|CrossZoneLoadBalancing.*disabled
+    explanation: |
+      Without cross-zone load balancing, traffic is not distributed evenly
+      across zones. If instances in one zone become unhealthy, that zone's
+      traffic is not redistributed, causing partial outages for affected users.
+    remediation: Enable cross-zone load balancing on all production load balancers
+  - id: SPOF-HIGH-002
+    signal: Redis/cache layer running as single instance
+    evidence_pattern: 'redis.*replicas: 1|num_cache_nodes = 1'
+    explanation: |
+      Single-instance cache layers become SPOFs when applications depend on
+      them for session state, rate limiting, or performance. Cache failure
+      causes either outage or severe performance degradation depending on
+      how the application handles cache unavailability.
+    remediation: Deploy Redis Cluster, Sentinel, or managed HA cache service
+  - id: SPOF-HIGH-003
+    signal: Message queue deployed without clustering
+    evidence_pattern: 'rabbitmq.*replicas: 1|kafka.*brokers: 1'
+    explanation: |
+      Message queues are critical for async processing and service decoupling.
+      A single broker failure halts message processing, causing backpressure
+      and potential data loss if messages are not durably persisted.
+    remediation: Deploy message queue clusters with replication across availability zones
+  medium:
+  - id: SPOF-MED-001
+    signal: External dependency without failover alternative
+    explanation: |
+      External services (payment processors, email providers, APIs) can fail.
+      Without alternatives, their failure directly impacts your system.
+    remediation: Configure backup providers or graceful degradation for external dependencies
+  - id: SPOF-MED-002
+    signal: Certificate or secret management centralized without redundancy
+    explanation: |
+      Centralized secret stores (Vault, KMS) can become SPOFs if not deployed
+      in HA configuration. Inability to retrieve secrets blocks application startup.
+    remediation: Deploy secret management in HA mode with multi-region replication
+  - id: SPOF-MED-003
+    signal: NAT Gateway in single availability zone
+    explanation: |
+      A single NAT Gateway creates an AZ-level SPOF for all outbound traffic
+      from private subnets. Zone failure blocks all external connectivity.
+    remediation: Deploy NAT Gateways in each availability zone with route table updates
+  low:
+  - id: SPOF-LOW-001
+    signal: Development/staging environment with single instances
+    explanation: |
+      Non-production environments often run single instances for cost savings.
+      Ensure production configurations differ appropriately.
+  positive:
+  - id: SPOF-POS-001
+    signal: Multi-AZ deployment configured for all stateful services
+  - id: SPOF-POS-002
+    signal: Minimum replica count >= 2 for all production services
+  - id: SPOF-POS-003
+    signal: Cross-zone load balancing enabled
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map system architecture
+    description: |
+      Create or review the complete system architecture identifying all
+      components, their dependencies, and data flow paths.
+    duration_estimate: 30 min
+    questions:
+    - What are all the components in the system?
+    - What are the dependencies between components?
+    - Which components are stateful vs stateless?
+    expected_findings:
+    - Complete component inventory
+    - Dependency graph
+  - id: '2'
+    name: Audit infrastructure configurations
+    description: |
+      Review infrastructure as code and cloud configurations for
+      redundancy settings on all components.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find single-replica Kubernetes deployments
+      command: |
+        kubectl get deployments -A -o json | jq '.items[] | select(.spec.replicas == 1) | {namespace: .metadata.namespace, name: .metadata.name}'
+    - purpose: Check RDS multi-AZ configuration
+      command: |
+        aws rds describe-db-instances --query 'DBInstances[*].{Name:DBInstanceIdentifier,MultiAZ:MultiAZ,Engine:Engine}'
+    - purpose: Check ElastiCache cluster mode
+      command: |
+        aws elasticache describe-cache-clusters --query 'CacheClusters[*].{Name:CacheClusterId,Nodes:NumCacheNodes}'
+    expected_findings:
+    - List of components lacking redundancy
+    - Multi-AZ status for all stateful services
+  - id: '3'
+    name: Analyze network topology
+    description: |
+      Review network architecture for single points of failure in
+      connectivity, routing, and DNS.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check NAT Gateway distribution
+      command: |
+        aws ec2 describe-nat-gateways --query 'NatGateways[*].{Id:NatGatewayId,AZ:SubnetId}'
+    - purpose: Check Route 53 health checks
+      command: |
+        aws route53 list-health-checks --query 'HealthChecks[*].{Id:Id,Config:HealthCheckConfig}'
+    expected_findings:
+    - Network redundancy status
+    - DNS failover configuration
+  - id: '4'
+    name: Evaluate external dependencies
+    description: |
+      Identify all external services and evaluate failover strategies
+      for each dependency.
+    duration_estimate: 30 min
+    questions:
+    - What external services does the system depend on?
+    - What happens if each external service fails?
+    - Are there backup providers or degradation strategies?
+    expected_findings:
+    - External dependency inventory
+    - Failover coverage assessment
+  - id: '5'
+    name: Document findings and prioritize remediation
+    description: |
+      Compile all identified SPOFs, assess their impact, and create
+      prioritized remediation plan.
+    duration_estimate: 45 min
+    expected_findings:
+    - Prioritized SPOF list
+    - Remediation roadmap
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - SPOF Inventory
+    - Impact Analysis
+    - Remediation Recommendations
+    - Implementation Roadmap
+  confidence_guidance:
+    high: Direct infrastructure inspection and configuration verification
+    medium: Architecture documentation review with limited config access
+    low: High-level architecture review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-well-architected
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive infrastructure review
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: spof-001
+  item: All databases have multi-AZ or HA configuration enabled
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify multi_az = true for RDS, replica sets for MongoDB, etc.
+  expected: Confirmed by reviewer
+- id: spof-002
+  item: All production services have minimum 2 replicas
+  level: CRITICAL
+  verification: |
+    kubectl get deployments -A -o jsonpath='{range .items[?(@.spec.replicas<2)]}{.metadata.namespace}/{.metadata.name}{" "}{end}' | wc -w
+  expected: '0'
+- id: spof-003
+  item: Resources distributed across multiple availability zones
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify subnets span at least 2 AZs for all critical resources
+  expected: Confirmed by reviewer
+- id: spof-004
+  item: Load balancers have cross-zone load balancing enabled
+  level: WARNING
+  verification: manual
+  verification_notes: Check ELB/ALB attributes for cross-zone setting
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+    - CC7.2
+  - framework: ISO 27001
+    controls:
+    - A.17.1.1
+    - A.17.1.2
+relationships:
+  commonly_combined:
+  - reliability-resilience.fault-tolerance.redundancy
+  - reliability-resilience.fault-tolerance.failover-mechanism
+  - reliability-resilience.high-availability.availability-sli

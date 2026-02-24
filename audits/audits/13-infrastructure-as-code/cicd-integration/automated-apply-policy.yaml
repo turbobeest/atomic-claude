@@ -1,0 +1,371 @@
+audit:
+  id: infrastructure-as-code.cicd-integration.automated-apply-policy
+  name: Automated Apply Policy
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: cicd-integration
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: process
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the policies that govern when terraform apply
+    can execute automatically (without human intervention) versus when
+    manual approval is required. It evaluates:
+
+    - Auto-apply rules by environment (dev vs staging vs prod)
+    - Change type classification (additive vs destructive)
+    - Resource sensitivity classifications
+    - Time-based restrictions (change windows)
+    - Blast radius assessment
+    - Policy-as-code enforcement with Sentinel or OPA
+
+    The goal is to balance deployment velocity with appropriate safeguards.
+  why_it_matters: |
+    Overly restrictive apply policies slow down development and create
+    bottlenecks. Overly permissive policies risk production outages:
+
+    - Auto-apply in production can cause immediate outages
+    - Blocking all auto-apply creates deployment friction
+    - No policy means inconsistent enforcement
+    - Manual-only deploys don't scale with team size
+
+    Well-designed apply policies enable safe automation where appropriate
+    while maintaining human oversight for risky changes.
+  when_to_run:
+  - When establishing IaC automation policies
+  - After incidents from automated applies
+  - When scaling IaC deployment velocity
+  - During DevOps efficiency optimization
+prerequisites:
+  required_artifacts:
+  - type: policy_documents
+    description: Apply policy documentation or Sentinel/OPA policies
+  - type: cicd_configuration
+    description: Pipeline configurations showing apply automation
+  access_requirements:
+  - Access to policy-as-code configurations
+  - Access to CI/CD pipeline configurations
+  - Access to Terraform Cloud/Enterprise policies if used
+discovery:
+  code_patterns:
+  - pattern: -auto-approve
+    type: keyword
+    scope: config
+    purpose: Find automatic apply flags
+  - pattern: auto_apply|auto-apply
+    type: regex
+    scope: config
+    purpose: Find auto-apply configuration
+  - pattern: sentinel_policy|policy_check
+    type: regex
+    scope: config
+    purpose: Find Sentinel policy enforcement
+  - pattern: main\.sentinel|policy\.rego
+    type: regex
+    scope: source
+    purpose: Find policy files
+  - pattern: change.*window|maintenance
+    type: regex
+    scope: config
+    purpose: Find change window restrictions
+  file_patterns:
+  - glob: '**/*.sentinel'
+    purpose: Sentinel policy files
+  - glob: '**/policy/**/*.rego'
+    purpose: OPA Rego policy files
+  - glob: '**/atlantis.yaml'
+    purpose: Atlantis auto-apply configuration
+  - glob: '**/.github/workflows/*.yml'
+    purpose: GitHub Actions apply automation
+  documents_to_review:
+  - type: Apply policy documentation
+    purpose: Understand stated policy for automated applies
+  - type: Change management procedures
+    purpose: Verify alignment with change management
+knowledge_sources:
+  specifications:
+  - id: sentinel-docs
+    name: HashiCorp Sentinel Documentation
+    url: https://developer.hashicorp.com/sentinel
+    offline_cache: true
+    priority: required
+  guides:
+  - id: terraform-cloud-auto-apply
+    name: Terraform Cloud Auto Apply
+    url: https://developer.hashicorp.com/terraform/cloud-docs/workspaces/settings#auto-apply-and-manual-apply
+    offline_cache: true
+  - id: atlantis-auto-plan-apply
+    name: Atlantis Auto Plan and Apply
+    url: https://www.runatlantis.io/docs/autoplanning.html
+    offline_cache: true
+  - id: opa-terraform
+    name: OPA Terraform Integration
+    url: https://www.openpolicyagent.org/docs/latest/terraform/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: conftest
+    purpose: Test Terraform plans against OPA policies
+    offline_capable: true
+  - tool: sentinel
+    purpose: HashiCorp policy enforcement
+    offline_capable: false
+  scripts:
+  - id: auto-apply-analysis
+    language: bash
+    purpose: Analyze where auto-apply is configured
+    source: inline
+    code: |
+      #!/bin/bash
+      # Find all auto-apply configurations
+
+      echo "=== GitHub Actions auto-approve ==="
+      grep -r '\-auto-approve' .github/ 2>/dev/null
+
+      echo "=== Atlantis auto_apply ==="
+      grep -A5 'autoplan\|auto_apply' atlantis.yaml 2>/dev/null
+
+      echo "=== Environment-specific applies ==="
+      grep -r 'environment.*prod\|if.*production' .github/ 2>/dev/null
+signals:
+  critical:
+  - id: IAC-AUTO-CRIT-001
+    signal: Auto-apply enabled for production environment
+    evidence_pattern: -auto-approve in production workflow
+    explanation: |
+      Automatic application of changes to production without human
+      review means any error in code or plan output goes directly
+      to production, causing outages. Even reviewed and approved
+      PRs can have last-minute issues.
+    remediation: |
+      Remove auto-apply from production:
+      1. Remove -auto-approve flag from production workflows
+      2. Configure Terraform Cloud workspaces as manual apply
+      3. Use Atlantis with apply_requirements: [approved, mergeable]
+      4. Require explicit "atlantis apply" command after review
+  - id: IAC-AUTO-CRIT-002
+    signal: No policy enforcement on apply automation
+    evidence_pattern: No sentinel or OPA policies for apply gates
+    explanation: |
+      Without policy-as-code, apply automation decisions are made
+      ad-hoc in pipeline scripts, leading to inconsistent enforcement
+      and potential bypasses.
+    remediation: |
+      Implement policy-as-code:
+      - Use Sentinel with Terraform Cloud/Enterprise
+      - Use OPA/Conftest with custom pipelines
+      - Define policies for destructive operations, sensitive resources
+  high:
+  - id: IAC-AUTO-HIGH-001
+    signal: No distinction between additive and destructive changes
+    evidence_pattern: Same workflow for all change types
+    explanation: |
+      Adding a tag is very different from deleting a database.
+      Apply policies should distinguish between low-risk additive
+      changes and high-risk destructive operations.
+    remediation: |
+      Classify changes by risk:
+      - Auto-apply: Additive changes in non-prod (add tag, add resource)
+      - Review required: Modifications in non-prod
+      - Manual approval: Any destructive change
+      - Multi-approval: Destructive changes in prod
+  - id: IAC-AUTO-HIGH-002
+    signal: No blast radius assessment for auto-apply decisions
+    evidence_pattern: Auto-apply regardless of scope of changes
+    explanation: |
+      A change affecting 100 resources has more risk than one
+      affecting a single resource. Auto-apply should consider
+      the scope of changes.
+    remediation: |
+      Add blast radius checks:
+      - Count resources affected
+      - Block auto-apply if > N resources changed
+      - Require additional approval for large changes
+  medium:
+  - id: IAC-AUTO-MED-001
+    signal: No change window enforcement for production
+    remediation: |
+      Implement change windows:
+      - Define allowed deployment times
+      - Block auto-apply outside windows
+      - Allow emergency overrides with logging
+  - id: IAC-AUTO-MED-002
+    signal: Auto-apply policy not documented
+    remediation: |
+      Document apply automation policy:
+      - Which environments allow auto-apply
+      - What change types trigger manual review
+      - How to request policy exceptions
+  low:
+  - id: IAC-AUTO-LOW-001
+    signal: Inconsistent auto-apply behavior across pipelines
+    remediation: Standardize auto-apply configuration
+  positive:
+  - id: IAC-AUTO-POS-001
+    signal: Sentinel/OPA policies enforce apply automation rules
+  - id: IAC-AUTO-POS-002
+    signal: Auto-apply limited to non-production and additive changes
+  - id: IAC-AUTO-POS-003
+    signal: Blast radius assessment gates large changes
+  - id: IAC-AUTO-POS-004
+    signal: Change windows enforced for production applies
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify auto-apply configurations
+    description: |
+      Find all places where auto-apply is configured in pipelines.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find auto-approve in workflows
+      command: grep -r '\-auto-approve' .github/ .gitlab-ci.yml Jenkinsfile 2>/dev/null
+    - purpose: Check Atlantis auto-apply
+      command: grep -A10 'autoplan\|auto_apply' atlantis.yaml 2>/dev/null
+    - purpose: Check Terraform Cloud settings
+      command: grep -r 'auto_apply' --include='*.tf' . | head -10
+    expected_findings:
+    - Auto-apply locations
+    - Environment restrictions
+  - id: '2'
+    name: Review policy-as-code implementation
+    description: |
+      Check for Sentinel or OPA policies governing apply automation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find Sentinel policies
+      command: find . -name '*.sentinel' | head -20
+    - purpose: Find OPA policies
+      command: find . -name '*.rego' | head -20
+    - purpose: Check for conftest usage
+      command: grep -r 'conftest' .github/ Makefile 2>/dev/null | head -10
+    expected_findings:
+    - Policy files present
+    - Policy enforcement in pipeline
+  - id: '3'
+    name: Analyze change type classification
+    description: |
+      Check if different change types (add, modify, delete) are
+      treated differently.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for destroy detection
+      command: grep -r 'destroy\|delete\|remove' .github/ --include='*.yml' | head -20
+    - purpose: Check policy for destructive operations
+      command: grep -r 'delete\|destroy\|replace' --include='*.sentinel' --include='*.rego' . | head -20
+    expected_findings:
+    - Destructive change handling
+    - Change type policies
+  - id: '4'
+    name: Verify environment-based restrictions
+    description: |
+      Confirm that production has stricter apply controls than
+      non-production environments.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check environment conditionals
+      command: grep -r -B5 -A5 'production\|prod' .github/ --include='*.yml' | head -50
+    expected_findings:
+    - Production-specific restrictions
+    - Environment differentiation
+  - id: '5'
+    name: Review blast radius assessment
+    description: |
+      Check if the number/scope of changes affects apply automation.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for resource count checks
+      command: grep -r 'resource_changes\|length\|count' --include='*.sentinel' --include='*.rego' . |
+        head -20
+    expected_findings:
+    - Blast radius policies
+    - Scope-based gates
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Auto-Apply Configuration Analysis
+    - Policy-as-Code Review
+    - Risk Classification Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Policies reviewed and tested with sample plans
+    medium: Configuration reviewed without testing
+    low: Only file presence confirmed
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: sentinel-docs
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires policy analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      reason: Critical for production safety
+closeout_checklist:
+- id: auto-apply-001
+  item: Production applies require manual approval
+  level: CRITICAL
+  verification: grep -r '\-auto-approve.*prod\|prod.*-auto-approve' .github/ | wc -l
+  expected: '0'
+- id: auto-apply-002
+  item: Policy-as-code enforces apply rules
+  level: BLOCKING
+  verification: find . -name '*.sentinel' -o -name '*.rego' | wc -l
+  expected: '>0'
+- id: auto-apply-003
+  item: Destructive changes require additional approval
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify policy blocks or flags delete operations
+  expected: Confirmed by reviewer
+- id: auto-apply-004
+  item: Auto-apply policy is documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify documentation exists
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC8.1
+  - framework: ISO 27001
+    controls:
+    - A.12.1.2
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.cicd-integration.approval-workflow
+  - infrastructure-as-code.cicd-integration.iac-pipeline
+  - infrastructure-as-code.testing-validation.plan-review-process

@@ -1,0 +1,233 @@
+audit:
+  id: code-quality.code-review.review-turnaround-time
+  name: Code Review Turnaround Time Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: code-review
+  tier: expert
+  estimated_duration: 30 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: medium
+  scope: repository
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Measures the time elapsed between when a pull request is opened and when it
+    receives its first review, approval, and merge. Analyzes review velocity
+    across different PR sizes, authors, reviewers, and time periods to identify
+    bottlenecks in the review process.
+  why_it_matters: |
+    Long review cycles increase context switching costs, delay feature delivery,
+    and encourage developers to batch larger changes (which are harder to review).
+    Google research shows PRs waiting more than 24 hours for review have 50%
+    higher abandonment rates. DORA metrics identify lead time as a key predictor
+    of organizational performance.
+  when_to_run:
+  - Sprint retrospectives
+  - Process improvement initiatives
+  - Developer experience assessments
+  - DORA metrics collection
+prerequisites:
+  required_artifacts:
+  - type: pr_metadata
+    description: Pull request records with timestamps
+  - type: review_history
+    description: Review submission timestamps
+  access_requirements:
+  - Access to PR/MR platform API
+  - Historical PR data for trend analysis
+discovery:
+  code_patterns:
+  - pattern: requested.*review
+    type: regex
+    scope: pr_events
+    purpose: Identify review request events
+  file_patterns:
+  - glob: .github/workflows/*review*.yml
+    purpose: Review automation configuration
+  - glob: .github/CODEOWNERS
+    purpose: Automatic reviewer assignment
+knowledge_sources:
+  specifications:
+  - id: dora-metrics
+    name: DORA State of DevOps Research
+    url: https://dora.dev/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: google-review-speed
+    name: Google Engineering - Speed of Code Reviews
+    url: https://google.github.io/eng-practices/review/reviewer/speed.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: gh
+    purpose: Query PR timeline and review events
+    offline_capable: false
+  scripts:
+  - id: review-time-calc
+    language: bash
+    purpose: Calculate median review turnaround time
+    source: inline
+    code: |
+      gh pr list --state merged --limit 50 --json number,createdAt,reviews \
+        --jq '.[] | {number, created: .createdAt, first_review: .reviews[0].submittedAt}'
+signals:
+  critical:
+  - id: RTT-CRIT-001
+    signal: Median first review time exceeds 1 week
+    evidence_pattern: median_first_review > 168 hours
+    explanation: |
+      Extremely long review wait times indicate severe process dysfunction,
+      likely causing significant developer frustration, context loss, and
+      merge conflicts.
+    remediation: Implement review SLAs and automatic reviewer load balancing
+  high:
+  - id: RTT-HIGH-001
+    signal: Median first review time exceeds 48 hours
+    evidence_pattern: median_first_review > 48 hours
+    explanation: |
+      Reviews taking more than 2 days delay delivery and increase the
+      likelihood of PRs becoming stale or abandoned.
+    remediation: Set 24-hour first review SLA and add review reminders
+  - id: RTT-HIGH-002
+    signal: Large variance in review times (CV > 1.5)
+    evidence_pattern: coefficient_of_variation > 1.5
+    explanation: |
+      Inconsistent review times suggest uneven reviewer load distribution
+      or lack of clear review prioritization.
+    remediation: Balance reviewer assignments and implement PR prioritization
+  medium:
+  - id: RTT-MED-001
+    signal: Median first review time between 24-48 hours
+    evidence_pattern: 24 hours < median_first_review <= 48 hours
+    remediation: Target same-day review for standard PRs
+  - id: RTT-MED-002
+    signal: Review-to-merge time exceeds 3x first review time
+    evidence_pattern: merge_time > 3 * first_review_time
+    remediation: Investigate revision cycles and approval bottlenecks
+  low:
+  - id: RTT-LOW-001
+    signal: No review time metrics tracked
+    evidence_pattern: no_metrics_available
+    remediation: Implement automated review time tracking
+  positive:
+  - id: RTT-POS-001
+    signal: Median first review under 4 hours
+    evidence_pattern: median_first_review < 4 hours
+  - id: RTT-POS-002
+    signal: Consistent review times across team
+    evidence_pattern: coefficient_of_variation < 0.5
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Extract PR Timeline Data
+    description: |
+      Collect timestamps for PR creation, review requests, first review,
+      approval, and merge for all PRs in analysis period.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Get PR timeline data
+      command: |
+        gh pr list --state merged --limit 100 --json number,createdAt,mergedAt,reviews
+    expected_findings:
+    - PR lifecycle timestamps
+    - Review event sequence
+  - id: '2'
+    name: Calculate Time Metrics
+    description: |
+      Compute statistical measures for each phase of the review cycle.
+    duration_estimate: 10 min
+    expected_findings:
+    - Median time to first review
+    - Median time to approval
+    - Median time to merge
+    - Standard deviation and percentiles
+  - id: '3'
+    name: Segment Analysis
+    description: |
+      Break down review times by PR size, author, reviewer, and component
+      to identify specific bottlenecks.
+    duration_estimate: 10 min
+    expected_findings:
+    - Review time by PR size category
+    - Review time by reviewer
+    - Time patterns by day of week
+output:
+  deliverables:
+  - type: metrics
+    format: structured
+    content:
+    - median_time_to_first_review
+    - median_time_to_approval
+    - median_time_to_merge
+    - p90_review_times
+    - review_time_trend
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Review Velocity Metrics
+    - Bottleneck Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Complete PR timeline data with granular event timestamps
+    medium: Basic timestamps available but missing some events
+    low: Limited to merge dates without review event data
+offline:
+  capability: minimal
+  cache_manifest:
+    knowledge:
+    - source_id: dora-metrics
+      priority: required
+    - source_id: google-review-speed
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: rtt-001
+  item: Review time metrics calculated
+  level: BLOCKING
+  verification: Median and percentile values available
+  expected: Numeric time values in hours
+- id: rtt-002
+  item: Trend analysis completed
+  level: WARNING
+  verification: Week-over-week comparison available
+  expected: Trend direction identified
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: DORA Metrics
+    controls:
+    - Lead Time for Changes
+relationships:
+  commonly_combined:
+  - code-quality.code-review.pr-review-coverage
+  - code-quality.code-review.reviewer-distribution
+  - code-quality.code-review.review-depth

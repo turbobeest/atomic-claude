@@ -1,0 +1,391 @@
+# ============================================================
+# AUDIT: Storage Redundancy
+# ============================================================
+
+audit:
+  id: "data-state-management.storage-strategy.storage-redundancy"
+  name: "Storage Redundancy Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "storage-strategy"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "requires_discovery"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates data redundancy strategies including replication levels,
+    geographic distribution of replicas, consistency models between replicas,
+    and recovery point objectives (RPO). Analyzes whether redundancy matches
+    the criticality of the data and business continuity requirements.
+
+  why_it_matters: |
+    Storage failures happen - disks fail, data centers flood, cloud regions
+    go offline. Without proper redundancy, a single failure can cause
+    permanent data loss. The cost of redundancy is always less than the
+    cost of losing critical business data.
+
+  when_to_run:
+    - "Disaster recovery planning"
+    - "Production readiness reviews"
+    - "After data loss incidents"
+    - "Business continuity assessments"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Storage and database configurations"
+    - type: "architecture_docs"
+      description: "System architecture showing replication topology"
+    - type: "business_requirements"
+      description: "RPO/RTO requirements"
+
+  access_requirements:
+    - "Read access to infrastructure configurations"
+    - "Access to replication settings"
+    - "Knowledge of business continuity requirements"
+
+discovery:
+  code_patterns:
+    - pattern: "replica|replication|standby|mirror"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect replication configuration"
+
+    - pattern: "availability.*zone|az_|multi_az|zone_redundant"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect availability zone configuration"
+
+    - pattern: "backup|snapshot|point_in_time"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect backup configuration"
+
+  file_patterns:
+    - glob: "**/terraform/**"
+      purpose: "Infrastructure redundancy configuration"
+    - glob: "**/*backup*.yaml"
+      purpose: "Backup configurations"
+    - glob: "**/replication/**"
+      purpose: "Replication settings"
+
+knowledge_sources:
+  guides:
+    - id: "rds-multi-az"
+      name: "RDS Multi-AZ Deployments"
+      url: "https://aws.amazon.com/rds/features/multi-az/"
+      offline_cache: true
+
+    - id: "s3-durability"
+      name: "S3 Durability and Availability"
+      url: "https://aws.amazon.com/s3/storage-classes/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "reliability-engineering"
+      title: "Site Reliability Engineering"
+      type: "book"
+      reference: "Google SRE Team, ISBN: 978-1491929124"
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws rds describe-db-instances"
+      purpose: "Check database replication configuration"
+      command: "aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,MultiAZ]'"
+
+    - tool: "aws s3api get-bucket-replication"
+      purpose: "Check S3 replication configuration"
+      command: "aws s3api get-bucket-replication --bucket BUCKET"
+
+  scripts:
+    - id: "redundancy-scan"
+      language: "bash"
+      purpose: "Identify storage redundancy configurations"
+      source: "inline"
+      code: |
+        echo "=== Storage Redundancy Analysis ==="
+        echo "--- Replication settings ---"
+        grep -rn "replica\|replication\|multi_az\|standby" \
+          --include="*.tf" --include="*.yaml" . 2>/dev/null | head -30
+
+        echo "--- Availability zone configuration ---"
+        grep -rn "availability_zone\|az_\|zone_redundant" \
+          --include="*.tf" --include="*.yaml" . 2>/dev/null | head -20
+
+        echo "--- Backup configuration ---"
+        grep -rn "backup\|snapshot\|retention\|point_in_time" \
+          --include="*.tf" --include="*.yaml" . 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "SR-CRIT-001"
+      signal: "Production database without replication"
+      evidence_pattern: "Single database instance without read replicas or standby"
+      explanation: |
+        A single database instance is a single point of failure. Hardware
+        failure, AZ outage, or corruption means total data loss without
+        recovery options. Production databases must have replication.
+      remediation: "Enable Multi-AZ deployment or configure read replicas"
+
+    - id: "SR-CRIT-002"
+      signal: "Critical data without cross-region redundancy"
+      evidence_pattern: "All data copies in single region"
+      explanation: |
+        Regional disasters (earthquakes, floods, major outages) can take
+        down entire regions. For business-critical data, cross-region
+        redundancy provides protection against regional failures.
+      remediation: "Implement cross-region replication for critical data"
+
+  high:
+    - id: "SR-HIGH-001"
+      signal: "No automated backups configured"
+      evidence_pattern: "backup_retention_period = 0 or no backup config"
+      explanation: |
+        Without backups, data recovery is impossible after corruption,
+        accidental deletion, or ransomware. Automated backups provide
+        point-in-time recovery capability.
+      remediation: "Enable automated backups with appropriate retention"
+
+    - id: "SR-HIGH-002"
+      signal: "Backup in same failure domain as primary"
+      evidence_pattern: "Backups stored on same disk/server as primary data"
+      explanation: |
+        Backups co-located with primary data don't protect against the most
+        common failure modes. The same event that destroys primary data
+        will destroy the backups.
+      remediation: "Store backups in separate failure domain or region"
+
+    - id: "SR-HIGH-003"
+      signal: "Replication lag not monitored"
+      evidence_pattern: "No alerts on replication delay"
+      explanation: |
+        High replication lag means replicas contain stale data. In failover,
+        this causes data loss equal to the lag. Lag must be monitored and
+        alerted.
+      remediation: "Implement replication lag monitoring with alerts"
+
+  medium:
+    - id: "SR-MED-001"
+      signal: "Object storage without versioning"
+      evidence_pattern: "S3 bucket without versioning enabled"
+      remediation: "Enable versioning on object storage buckets"
+
+    - id: "SR-MED-002"
+      signal: "RPO/RTO not defined or not met"
+      evidence_pattern: "Backup frequency doesn't meet stated RPO"
+      remediation: "Define and validate RPO/RTO requirements"
+
+    - id: "SR-MED-003"
+      signal: "Redundancy varies by environment inconsistently"
+      evidence_pattern: "Production has replication but staging mirrors production patterns"
+      remediation: "Document and justify redundancy differences by environment"
+
+  low:
+    - id: "SR-LOW-001"
+      signal: "Backup restoration not tested regularly"
+      evidence_pattern: "No documented restore test results"
+      remediation: "Implement regular backup restoration testing"
+
+    - id: "SR-LOW-002"
+      signal: "Redundancy strategy not documented"
+      evidence_pattern: "No documentation of replication topology"
+      remediation: "Document redundancy strategy and failure scenarios"
+
+  positive:
+    - id: "SR-POS-001"
+      signal: "Multi-AZ deployment for all databases"
+      evidence_pattern: "multi_az = true on all database instances"
+
+    - id: "SR-POS-002"
+      signal: "Cross-region replication for critical data"
+      evidence_pattern: "Replication to secondary region configured"
+
+    - id: "SR-POS-003"
+      signal: "Regular backup restoration testing"
+      evidence_pattern: "Documented restore test results"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Storage Systems"
+      description: |
+        Catalog all storage systems and their redundancy configuration.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find database configurations"
+          command: |
+            grep -rn "aws_db_instance\|aws_rds\|azurerm_.*database\|google_sql" \
+              --include="*.tf" . 2>/dev/null | head -30
+        - purpose: "Find object storage"
+          command: |
+            grep -rn "aws_s3_bucket\|azurerm_storage\|google_storage" \
+              --include="*.tf" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Storage system inventory"
+        - "Current configurations"
+
+    - id: "2"
+      name: "Analyze Replication Settings"
+      description: |
+        Review replication configuration for each storage system.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find replication settings"
+          command: |
+            grep -rn "multi_az\|replica\|replication\|standby" \
+              --include="*.tf" --include="*.yaml" . 2>/dev/null | head -40
+        - purpose: "Find availability zone settings"
+          command: |
+            grep -rn "availability_zone\|zone\s*=" \
+              --include="*.tf" . 2>/dev/null | head -30
+
+      expected_findings:
+        - "Replication status per system"
+        - "Geographic distribution"
+
+    - id: "3"
+      name: "Review Backup Configuration"
+      description: |
+        Examine backup policies and retention.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find backup configurations"
+          command: |
+            grep -rn "backup\|retention\|snapshot" \
+              --include="*.tf" --include="*.yaml" . 2>/dev/null | head -40
+        - purpose: "Find backup schedules"
+          command: |
+            grep -rn "schedule\|cron\|period\|window" \
+              --include="*.tf" --include="*.yaml" . 2>/dev/null | \
+              grep -i backup | head -20
+
+      expected_findings:
+        - "Backup coverage"
+        - "Retention policies"
+
+    - id: "4"
+      name: "Assess RPO/RTO Alignment"
+      description: |
+        Verify redundancy meets business continuity requirements.
+      duration_estimate: "25 min"
+      questions:
+        - "What is the defined RPO for critical data?"
+        - "Does backup frequency support the RPO?"
+        - "Does replication lag stay within RPO bounds?"
+        - "Can systems recover within defined RTO?"
+      expected_findings:
+        - "RPO/RTO assessment"
+        - "Gap identification"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "storage_inventory"
+        - "redundancy_status"
+        - "rpo_rto_assessment"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Redundancy Inventory"
+        - "Backup Assessment"
+        - "RPO/RTO Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of missing redundancy for critical data"
+    medium: "Redundancy exists but may not meet requirements"
+    low: "Requires RPO/RTO requirements to assess adequacy"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "rds-multi-az"
+        priority: "required"
+      - source_id: "reliability-engineering"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "sr-001"
+    item: "Production databases have replication enabled"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "multi_az.*true\|replica" --include="*.tf" . 2>/dev/null | \
+        wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "sr-002"
+    item: "Automated backups configured"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "backup_retention\|backup.*enabled\|backup_window" --include="*.tf" . 2>/dev/null | \
+        wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "sr-003"
+    item: "Backups stored in separate failure domain"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify backups are in different AZ or region from primary"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 27001"
+      controls: ["A.12.3.1"]
+    - framework: "SOC 2"
+      controls: ["A1.2"]
+    - framework: "PCI DSS"
+      controls: ["9.5", "9.6"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.storage-strategy.data-locality"
+    - "reliability-resilience.backup-recovery.backup-strategy"
+    - "reliability-resilience.disaster-recovery.rpo-rto-compliance"

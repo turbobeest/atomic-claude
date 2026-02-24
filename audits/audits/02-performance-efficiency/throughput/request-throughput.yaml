@@ -1,0 +1,288 @@
+audit:
+  id: performance-efficiency.throughput.request-throughput
+  name: Request Throughput Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: throughput
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures the system's request throughput capacity - the
+    number of requests per second (RPS) it can handle while maintaining
+    acceptable latency and error rates. It evaluates current throughput,
+    identifies bottlenecks, and determines headroom before saturation.
+    The audit examines load testing results, production metrics, and
+    capacity planning data.
+  why_it_matters: |
+    Understanding request throughput is essential for capacity planning,
+    cost optimization, and incident prevention. Systems that operate
+    near capacity have no headroom for traffic spikes and degrade
+    unpredictably under load. Knowing your throughput limits enables
+    proper scaling decisions and SLA commitments.
+  when_to_run:
+  - Before major traffic events or launches
+  - After infrastructure changes
+  - During capacity planning cycles
+  - When investigating performance degradation
+prerequisites:
+  required_artifacts:
+  - type: load_testing_environment
+    description: Ability to run load tests (staging or production)
+  - type: metrics_system
+    description: Request rate metrics collection
+  access_requirements:
+  - Access to load testing tools
+  - Access to request rate metrics
+  - Permission to run load tests
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: sum(rate(http_requests_total[5m]))
+    purpose: Current request throughput
+    threshold: < 80% of tested capacity
+  - system: Prometheus
+    query: |
+      sum(rate(http_requests_total[5m]))
+      /
+      sum(kube_deployment_spec_replicas{deployment="api"})
+    purpose: Requests per second per instance
+    threshold: Within load-tested limits
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: google-sre-capacity
+    name: Google SRE - Capacity Planning
+    url: https://sre.google/sre-book/handling-overload/
+    offline_cache: true
+  - id: aws-well-architected
+    name: AWS Well-Architected Performance Pillar
+    url: https://docs.aws.amazon.com/wellarchitected/latest/performance-efficiency-pillar/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: hey
+    purpose: HTTP load testing
+    command: hey -n 10000 -c 100 -q 500 https://api.example.com/endpoint
+  - tool: wrk
+    purpose: High-performance load testing
+    command: wrk -t12 -c400 -d60s --rate 5000 https://api.example.com/endpoint
+  - tool: k6
+    purpose: Scriptable load testing
+    command: k6 run --vus 100 --duration 60s loadtest.js
+  - tool: ab
+    purpose: Apache Bench
+    command: ab -n 10000 -c 100 https://api.example.com/endpoint
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      max_over_time(sum(rate(http_requests_total[1m]))[1h:1m])
+    purpose: Peak throughput in last hour
+  - system: Prometheus
+    query: |
+      sum(rate(http_requests_total{status=~"5.."}[5m]))
+      /
+      sum(rate(http_requests_total[5m]))
+    purpose: Error rate during high throughput
+signals:
+  critical:
+  - id: RPS-CRIT-001
+    signal: System operating above 90% of tested capacity
+    evidence_threshold: current_rps / max_tested_rps > 0.9
+    explanation: |
+      Operating near capacity limits leaves no headroom for traffic
+      spikes. Any increase in load will cause performance degradation
+      or failures. This is an immediate scaling concern.
+    remediation: Scale up immediately; implement load shedding; review capacity plan
+  - id: RPS-CRIT-002
+    signal: No load testing has been performed
+    evidence_indicators:
+    - No documented throughput limits
+    - No load test results on file
+    explanation: |
+      Without load testing, you don't know your system's limits.
+      You cannot make informed capacity decisions or commitments.
+      The first "load test" may be a production incident.
+    remediation: Implement regular load testing in staging or production-like environment
+  high:
+  - id: RPS-HIGH-001
+    signal: Throughput decreases as request rate increases
+    evidence_threshold: throughput plateau or decline under load
+    explanation: |
+      A throughput curve that flattens or drops indicates the system
+      is saturated. Additional requests cause queuing, timeouts, and
+      wasted resources without improving output.
+    remediation: Identify and address bottleneck; scale horizontally or vertically
+  - id: RPS-HIGH-002
+    signal: Error rate increases with throughput before capacity limit
+    evidence_threshold: error_rate > 1% at 70% capacity
+    explanation: |
+      Errors increasing before reaching throughput limits indicates
+      a resource constraint or bug that manifests under load.
+    remediation: Profile under load; check for connection limits, thread exhaustion
+  medium:
+  - id: RPS-MED-001
+    signal: Throughput metrics not collected
+    remediation: Implement request rate metrics with proper labeling
+  - id: RPS-MED-002
+    signal: No defined throughput SLO
+    remediation: Define minimum throughput requirements based on business needs
+  low:
+  - id: RPS-LOW-001
+    signal: Load test results not documented
+  positive:
+  - id: RPS-POS-001
+    signal: Operating at less than 50% of tested capacity
+  - id: RPS-POS-002
+    signal: Regular load testing with documented results
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Establish Current Throughput
+    description: |
+      Measure current production request rates and identify peak
+      usage patterns.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query current RPS
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(http_requests_total[5m]))'
+    - purpose: Query peak RPS in last 24h
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=max_over_time(sum(rate(http_requests_total[1m]))[24h:1m])'
+    expected_findings:
+    - Current request rate
+    - Peak request rate
+    - Traffic patterns
+  - id: '2'
+    name: Run Load Tests
+    description: |
+      Execute load tests to determine maximum throughput capacity
+      while maintaining acceptable latency.
+    duration_estimate: 40 min
+    commands:
+    - purpose: Baseline load test
+      command: |
+        hey -n 5000 -c 50 https://staging.api.example.com/endpoint
+    - purpose: Find saturation point
+      command: |
+        for c in 50 100 200 400 800; do
+          echo "=== Concurrency: $c ===" && \
+          hey -n 5000 -c $c -q 1000 https://staging.api.example.com/endpoint 2>&1 | grep -E 'Requests/sec|Latency'
+        done
+    expected_findings:
+    - Maximum sustainable RPS
+    - Saturation point
+    - Latency at various load levels
+  - id: '3'
+    name: Identify Bottlenecks
+    description: |
+      Analyze system metrics during load to identify throughput
+      bottlenecks.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check CPU utilization during load
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=avg(rate(container_cpu_usage_seconds_total[5m]))by(pod)'
+    - purpose: Check connection counts
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(pg_stat_activity_count)by(state)'
+    expected_findings:
+    - CPU, memory, connection constraints
+    - Primary bottleneck identification
+  - id: '4'
+    name: Calculate Capacity Headroom
+    description: |
+      Compare current production throughput to tested capacity to
+      determine headroom.
+    duration_estimate: 10 min
+    questions:
+    - What percentage of tested capacity is currently used?
+    - How much headroom exists for traffic spikes?
+    - When will scaling be required based on growth?
+    expected_findings:
+    - Capacity utilization percentage
+    - Headroom for growth
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Current Throughput Analysis
+    - Load Test Results
+    - Capacity Headroom
+    - Scaling Recommendations
+  confidence_guidance:
+    high: Load test results with production-like data and traffic
+    medium: Load test results with synthetic data
+    low: Estimates based on production metrics only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-sre-capacity
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires load testing and runtime measurements
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: rps-001
+  item: Operating below 80% of tested capacity
+  level: CRITICAL
+  verification: |
+    CURRENT=$(curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(http_requests_total[5m]))' | jq -r '.data.result[0].value[1]')
+    CAPACITY=10000  # Replace with tested capacity
+    echo "scale=2; $CURRENT / $CAPACITY < 0.8" | bc
+  expected: '1'
+- id: rps-002
+  item: Load testing performed in last 30 days
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm load test results exist and are recent
+  expected: Confirmed by reviewer
+- id: rps-003
+  item: Throughput SLO defined
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm minimum RPS requirements are documented
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+relationships:
+  commonly_combined:
+  - performance-efficiency.latency.end-to-end-latency
+  - performance-efficiency.throughput.concurrent-connection-capacity

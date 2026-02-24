@@ -1,0 +1,458 @@
+audit:
+  id: configuration-management.configuration-identification.config-dependencies
+  name: Configuration Dependencies Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: configuration-management
+  category_number: 30
+  subcategory: configuration-identification
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the mapping and tracking of dependencies between
+    configuration items across the system. It evaluates:
+    - Inter-configuration dependencies (config A requires config B)
+    - Service-to-configuration dependencies
+    - Configuration ordering requirements
+    - Circular dependency detection
+    - External service configuration dependencies
+    - Environment variable dependency chains
+    - Infrastructure configuration dependencies
+  why_it_matters: |
+    Configuration dependency mapping is critical for safe operations:
+    - ITIL CMDB requires relationship mapping between CIs for impact analysis
+    - Untracked dependencies cause cascading failures during changes
+    - Change impact assessment depends on complete dependency graphs
+    - Circular dependencies create initialization deadlocks
+    - Dependency awareness enables proper change sequencing
+    - Incident response requires understanding configuration relationships
+    - Compliance requires demonstrating configuration control
+  when_to_run:
+  - Before major configuration changes
+  - When planning infrastructure migrations
+  - During incident post-mortems involving configuration
+  - When onboarding new services
+  - Quarterly configuration reviews
+prerequisites:
+  required_artifacts:
+  - type: configuration_files
+    description: All configuration and infrastructure code
+  - type: architecture_docs
+    description: System architecture documentation
+  access_requirements:
+  - Read access to all configuration repositories
+  - Access to infrastructure definitions
+  - Access to service dependency documentation
+discovery:
+  code_patterns:
+  - pattern: (depends_on|DependsOn|requires|prerequisite)
+    type: regex
+    scope: config
+    purpose: Detect explicit dependency declarations
+  - pattern: \$\{[a-zA-Z_][a-zA-Z0-9_]*\}
+    type: regex
+    scope: config
+    purpose: Detect variable interpolation (dependencies)
+  - pattern: ref\s*\(|getattr\s*\(|lookup\s*\(
+    type: regex
+    scope: config
+    purpose: Detect reference functions
+  - pattern: (import|include|source|extends)\s*['"]
+    type: regex
+    scope: config
+    purpose: Detect configuration imports
+  - pattern: '!include|\$ref:'
+    type: regex
+    scope: config
+    purpose: Detect YAML/JSON references
+  - pattern: \.(id|arn|name|address)\s*$
+    type: regex
+    scope: config
+    purpose: Detect resource attribute references
+  file_patterns:
+  - glob: '**/terraform/**/*.tf'
+    purpose: Terraform configurations with dependencies
+  - glob: '**/k8s/**/*.yaml'
+    purpose: Kubernetes manifests with dependencies
+  - glob: '**/docker-compose*.yaml'
+    purpose: Docker Compose with service dependencies
+  - glob: '**/dependencies.*'
+    purpose: Explicit dependency files
+knowledge_sources:
+  specifications:
+  - id: itil-cmdb-relationships
+    name: ITIL CMDB Relationship Types
+    url: https://www.axelos.com/best-practice-solutions/itil
+    offline_cache: true
+    priority: required
+  - id: terraform-dependencies
+    name: Terraform Resource Dependencies
+    url: https://developer.hashicorp.com/terraform/language/resources/behavior#resource-dependencies
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: k8s-dependencies
+    name: Kubernetes Resource Dependencies
+    url: https://kubernetes.io/docs/concepts/workloads/pods/init-containers/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: terraform-graph
+    purpose: Generate Terraform dependency graph
+    offline_capable: true
+  - tool: custom-dependency-analyzer
+    purpose: Analyze configuration dependencies
+    offline_capable: true
+  infrastructure_tools:
+  - tool: terraform
+    purpose: Show dependency graph
+    command: terraform graph
+  scripts:
+  - id: dependency-audit
+    language: bash
+    purpose: Audit configuration dependencies
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Configuration Dependency Audit ==="
+      echo ""
+      echo "=== Explicit Dependencies ==="
+      grep -rn "depends_on\|DependsOn\|requires:" \
+        --include="*.tf" --include="*.yaml" --include="*.json" . 2>/dev/null | head -30
+      echo ""
+      echo "=== Variable Interpolations ==="
+      grep -rhoE '\$\{[^}]+\}' --include="*.tf" --include="*.yaml" . 2>/dev/null | \
+        sort | uniq | head -30
+      echo ""
+      echo "=== Configuration Imports ==="
+      grep -rn "import\|include\|source:" \
+        --include="*.yaml" --include="*.tf" . 2>/dev/null | head -30
+signals:
+  critical:
+  - id: CDEP-CRIT-001
+    signal: Circular configuration dependencies detected
+    evidence_indicators:
+    - Config A depends on B, B depends on A
+    - Initialization deadlocks reported
+    - Terraform circular dependency errors
+    explanation: |
+      Circular dependencies prevent proper initialization and create
+      deadlocks. Systems cannot start correctly, and changes become
+      impossible without breaking the cycle manually.
+    remediation: |
+      - Identify and document circular dependencies
+      - Refactor to eliminate cycles
+      - Use dependency injection patterns
+      - Implement lazy initialization where needed
+    cwe: CWE-1060
+  - id: CDEP-CRIT-002
+    signal: Critical service dependencies undocumented
+    evidence_indicators:
+    - Services fail due to missing config dependencies
+    - No dependency graph for production systems
+    - Change impact assessment not possible
+    explanation: |
+      ITIL requires CI relationships for impact analysis. Undocumented
+      critical dependencies result in service failures when changes
+      affect dependent configurations without warning.
+    remediation: |
+      - Map all critical service dependencies
+      - Create dependency graph documentation
+      - Implement dependency validation in deployment
+      - Add dependency documentation to runbooks
+  high:
+  - id: CDEP-HIGH-001
+    signal: Implicit dependencies not tracked
+    evidence_indicators:
+    - Dependencies inferred from naming only
+    - No explicit depends_on declarations
+    - Order-dependent configs without documentation
+    explanation: |
+      Implicit dependencies are fragile and error-prone. They depend
+      on conventions that may not be followed, leading to subtle
+      failures when order changes or names are modified.
+    remediation: |
+      - Convert implicit to explicit dependencies
+      - Add depends_on declarations where supported
+      - Document ordering requirements
+      - Implement dependency validation
+  - id: CDEP-HIGH-002
+    signal: External service dependencies not tracked
+    evidence_indicators:
+    - Third-party API dependencies untracked
+    - SaaS service dependencies undocumented
+    - External DB dependencies implicit
+    explanation: |
+      External dependencies affect availability and change management.
+      Untracked external dependencies create blind spots in impact
+      assessment and incident response.
+    remediation: |
+      - Document all external service dependencies
+      - Track external config requirements
+      - Include external deps in change impact
+      - Monitor external dependency health
+  - id: CDEP-HIGH-003
+    signal: Cross-environment dependencies exist
+    evidence_indicators:
+    - Production depends on staging resources
+    - Environment-crossing configuration references
+    - Shared resources across environments
+    explanation: |
+      Cross-environment dependencies violate environment isolation.
+      Changes in one environment unexpectedly affect others, and
+      environment promotion becomes dangerous.
+    remediation: |
+      - Eliminate cross-environment dependencies
+      - Ensure each environment is self-contained
+      - Use environment-specific resource naming
+      - Validate environment isolation
+  medium:
+  - id: CDEP-MED-001
+    signal: Dependency graph not visualized
+    evidence_indicators:
+    - No dependency diagram available
+    - Dependencies documented in text only
+    - Complex dependencies hard to understand
+    explanation: |
+      Visualization aids understanding of complex dependencies.
+      Text-only documentation makes it difficult to see relationships
+      and identify potential issues like long chains or hubs.
+    remediation: |
+      - Generate dependency graph visualization
+      - Include diagrams in documentation
+      - Use tools like Terraform graph
+      - Update visualizations with changes
+  - id: CDEP-MED-002
+    signal: Optional dependencies not distinguished
+    evidence_indicators:
+    - No soft/hard dependency distinction
+    - All dependencies treated as required
+    - Graceful degradation not supported
+    explanation: |
+      Distinguishing required from optional dependencies enables
+      graceful degradation. Without this distinction, systems fail
+      completely even for non-critical missing dependencies.
+    remediation: |
+      - Classify dependencies as required or optional
+      - Implement fallbacks for optional deps
+      - Document degraded behavior
+      - Test with missing optional dependencies
+  - id: CDEP-MED-003
+    signal: Dependency versions not tracked
+    evidence_indicators:
+    - No version compatibility documentation
+    - Dependencies assumed to be latest
+    - Breaking changes in dependencies not tracked
+    explanation: |
+      Version-specific dependencies require tracking to prevent
+      compatibility issues. Without version tracking, updates may
+      break functionality silently.
+    remediation: |
+      - Document version requirements for dependencies
+      - Track compatibility matrices
+      - Implement version validation
+      - Test dependency updates before deployment
+  low:
+  - id: CDEP-LOW-001
+    signal: Dependency documentation fragmented
+    evidence_indicators:
+    - Dependencies documented in multiple locations
+    - No single source of truth
+    - Inconsistent dependency information
+    explanation: |
+      Fragmented documentation creates inconsistencies and makes
+      dependency information hard to find. Consolidation improves
+      maintainability and accuracy.
+    remediation: |
+      - Consolidate dependency documentation
+      - Create single source of truth
+      - Link from configs to dependency docs
+      - Keep documentation synchronized
+  positive:
+  - id: CDEP-POS-001
+    signal: Comprehensive dependency mapping
+    evidence_indicators:
+    - All dependencies explicitly declared
+    - Dependency graph generated and maintained
+    - Change impact analysis uses dependency data
+  - id: CDEP-POS-002
+    signal: Automated dependency validation
+    evidence_indicators:
+    - CI/CD validates dependency satisfaction
+    - Circular dependency detection automated
+    - Dependency health monitoring active
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Explicit Dependency Discovery
+    description: |
+      Identify explicitly declared dependencies in configurations.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find Terraform dependencies
+      command: |
+        grep -rn "depends_on" --include="*.tf" . 2>/dev/null | head -30
+    - purpose: Find Docker Compose dependencies
+      command: |
+        grep -rn "depends_on:" --include="docker-compose*" . 2>/dev/null | head -20
+    - purpose: Find Kubernetes init containers (dependencies)
+      command: |
+        grep -rn "initContainers:" --include="*.yaml" . 2>/dev/null | head -20
+    expected_findings:
+    - Explicit dependency declarations
+    - Infrastructure dependencies
+    - Container dependencies
+  - id: '2'
+    name: Implicit Dependency Analysis
+    description: |
+      Analyze implicit dependencies through variable interpolation.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find variable interpolations
+      command: |
+        grep -rhoE '\$\{[^}]+\}' --include="*.tf" . 2>/dev/null | sort | uniq | head -50
+    - purpose: Find resource references
+      command: |
+        grep -rhoE '[a-z_]+\.[a-z_]+\.(id|arn|name|address)' \
+          --include="*.tf" . 2>/dev/null | sort | uniq | head -30
+    - purpose: Find environment variable references
+      command: |
+        grep -rhoE 'process\.env\.[A-Z_]+|os\.environ\[[^\]]+\]' \
+          --include="*.js" --include="*.py" . 2>/dev/null | sort | uniq | head -30
+    expected_findings:
+    - Variable interpolation patterns
+    - Resource reference chains
+    - Environment variable dependencies
+  - id: '3'
+    name: Circular Dependency Detection
+    description: |
+      Check for circular dependencies that could cause deadlocks.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Generate Terraform dependency graph
+      command: |
+        if command -v terraform &>/dev/null; then
+          terraform graph 2>/dev/null | head -100
+        else
+          echo "Terraform not available"
+        fi
+    - purpose: Look for mutual references
+      command: |
+        grep -rn "depends_on.*depends_on" --include="*.tf" . 2>/dev/null | head -10
+    expected_findings:
+    - Dependency graph structure
+    - Potential circular dependencies
+    - Deep dependency chains
+  - id: '4'
+    name: External Dependency Mapping
+    description: |
+      Map dependencies on external services and resources.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find external API references
+      command: |
+        grep -rn "(api\.|endpoint|url).*http" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | head -30
+    - purpose: Find external service configurations
+      command: |
+        grep -rn "(redis|mongo|postgres|mysql|aws|gcp|azure).*host\|endpoint" \
+          --include="*.yaml" --include="*.env*" . 2>/dev/null | head -30
+    expected_findings:
+    - External API dependencies
+    - Database dependencies
+    - Cloud service dependencies
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Dependency Mapping Results
+    - Circular Dependency Analysis
+    - Recommendations
+  - type: dependency_graph
+    format: diagram
+    description: Visual representation of configuration dependencies
+  confidence_guidance:
+    high: Dependencies explicitly declared and verified
+    medium: Dependencies inferred from patterns
+    low: Potential dependencies requiring manual validation
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: itil-cmdb-relationships
+      priority: required
+    - source_id: terraform-dependencies
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Dependency analysis requires comprehensive review
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cdep-001
+  item: No circular dependencies exist
+  level: CRITICAL
+  verification: |
+    terraform graph 2>/dev/null | grep -E "cycle|circular" && \
+      echo "FAIL" || echo "PASS"
+  expected: PASS
+- id: cdep-002
+  item: Critical dependencies documented
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify production service dependencies are mapped
+  expected: Confirmed by reviewer
+- id: cdep-003
+  item: Dependency graph available
+  level: WARNING
+  verification: manual
+  verification_notes: Verify dependency visualization exists
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ITIL
+    controls:
+    - Configuration Management
+    - CMDB Relationships
+  - framework: CMMI
+    controls:
+    - CM SP 1.2
+  - framework: ISO 27001
+    controls:
+    - A.8.9
+    - A.8.10
+relationships:
+  commonly_combined:
+  - configuration-management.configuration-identification.config-discovery
+  - configuration-management.configuration-control.change-control
+  - configuration-management.configuration-verification.drift-detection

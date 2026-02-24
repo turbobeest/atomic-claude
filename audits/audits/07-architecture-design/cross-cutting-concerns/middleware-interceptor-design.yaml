@@ -1,0 +1,364 @@
+# ============================================================
+# AUDIT: Middleware and Interceptor Design Assessment
+# ============================================================
+# Evaluates the design and implementation of middleware chains
+# and interceptor patterns for cross-cutting concerns.
+# ============================================================
+
+audit:
+  id: "architecture-design.cross-cutting-concerns.middleware-interceptor-design"
+  name: "Middleware and Interceptor Design Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "cross-cutting-concerns"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates the design of middleware chains and interceptor
+    patterns used to implement cross-cutting concerns. It assesses
+    ordering, composability, error handling, and proper separation
+    of concerns in middleware/interceptor implementations.
+
+  why_it_matters: |
+    Poor middleware/interceptor design causes:
+    - Order-dependent bugs that are hard to diagnose
+    - Performance issues from unnecessary processing
+    - Error handling gaps in the chain
+    - Difficulty understanding request flow
+    - Tight coupling between middleware components
+    Good design enables composable, understandable concern handling.
+
+  when_to_run:
+    - "When implementing middleware pipelines"
+    - "When experiencing mysterious request issues"
+    - "During API gateway or filter design"
+    - "When middleware chains grow complex"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Middleware and interceptor source code"
+    - type: "configuration"
+      description: "Middleware ordering configuration"
+
+  access_requirements:
+    - "Read access to source code"
+
+discovery:
+  code_patterns:
+    - pattern: "Interceptor|Filter|Middleware|Handler"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find middleware implementations"
+
+    - pattern: "@Order|addFilter|use\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find middleware registration"
+
+    - pattern: "next\\(|chain\\.doFilter|proceed"
+      type: "regex"
+      scope: "source"
+      purpose: "Find chain invocation patterns"
+
+  file_patterns:
+    - glob: "**/*Interceptor*.{java,ts}"
+      purpose: "Interceptor implementations"
+    - glob: "**/*Filter*.{java,ts}"
+      purpose: "Filter implementations"
+    - glob: "**/*Middleware*.{ts,js}"
+      purpose: "Middleware implementations"
+
+knowledge_sources:
+  specifications:
+    - id: "chain-of-responsibility"
+      name: "Chain of Responsibility Pattern"
+      url: "https://refactoring.guru/design-patterns/chain-of-responsibility"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "middleware-patterns"
+      name: "Middleware Design Patterns"
+      url: "https://expressjs.com/en/guide/using-middleware.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "design-patterns"
+      title: "Design Patterns"
+      type: "book"
+      reference: "Gang of Four"
+
+tooling:
+  static_analysis:
+    - tool: "SonarQube"
+      purpose: "Detect middleware issues"
+      offline_capable: false
+
+  scripts:
+    - id: "middleware-analyzer"
+      language: "bash"
+      purpose: "Analyze middleware patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Filter Implementations ==="
+        find . -name "*Filter*.java" | head -20
+
+        echo "=== Interceptor Implementations ==="
+        find . -name "*Interceptor*.java" | head -20
+
+        echo "=== Middleware Implementations ==="
+        find . \( find . -name "*Middleware*.ts" -o -name "*Middleware*.js" \) | head -20
+
+        echo "=== Order Annotations ==="
+        grep -rn "@Order\|addFilter\|use(" --include="*.java" --include="*.ts" | head -30
+
+signals:
+  critical:
+    - id: "MIDDLE-CRIT-001"
+      signal: "Middleware order-dependent bug potential"
+      evidence_pattern: "Authentication after logging that expects user context"
+      explanation: |
+        When middleware depends on previous middleware output without
+        explicit ordering guarantee, subtle bugs can occur when order changes.
+      remediation: "Make ordering explicit; document dependencies; test order"
+
+    - id: "MIDDLE-CRIT-002"
+      signal: "Error in middleware breaks entire chain"
+      evidence_pattern: "Middleware throws without calling next()"
+      explanation: |
+        Middleware that throws without proper error handling can break
+        the entire request pipeline, including cleanup middleware.
+      remediation: "Use try-finally; ensure cleanup middleware runs; centralize error handling"
+
+  high:
+    - id: "MIDDLE-HIGH-001"
+      signal: "Middleware with hidden side effects"
+      evidence_pattern: "Middleware modifies request/response without documentation"
+      explanation: |
+        Middleware that silently modifies requests makes debugging difficult.
+        Later middleware receives unexpected state.
+      remediation: "Document all modifications; use clear naming; log changes"
+
+    - id: "MIDDLE-HIGH-002"
+      signal: "Long middleware chain without visibility"
+      evidence_pattern: "10+ middleware without tracing or documentation"
+      explanation: |
+        Long chains without visibility make request flow impossible to
+        understand or debug.
+      remediation: "Add request tracing; document middleware sequence"
+
+  medium:
+    - id: "MIDDLE-MED-001"
+      signal: "Middleware doing too much"
+      evidence_pattern: "Single middleware handles logging, auth, and validation"
+      remediation: "Split into focused single-concern middleware"
+
+    - id: "MIDDLE-MED-002"
+      signal: "Async middleware without timeout"
+      evidence_pattern: "Middleware awaits external call without timeout"
+      remediation: "Add timeouts to all async operations in middleware"
+
+  low:
+    - id: "MIDDLE-LOW-001"
+      signal: "Inconsistent middleware naming"
+      remediation: "Standardize naming convention (AuthMiddleware, LoggingFilter)"
+
+  positive:
+    - id: "MIDDLE-POS-001"
+      signal: "Explicit middleware ordering"
+    - id: "MIDDLE-POS-002"
+      signal: "Single-concern middleware components"
+    - id: "MIDDLE-POS-003"
+      signal: "Request tracing through chain"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory middleware/interceptors"
+      description: |
+        Catalog all middleware and interceptors in the system.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find filters"
+          command: "find . -name '*Filter*.java' -o -name '*Filter*.ts' | head -20"
+        - purpose: "Find interceptors"
+          command: "find . -name '*Interceptor*.java' -o -name '*Handler*.ts' | head -20"
+        - purpose: "Find middleware"
+          command: "find . -name '*Middleware*.ts' -o -name '*middleware*.js' | head -20"
+      expected_findings:
+        - "Middleware inventory"
+        - "Implementation patterns"
+
+    - id: "2"
+      name: "Analyze ordering"
+      description: |
+        Check how middleware ordering is defined and whether
+        it's explicit.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find order definitions"
+          command: "grep -rn '@Order\\|getOrder\\|priority' --include='*Filter*.java' --include='*Interceptor*.java' | head -30"
+        - purpose: "Find registration order"
+          command: "grep -rn 'addFilter\\|addInterceptor\\|use(' --include='*.java' --include='*.ts' | head -30"
+      expected_findings:
+        - "Ordering mechanism"
+        - "Order conflicts"
+
+    - id: "3"
+      name: "Review error handling"
+      description: |
+        Check how errors in middleware are handled and whether
+        the chain continues appropriately.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find try-catch in middleware"
+          command: "grep -rn 'try.*{' --include='*Filter*.java' --include='*Middleware*.ts' | head -30"
+        - purpose: "Find error handlers"
+          command: "grep -rn 'ErrorHandler\\|@ExceptionHandler\\|catch' --include='*Filter*.java' --include='*Middleware*.ts' | head -30"
+      expected_findings:
+        - "Error handling coverage"
+        - "Chain continuation patterns"
+
+    - id: "4"
+      name: "Assess middleware responsibilities"
+      description: |
+        Evaluate whether each middleware has a single,
+        clear responsibility.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Sample middleware implementation"
+          command: "for f in $(find . -name '*Filter*.java' | head -3); do echo \"=== $f ===\"; wc -l $f; done"
+      expected_findings:
+        - "Responsibility clarity"
+        - "Potential splits"
+
+    - id: "5"
+      name: "Document chain flow"
+      description: |
+        Map the complete middleware chain to understand
+        request flow.
+      duration_estimate: "20 min"
+      questions:
+        - "What's the complete middleware sequence?"
+        - "Are dependencies between middleware documented?"
+        - "Is the flow traceable in logs?"
+      expected_findings:
+        - "Chain documentation"
+        - "Visibility recommendations"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "middleware_chain_diagram"
+      format: "visual"
+      sections:
+        - "Chain Sequence"
+        - "Dependencies"
+        - "Error Paths"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Middleware Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear design issue identified"
+    medium: "Pattern suggests improvement needed"
+    low: "Minor enhancement opportunity"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "chain-of-responsibility"
+        priority: "required"
+      - source_id: "middleware-patterns"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "middle-001"
+    item: "Middleware ordering is explicit"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "@Order or equivalent on all middleware"
+    expected: "Confirmed by reviewer"
+
+  - id: "middle-002"
+    item: "Error handling doesn't break chain"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Errors handled; cleanup middleware runs"
+    expected: "Confirmed by reviewer"
+
+  - id: "middle-003"
+    item: "Middleware have single responsibility"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Each middleware does one thing"
+    expected: "Confirmed by reviewer"
+
+  - id: "middle-004"
+    item: "Middleware chain documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Sequence and dependencies documented"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web", "api", "all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Reliability"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.cross-cutting-concerns.cross-cutting-concern-handling"
+    - "architecture-design.cross-cutting-concerns.aspect-separation"
+    - "architecture-design.design-principles.single-responsibility"

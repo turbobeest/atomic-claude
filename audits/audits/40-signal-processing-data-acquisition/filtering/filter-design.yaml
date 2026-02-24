@@ -1,0 +1,323 @@
+audit:
+  id: signal-processing-data-acquisition.filtering.filter-design
+  name: Filter Design Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: filtering
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates digital filter design and implementation
+    for signal processing applications. It examines:
+    - Filter type selection (FIR vs IIR, lowpass/highpass/bandpass)
+    - Frequency response meets requirements
+    - Passband ripple and stopband attenuation
+    - Filter order vs. computational cost trade-offs
+    - Design method appropriateness
+    - Implementation verification
+  why_it_matters: |
+    Filter design directly affects signal processing quality:
+    - Incorrect cutoff frequencies corrupt signal content
+    - Inadequate attenuation allows interference through
+    - Excessive order wastes computational resources
+    - Poor design can introduce artifacts and distortion
+    - FIR vs IIR choice affects phase and stability
+
+    Well-designed filters enable accurate signal analysis while
+    poorly designed filters corrupt the very signals they should enhance.
+  when_to_run:
+  - Filter design review
+  - Signal processing system development
+  - Performance optimization
+  - Filter specification verification
+  - System validation
+prerequisites:
+  required_artifacts:
+  - type: filter_specification
+    description: Filter requirements and specifications
+  - type: source_code
+    description: Filter implementation code
+  - type: design_documentation
+    description: Filter design documentation
+  access_requirements:
+  - Access to filter source code
+  - Filter design specifications
+  - Signal processing tools for analysis
+discovery:
+  code_patterns:
+  - pattern: (filter|filt)_(coeff|coefficients|taps)
+    type: regex
+    scope: source
+    purpose: Detect filter coefficients
+  - pattern: (fir|iir|lowpass|highpass|bandpass|notch)
+    type: regex
+    scope: source
+    purpose: Detect filter type
+  - pattern: (butter|cheby|bessel|ellip|remez|firwin)
+    type: regex
+    scope: source
+    purpose: Detect filter design method
+  - pattern: (cutoff|fc|corner)_(freq|frequency)
+    type: regex
+    scope: source
+    purpose: Detect cutoff frequency
+  file_patterns:
+  - glob: '**/filter*.{c,h,cpp,py}'
+    purpose: Filter implementation files
+  - glob: '**/*coeff*.{h,json,csv}'
+    purpose: Filter coefficient files
+  - glob: '**/dsp*.{c,h,cpp,py}'
+    purpose: DSP implementation files
+knowledge_sources:
+  specifications:
+  - id: oppenheim-dsp
+    name: Discrete-Time Signal Processing
+    url: https://www.pearson.com/store/p/discrete-time-signal-processing/P100000298298
+    offline_cache: true
+    priority: required
+  guides:
+  - id: scipy-filter-design
+    name: SciPy Filter Design Guide
+    url: https://docs.scipy.org/doc/scipy/reference/signal.html
+    offline_cache: true
+  - id: ti-digital-filters
+    name: Texas Instruments Digital Filter Guide
+    url: https://www.ti.com/lit/an/spra669/spra669.pdf
+    offline_cache: true
+tooling:
+  scripts:
+  - id: filter-scanner
+    language: bash
+    purpose: Scan for filter implementations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Filter Implementation Scan ==="
+      grep -rniE "(filter|fir|iir|lowpass|highpass)" \
+        --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -40
+signals:
+  critical:
+  - id: FLT-CRIT-001
+    signal: Filter cutoff frequency incorrect for application
+    evidence_indicators:
+    - Cutoff removes desired signal content
+    - Cutoff allows unwanted interference
+    - Cutoff doesn't match specification
+    explanation: |
+      Incorrect cutoff frequency either removes signal of interest
+      or allows interference through. This fundamentally corrupts
+      the filtered signal and invalidates downstream processing.
+    remediation: |
+      - Verify cutoff against signal bandwidth requirements
+      - Recalculate filter coefficients for correct cutoff
+      - Test filter with known signals at cutoff
+      - Document cutoff frequency and rationale
+    cwe: CWE-682
+  - id: FLT-CRIT-002
+    signal: Unstable IIR filter implementation
+    evidence_indicators:
+    - Filter output grows unbounded
+    - Poles outside unit circle
+    - Oscillation in filter output
+    explanation: |
+      IIR filter instability causes output to grow without bound,
+      corrupting data and potentially causing overflow. This is
+      a fundamental design failure that must be corrected.
+    remediation: |
+      - Verify all poles inside unit circle
+      - Use stable filter design method
+      - Consider FIR for guaranteed stability
+      - Implement coefficient scaling for stability
+    cwe: CWE-682
+  high:
+  - id: FLT-HIGH-001
+    signal: Stopband attenuation insufficient
+    evidence_indicators:
+    - Interference visible in filter output
+    - Stopband attenuation < requirement
+    - Filter order too low
+    explanation: |
+      Insufficient stopband attenuation allows unwanted signals
+      through the filter, degrading signal-to-interference ratio.
+      Higher order or different filter type may be needed.
+    remediation: |
+      - Increase filter order for more attenuation
+      - Use elliptic filter for maximum stopband attenuation
+      - Cascade multiple filter stages
+      - Verify attenuation meets requirements
+  - id: FLT-HIGH-002
+    signal: Passband ripple distorting signal
+    evidence_indicators:
+    - Amplitude variation across passband
+    - Chebyshev or elliptic filter with excessive ripple
+    - Signal distortion in passband
+    explanation: |
+      Passband ripple causes frequency-dependent amplitude
+      distortion. For precision applications or waveform fidelity,
+      ripple must be minimized.
+    remediation: |
+      - Use Butterworth or Bessel for flat passband
+      - Reduce ripple specification if using Chebyshev
+      - Accept higher order for flatter response
+      - Document acceptable ripple level
+  medium:
+  - id: FLT-MED-001
+    signal: Filter type inappropriate for application
+    evidence_indicators:
+    - IIR where linear phase required
+    - FIR where low latency required
+    - Filter type not optimized for constraints
+    explanation: |
+      Different filter types have different trade-offs. FIR provides
+      linear phase but higher latency; IIR is efficient but has
+      nonlinear phase. Mismatched selection compromises performance.
+    remediation: |
+      - Use FIR for linear phase requirements
+      - Use IIR for computational efficiency
+      - Document selection rationale
+      - Consider application-specific trade-offs
+  - id: FLT-MED-002
+    signal: Filter order not optimized
+    evidence_indicators:
+    - Excessive order wasting computation
+    - Order insufficient for requirements
+    - No analysis of order vs. specification
+    explanation: |
+      Filter order affects both performance and computation.
+      Under-specifying order fails to meet requirements;
+      over-specifying wastes resources and adds latency.
+    remediation: |
+      - Calculate minimum order for requirements
+      - Add small margin for robustness
+      - Document order selection analysis
+      - Consider computational constraints
+  low:
+  - id: FLT-LOW-001
+    signal: Filter design not documented
+    evidence_indicators:
+    - No design specification
+    - Coefficient origin unknown
+    - Design method not recorded
+    explanation: |
+      Undocumented filter design makes verification and
+      maintenance difficult. Coefficients cannot be validated
+      or regenerated without design information.
+    remediation: |
+      - Document filter specifications
+      - Record design method and tools
+      - Include coefficient generation script
+      - Maintain design rationale
+  positive:
+  - id: FLT-POS-001
+    signal: Well-documented filter design with verification
+    evidence_indicators:
+    - Complete design documentation
+    - Verified frequency response
+    - Appropriate type for application
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: dsp-engineer
+  steps:
+  - id: '1'
+    name: Filter Configuration Review
+    description: |
+      Review filter implementation and configuration.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find filter implementations
+      command: |
+        grep -rniE "(filter|fir|iir)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    - purpose: Find filter coefficients
+      command: |
+        grep -rniE "(coeff|taps)" \
+          --include="*.c" --include="*.h" --include="*.json" . 2>/dev/null | head -20
+    expected_findings:
+    - Filter type identification
+    - Coefficient location
+    - Cutoff configuration
+  - id: '2'
+    name: Frequency Response Verification
+    description: |
+      Verify filter meets frequency response requirements.
+    duration_estimate: 45 min
+    manual_verification: true
+    expected_findings:
+    - Cutoff frequency verification
+    - Stopband attenuation measurement
+    - Passband ripple assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Filter Design Analysis
+    - Frequency Response Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 2
+    signal-processing:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: flt-001
+  item: Filter cutoff frequency correct
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify cutoff matches requirements
+  expected: Confirmed by reviewer
+- id: flt-002
+  item: IIR filter stable
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify all poles inside unit circle
+  expected: Confirmed by reviewer
+- id: flt-003
+  item: Filter design documented
+  level: WARNING
+  verification: |
+    find . -name "*filter*" -type f \( -name "*.md" -o -name "*.txt" \) 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - signal-processing
+    - audio-systems
+    - embedded-systems
+    - scientific-instruments
+relationships:
+  commonly_combined:
+  - signal-processing.filtering.filter-stability
+  - signal-processing.filtering.phase-distortion
+  - signal-processing.filtering.filter-coefficient-precision
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

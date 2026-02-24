@@ -1,0 +1,404 @@
+audit:
+  id: cloud-infrastructure.networking.vpc-design
+  name: VPC Design
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: networking
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates Virtual Private Cloud (VPC) architecture including CIDR
+    allocation, subnet design, route tables, internet/NAT gateways,
+    VPC peering, and Transit Gateway configurations. Examines whether
+    network design supports scalability, security, and operational
+    requirements.
+  why_it_matters: |
+    VPC design is foundational to cloud security and scalability.
+    Poor CIDR planning leads to address exhaustion and inability to
+    expand. Missing network segmentation allows lateral movement during
+    security breaches. Incorrect routing causes outages or data exposure.
+    Well-designed VPCs enable security, compliance, and operational
+    efficiency.
+  when_to_run:
+  - Initial cloud architecture reviews
+  - Before major expansions
+  - Security assessments
+  - Multi-account strategy planning
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to VPC configurations
+  - type: network_requirements
+    description: IP addressing and connectivity requirements
+  access_requirements:
+  - VPC configuration access
+  - Route table access
+  - Gateway and endpoint access
+  - Peering and Transit Gateway access
+discovery:
+  code_patterns:
+  - pattern: 0\.0\.0\.0/0.*igw-
+    type: regex
+    scope: config
+    purpose: Find public route table entries
+  file_patterns:
+  - glob: '**/terraform/**/*vpc*.tf'
+    purpose: Find Terraform VPC configurations
+  - glob: '**/terraform/**/*network*.tf'
+    purpose: Find network configurations
+  - glob: '**/cloudformation/**/*network*.yaml'
+    purpose: Find CloudFormation network templates
+knowledge_sources:
+  specifications:
+  - id: aws-vpc-docs
+    name: AWS VPC Documentation
+    url: https://docs.aws.amazon.com/vpc/
+    offline_cache: true
+    priority: required
+  - id: rfc1918
+    name: RFC 1918 - Private Address Space
+    url: https://tools.ietf.org/html/rfc1918
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: 'NIST SP 800-207: Zero Trust Architecture'
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-vpc-best-practices
+    name: AWS VPC Best Practices
+    url: https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-best-practices.html
+    offline_cache: true
+  - id: aws-network-architecture
+    name: AWS Network Architecture Patterns
+    url: https://docs.aws.amazon.com/whitepapers/latest/aws-vpc-connectivity-options/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: List VPCs and subnets
+    command: aws ec2 describe-vpcs
+  - tool: AWS CLI
+    purpose: List route tables
+    command: aws ec2 describe-route-tables
+  - tool: AWS CLI
+    purpose: List VPC endpoints
+    command: aws ec2 describe-vpc-endpoints
+  - tool: AWS CLI
+    purpose: List Transit Gateway attachments
+    command: aws ec2 describe-transit-gateway-attachments
+  scripts:
+  - id: vpc-analyzer
+    language: bash
+    purpose: Analyze VPC design and configuration
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== VPC Design Analysis ==="
+
+      # List all VPCs
+      echo "VPCs:"
+      aws ec2 describe-vpcs \
+        --query 'Vpcs[].{ID:VpcId,CIDR:CidrBlock,Default:IsDefault,Name:Tags[?Key==`Name`].Value|[0]}' \
+        --output table
+
+      # Subnet distribution
+      echo ""
+      echo "Subnets by VPC:"
+      for vpc in $(aws ec2 describe-vpcs --query 'Vpcs[].VpcId' --output text); do
+        echo "--- VPC: $vpc ---"
+        aws ec2 describe-subnets \
+          --filters "Name=vpc-id,Values=$vpc" \
+          --query 'Subnets[].{CIDR:CidrBlock,AZ:AvailabilityZone,Public:MapPublicIpOnLaunch,Name:Tags[?Key==`Name`].Value|[0]}' \
+          --output table
+      done
+
+      # Internet Gateways
+      echo ""
+      echo "Internet Gateways:"
+      aws ec2 describe-internet-gateways \
+        --query 'InternetGateways[].{ID:InternetGatewayId,VPC:Attachments[0].VpcId}' \
+        --output table
+
+      # NAT Gateways
+      echo ""
+      echo "NAT Gateways:"
+      aws ec2 describe-nat-gateways \
+        --query 'NatGateways[].{ID:NatGatewayId,VPC:VpcId,State:State,Subnet:SubnetId}' \
+        --output table
+
+      # VPC Endpoints
+      echo ""
+      echo "VPC Endpoints:"
+      aws ec2 describe-vpc-endpoints \
+        --query 'VpcEndpoints[].{ID:VpcEndpointId,Service:ServiceName,Type:VpcEndpointType,VPC:VpcId}' \
+        --output table
+signals:
+  critical:
+  - id: VPC-CRIT-001
+    signal: VPC CIDR too small for growth requirements
+    evidence_threshold: VPC CIDR < /20 for production workloads
+    explanation: |
+      Small VPC CIDRs cannot accommodate growth in subnets or instances.
+      CIDR cannot be easily changed after VPC creation. A /20 provides
+      only 4,096 addresses before subnetting.
+    remediation: Plan VPC CIDRs at /16 for flexibility; create new VPC if exhausted
+  - id: VPC-CRIT-002
+    signal: Overlapping CIDR blocks across VPCs
+    evidence_pattern: Same CIDR in multiple VPCs that need connectivity
+    explanation: |
+      Overlapping CIDRs prevent VPC peering and Transit Gateway
+      connectivity. This is a fundamental design flaw that's expensive
+      to remediate.
+    remediation: Implement IP Address Management (IPAM) and readdress overlapping VPCs
+  - id: VPC-CRIT-003
+    signal: Production resources in default VPC
+    evidence_pattern: 'Workloads running in VPC with IsDefault: true'
+    explanation: |
+      Default VPCs have permissive configurations and shared
+      infrastructure. Production workloads should use purpose-built
+      VPCs with appropriate security controls.
+    remediation: Migrate production workloads to dedicated VPCs
+  high:
+  - id: VPC-HIGH-001
+    signal: Single NAT Gateway for multiple AZs
+    evidence_pattern: One NAT Gateway serving subnets in multiple AZs
+    explanation: |
+      Single NAT Gateway is a single point of failure. AZ failure
+      will break outbound connectivity for all private subnets.
+    remediation: Deploy NAT Gateway per AZ for high availability
+  - id: VPC-HIGH-002
+    signal: No VPC Flow Logs enabled
+    evidence_pattern: VPCs without flow log configuration
+    explanation: |
+      Without flow logs, network traffic cannot be analyzed for
+      security incidents, troubleshooting, or compliance audits.
+    remediation: Enable VPC Flow Logs for all VPCs
+  - id: VPC-HIGH-003
+    signal: Missing VPC endpoints for AWS services
+    evidence_indicators:
+    - S3/DynamoDB traffic going through NAT Gateway
+    - No gateway endpoints for S3/DynamoDB
+    explanation: |
+      Without VPC endpoints, AWS service traffic traverses NAT
+      Gateway or internet, incurring unnecessary costs and latency.
+    remediation: Create gateway endpoints for S3 and DynamoDB at minimum
+  medium:
+  - id: VPC-MED-001
+    signal: Subnet sizing not aligned with workload requirements
+    remediation: Right-size subnets based on expected instance counts
+  - id: VPC-MED-002
+    signal: No consistent naming/tagging for network resources
+    remediation: Implement tagging strategy for network resources
+  - id: VPC-MED-003
+    signal: Transit Gateway not used for hub-spoke topology
+    remediation: Consider Transit Gateway for simplified multi-VPC connectivity
+  low:
+  - id: VPC-LOW-001
+    signal: VPC architecture not documented
+    remediation: Create and maintain network architecture diagrams
+  positive:
+  - id: VPC-POS-001
+    signal: Well-planned CIDR hierarchy with room for growth
+  - id: VPC-POS-002
+    signal: NAT Gateway per AZ for high availability
+  - id: VPC-POS-003
+    signal: VPC endpoints for AWS service access
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: VPC Inventory
+    description: |
+      Collect complete inventory of VPCs, subnets, and CIDR allocations
+      across all accounts and regions.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all VPCs
+      command: aws ec2 describe-vpcs --query 'Vpcs[].{ID:VpcId,CIDR:CidrBlock,Default:IsDefault,Name:Tags[?Key==`Name`].Value|[0]}'
+        --output table
+    - purpose: List subnets
+      command: aws ec2 describe-subnets --query 'Subnets[].{VPC:VpcId,CIDR:CidrBlock,AZ:AvailabilityZone,Public:MapPublicIpOnLaunch}'
+        --output table
+    expected_findings:
+    - Complete VPC inventory
+    - CIDR allocation map
+  - id: '2'
+    name: Routing Analysis
+    description: |
+      Analyze route tables for proper segmentation, internet access
+      controls, and internal routing.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List route tables with routes
+      command: aws ec2 describe-route-tables --query 'RouteTables[].{ID:RouteTableId,VPC:VpcId,Routes:Routes[].{Dest:DestinationCidrBlock,Target:GatewayId||NatGatewayId||TransitGatewayId}}'
+        --output yaml
+    - purpose: Check for 0.0.0.0/0 routes
+      command: aws ec2 describe-route-tables --query 'RouteTables[].Routes[?DestinationCidrBlock==`0.0.0.0/0`].{GW:GatewayId,NAT:NatGatewayId}'
+        --output table
+    expected_findings:
+    - Internet gateway routes
+    - NAT gateway routes
+    - Cross-VPC routing
+  - id: '3'
+    name: Gateway Assessment
+    description: |
+      Assess internet gateway, NAT gateway, and VPC endpoint
+      configurations for availability and cost.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List NAT Gateways
+      command: aws ec2 describe-nat-gateways --query 'NatGateways[].{ID:NatGatewayId,VPC:VpcId,Subnet:SubnetId,State:State}'
+        --output table
+    - purpose: List VPC Endpoints
+      command: aws ec2 describe-vpc-endpoints --query 'VpcEndpoints[].{ID:VpcEndpointId,Service:ServiceName,Type:VpcEndpointType}'
+        --output table
+    expected_findings:
+    - NAT Gateway per AZ status
+    - VPC endpoint coverage
+  - id: '4'
+    name: Connectivity Analysis
+    description: |
+      Review VPC peering, Transit Gateway, and VPN configurations
+      for proper connectivity and security.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List VPC peering connections
+      command: aws ec2 describe-vpc-peering-connections --query 'VpcPeeringConnections[].{ID:VpcPeeringConnectionId,Requester:RequesterVpcInfo.VpcId,Accepter:AccepterVpcInfo.VpcId,Status:Status.Code}'
+        --output table
+    - purpose: List Transit Gateway attachments
+      command: aws ec2 describe-transit-gateway-attachments --query 'TransitGatewayAttachments[].{ID:TransitGatewayAttachmentId,TGW:TransitGatewayId,ResourceType:ResourceType,State:State}'
+        --output table
+    expected_findings:
+    - Cross-VPC connectivity map
+    - Transit Gateway usage
+  - id: '5'
+    name: Security and Compliance Review
+    description: |
+      Review VPC configuration for security controls including
+      flow logs, DNS settings, and DHCP options.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check VPC flow logs
+      command: aws ec2 describe-flow-logs --query 'FlowLogs[].{ID:FlowLogId,ResourceId:ResourceId,LogDestination:LogDestinationType,Status:FlowLogStatus}'
+        --output table
+    questions:
+    - Are all VPCs covered by flow logs?
+    - Is DNS resolution configured appropriately?
+    - Are DHCP options appropriate for the environment?
+    expected_findings:
+    - Flow log coverage
+    - Security control gaps
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - VPC Architecture Review
+    - CIDR and Subnet Analysis
+    - Connectivity Assessment
+    - Security Controls
+    - Recommendations
+  - type: diagram
+    format: text
+    contents: VPC architecture diagram
+  confidence_guidance:
+    high: Full access to VPC configurations across all accounts
+    medium: Partial access or single account
+    low: Limited access to configurations
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-vpc-docs
+      priority: required
+    - source_id: aws-vpc-best-practices
+      priority: required
+  limitations:
+  - Cannot access live VPC configurations offline
+  - Route table analysis requires runtime access
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Foundational security assessment
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: vpc-001
+  item: All VPCs inventoried
+  level: CRITICAL
+  verification: aws ec2 describe-vpcs --query 'length(Vpcs)' | grep -qE '[0-9]+' && echo PASS || echo
+    FAIL
+  expected: PASS
+- id: vpc-002
+  item: CIDR overlaps checked
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify no overlapping CIDRs for peered VPCs
+  expected: Confirmed by reviewer
+- id: vpc-003
+  item: VPC Flow Logs verified
+  level: BLOCKING
+  verification: aws ec2 describe-flow-logs --query 'length(FlowLogs)' | xargs -I{} test {} -gt 0 && echo
+    PASS || echo FAIL
+  expected: PASS
+- id: vpc-004
+  item: NAT Gateway HA verified
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm NAT Gateway per AZ for production VPCs
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.6
+  - framework: ISO 27001
+    controls:
+    - A.13.1.1
+    - A.13.1.3
+  - framework: CIS AWS
+    controls:
+    - '5.1'
+    - '5.2'
+    - '5.3'
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.networking.network-segmentation
+  - cloud-infrastructure.networking.network-security-groups
+  - cloud-infrastructure.networking.private-connectivity

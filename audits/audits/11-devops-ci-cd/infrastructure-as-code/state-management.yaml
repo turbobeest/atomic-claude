@@ -1,0 +1,294 @@
+audit:
+  id: devops-ci-cd.infrastructure-as-code.state-management
+  name: State Management
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: devops-ci-cd
+  category_number: 11
+  subcategory: infrastructure-as-code
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates how IaC state is stored, secured, backed up, and managed.
+    Includes assessment of remote state configuration, state locking,
+    state encryption, access controls, and state file organization.
+    Critical for Terraform but applicable to other IaC tools with
+    state concepts.
+  why_it_matters: |
+    IaC state contains sensitive information including resource IDs,
+    connection strings, and sometimes secrets. Corrupted or lost state
+    makes infrastructure unmanageable. Concurrent state modifications
+    without locking can corrupt state. Proper state management is
+    essential for IaC reliability and security.
+  when_to_run:
+  - Initial IaC security audit
+  - When migrating state backends
+  - After state-related incidents
+  - Quarterly security reviews
+prerequisites:
+  required_artifacts:
+  - type: iac_configuration
+    description: Backend configuration for IaC tools
+  - type: state_storage
+    description: Access to state storage location
+  access_requirements:
+  - IaC backend configuration
+  - State storage access for verification
+discovery:
+  code_patterns:
+  - pattern: backend\s+"|terraform_remote_state
+    type: regex
+    scope: config
+    purpose: Terraform backend configuration
+  - pattern: state:|pulumi.*login
+    type: regex
+    scope: config
+    purpose: Pulumi state configuration
+  file_patterns:
+  - glob: '**/backend.tf'
+    purpose: Terraform backend configuration
+  - glob: '**/terraform.tfstate*'
+    purpose: Local state files (should not exist in repo)
+  - glob: '**/Pulumi.*.yaml'
+    purpose: Pulumi stack configurations
+knowledge_sources:
+  guides:
+  - id: terraform-backend
+    name: Terraform Backend Configuration
+    url: https://developer.hashicorp.com/terraform/language/settings/backends
+    offline_cache: true
+  - id: terraform-state-security
+    name: Terraform State Security
+    url: https://developer.hashicorp.com/terraform/language/state/sensitive-data
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: terraform
+    purpose: State inspection and management
+    command: terraform state list
+  - tool: aws s3
+    purpose: S3 backend verification
+    command: aws s3api get-bucket-versioning --bucket STATE_BUCKET
+  scripts:
+  - id: check-state-security
+    language: bash
+    purpose: Verify state backend security
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check for local state files in repo
+      if find . -name '*.tfstate' -not -path './.terraform/*' 2>/dev/null | grep -q .; then
+        echo "FAIL: Local state files found in repository"
+      else
+        echo "PASS: No local state files in repository"
+      fi
+signals:
+  critical:
+  - id: CICD-STATE-CRIT-001
+    signal: State stored locally or in repository
+    explanation: |
+      Local state cannot be shared between team members, is not
+      backed up, and exposes sensitive data in the repository.
+      State files should never be committed to version control.
+    remediation: Configure remote backend (S3, GCS, Azure Blob, Terraform Cloud)
+    evidence_description: '*.tfstate files in git, no remote backend configured'
+  - id: CICD-STATE-CRIT-002
+    signal: State not encrypted at rest
+    evidence_pattern: S3 bucket without server-side encryption
+    explanation: |
+      State files contain sensitive information including resource
+      IDs, IP addresses, and potentially secrets. Unencrypted state
+      exposes this data if storage is compromised.
+    remediation: Enable encryption at rest for state storage
+  high:
+  - id: CICD-STATE-HIGH-001
+    signal: State locking not enabled
+    evidence_pattern: DynamoDB table not configured for S3 backend
+    explanation: |
+      Without state locking, concurrent terraform runs can corrupt
+      state, leading to orphaned resources or incorrect state.
+    remediation: Enable state locking (DynamoDB for S3, native for Terraform Cloud)
+  - id: CICD-STATE-HIGH-002
+    signal: State storage not versioned or backed up
+    evidence_pattern: S3 bucket versioning disabled
+    explanation: |
+      Without versioning, corrupted state cannot be recovered.
+      State versioning provides protection against accidental
+      modification or corruption.
+    remediation: Enable versioning on state storage bucket
+  medium:
+  - id: CICD-STATE-MED-001
+    signal: State access not restricted
+    evidence_pattern: Broad IAM permissions to state bucket
+    remediation: Restrict state access to CI/CD and admins only
+  - id: CICD-STATE-MED-002
+    signal: Multiple environments share single state file
+    evidence_pattern: No workspace or state separation by environment
+    remediation: Use separate state files per environment
+  low:
+  - id: CICD-STATE-LOW-001
+    signal: State file contains unnecessary sensitive data
+  - id: CICD-STATE-LOW-002
+    signal: No state backup beyond storage versioning
+  positive:
+  - id: CICD-STATE-POS-001
+    signal: Remote backend with encryption and locking
+  - id: CICD-STATE-POS-002
+    signal: State access limited to CI/CD pipeline
+  - id: CICD-STATE-POS-003
+    signal: Environment isolation via workspaces or separate state
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review backend configuration
+    description: |
+      Examine IaC backend configuration to understand
+      where and how state is stored.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find backend configuration
+      command: |
+        grep -rA 10 'backend "' --include='*.tf' 2>/dev/null | head -30
+    - purpose: Check for local state files
+      command: |
+        find . -name '*.tfstate' -not -path './.terraform/*' 2>/dev/null
+    expected_findings:
+    - State backend configuration
+  - id: '2'
+    name: Verify encryption
+    description: |
+      Check that state storage has encryption enabled
+      at rest and in transit.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check S3 bucket encryption
+      command: |
+        aws s3api get-bucket-encryption --bucket STATE_BUCKET 2>/dev/null || echo "Check encryption manually"
+    expected_findings:
+    - State encryption status
+  - id: '3'
+    name: Verify locking
+    description: |
+      Confirm that state locking is properly configured
+      to prevent concurrent modifications.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for DynamoDB lock table
+      command: |
+        grep -r 'dynamodb_table' --include='*.tf' 2>/dev/null
+    expected_findings:
+    - State locking configuration
+  - id: '4'
+    name: Check versioning and backup
+    description: |
+      Verify that state storage has versioning enabled
+      for recovery purposes.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check S3 bucket versioning
+      command: |
+        aws s3api get-bucket-versioning --bucket STATE_BUCKET 2>/dev/null || echo "Check versioning manually"
+    expected_findings:
+    - State versioning status
+  - id: '5'
+    name: Review access controls
+    description: |
+      Assess who has access to state storage and
+      whether it's appropriately restricted.
+    duration_estimate: 20 min
+    questions:
+    - Who can read state files?
+    - Who can write state files?
+    - Is access logged?
+    expected_findings:
+    - State access control assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Backend Configuration
+    - Security Assessment
+    - Recommendations
+  confidence_guidance:
+    high: State storage verified with encryption and locking tested
+    medium: Configuration reviewed, storage settings verified
+    low: Based on configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-backend
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires state storage verification
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: state-management-001
+  item: Remote backend configured
+  level: CRITICAL
+  verification: |
+    grep -r 'backend "' --include='*.tf' 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: state-management-002
+  item: No local state files in repository
+  level: CRITICAL
+  verification: |
+    find . -name '*.tfstate' -not -path './.terraform/*' 2>/dev/null | grep -q . && echo "FAIL" || echo "PASS"
+  expected: PASS
+- id: state-management-003
+  item: State locking enabled
+  level: CRITICAL
+  verification: |
+    grep -r 'dynamodb_table\|lock' --include='*.tf' 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: state-management-004
+  item: State storage encrypted
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify encryption at rest on state storage
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.7
+  - framework: CIS
+    controls:
+    - Benchmark
+relationships:
+  commonly_combined:
+  - devops-ci-cd.infrastructure-as-code.drift-detection
+  - devops-ci-cd.infrastructure-as-code.iac-security-scanning

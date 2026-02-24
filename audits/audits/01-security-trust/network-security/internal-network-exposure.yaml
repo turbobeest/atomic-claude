@@ -1,0 +1,451 @@
+audit:
+  id: security-trust.network-security.internal-network-exposure
+  name: Internal Network Exposure Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: network-security
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines internal services exposure to identify services
+    that should be restricted but are accessible more broadly than intended.
+    It covers internal APIs, management interfaces, debugging endpoints,
+    metrics services, and infrastructure components that may be exposed
+    to unintended audiences.
+  why_it_matters: |
+    Internal services often have weaker authentication assuming network
+    isolation provides security. Zero trust principles require that internal
+    services be protected even from other internal systems. Average organizations
+    manage over 500 APIs, many undocumented or untracked. Shadow and zombie
+    APIs remain invisible and exploitable without audits.
+  when_to_run:
+  - Initial security assessment
+  - After infrastructure changes
+  - Zero trust implementation
+  - Following security incidents
+  - Quarterly security review
+prerequisites:
+  required_artifacts:
+  - type: network_diagram
+    description: Network architecture with internal services
+  - type: service_inventory
+    description: List of internal services and APIs
+  - type: access_matrix
+    description: Expected access patterns for services
+  access_requirements:
+  - Internal network access
+  - Service discovery tools
+  - API documentation access
+discovery:
+  code_patterns:
+  - pattern: internal|admin|debug|metrics|health|status
+    type: regex
+    scope: config
+    purpose: Identify internal service endpoints
+  - pattern: bind.*0\.0\.0\.0|listen.*\*|host.*0\.0\.0\.0
+    type: regex
+    scope: config
+    purpose: Find services bound to all interfaces
+  - pattern: pprof|debug|actuator|swagger|graphiql
+    type: regex
+    scope: config
+    purpose: Identify debugging and introspection endpoints
+  file_patterns:
+  - glob: '**/internal-api*.yaml'
+    purpose: Internal API definitions
+  - glob: '**/admin*.conf'
+    purpose: Admin interface configurations
+  - glob: '**/debug*.yaml'
+    purpose: Debug configurations
+knowledge_sources:
+  specifications:
+  - id: nsa-network-infrastructure
+    name: NSA Network Infrastructure Security Guide
+    url: https://media.defense.gov/2022/Jun/15/2003018261/-1/-1/0/CTR_NSA_NETWORK_INFRASTRUCTURE_SECURITY_GUIDE_20220615.PDF
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-api-security
+    name: OWASP API Security Project
+    url: https://owasp.org/www-project-api-security/
+    offline_cache: true
+  - id: isaca-api-audit
+    name: ISACA API Security Audit Guide
+    url: https://www.isaca.org/resources/news-and-trends/isaca-now-blog/2023/api-security-an-internal-auditors-quick-reference
+    offline_cache: true
+  - id: nist-sp-800-228
+    name: NIST SP 800-228 - Guidelines for API Protection
+    url: https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-228.pdf
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: nmap
+    purpose: Scan for exposed internal services
+    command: nmap -sV -p- 10.0.0.0/24
+  - tool: curl
+    purpose: Test internal endpoint access
+    command: curl -v http://internal-service:8080/admin
+  - tool: netstat
+    purpose: List listening services
+    command: netstat -tlnp
+  scripts:
+  - id: internal-exposure-scan
+    language: bash
+    purpose: Scan for common internal endpoints
+    source: inline
+    code: |
+      #!/bin/bash
+      # Test common internal endpoints
+      ENDPOINTS=("/admin" "/debug" "/metrics" "/health" "/actuator" "/swagger" "/graphiql" "/pprof")
+      for host in $@; do
+        for ep in ${ENDPOINTS[@]}; do
+          code=$(curl -s -o /dev/null -w "%{http_code}" "http://$host$ep" 2>/dev/null)
+          [[ $code != "404" && $code != "000" ]] && echo "$host$ep: $code"
+        done
+      done
+signals:
+  critical:
+  - id: INTERNAL-CRIT-001
+    signal: Management interface exposed without authentication
+    cwe_id: CWE-306
+    evidence_indicators:
+    - Admin panels accessible without login
+    - Management APIs have no auth
+    - Database admin tools exposed
+    explanation: |
+      Unauthenticated management interfaces allow attackers to modify
+      configurations, access sensitive data, or take control of systems.
+      This is especially dangerous for internal services that assume
+      network isolation provides security.
+    remediation: Implement authentication on all management interfaces; use network policies
+  - id: INTERNAL-CRIT-002
+    signal: Debug endpoints exposed in production
+    cwe_id: CWE-489
+    evidence_pattern: pprof|debug.*enabled|actuator.*exposed
+    explanation: |
+      Debug endpoints like pprof, actuator, or debug routes expose
+      internal state, enable heap dumps, and may allow code execution.
+      They should never be accessible in production.
+    remediation: Disable debug endpoints in production; use feature flags
+  - id: INTERNAL-CRIT-003
+    signal: Database exposed to all internal networks
+    cwe_id: CWE-284
+    evidence_indicators:
+    - Database port accessible from user segments
+    - No network segmentation for data tier
+    - Database listening on 0.0.0.0
+    explanation: |
+      Databases should only be accessible from application servers that
+      need them. Exposure to broader internal networks increases attack
+      surface dramatically.
+    remediation: Restrict database access to specific application subnets
+  high:
+  - id: INTERNAL-HIGH-001
+    signal: Internal APIs accessible without authentication
+    cwe_id: CWE-306
+    evidence_indicators:
+    - Internal APIs respond without token
+    - Service-to-service auth not enforced
+    - Trust based on network location only
+    explanation: |
+      Internal APIs should require authentication even from other internal
+      services. Zero trust assumes the network is compromised.
+    remediation: Implement mTLS or token-based auth for all internal APIs
+  - id: INTERNAL-HIGH-002
+    signal: Metrics endpoint exposes sensitive information
+    cwe_id: CWE-200
+    evidence_pattern: /metrics.*password|/metrics.*secret|/metrics.*key
+    explanation: |
+      Metrics endpoints may inadvertently expose sensitive data like
+      connection strings, API keys, or internal system details.
+    remediation: Audit metrics for sensitive data; restrict metrics endpoint access
+  - id: INTERNAL-HIGH-003
+    signal: GraphQL/Swagger introspection enabled
+    cwe_id: CWE-200
+    evidence_pattern: introspection.*enabled|swagger.*ui.*enabled
+    explanation: |
+      API introspection allows attackers to discover all available
+      operations and data structures, facilitating further attacks.
+    remediation: Disable introspection in production; implement query allowlists
+  - id: INTERNAL-HIGH-004
+    signal: Shadow APIs discovered
+    cwe_id: CWE-912
+    evidence_indicators:
+    - Undocumented endpoints found
+    - APIs not in service catalog
+    - Legacy endpoints still active
+    explanation: |
+      Shadow APIs are undocumented endpoints that may lack security
+      controls and monitoring. They present significant risk.
+    remediation: Audit and document all APIs; decommission unused endpoints
+  medium:
+  - id: INTERNAL-MED-001
+    signal: Services bound to all interfaces
+    cwe_id: CWE-284
+    evidence_pattern: bind.*0\.0\.0\.0|listen.*\*|INADDR_ANY
+    explanation: |
+      Services bound to 0.0.0.0 are accessible from all network interfaces.
+      Internal services should bind only to internal interfaces.
+    remediation: Bind services to specific internal interfaces only
+  - id: INTERNAL-MED-002
+    signal: Health endpoints expose version information
+    cwe_id: CWE-200
+    evidence_indicators:
+    - Version in health response
+    - Build info exposed
+    - Dependency versions listed
+    explanation: |
+      Version information helps attackers identify known vulnerabilities.
+      Health endpoints should provide minimal information.
+    remediation: Remove version details from health endpoints
+  - id: INTERNAL-MED-003
+    signal: Internal service inventory incomplete
+    evidence_indicators:
+    - Discovered services not in CMDB
+    - No service catalog
+    - Documentation outdated
+    explanation: |
+      Unknown services cannot be properly secured or monitored.
+      Complete inventory is essential for security management.
+    remediation: Implement service discovery and maintain accurate inventory
+  low:
+  - id: INTERNAL-LOW-001
+    signal: Verbose error messages on internal services
+    cwe_id: CWE-209
+    evidence_indicators:
+    - Stack traces in error responses
+    - Database errors exposed
+    - Internal paths revealed
+    explanation: |
+      Verbose errors help attackers understand system internals.
+    remediation: Return generic errors; log details server-side
+  positive:
+  - id: INTERNAL-POS-001
+    signal: All internal APIs require authentication
+    explanation: Zero trust authentication implemented for service-to-service communication
+  - id: INTERNAL-POS-002
+    signal: Complete API inventory with documentation
+    explanation: All APIs documented and tracked in service catalog
+  - id: INTERNAL-POS-003
+    signal: Debug endpoints disabled in production
+    explanation: Production environment hardened against information disclosure
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Service Discovery Scan
+    description: |
+      Perform network scanning to discover all services listening on
+      internal networks, comparing against known inventory.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Scan internal subnet for services
+      command: nmap -sV -p- 10.0.0.0/24 -oN internal-scan.txt
+    - purpose: List Kubernetes services
+      command: kubectl get services -A -o wide
+    - purpose: Compare to service inventory
+      command: diff discovered-services.txt known-services.txt
+    expected_findings:
+    - Complete service inventory
+    - Unknown or undocumented services
+  - id: '2'
+    name: Test Management Interfaces
+    description: |
+      Attempt to access management interfaces without authentication
+      to identify exposed admin panels.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test common admin endpoints
+      command: for ep in admin console dashboard management; do curl -s -o /dev/null -w '%{http_code}
+        ' http://target/$ep; done
+    - purpose: Check for default credentials
+      command: hydra -L users.txt -P pass.txt http://target/admin
+    expected_findings:
+    - Unauthenticated management access
+    - Default credentials
+  - id: '3'
+    name: Audit Debug Endpoints
+    description: |
+      Check for debug, profiling, and introspection endpoints that
+      should be disabled in production.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Test debug endpoints
+      command: curl -v http://target/debug/pprof/
+    - purpose: Check actuator endpoints
+      command: curl http://target/actuator
+    - purpose: Test GraphQL introspection
+      command: 'curl -X POST -H ''Content-Type: application/json'' -d ''{"query":"{__schema{types{name}}}"}''
+        http://target/graphql'
+    expected_findings:
+    - Exposed debug endpoints
+    - Enabled introspection
+  - id: '4'
+    name: Review Service Binding
+    description: |
+      Check what interfaces services are bound to, identifying services
+      exposed more broadly than necessary.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List listening services
+      command: netstat -tlnp | grep -E '0\.0\.0\.0|:::'
+    - purpose: Check Kubernetes service types
+      command: kubectl get services -A -o custom-columns='NAME:.metadata.name,TYPE:.spec.type,EXTERNAL-IP:.status.loadBalancer.ingress'
+    expected_findings:
+    - Services bound to all interfaces
+    - Unexpectedly exposed services
+  - id: '5'
+    name: Test Internal API Authentication
+    description: |
+      Verify that internal APIs require authentication and don't rely
+      solely on network location for security.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test API without auth
+      command: curl -v http://internal-api/v1/users
+    - purpose: Check for auth bypass
+      command: 'curl -v -H ''X-Forwarded-For: 127.0.0.1'' http://internal-api/v1/admin'
+    expected_findings:
+    - APIs requiring authentication
+    - Auth bypass possibilities
+  - id: '6'
+    name: Audit Metrics and Health Endpoints
+    description: |
+      Review metrics and health endpoints for sensitive information
+      disclosure.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Retrieve metrics
+      command: curl http://target/metrics | grep -iE 'password|secret|key|token'
+    - purpose: Check health endpoint
+      command: curl http://target/health | jq .
+    expected_findings:
+    - Sensitive data in metrics
+    - Information disclosure in health checks
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Service Inventory
+    - Exposure Assessment
+    - Shadow API Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct scanning and testing confirms exposure, configuration reviewed
+    medium: Scanning completed without full configuration access
+    low: Based on documentation and interviews only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-api-security
+      priority: required
+    - source_id: nist-sp-800-228
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Internal exposure audit requires comprehensive network scanning
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: internal-001
+  item: No unauthenticated management interfaces
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test all management endpoints require authentication
+  expected: Confirmed by reviewer
+- id: internal-002
+  item: Debug endpoints disabled in production
+  level: CRITICAL
+  verification: curl -s -o /dev/null -w '%{http_code}' http://$HOST/debug/pprof/ | grep -q '404\|403'
+    && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: internal-003
+  item: Database not exposed to user networks
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test database connectivity from user segment
+  expected: Confirmed by reviewer
+- id: internal-004
+  item: Internal APIs require authentication
+  level: BLOCKING
+  verification: curl -s -o /dev/null -w '%{http_code}' http://$INTERNAL_API/v1/resource | grep -q '401\|403'
+    && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: internal-005
+  item: All services documented in inventory
+  level: WARNING
+  verification: manual
+  verification_notes: Compare discovered services against service catalog
+  expected: Confirmed by reviewer
+- id: internal-006
+  item: GraphQL introspection disabled
+  level: WARNING
+  verification: manual
+  verification_notes: Test GraphQL introspection query returns error
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST-CSF
+    controls:
+    - PR.AC-1
+    - PR.AC-4
+    - PR.DS-5
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.3
+  - framework: PCI-DSS
+    controls:
+    - '1.3'
+    - '7.1'
+relationships:
+  commonly_combined:
+  - security-trust.network-security.network-segmentation
+  - security-trust.authentication.api-authentication
+  - security-trust.authorization.access-control

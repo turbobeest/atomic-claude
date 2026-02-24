@@ -1,0 +1,393 @@
+# ============================================================
+# AUDIT: Monolith vs Distributed Architecture Decision
+# ============================================================
+# Evaluates whether the choice between monolithic and distributed
+# architecture is appropriate for the system's needs.
+# ============================================================
+
+audit:
+  id: "architecture-design.system-decomposition.monolith-vs-distributed-decision"
+  name: "Monolith vs Distributed Architecture Decision"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "system-decomposition"
+
+  tier: "expert"
+  estimated_duration: "3-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "architecture"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates whether the architectural style (monolith,
+    modular monolith, or distributed microservices) is appropriate
+    for the system's scale, team structure, and business requirements.
+    It identifies over-distribution or under-distribution relative
+    to actual needs.
+
+  why_it_matters: |
+    Wrong architectural style causes:
+    - Premature microservices: Unnecessary complexity and operational burden
+    - Overdue monolith: Deployment bottlenecks and team scaling issues
+    - Distributed monolith: Worst of both worlds
+    The right choice depends on team size, scale requirements, and
+    organizational structure - not technology trends.
+
+  when_to_run:
+    - "During initial architecture decisions"
+    - "When experiencing scaling pain (either kind)"
+    - "Before major architectural migrations"
+    - "When evaluating microservices adoption"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "System source code"
+    - type: "architecture_documentation"
+      description: "Architecture decision records"
+    - type: "deployment_configuration"
+      description: "Deployment and infrastructure configuration"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Understanding of team structure"
+    - "Business requirements context"
+
+  interviews:
+    - role: "Engineering Leadership"
+      questions:
+        - "What scaling challenges are you experiencing?"
+        - "How many teams work on this system?"
+        - "What's the deployment frequency?"
+      purpose: "Understand organizational context"
+
+discovery:
+  code_patterns:
+    - pattern: "RestTemplate|WebClient|FeignClient|grpc"
+      type: "regex"
+      scope: "source"
+      purpose: "Find inter-service communication"
+
+    - pattern: "@SpringBootApplication|func main\\(\\)|if __name__"
+      type: "regex"
+      scope: "source"
+      purpose: "Find application entry points (service count)"
+
+  file_patterns:
+    - glob: "**/docker-compose.yaml"
+      purpose: "Multi-service composition"
+    - glob: "**/Dockerfile"
+      purpose: "Containerized services"
+    - glob: "**/deployment.yaml"
+      purpose: "Kubernetes deployments"
+
+knowledge_sources:
+  specifications:
+    - id: "monolith-first"
+      name: "MonolithFirst - Martin Fowler"
+      url: "https://martinfowler.com/bliki/MonolithFirst.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "microservices-prerequisites"
+      name: "Microservices Prerequisites"
+      url: "https://martinfowler.com/bliki/MicroservicePrerequisites.html"
+      offline_cache: true
+
+    - id: "modular-monolith"
+      name: "Modular Monolith"
+      url: "https://www.kamilgrzybek.com/design/modular-monolith-primer/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "microservices-patterns"
+      title: "Microservices Patterns"
+      type: "book"
+      reference: "Chris Richardson"
+
+    - id: "building-microservices"
+      title: "Building Microservices"
+      type: "book"
+      reference: "Sam Newman - 2nd Edition"
+
+    - id: "ddd-evans"
+      title: "Domain-Driven Design"
+      type: "book"
+      reference: "Eric Evans"
+
+tooling:
+  static_analysis:
+    - tool: "Structure101"
+      purpose: "Analyze system decomposition"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Analyze service count and relationships"
+      command: "kubectl get services -A | wc -l"
+
+  scripts:
+    - id: "architecture-style-analyzer"
+      language: "bash"
+      purpose: "Assess architecture style indicators"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Service Count ==="
+        find . -name 'Dockerfile' | wc -l
+
+        echo "=== Inter-Service Calls ==="
+        grep -r 'RestTemplate\|FeignClient\|WebClient' --include="*.java" | wc -l
+
+        echo "=== Database Count ==="
+        grep -r 'datasource.url\|DATABASE_URL' --include="*.yaml" --include="*.properties" | wc -l
+
+        echo "=== Shared Libraries ==="
+        find . -name 'pom.xml' -exec grep -l '<packaging>jar</packaging>' {} \; | wc -l
+
+signals:
+  critical:
+    - id: "ARCH-CRIT-001"
+      signal: "Premature microservices - small team with many services"
+      evidence_pattern: "Team < 10 people operating > 15 services"
+      explanation: |
+        Microservices require operational maturity. A small team with
+        many services spends more time on infrastructure than features.
+        The overhead exceeds the benefits.
+      remediation: "Consider consolidation into modular monolith; merge related services"
+
+    - id: "ARCH-CRIT-002"
+      signal: "Distributed monolith - services tightly coupled"
+      evidence_pattern: "Services share database; require coordinated deployments"
+      explanation: |
+        A distributed monolith has the complexity of distribution with
+        none of the benefits. Services can't deploy independently and
+        changes still cascade.
+      remediation: "Either consolidate or properly decouple; establish data ownership"
+
+  high:
+    - id: "ARCH-HIGH-001"
+      signal: "Monolith constraining multiple teams"
+      evidence_pattern: "Multiple teams blocked on shared deployment; merge conflicts"
+      explanation: |
+        When a monolith constrains team autonomy, the benefit of
+        simplicity is outweighed by coordination overhead.
+      remediation: "Consider modular monolith first; extract services for team boundaries"
+
+    - id: "ARCH-HIGH-002"
+      signal: "Missing microservice prerequisites"
+      evidence_pattern: "Microservices without CI/CD, monitoring, or service mesh"
+      explanation: |
+        Operating microservices without proper infrastructure creates
+        operational chaos. Prerequisites must be in place first.
+      remediation: "Implement DevOps capabilities before further distribution"
+
+  medium:
+    - id: "ARCH-MED-001"
+      signal: "Architecture doesn't match scaling needs"
+      evidence_pattern: "Monolith for globally distributed high-traffic system"
+      remediation: "Evaluate specific scaling requirements; extract bottlenecks"
+
+    - id: "ARCH-MED-002"
+      signal: "Technology diversity without justification"
+      evidence_pattern: "Services in 5 languages without clear benefit"
+      remediation: "Document polyglot justification; consider standardization"
+
+  low:
+    - id: "ARCH-LOW-001"
+      signal: "Architecture style not documented"
+      remediation: "Document architectural style and rationale in ADR"
+
+  positive:
+    - id: "ARCH-POS-001"
+      signal: "Architecture matches team and scale"
+    - id: "ARCH-POS-002"
+      signal: "Clear progression path documented"
+    - id: "ARCH-POS-003"
+      signal: "Operational capabilities match architecture complexity"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Assess current architecture style"
+      description: |
+        Determine the current architectural style and measure
+        distribution level.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Count deployable units"
+          command: "find . -name 'Dockerfile' -o -name 'deployment.yaml' | wc -l"
+        - purpose: "Find entry points"
+          command: "grep -rn '@SpringBootApplication\\|func main\\|if __name__' --include='*.java' --include='*.go' --include='*.py' | wc -l"
+      expected_findings:
+        - "Current architecture style"
+        - "Distribution level"
+
+    - id: "2"
+      name: "Evaluate team structure alignment"
+      description: |
+        Compare service count and boundaries with team structure
+        and capacity.
+      duration_estimate: "25 min"
+      questions:
+        - "How many development teams exist?"
+        - "How many services per team?"
+        - "Can teams deploy independently?"
+      expected_findings:
+        - "Team-service alignment"
+        - "Autonomy assessment"
+
+    - id: "3"
+      name: "Check microservice prerequisites"
+      description: |
+        Verify that necessary operational capabilities exist
+        for the architecture complexity.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find CI/CD configuration"
+          command: "find . -name 'Jenkinsfile' -o -name '.gitlab-ci.yml' -o -name 'azure-pipelines.yml' | wc -l"
+        - purpose: "Find monitoring configuration"
+          command: "grep -r 'prometheus\\|datadog\\|newrelic' --include='*.yaml' | wc -l"
+      expected_findings:
+        - "Operational maturity level"
+        - "Missing prerequisites"
+
+    - id: "4"
+      name: "Assess coupling between services"
+      description: |
+        Determine if services are truly independent or tightly
+        coupled (distributed monolith).
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find shared databases"
+          command: "grep -rh 'datasource.url\\|DATABASE_URL' --include='*.yaml' --include='*.properties' | sort | uniq -c | sort -rn | head -10"
+        - purpose: "Find synchronous dependencies"
+          command: "grep -rn 'RestTemplate\\|FeignClient' --include='*.java' | wc -l"
+      expected_findings:
+        - "Service independence level"
+        - "Coupling indicators"
+
+    - id: "5"
+      name: "Develop recommendations"
+      description: |
+        Based on findings, recommend appropriate architecture
+        style and migration path if needed.
+      duration_estimate: "35 min"
+      questions:
+        - "Is current style appropriate for team/scale?"
+        - "What migration would improve the situation?"
+        - "What's the priority sequence?"
+      expected_findings:
+        - "Style recommendation"
+        - "Migration roadmap"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "architecture_assessment"
+      format: "prose"
+      sections:
+        - "Current State"
+        - "Desired State"
+        - "Gap Analysis"
+        - "Migration Path"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Architecture Style Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear misalignment with metrics"
+    medium: "Indicators suggest suboptimal choice"
+    low: "Potential concern requiring context"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "monolith-first"
+        priority: "required"
+      - source_id: "microservices-prerequisites"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires organizational context"
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "arch-001"
+    item: "Architecture style matches team capacity"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Service count appropriate for team size"
+    expected: "Confirmed by reviewer"
+
+  - id: "arch-002"
+    item: "No distributed monolith patterns"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Services deployable independently"
+    expected: "Confirmed by reviewer"
+
+  - id: "arch-003"
+    item: "Operational prerequisites met"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "CI/CD, monitoring, logging in place"
+    expected: "Confirmed by reviewer"
+
+  - id: "arch-004"
+    item: "Architecture decision documented"
+    level: "WARNING"
+    verification: "find . -name '*adr*' -o -name '*ADR*' | wc -l"
+    expected: ">0"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Scalability"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.system-decomposition.service-granularity"
+    - "architecture-design.cohesion.service-cohesion"
+    - "architecture-design.coupling.tight-coupling-detection"

@@ -1,0 +1,395 @@
+# ============================================================
+# AUDIT: Provisioned Capacity Audit
+# ============================================================
+# Category 4: Scalability & Capacity
+# Subcategory 4.7: Serverless & Edge Scaling
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "scalability-capacity.serverless-edge-scaling.provisioned-capacity"
+
+  name: "Provisioned Capacity Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "serverless-edge-scaling"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "high"
+
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates provisioned capacity configurations for serverless and
+    managed services including Lambda provisioned concurrency, DynamoDB
+    provisioned throughput, and similar pre-allocated capacity settings.
+    Analyzes the balance between cost, performance, and auto-scaling
+    responsiveness to ensure appropriate capacity is always available.
+
+  why_it_matters: |
+    Provisioned capacity eliminates cold starts and throttling by
+    pre-allocating resources, but at a cost premium. Under-provisioning
+    leads to performance degradation during traffic spikes, while
+    over-provisioning wastes budget. Proper provisioned capacity
+    configuration balances performance guarantees with cost efficiency.
+
+  when_to_run:
+    - "During cost optimization reviews"
+    - "When experiencing latency or throttling issues"
+    - "Before high-traffic events"
+    - "After significant changes in traffic patterns"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "capacity_configurations"
+      description: "Provisioned capacity settings for serverless resources"
+    - type: "utilization_metrics"
+      description: "Capacity utilization and consumption metrics"
+    - type: "billing_data"
+      description: "Cost data for provisioned capacity"
+
+  access_requirements:
+    - "Access to serverless resource configurations"
+    - "Access to CloudWatch or equivalent metrics"
+    - "Access to cost and billing information"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "ProvisionedConcurrencyConfig|provisioned_concurrency"
+      type: "regex"
+      scope: "config"
+      purpose: "Find Lambda provisioned concurrency"
+    - pattern: "ProvisionedThroughput|ReadCapacityUnits|WriteCapacityUnits"
+      type: "regex"
+      scope: "config"
+      purpose: "Find DynamoDB provisioned capacity"
+    - pattern: "ScalingConfiguration|MinCapacity|MaxCapacity"
+      type: "regex"
+      scope: "config"
+      purpose: "Find auto-scaling configurations"
+
+  file_patterns:
+    - glob: "**/serverless.{yml,yaml}"
+      purpose: "Serverless framework configurations"
+    - glob: "**/dynamodb*.tf"
+      purpose: "Terraform DynamoDB configurations"
+    - glob: "**/*-scaling*.yaml"
+      purpose: "Auto-scaling policies"
+
+  metrics_queries:
+    - system: "CloudWatch"
+      query: "ProvisionedConcurrencyUtilization"
+      purpose: "Lambda provisioned concurrency usage"
+      threshold: "Should be 70-90% during peak"
+    - system: "CloudWatch"
+      query: "ConsumedReadCapacityUnits / ProvisionedReadCapacityUnits"
+      purpose: "DynamoDB read capacity utilization"
+      threshold: "Should be 60-80% during peak"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "lambda-provisioned"
+      name: "Lambda Provisioned Concurrency"
+      url: "https://docs.aws.amazon.com/lambda/latest/dg/provisioned-concurrency.html"
+      offline_cache: true
+    - id: "dynamodb-capacity"
+      name: "DynamoDB Capacity Modes"
+      url: "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/capacity-mode.html"
+      offline_cache: true
+
+  papers:
+    - id: "serverless-cost"
+      title: "Cost-Aware Resource Provisioning for Serverless"
+      url: "https://arxiv.org/abs/2103.03012"
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws lambda list-provisioned-concurrency-configs"
+      purpose: "List Lambda provisioned concurrency"
+      command: "aws lambda list-provisioned-concurrency-configs --function-name <name>"
+    - tool: "aws dynamodb describe-table"
+      purpose: "Check DynamoDB provisioned capacity"
+      command: "aws dynamodb describe-table --table-name <name> --query 'Table.ProvisionedThroughput'"
+
+  monitoring_queries:
+    - system: "CloudWatch"
+      query: "avg(ProvisionedConcurrencyUtilization) by (FunctionName)"
+      purpose: "Average provisioned concurrency usage"
+    - system: "Cost Explorer"
+      query: "UsageType contains Provisioned"
+      purpose: "Cost of provisioned capacity"
+
+  scripts:
+    - id: "capacity-utilization-checker"
+      language: "bash"
+      purpose: "Check provisioned capacity utilization"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "Checking provisioned capacity configurations..."
+        aws lambda list-functions --query 'Functions[*].FunctionName' --output text | \
+        xargs -I {} aws lambda list-provisioned-concurrency-configs --function-name {} 2>/dev/null
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "PROVISIONED-CRIT-001"
+      signal: "Provisioned capacity exhausted during peak traffic"
+      evidence_threshold: "ProvisionedConcurrencySpilloverInvocations > 0 at peak"
+      explanation: |
+        When provisioned capacity is exhausted, requests spill over to
+        on-demand capacity, incurring cold starts and potentially
+        violating latency SLAs for critical functions.
+      remediation: "Increase provisioned capacity or implement auto-scaling"
+    - id: "PROVISIONED-CRIT-002"
+      signal: "DynamoDB throttling due to insufficient provisioned capacity"
+      evidence_threshold: "ThrottledRequests > 0"
+      explanation: |
+        Throttled DynamoDB requests cause failures or retries,
+        impacting application availability and user experience.
+      remediation: "Increase provisioned capacity or switch to on-demand"
+
+  high:
+    - id: "PROVISIONED-HIGH-001"
+      signal: "Provisioned capacity utilization consistently below 50%"
+      explanation: "Paying for unused capacity, wasting budget"
+      remediation: "Reduce provisioned capacity or switch to on-demand"
+    - id: "PROVISIONED-HIGH-002"
+      signal: "No auto-scaling for provisioned capacity"
+      explanation: "Cannot respond to traffic pattern changes"
+      remediation: "Configure Application Auto Scaling"
+
+  medium:
+    - id: "PROVISIONED-MED-001"
+      signal: "Provisioned capacity not aligned with traffic patterns"
+      remediation: "Analyze traffic patterns and adjust capacity accordingly"
+    - id: "PROVISIONED-MED-002"
+      signal: "Cost of provisioned capacity not tracked"
+      remediation: "Implement cost monitoring and optimization reviews"
+
+  low:
+    - id: "PROVISIONED-LOW-001"
+      signal: "Provisioned capacity decisions not documented"
+
+  positive:
+    - id: "PROVISIONED-POS-001"
+      signal: "Provisioned capacity with auto-scaling maintains 70-90% utilization"
+    - id: "PROVISIONED-POS-002"
+      signal: "Cost-optimized mix of provisioned and on-demand capacity"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Provisioned Resources"
+      description: |
+        List all resources with provisioned capacity including
+        Lambda, DynamoDB, and other managed services.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List Lambda provisioned concurrency"
+          command: "aws lambda list-functions --query 'Functions[*].FunctionName' --output text"
+      expected_findings:
+        - "Complete provisioned resource inventory"
+        - "Capacity settings per resource"
+
+    - id: "2"
+      name: "Analyze Utilization Metrics"
+      description: |
+        Review capacity utilization metrics to identify
+        under and over-provisioned resources.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Utilization patterns per resource"
+        - "Peak vs average utilization"
+
+    - id: "3"
+      name: "Review Cost Impact"
+      description: |
+        Analyze the cost of provisioned capacity and compare
+        with on-demand alternatives.
+      duration_estimate: "30 min"
+      questions:
+        - "What is the monthly cost of provisioned capacity?"
+        - "Would on-demand be more cost-effective?"
+        - "Are there scheduled scaling opportunities?"
+      expected_findings:
+        - "Cost breakdown by resource"
+        - "Optimization opportunities"
+
+    - id: "4"
+      name: "Evaluate Auto-Scaling Configuration"
+      description: |
+        Review auto-scaling policies for provisioned capacity
+        to ensure responsiveness to demand changes.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Auto-scaling policy coverage"
+        - "Scaling trigger configurations"
+
+    - id: "5"
+      name: "Assess Spillover and Throttling"
+      description: |
+        Analyze metrics for capacity exhaustion events
+        that impact performance.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Spillover frequency and impact"
+        - "Throttling incidents"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Provisioned Resource Inventory"
+        - "Utilization Analysis"
+        - "Cost Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Complete metrics and cost data analyzed"
+    medium: "Metrics reviewed with limited cost data"
+    low: "Configuration review only"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "lambda-provisioned"
+        priority: "required"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires metrics and cost analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "provisioned-001"
+    item: "Provisioned capacity meets peak demand without spillover"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify no spillover or throttling during peak periods"
+    expected: "Confirmed by reviewer"
+
+  - id: "provisioned-002"
+    item: "Capacity utilization is cost-effective (50-90%)"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Average utilization between 50-90% during active periods"
+    expected: "Confirmed by reviewer"
+
+  - id: "provisioned-003"
+    item: "Auto-scaling configured for capacity adjustment"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Application Auto Scaling policies exist"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["serverless", "api-gateway", "data-store"]
+
+  compliance_frameworks:
+    - framework: "FinOps"
+      controls: ["Cost Optimization"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.serverless-edge-scaling.cold-start-impact"
+    - "scalability-capacity.serverless-edge-scaling.concurrency-limits"

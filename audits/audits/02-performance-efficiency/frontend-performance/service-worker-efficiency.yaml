@@ -1,0 +1,336 @@
+# ============================================================
+# SERVICE WORKER EFFICIENCY AUDIT
+# ============================================================
+# Evaluates service worker implementation for performance,
+# caching strategy, and offline capability.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.frontend-performance.service-worker-efficiency"
+  name: "Service Worker Efficiency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "frontend-performance"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates service worker implementation including caching strategies,
+    cache management, update handling, and error recovery. Examines whether
+    the service worker improves or degrades performance and user experience.
+
+  why_it_matters: |
+    Service workers can dramatically improve performance through caching
+    but can also cause problems: serving stale content, consuming excessive
+    storage, or failing to update. Poorly implemented service workers create
+    confusing user experiences and support issues.
+
+  when_to_run:
+    - "After implementing or modifying service workers"
+    - "When users report stale content"
+    - "During PWA development"
+    - "When investigating caching issues"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Service worker files"
+    - type: "deployed_application"
+      description: "Running application with service worker"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Chrome DevTools Application panel"
+
+discovery:
+  code_patterns:
+    - pattern: "serviceWorker\\.register|navigator\\.serviceWorker"
+      type: "regex"
+      scope: "source"
+      purpose: "Find service worker registration"
+
+    - pattern: "CacheStorage|caches\\.open|cache\\.put"
+      type: "regex"
+      scope: "source"
+      purpose: "Find caching operations"
+
+    - pattern: "fetch.*event\\.respondWith"
+      type: "regex"
+      scope: "source"
+      purpose: "Find fetch interception"
+
+    - pattern: "workbox|sw-precache|sw-toolbox"
+      type: "regex"
+      scope: "source"
+      purpose: "Find service worker libraries"
+
+  file_patterns:
+    - glob: "**/sw.js"
+      purpose: "Service worker files"
+    - glob: "**/service-worker.js"
+      purpose: "Service worker files"
+    - glob: "**/workbox-*.js"
+      purpose: "Workbox files"
+
+knowledge_sources:
+  guides:
+    - id: "service-worker-lifecycle"
+      name: "The Service Worker Lifecycle"
+      url: "https://web.dev/service-worker-lifecycle/"
+      offline_cache: true
+
+    - id: "caching-strategies"
+      name: "Offline Cookbook - Caching Strategies"
+      url: "https://web.dev/offline-cookbook/"
+      offline_cache: true
+
+    - id: "workbox"
+      name: "Workbox Documentation"
+      url: "https://developer.chrome.com/docs/workbox/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Chrome DevTools Application"
+      purpose: "Service worker inspection"
+      offline_capable: false
+
+    - tool: "Lighthouse"
+      purpose: "PWA audits"
+      offline_capable: false
+
+  scripts:
+    - id: "find-sw-patterns"
+      language: "bash"
+      purpose: "Find service worker code"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find service worker files
+        find . -name "*sw*.js" -o -name "*service-worker*.js"
+        # Find caching code
+        grep -rn "caches.open\|cache.put\|cache.match" --include='*.js' .
+
+signals:
+  critical:
+    - id: "SW-CRIT-001"
+      signal: "No cache versioning or cleanup"
+      evidence_pattern: "caches\\.open\\(['\"](?!.*-v[0-9]|version)"
+      explanation: |
+        Without cache versioning, old cached content cannot be invalidated.
+        Without cleanup, cache storage grows indefinitely. Users get stale
+        content and storage fills up.
+      remediation: "Version cache names, delete old caches in activate event"
+
+    - id: "SW-CRIT-002"
+      signal: "Caching with no network fallback"
+      evidence_pattern: "cache\\.match.*respondWith(?!.*fetch)"
+      explanation: |
+        Serving only from cache without network fallback means users never
+        get updated content until the service worker updates.
+      remediation: "Implement stale-while-revalidate or network-first for dynamic content"
+
+  high:
+    - id: "SW-HIGH-001"
+      signal: "No update notification for users"
+      evidence_pattern: "skipWaiting(?!.*updatefound|reload)"
+      explanation: |
+        When skipWaiting is called, the new service worker activates
+        immediately. Without notifying users, they may see inconsistent
+        behavior as the old and new versions mix.
+      remediation: "Notify users of updates, optionally prompt for reload"
+
+    - id: "SW-HIGH-002"
+      signal: "Precaching everything"
+      evidence_pattern: "precache.*\\*\\*|precacheAndRoute.*glob"
+      explanation: |
+        Precaching too many files increases initial load time and uses
+        excessive storage. Users download files they may never need.
+      remediation: "Precache only critical resources, lazy-cache others"
+
+    - id: "SW-HIGH-003"
+      signal: "No error handling in fetch handler"
+      evidence_pattern: "addEventListener.*fetch[^}]*respondWith(?!.*catch)"
+      explanation: |
+        Without error handling, cache misses or network failures result in
+        broken requests. Users see errors instead of fallback content.
+      remediation: "Add catch blocks, provide offline fallback pages"
+
+  medium:
+    - id: "SW-MED-001"
+      signal: "Caching API responses without consideration"
+      evidence_pattern: "cache\\.put.*api|cache.*json"
+      remediation: "Use network-first for APIs, consider cache expiration"
+
+    - id: "SW-MED-002"
+      signal: "No offline fallback page"
+      evidence_pattern: "(?!.*offline\\.html|fallback)"
+      remediation: "Provide cached offline fallback page for navigation failures"
+
+  low:
+    - id: "SW-LOW-001"
+      signal: "Using deprecated sw-precache/sw-toolbox"
+      evidence_pattern: "sw-precache|sw-toolbox"
+      remediation: "Migrate to Workbox"
+
+  positive:
+    - id: "SW-POS-001"
+      signal: "Using Workbox with appropriate strategies"
+      evidence_pattern: "workbox.*CacheFirst|workbox.*NetworkFirst|workbox.*StaleWhileRevalidate"
+
+    - id: "SW-POS-002"
+      signal: "Proper cache cleanup in activate"
+      evidence_pattern: "activate.*caches\\.keys.*delete"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Locate service worker files"
+      description: |
+        Find all service worker related files.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find service worker files"
+          command: "find . -name '*sw*.js' -o -name '*service-worker*.js'"
+        - purpose: "Find registration"
+          command: "grep -rn 'serviceWorker.register' --include='*.js' --include='*.ts' ."
+      expected_findings:
+        - "Service worker files"
+        - "Registration points"
+
+    - id: "2"
+      name: "Analyze caching strategy"
+      description: |
+        Examine what caching strategies are used for different resources.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find caching code"
+          command: "grep -rn 'cache\\|respondWith' --include='*sw*.js' --include='*service-worker*.js' ."
+      expected_findings:
+        - "Caching strategies per route"
+        - "Cache versioning approach"
+
+    - id: "3"
+      name: "Check cache management"
+      description: |
+        Verify caches are versioned and old caches are cleaned up.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find cache cleanup"
+          command: "grep -rn 'caches.delete\\|caches.keys' --include='*sw*.js' ."
+      expected_findings:
+        - "Cache versioning"
+        - "Cleanup implementation"
+
+    - id: "4"
+      name: "Test update behavior"
+      description: |
+        Verify service worker updates correctly and users are notified.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find update handling"
+          command: "grep -rn 'updatefound\\|skipWaiting\\|controllerchange' --include='*.js' ."
+      expected_findings:
+        - "Update notification"
+        - "Activation strategy"
+
+    - id: "5"
+      name: "Verify offline experience"
+      description: |
+        Test offline fallback and error handling.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find offline handling"
+          command: "grep -rn 'offline\\|fallback' --include='*sw*.js' ."
+      expected_findings:
+        - "Offline fallback pages"
+        - "Error handling coverage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Caching Strategy Analysis"
+        - "Update Behavior"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Code clearly shows strategy and testing confirms behavior"
+    medium: "Code patterns suggest issues"
+    low: "Requires runtime testing"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "service-worker-lifecycle"
+        priority: "required"
+      - source_id: "caching-strategies"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 3
+
+closeout_checklist:
+  - id: "sw-001"
+    item: "Cache versioning implemented"
+    level: "CRITICAL"
+    verification: "grep -rn 'CACHE.*v[0-9]\\|version' --include='*sw*.js' . | wc -l"
+    expected: "> 0"
+
+  - id: "sw-002"
+    item: "Old caches cleaned up in activate"
+    level: "CRITICAL"
+    verification: "grep -rn 'caches.delete' --include='*sw*.js' . | wc -l"
+    expected: "> 0"
+
+  - id: "sw-003"
+    item: "Offline fallback implemented"
+    level: "BLOCKING"
+    verification: "grep -rn 'offline\\|fallback' --include='*sw*.js' . | wc -l"
+    expected: "> 0"
+
+governance:
+  applicable_to:
+    archetypes: ["pwa", "webapp"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.frontend-performance.core-web-vitals"

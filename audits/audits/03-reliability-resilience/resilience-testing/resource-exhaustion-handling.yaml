@@ -1,0 +1,377 @@
+audit:
+  id: reliability-resilience.resilience-testing.resource-exhaustion-handling
+  name: Resource Exhaustion Handling Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: resilience-testing
+  tier: phd
+  estimated_duration: 4 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: true
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: false
+description:
+  what: |
+    This audit assesses chaos experiments that simulate resource exhaustion
+    scenarios including CPU saturation, memory exhaustion, disk fill,
+    connection pool exhaustion, and file descriptor limits. It validates
+    that systems degrade gracefully, shed load appropriately, and recover
+    when resources become available.
+  why_it_matters: |
+    Resource exhaustion is a common cause of production incidents. Systems
+    that are not tested for resource limits may crash suddenly, become
+    completely unresponsive, or exhibit undefined behavior. Proper resource
+    exhaustion handling enables graceful degradation, maintains partial
+    functionality, and prevents cascading failures.
+  when_to_run:
+  - Before production deployments
+  - When changing resource limits or quotas
+  - Quarterly resilience testing
+  - After incidents caused by resource exhaustion
+prerequisites:
+  required_artifacts:
+  - type: resource-limits
+    description: Documented resource limits and quotas
+  - type: chaos-experiments
+    description: Resource exhaustion experiment definitions
+  - type: capacity-plans
+    description: Service capacity requirements and limits
+  access_requirements:
+  - Access to chaos engineering platform
+  - Read access to resource configurations
+  - Access to resource monitoring dashboards
+discovery:
+  code_patterns:
+  - pattern: oom|out.*of.*memory|memory.*limit
+    type: regex
+    scope: source
+    purpose: Identify memory handling code
+  - pattern: cpu.*stress|load.*test|stress.*ng
+    type: regex
+    scope: config
+    purpose: Find CPU stress experiments
+  - pattern: disk.*fill|iops|throughput.*limit
+    type: regex
+    scope: config
+    purpose: Find disk exhaustion experiments
+  - pattern: connection.*pool|max.*connections
+    type: regex
+    scope: config
+    purpose: Find connection limit configurations
+  file_patterns:
+  - glob: '**/chaos/resource/**/*.yaml'
+    purpose: Resource chaos experiments
+  - glob: '**/stress-test/**/*'
+    purpose: Stress test configurations
+  - glob: '**/limits/**/*'
+    purpose: Resource limit configurations
+  metrics_queries:
+  - system: Prometheus
+    query: container_memory_usage_bytes / container_spec_memory_limit_bytes
+    purpose: Monitor memory utilization vs limits
+    threshold: Alert before hitting limits
+  - system: Prometheus
+    query: rate(container_cpu_usage_seconds_total[5m]) / container_spec_cpu_quota
+    purpose: Monitor CPU utilization vs quota
+    threshold: Sustained high utilization triggers alerts
+knowledge_sources:
+  specifications:
+  - id: kubernetes-resources
+    name: Kubernetes Resource Management
+    url: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: gremlin-resource-attacks
+    name: Gremlin Resource Attacks
+    url: https://www.gremlin.com/docs/attacks/resource/
+    offline_cache: true
+  - id: stress-ng
+    name: 'stress-ng: A Stress Testing Tool'
+    url: https://wiki.ubuntu.com/Kernel/Reference/stress-ng
+    offline_cache: true
+  learning_resources:
+  - id: sre-book-overload
+    title: Google SRE Book - Handling Overload
+    type: article
+    reference: https://sre.google/sre-book/handling-overload/
+tooling:
+  infrastructure_tools:
+  - tool: stress-ng
+    purpose: Generate CPU, memory, and I/O stress
+    command: stress-ng --cpu 4 --io 2 --vm 2 --vm-bytes 256M --timeout 60s
+  - tool: Gremlin
+    purpose: Resource chaos attacks
+    command: gremlin attack cpu --percent 100 --length 60
+  - tool: Chaos Mesh
+    purpose: Kubernetes resource stress
+    command: kubectl apply -f stress-chaos.yaml
+  - tool: dd
+    purpose: Disk fill testing
+    command: dd if=/dev/zero of=/tmp/fill bs=1M count=1000
+  monitoring_queries:
+  - system: Prometheus
+    query: sum(increase(container_oom_events_total[1h])) by (container)
+    purpose: Track OOM kills
+    threshold: Zero during normal operation
+  - system: Prometheus
+    query: node_filesystem_avail_bytes / node_filesystem_size_bytes
+    purpose: Monitor disk space
+    threshold: '> 20% free space'
+  - system: Prometheus
+    query: sum(pg_stat_activity_count) by (datname)
+    purpose: Monitor database connections
+    threshold: Below connection pool max
+  scripts:
+  - id: resource-stress-suite
+    language: bash
+    purpose: Run comprehensive resource stress tests
+    source: inline
+    code: |
+      #!/bin/bash
+      # Resource Exhaustion Test Suite
+
+      run_cpu_stress() {
+          echo "Starting CPU stress..."
+          stress-ng --cpu $(nproc) --timeout 60s --metrics-brief
+      }
+
+      run_memory_stress() {
+          echo "Starting memory stress..."
+          stress-ng --vm 2 --vm-bytes 80% --timeout 60s --metrics-brief
+      }
+
+      run_disk_stress() {
+          echo "Starting disk I/O stress..."
+          stress-ng --hdd 2 --timeout 60s --metrics-brief
+      }
+
+      run_connection_stress() {
+          echo "Stressing connection pools..."
+          # Custom connection pool stress test
+      }
+signals:
+  critical:
+  - id: REH-CRIT-001
+    signal: No resource exhaustion testing exists
+    evidence_indicators:
+    - No chaos experiments for CPU, memory, or disk
+    - Resource limits not tested
+    explanation: |
+      Systems without resource exhaustion testing will have unpredictable
+      behavior when limits are reached. This often results in sudden
+      crashes, data loss, or cascading failures.
+    remediation: Implement resource exhaustion chaos experiments
+  - id: REH-CRIT-002
+    signal: OOM kills crash services without recovery
+    evidence_indicators:
+    - Containers restart repeatedly on OOM
+    - No graceful memory pressure handling
+    explanation: |
+      Services that crash on OOM without graceful degradation cause
+      availability issues. Memory pressure should trigger load shedding
+      before OOM occurs.
+    remediation: Implement memory pressure handling and early load shedding
+  - id: REH-CRIT-003
+    signal: Resource limits not configured
+    evidence_indicators:
+    - Containers without memory limits
+    - No CPU quotas defined
+    explanation: |
+      Without resource limits, a single service can consume all available
+      resources and impact other services. This is especially dangerous
+      in shared environments.
+    remediation: Configure appropriate resource limits for all services
+  high:
+  - id: REH-HIGH-001
+    signal: Disk exhaustion causes service failure
+    explanation: Full disks cause services to crash rather than degrade
+    remediation: Implement disk space monitoring and cleanup automation
+  - id: REH-HIGH-002
+    signal: Connection pool exhaustion untested
+    explanation: Database or service connection limits may cause failures
+    remediation: Test behavior when connection pools are exhausted
+  medium:
+  - id: REH-MED-001
+    signal: Load shedding not implemented
+    remediation: Add load shedding for graceful degradation under resource pressure
+  - id: REH-MED-002
+    signal: Resource alerts trigger too late
+    remediation: Configure alerts with sufficient lead time for intervention
+  low:
+  - id: REH-LOW-001
+    signal: Resource chaos experiments not automated
+  positive:
+  - id: REH-POS-001
+    signal: All resource types have exhaustion experiments
+  - id: REH-POS-002
+    signal: Graceful degradation verified under resource pressure
+  - id: REH-POS-003
+    signal: Load shedding activates appropriately
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review Resource Configurations
+    description: |
+      Document resource limits, requests, and quotas for all services
+      across CPU, memory, disk, and connection resources.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check Kubernetes resource limits
+      command: kubectl get pods -A -o jsonpath='{.items[*].spec.containers[*].resources}'
+    - purpose: Check resource quotas
+      command: kubectl get resourcequotas -A
+    expected_findings:
+    - Resource limit inventory
+    - Services missing resource limits
+  - id: '2'
+    name: Inventory Exhaustion Experiments
+    description: |
+      Catalog chaos experiments that test resource exhaustion
+      for CPU, memory, disk, and connections.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find stress chaos experiments
+      command: kubectl get stresschaos -A -o yaml
+    - purpose: List Gremlin resource attacks
+      command: gremlin attack list --type resource
+    expected_findings:
+    - List of resource exhaustion experiments
+    - Coverage across resource types
+  - id: '3'
+    name: Test CPU Exhaustion
+    description: |
+      Verify system behavior when CPU resources are saturated,
+      including request latency and error rates.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Run CPU stress experiment
+      command: gremlin attack cpu --percent 100 --length 120 --targets service=critical
+    expected_findings:
+    - System behavior under CPU saturation
+    - Latency and error rate impact
+  - id: '4'
+    name: Test Memory Exhaustion
+    description: |
+      Verify system behavior when memory limits are approached
+      or exceeded, including OOM handling.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Run memory stress experiment
+      command: gremlin attack memory --percent 95 --length 120
+    expected_findings:
+    - Memory pressure handling behavior
+    - OOM kill recovery
+  - id: '5'
+    name: Test Disk and Connection Limits
+    description: |
+      Verify behavior when disk space is exhausted and when
+      connection pool limits are reached.
+    duration_estimate: 45 min
+    questions:
+    - What happens when disk is full?
+    - How does the system behave when connection pools are exhausted?
+    - Is there automatic cleanup or recovery?
+    expected_findings:
+    - Disk exhaustion behavior
+    - Connection pool exhaustion behavior
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: resource_behavior_matrix
+    format: table
+    sections:
+    - Resource Type
+    - Experiment Coverage
+    - Behavior at Limit
+    - Recovery Behavior
+    - Status
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Resource Testing Coverage
+    - Degradation Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Resource exhaustion tested with verified results
+    medium: Experiments defined but not recently executed
+    low: Based on configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: kubernetes-resources
+      priority: required
+    - source_id: gremlin-resource-attacks
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive resource testing
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: reh-001
+  item: Resource limits configured for all services
+  level: CRITICAL
+  verification: kubectl get pods -A -o json | jq '.items[] | select(.spec.containers[].resources.limits
+    == null) | .metadata.name'
+  expected: No pods without resource limits
+- id: reh-002
+  item: CPU exhaustion experiments exist and pass
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify CPU stress experiments are defined and results documented
+  expected: Confirmed by reviewer
+- id: reh-003
+  item: Memory exhaustion behavior verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm memory pressure handling and OOM recovery
+  expected: Confirmed by reviewer
+- id: reh-004
+  item: Graceful degradation verified under resource pressure
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm services degrade gracefully rather than crash
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - distributed-system
+    - microservices
+    - cloud-native
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+    - CC7.2
+  - framework: ISO 27001
+    controls:
+    - A.17.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.resilience-testing.failure-mode-coverage
+  - reliability-resilience.fault-tolerance.graceful-degradation
+  - reliability-resilience.high-availability.load-shedding

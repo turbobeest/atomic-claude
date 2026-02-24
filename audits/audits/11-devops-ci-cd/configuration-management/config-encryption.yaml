@@ -1,0 +1,371 @@
+# ============================================================
+# AUDIT: Config Encryption
+# ============================================================
+# Evaluates encryption of sensitive configuration data
+
+audit:
+  id: "devops-ci-cd.configuration-management.config-encryption"
+  name: "Config Encryption"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "configuration-management"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "security"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Assesses encryption practices for sensitive configuration data
+    including encryption at rest, in transit, and in version control.
+    Evaluates encryption key management, access controls, and compliance
+    with security requirements.
+
+  why_it_matters: |
+    Configuration often contains sensitive data including database
+    credentials, API keys, and encryption keys. Unencrypted configuration
+    can be compromised through repository access, backup theft, or
+    network interception. Proper encryption protects sensitive data
+    throughout its lifecycle.
+
+  when_to_run:
+    - "Initial security audit"
+    - "When implementing encryption"
+    - "After security incidents"
+    - "Compliance reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "configuration_storage"
+      description: "Configuration storage systems and repositories"
+    - type: "encryption_configuration"
+      description: "Encryption tooling and key management setup"
+
+  access_requirements:
+    - "Configuration repository access"
+    - "Encryption configuration access"
+    - "Key management system access (read-only)"
+
+discovery:
+  code_patterns:
+    - pattern: "sealed-secrets|sops|vault|kms|encrypt"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify encryption tools"
+
+    - pattern: "ENC\\[|sops:|sealed"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify encrypted values"
+
+  file_patterns:
+    - glob: "**/*.sops.yaml"
+      purpose: "SOPS encrypted files"
+
+    - glob: "**/sealed*.yaml"
+      purpose: "Sealed Secrets"
+
+    - glob: "**/.sops.yaml"
+      purpose: "SOPS configuration"
+
+knowledge_sources:
+  guides:
+    - id: "sops"
+      name: "SOPS Documentation"
+      url: "https://github.com/getsops/sops"
+      offline_cache: true
+
+    - id: "sealed-secrets"
+      name: "Bitnami Sealed Secrets"
+      url: "https://github.com/bitnami-labs/sealed-secrets"
+      offline_cache: true
+
+    - id: "vault-encryption"
+      name: "Vault Transit Secrets Engine"
+      url: "https://developer.hashicorp.com/vault/docs/secrets/transit"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "sops"
+      purpose: "Encrypt/decrypt config files"
+      command: "sops -d config.enc.yaml"
+
+    - tool: "kubeseal"
+      purpose: "Create sealed secrets"
+      command: "kubeseal --format yaml < secret.yaml"
+
+  scripts:
+    - id: "check-encryption"
+      language: "bash"
+      purpose: "Identify encryption usage"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== SOPS files ==="
+        find . -name '*.sops.yaml' -o -name '*.sops.json' 2>/dev/null | head -10
+        echo "=== Sealed Secrets ==="
+        grep -r 'SealedSecret' k8s/ --include='*.yaml' 2>/dev/null | head -5
+        echo "=== SOPS config ==="
+        cat .sops.yaml 2>/dev/null || echo "No .sops.yaml found"
+
+signals:
+  critical:
+    - id: "CICD-CONFIGENC-CRIT-001"
+      signal: "Secrets stored unencrypted in version control"
+      evidence_pattern: "Plain text passwords, API keys in committed YAML/JSON"
+      explanation: |
+        Unencrypted secrets in version control are exposed to anyone
+        with repository access and persist in git history forever,
+        even after removal.
+      remediation: "Encrypt all secrets using SOPS, sealed-secrets, or Vault"
+
+    - id: "CICD-CONFIGENC-CRIT-002"
+      signal: "Encryption keys stored alongside encrypted data"
+      evidence_pattern: "KMS key ID or encryption key in same repository"
+      explanation: |
+        Storing encryption keys with encrypted data defeats the purpose
+        of encryption. An attacker with repository access can decrypt
+        everything.
+      remediation: "Store encryption keys in separate, controlled key management system"
+
+  high:
+    - id: "CICD-CONFIGENC-HIGH-001"
+      signal: "etcd not encrypted at rest"
+      evidence_pattern: "Kubernetes etcd without encryption configuration"
+      explanation: |
+        Kubernetes Secrets stored in etcd are base64 encoded, not encrypted.
+        Anyone with etcd access can read all secrets.
+      remediation: "Enable etcd encryption at rest or use external secrets manager"
+
+    - id: "CICD-CONFIGENC-HIGH-002"
+      signal: "Configuration transmitted without TLS"
+      evidence_pattern: "HTTP endpoints for config, no TLS verification"
+      explanation: |
+        Configuration transmitted over unencrypted connections can be
+        intercepted, exposing sensitive values.
+      remediation: "Require TLS for all configuration endpoints"
+
+  medium:
+    - id: "CICD-CONFIGENC-MED-001"
+      signal: "Encryption key rotation not automated"
+      evidence_pattern: "Manual key rotation or no rotation process"
+      remediation: "Implement automated key rotation"
+
+    - id: "CICD-CONFIGENC-MED-002"
+      signal: "Limited encryption key access controls"
+      evidence_pattern: "Wide access to decrypt configuration"
+      remediation: "Restrict decryption access to only necessary systems"
+
+  low:
+    - id: "CICD-CONFIGENC-LOW-001"
+      signal: "Encryption algorithms not documented"
+
+    - id: "CICD-CONFIGENC-LOW-002"
+      signal: "No encryption key inventory"
+
+  positive:
+    - id: "CICD-CONFIGENC-POS-001"
+      signal: "All sensitive config encrypted in version control"
+
+    - id: "CICD-CONFIGENC-POS-002"
+      signal: "Cloud KMS used for key management"
+
+    - id: "CICD-CONFIGENC-POS-003"
+      signal: "Automated key rotation configured"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify encryption tools in use"
+      description: |
+        Determine what encryption tools are used for
+        configuration and secrets.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for SOPS configuration"
+          command: |
+            cat .sops.yaml 2>/dev/null || echo "No .sops.yaml"
+
+        - purpose: "Find encrypted files"
+          command: |
+            find . -name '*.sops.*' -o -name '*sealed*' 2>/dev/null | head -20
+
+        - purpose: "Check for encryption patterns"
+          command: |
+            grep -rn 'ENC\[' . --include='*.yaml' --include='*.json' 2>/dev/null | head -10
+
+      expected_findings:
+        - "Encryption tools and patterns"
+
+    - id: "2"
+      name: "Scan for unencrypted secrets"
+      description: |
+        Search for potentially unencrypted sensitive values
+        in configuration files.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find potential plain text secrets"
+          command: |
+            grep -rn 'password:\|secret:\|api_key:' --include='*.yaml' --include='*.json' 2>/dev/null | grep -v 'ENC\|sops\|sealed' | head -20
+
+        - purpose: "Check Kubernetes Secret definitions"
+          command: |
+            grep -rB 5 -A 10 'kind: Secret' k8s/ --include='*.yaml' 2>/dev/null | grep -E 'data:|stringData:' | head -10
+
+      expected_findings:
+        - "Potential unencrypted secrets"
+
+    - id: "3"
+      name: "Review key management"
+      description: |
+        Assess how encryption keys are managed,
+        stored, and rotated.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check SOPS key configuration"
+          command: |
+            grep -E 'kms:|pgp:|age:|gcp_kms:|azure_kv:' .sops.yaml 2>/dev/null
+
+      expected_findings:
+        - "Key management approach"
+
+    - id: "4"
+      name: "Assess encryption coverage"
+      description: |
+        Determine what percentage of sensitive configuration
+        is encrypted.
+      duration_estimate: "15 min"
+
+      questions:
+        - "What secrets are encrypted vs plain text?"
+        - "Is encryption consistent across environments?"
+        - "Are there exceptions or gaps?"
+
+      expected_findings:
+        - "Encryption coverage assessment"
+
+    - id: "5"
+      name: "Verify transmission security"
+      description: |
+        Check that configuration is transmitted securely
+        during deployment.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for TLS configuration"
+          command: |
+            grep -rE 'https://|tls:|ssl:' .github/workflows/ k8s/ --include='*.yaml' 2>/dev/null | head -10
+
+      expected_findings:
+        - "Transmission security status"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Encryption Assessment"
+        - "Key Management Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full encryption audit with key management review"
+    medium: "Configuration scanned, key management not fully verified"
+    low: "Based on pattern search only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "sops"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed security analysis"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "config-encryption-001"
+    item: "No plain text secrets in version control"
+    level: "CRITICAL"
+    verification: |
+      grep -rn 'password:\s*[a-zA-Z0-9]' --include='*.yaml' --include='*.json' 2>/dev/null | grep -v 'ENC\|sops\|sealed\|test\|example' && echo "FAIL" || echo "PASS"
+    expected: "PASS"
+
+  - id: "config-encryption-002"
+    item: "Encryption tool configured (SOPS/sealed-secrets)"
+    level: "CRITICAL"
+    verification: |
+      [[ -f .sops.yaml ]] || grep -r 'SealedSecret' k8s/ --include='*.yaml' 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "config-encryption-003"
+    item: "Cloud KMS or equivalent key management"
+    level: "BLOCKING"
+    verification: |
+      grep -E 'kms:|gcp_kms:|azure_kv:' .sops.yaml 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "config-encryption-004"
+    item: "Key rotation process documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify key rotation process exists and is documented"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC6.7"]
+    - framework: "PCI-DSS"
+      controls: ["3.4", "3.5", "3.6"]
+    - framework: "HIPAA"
+      controls: ["164.312(a)(2)(iv)"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.configuration-management.secrets-injection"
+    - "devops-ci-cd.infrastructure-as-code.state-management"

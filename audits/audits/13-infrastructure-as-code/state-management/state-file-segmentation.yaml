@@ -1,0 +1,378 @@
+audit:
+  id: infrastructure-as-code.state-management.state-file-segmentation
+  name: IaC State File Segmentation
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: state-management
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines how Terraform state files are segmented and
+    organized across the infrastructure. It evaluates blast radius
+    containment, state dependencies, and the overall state architecture.
+
+    Key areas examined:
+    - State file granularity and boundaries
+    - Blast radius analysis
+    - Cross-state dependencies (remote state data sources)
+    - Environment and team isolation
+    - State file size and performance
+    - Segmentation patterns (by service, team, environment, layer)
+  why_it_matters: |
+    Proper state segmentation provides:
+    - Reduced blast radius: Problems in one state don't affect others
+    - Faster operations: Smaller states are quicker to plan and apply
+    - Better parallelization: Independent states can be managed concurrently
+    - Team autonomy: Teams can work without blocking each other
+    - Security isolation: Sensitive resources in separate states
+
+    Poor segmentation leads to:
+    - Long plan/apply times
+    - High risk of cascading failures
+    - Team bottlenecks and conflicts
+    - Difficulty tracking changes
+    - Complex rollback scenarios
+  when_to_run:
+  - During infrastructure architecture review
+  - When experiencing slow Terraform operations
+  - Before major infrastructure scaling
+  - When restructuring team responsibilities
+prerequisites:
+  required_artifacts:
+  - type: iac_repository
+    description: Access to infrastructure code repository
+  - type: state_inventory
+    description: List of all state files and their purposes
+  access_requirements:
+  - Read access to IaC repositories
+  - Understanding of infrastructure architecture
+  - Knowledge of team structure and ownership
+discovery:
+  code_patterns:
+  - pattern: data\s+"terraform_remote_state"
+    type: regex
+    scope: config
+    purpose: Find cross-state dependencies
+  - pattern: backend\s+"[^"]+"
+    type: regex
+    scope: config
+    purpose: Identify backend configurations
+  - pattern: key\s*=\s*"[^"]+"
+    type: regex
+    scope: config
+    purpose: Extract state file keys
+  file_patterns:
+  - glob: '**/backend.tf'
+    purpose: Backend configurations
+  - glob: '**/data.tf'
+    purpose: Data source definitions including remote state
+  - glob: '**/remote_state.tf'
+    purpose: Remote state references
+knowledge_sources:
+  guides:
+  - id: terraform-state-architecture
+    name: Terraform State Architecture
+    url: https://developer.hashicorp.com/terraform/language/state
+    offline_cache: true
+  - id: terraform-remote-state
+    name: Terraform Remote State Data Source
+    url: https://developer.hashicorp.com/terraform/language/state/remote-state-data
+    offline_cache: true
+  - id: terraform-workspaces
+    name: Terraform Workspaces
+    url: https://developer.hashicorp.com/terraform/language/state/workspaces
+    offline_cache: true
+  learning_resources:
+  - id: terraform-up-running
+    title: 'Terraform: Up & Running'
+    type: book
+    reference: O'Reilly Media - Chapter on State Management
+tooling:
+  static_analysis:
+  - tool: terraform graph
+    purpose: Visualize resource dependencies within state
+    offline_capable: true
+  infrastructure_tools:
+  - tool: terraform state list
+    purpose: Count resources in state
+    command: terraform state list | wc -l
+  - tool: terraform plan
+    purpose: Measure plan time as indicator of state size
+    command: time terraform plan -refresh-only
+  scripts:
+  - id: state-dependency-mapper
+    language: bash
+    purpose: Map dependencies between state files
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Remote State Dependencies ==="
+      for dir in $(find . -name 'backend.tf' -exec dirname {} \;); do
+        state_key=$(grep -h 'key\s*=' "$dir/backend.tf" 2>/dev/null | head -1)
+        deps=$(grep -rh 'data\s*"terraform_remote_state"' "$dir" 2>/dev/null | wc -l)
+        echo "$dir: $state_key -> $deps dependencies"
+      done
+signals:
+  critical:
+  - id: IAC-SEG-CRIT-001
+    signal: Monolithic state file with entire infrastructure
+    evidence_indicators:
+    - Single state file for all resources
+    - State file with >500 resources
+    - All environments in one state
+    explanation: |
+      A monolithic state creates massive blast radius where any error
+      or change affects all infrastructure. Recovery is complex and
+      changes are slow.
+    remediation: Split state by environment, team, service, or layer
+  - id: IAC-SEG-CRIT-002
+    signal: Circular dependencies between state files
+    evidence_indicators:
+    - State A references State B which references State A
+    - Deadlock in state operations
+    explanation: |
+      Circular dependencies create deadlocks where neither state can
+      be applied without the other, leading to operational paralysis.
+    remediation: Restructure to eliminate circular dependencies; use parameter stores for shared data
+  high:
+  - id: IAC-SEG-HIGH-001
+    signal: Production and non-production in same state
+    evidence_indicators:
+    - Single state spanning multiple environments
+    - Environment selection via conditionals instead of states
+    explanation: |
+      Shared state means development changes can affect production
+      and vice versa, creating significant operational risk.
+    remediation: Create separate state files per environment
+  - id: IAC-SEG-HIGH-002
+    signal: Excessive cross-state dependencies
+    evidence_pattern: data\s+"terraform_remote_state"
+    explanation: |
+      Many cross-state dependencies create a complex dependency graph
+      that's hard to understand and maintain. Changes require
+      coordinated deployments across multiple states.
+    remediation: Minimize cross-state dependencies; use SSM Parameter Store or similar
+  - id: IAC-SEG-HIGH-003
+    signal: No clear ownership for state files
+    evidence_indicators:
+    - State files without team assignment
+    - Multiple teams modifying same state
+    explanation: |
+      Unclear ownership leads to coordination problems, conflicting
+      changes, and difficulty tracking who made what changes.
+    remediation: Assign clear ownership and align state boundaries with team boundaries
+  medium:
+  - id: IAC-SEG-MED-001
+    signal: State files exceeding optimal size
+    evidence_indicators:
+    - Plan/apply operations taking >10 minutes
+    - State file >50MB
+    remediation: Split large states into smaller, focused components
+  - id: IAC-SEG-MED-002
+    signal: Inconsistent segmentation patterns
+    evidence_indicators:
+    - Some services have dedicated states, others share
+    - No clear segmentation strategy
+    remediation: Establish and document consistent segmentation patterns
+  - id: IAC-SEG-MED-003
+    signal: Remote state data sources without version constraints
+    evidence_indicators:
+    - terraform_remote_state without workspace constraint
+    - No state key versioning
+    remediation: Use explicit workspace/key references in remote state data sources
+  low:
+  - id: IAC-SEG-LOW-001
+    signal: State key naming doesn't reflect contents
+    evidence_indicators:
+    - Generic names like 'terraform.tfstate'
+    - Unclear state file purposes
+    remediation: 'Use descriptive state keys: service/environment/component.tfstate'
+  positive:
+  - id: IAC-SEG-POS-001
+    signal: Well-segmented state architecture
+    evidence_indicators:
+    - Clear boundaries by service/team/environment
+    - Minimal cross-state dependencies
+    - Documented state ownership
+  - id: IAC-SEG-POS-002
+    signal: State segmentation aligned with team structure
+    evidence_indicators:
+    - Teams own their states independently
+    - No cross-team state conflicts
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: State Inventory
+    description: |
+      Create an inventory of all state files and their
+      organization.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find all backend configurations
+      command: grep -rA20 'backend\s*"' --include='*.tf' | grep -E 'backend|key\s*=' | head -50
+    - purpose: Extract state file keys
+      command: grep -rh 'key\s*=' --include='*.tf' | sort -u
+    - purpose: Count backend configurations
+      command: grep -rl 'backend\s*"' --include='*.tf' | wc -l
+    expected_findings:
+    - List of all state files
+    - State organization pattern
+    - Number of distinct states
+  - id: '2'
+    name: Cross-State Dependency Analysis
+    description: |
+      Map dependencies between state files to understand
+      the dependency graph.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find remote state data sources
+      command: grep -rA20 'data\s*"terraform_remote_state"' --include='*.tf'
+    - purpose: Count dependencies per directory
+      command: 'for dir in $(find . -name ''main.tf'' -exec dirname {} \;); do deps=$(grep -rh ''terraform_remote_state''
+        "$dir" 2>/dev/null | wc -l); if [ $deps -gt 0 ]; then echo "$dir: $deps remote state refs"; fi;
+        done'
+    - purpose: Extract referenced state keys
+      command: grep -rA10 'terraform_remote_state' --include='*.tf' | grep -E 'key\s*=|backend\s*=' |
+        head -30
+    expected_findings:
+    - Cross-state dependency map
+    - Highly connected states
+    - Potential circular dependencies
+  - id: '3'
+    name: Blast Radius Assessment
+    description: |
+      Evaluate the potential impact of changes to each
+      state file.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Identify state with many resources
+      command: 'for dir in $(find . -name ''main.tf'' -exec dirname {} \;); do count=$(grep -c ''^resource''
+        $dir/*.tf 2>/dev/null || echo 0); echo "$dir: $count resources"; done | sort -t: -k2 -rn | head
+        -20'
+    - purpose: Check environment mixing
+      command: grep -rn 'prod\|staging\|dev' --include='backend.tf'
+    - purpose: Look for multi-environment states
+      command: grep -rn 'terraform.workspace\|count.*environment' --include='*.tf' | head -20
+    expected_findings:
+    - Resource counts per state
+    - Environment isolation status
+    - Blast radius metrics
+  - id: '4'
+    name: Ownership and Boundaries Review
+    description: |
+      Assess how state boundaries align with team structure
+      and ownership.
+    duration_estimate: 20 min
+    questions:
+    - Are state boundaries aligned with team ownership?
+    - Do teams have autonomy over their states?
+    - How are cross-team changes coordinated?
+    commands:
+    - purpose: Check for CODEOWNERS or ownership indicators
+      command: find . -name 'CODEOWNERS' -o -name 'OWNERS'
+    - purpose: Look for team indicators in paths
+      command: find . -type d -name 'team-*' -o -name '*-team'
+    expected_findings:
+    - Ownership model
+    - Team boundary alignment
+    - Coordination mechanisms
+  - id: '5'
+    name: Performance Impact Analysis
+    description: |
+      Assess performance implications of current state
+      organization.
+    duration_estimate: 20 min
+    questions:
+    - How long do plan/apply operations typically take?
+    - Are there frequent lock conflicts?
+    - Do teams block each other due to shared states?
+    expected_findings:
+    - Performance metrics
+    - Lock conflict frequency
+    - Team productivity impacts
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - State Architecture Diagram
+    - Dependency Analysis
+    - Blast Radius Assessment
+    - Segmentation Recommendations
+  confidence_guidance:
+    high: Direct state analysis and configuration review
+    medium: Inferred from code structure
+    low: Based on interviews or documentation
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-state-architecture
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: State architecture requires thorough analysis
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: seg-001
+  item: No monolithic state with >200 resources
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review resource counts per state; verify none exceed 200
+  expected: Confirmed by reviewer
+- id: seg-002
+  item: Production and non-production in separate states
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify environment separation in state architecture
+  expected: Confirmed by reviewer
+- id: seg-003
+  item: No circular state dependencies
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review dependency graph for cycles
+  expected: Confirmed by reviewer
+- id: seg-004
+  item: State boundaries aligned with team ownership
+  level: WARNING
+  verification: manual
+  verification_notes: Verify teams have autonomy over their states
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: Internal Standards
+    controls:
+    - Infrastructure organization
+    - Change management
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.state-management.state-backend-security
+  - infrastructure-as-code.iac-structure.environment-separation

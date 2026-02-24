@@ -1,0 +1,340 @@
+# ============================================================
+# END-TO-END LATENCY AUDIT
+# ============================================================
+# Measures the total time from request initiation to response
+# completion across all system components.
+
+audit:
+  id: "performance-efficiency.latency.end-to-end-latency"
+  name: "End-to-End Latency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "latency"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit measures the total elapsed time from when a user initiates
+    a request to when they receive the complete response. It encompasses
+    all components: client-side processing, network transmission, load
+    balancers, application servers, databases, external services, and
+    response delivery. The audit examines distributed tracing data,
+    application metrics, and synthetic monitoring results to identify
+    latency bottlenecks and SLO violations.
+
+  why_it_matters: |
+    End-to-end latency directly impacts user experience and business
+    outcomes. Research shows that each 100ms of latency costs Amazon 1%
+    in sales. Google found that an extra 500ms in search page load time
+    caused a 20% drop in traffic. Beyond user experience, high latency
+    can cause cascading failures in distributed systems through timeout
+    chains and resource exhaustion.
+
+  when_to_run:
+    - "Before and after major releases"
+    - "When SLO violations are detected"
+    - "During capacity planning exercises"
+    - "When adding new infrastructure components"
+
+prerequisites:
+  required_artifacts:
+    - type: "monitoring_system"
+      description: "Access to APM/distributed tracing system (Jaeger, Zipkin, Datadog, etc.)"
+    - type: "metrics_platform"
+      description: "Prometheus, Grafana, or equivalent metrics infrastructure"
+    - type: "synthetic_monitoring"
+      description: "Synthetic transaction monitoring for baseline measurements"
+
+  access_requirements:
+    - "Read access to APM/tracing dashboards"
+    - "Query access to metrics databases"
+    - "Access to run load testing tools in staging/production"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))"
+      purpose: "Identify P99 latency for HTTP requests"
+      threshold: "< 500ms for user-facing endpoints"
+
+    - system: "Prometheus"
+      query: "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket[5m]))"
+      purpose: "Identify P50 (median) latency baseline"
+      threshold: "< 100ms for user-facing endpoints"
+
+    - system: "Jaeger/Zipkin"
+      query: "service={service_name} AND duration > 1s"
+      purpose: "Find traces exceeding latency thresholds"
+      threshold: "< 5% of traces should exceed 1s"
+
+  file_patterns:
+    - glob: "**/prometheus.yml"
+      purpose: "Verify latency metrics are being collected"
+    - glob: "**/opentelemetry*.yaml"
+      purpose: "Check distributed tracing configuration"
+
+knowledge_sources:
+  guides:
+    - id: "google-sre-book"
+      name: "Google SRE Book - Service Level Objectives"
+      url: "https://sre.google/sre-book/service-level-objectives/"
+      offline_cache: true
+
+    - id: "dora-metrics"
+      name: "DORA Metrics - Lead Time for Changes"
+      url: "https://cloud.google.com/blog/products/devops-sre/using-the-four-keys-to-measure-your-devops-performance"
+      offline_cache: true
+
+  papers:
+    - id: "tail-at-scale"
+      title: "The Tail at Scale - Jeff Dean, Luiz Barroso"
+      url: "https://research.google/pubs/pub40801/"
+
+tooling:
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Basic latency measurement"
+      command: "curl -w '%{time_total}' -o /dev/null -s https://api.example.com/health"
+
+    - tool: "hey"
+      purpose: "Load testing with latency percentiles"
+      command: "hey -n 1000 -c 50 https://api.example.com/endpoint"
+
+    - tool: "wrk"
+      purpose: "High-performance HTTP benchmarking"
+      command: "wrk -t12 -c400 -d30s https://api.example.com/endpoint"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        histogram_quantile(0.99,
+          sum(rate(http_request_duration_seconds_bucket{job=\"api\"}[5m])) by (le, endpoint)
+        )
+      purpose: "P99 latency by endpoint"
+
+    - system: "Grafana"
+      query: "Dashboard: Application Performance > End-to-End Latency"
+      purpose: "Visual analysis of latency trends"
+
+signals:
+  critical:
+    - id: "E2E-CRIT-001"
+      signal: "P99 latency exceeds 5 seconds for user-facing endpoints"
+      evidence_threshold: "histogram_quantile(0.99, ...) > 5"
+      explanation: |
+        Extreme latency indicates severe performance degradation that will
+        cause user abandonment, timeout errors, and potential cascading
+        failures. Users experience the system as unresponsive.
+      remediation: "Immediate investigation of bottlenecks via distributed tracing; consider circuit breakers"
+
+    - id: "E2E-CRIT-002"
+      signal: "No distributed tracing or APM configured"
+      evidence_indicators:
+        - "No tracing headers propagated between services"
+        - "No APM agent installed"
+        - "No trace data in observability platform"
+      explanation: |
+        Without distributed tracing, identifying latency bottlenecks in
+        microservices architectures becomes nearly impossible. This is
+        a critical observability gap.
+      remediation: "Implement OpenTelemetry or vendor APM solution"
+
+  high:
+    - id: "E2E-HIGH-001"
+      signal: "P99 latency more than 10x P50 latency"
+      evidence_threshold: "P99/P50 ratio > 10"
+      explanation: |
+        Large variance between median and tail latency indicates
+        inconsistent performance, often caused by garbage collection,
+        cold caches, or resource contention.
+      remediation: "Profile tail latency causes; implement request hedging or caching"
+
+    - id: "E2E-HIGH-002"
+      signal: "Latency SLO violated for more than 1% of requests"
+      evidence_threshold: "SLO breach rate > 1%"
+      explanation: |
+        Consistent SLO violations indicate systemic performance issues
+        that require architectural changes rather than tactical fixes.
+      remediation: "Review and address top latency contributors; consider SLO revision"
+
+  medium:
+    - id: "E2E-MED-001"
+      signal: "No latency SLOs defined for critical endpoints"
+      remediation: "Define and document latency SLOs based on business requirements"
+
+    - id: "E2E-MED-002"
+      signal: "Latency measurements not broken down by endpoint"
+      remediation: "Add endpoint labels to latency metrics"
+
+  low:
+    - id: "E2E-LOW-001"
+      signal: "No synthetic monitoring for critical user journeys"
+
+  positive:
+    - id: "E2E-POS-001"
+      signal: "Comprehensive distributed tracing with >99% trace coverage"
+    - id: "E2E-POS-002"
+      signal: "Latency SLOs defined and actively monitored with alerting"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Verify Instrumentation"
+      description: |
+        Confirm that distributed tracing and latency metrics are properly
+        configured across all services in the request path.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check if OpenTelemetry is configured"
+          command: "grep -r 'opentelemetry\\|otel\\|tracing' --include='*.yaml' --include='*.yml' ."
+        - purpose: "Verify Prometheus metrics endpoint"
+          command: "curl -s http://localhost:9090/api/v1/label/__name__/values | grep -i latency"
+      expected_findings:
+        - "Tracing configuration files present"
+        - "Latency histogram metrics being collected"
+
+    - id: "2"
+      name: "Measure Baseline Latency"
+      description: |
+        Run load tests to establish current latency baselines across
+        P50, P95, and P99 percentiles.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Run load test with hey"
+          command: "hey -n 10000 -c 100 -m GET https://api.example.com/health"
+        - purpose: "Query current P99 from Prometheus"
+          command: "curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,rate(http_request_duration_seconds_bucket[5m]))'"
+      expected_findings:
+        - "P50, P95, P99 latency values"
+        - "Request throughput capacity"
+
+    - id: "3"
+      name: "Analyze Trace Data"
+      description: |
+        Examine distributed traces to identify the slowest spans and
+        services contributing to end-to-end latency.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find slowest traces via API"
+          command: "curl -s 'http://jaeger:16686/api/traces?service=api-gateway&limit=20&lookback=1h&sortBy=duration'"
+      expected_findings:
+        - "Identification of slowest service spans"
+        - "Database vs network vs compute breakdown"
+
+    - id: "4"
+      name: "Compare Against SLOs"
+      description: |
+        Compare measured latency against defined SLOs and identify
+        any violations or at-risk thresholds.
+      duration_estimate: "20 min"
+      questions:
+        - "What are the defined latency SLOs for each endpoint?"
+        - "What percentage of requests are violating SLOs?"
+        - "What is the error budget burn rate?"
+      expected_findings:
+        - "SLO compliance status"
+        - "Error budget remaining"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Latency Baseline Measurements"
+        - "SLO Compliance Status"
+        - "Bottleneck Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Measurements from production traffic with >1000 samples"
+    medium: "Measurements from staging or limited production samples"
+    low: "Estimates based on component-level analysis"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "google-sre-book"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime measurements and load testing"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "e2e-latency-001"
+    item: "Distributed tracing is configured and operational"
+    level: "CRITICAL"
+    verification: "curl -s http://jaeger:16686/api/services | jq '.data | length > 0'"
+    expected: "true"
+
+  - id: "e2e-latency-002"
+    item: "Latency histogram metrics are being collected"
+    level: "CRITICAL"
+    verification: "curl -s http://prometheus:9090/api/v1/label/__name__/values | grep -q http_request_duration && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "e2e-latency-003"
+    item: "P99 latency is below 1 second for user-facing endpoints"
+    level: "BLOCKING"
+    verification: "curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,rate(http_request_duration_seconds_bucket[5m]))' | jq '.data.result[0].value[1] | tonumber < 1'"
+    threshold: "< 1.0"
+
+  - id: "e2e-latency-004"
+    item: "Latency SLOs are documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm SLO documentation exists in runbooks or SRE docs"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC6.1"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.latency.api-response-time"
+    - "performance-efficiency.latency.percentile-latency"
+    - "performance-efficiency.throughput.request-throughput"

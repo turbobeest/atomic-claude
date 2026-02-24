@@ -1,0 +1,312 @@
+audit:
+  id: testing-quality-assurance.test-environment.environment-access-control
+  name: Environment Access Control
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: testing-quality-assurance
+  category_number: 26
+  subcategory: test-environment
+  tier: expert
+  estimated_duration: 30-45 min
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: security
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates access control for test environments including who can
+    access environments, credential management, network isolation,
+    and audit logging. Ensures test environments don't become security
+    weak points.
+  why_it_matters: |
+    Test environments often have weaker security than production but
+    may contain sensitive data or provide network paths to production.
+    Attackers target less-protected test systems. Proper access control
+    limits exposure without blocking legitimate testing.
+  when_to_run:
+  - Security assessment
+  - Environment setup review
+  - Compliance audit
+  - Access review
+prerequisites:
+  required_artifacts:
+  - type: access_config
+    description: Access control configuration
+  - type: network_config
+    description: Network security settings
+  access_requirements:
+  - Access control documentation
+  - Network configuration access
+discovery:
+  file_patterns:
+  - glob: '**/.env*'
+    purpose: Environment credentials
+  - glob: '**/secrets/**'
+    purpose: Secret storage
+  - glob: '**/network*.yml'
+    purpose: Network configuration
+  code_patterns:
+  - pattern: password|secret|api_key|token
+    type: regex
+    scope: config
+    purpose: Credential patterns
+knowledge_sources:
+  guides:
+  - id: env-security
+    name: Environment Security Best Practices
+    url: https://owasp.org/www-project-web-security-testing-guide/
+    offline_cache: true
+  - id: network-isolation
+    name: Network Isolation Guide
+    url: https://docs.docker.com/network/
+    offline_cache: true
+  learning_resources:
+  - id: infra-security
+    title: Infrastructure Security
+    type: guide
+    reference: Security Best Practices
+tooling:
+  static_analysis:
+  - tool: Credential scanner
+    purpose: Detect exposed credentials
+    offline_capable: true
+  scripts:
+  - id: access-check
+    language: bash
+    purpose: Analyze access control
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Environment Access Control Analysis ==="
+
+      echo "Environment files with credentials:"
+      find . -name '.env*' 2>/dev/null | head -10
+
+      echo ""
+      echo "Credential patterns in configs:"
+      grep -r -l 'password\|secret\|api_key' --include='*.yml' --include='*.yaml' . 2>/dev/null | head -10
+
+      echo ""
+      echo "Network configuration:"
+      grep -r 'network\|port' --include='docker-compose*.yml' . 2>/dev/null | head -10
+
+      echo ""
+      echo "Exposed ports:"
+      grep -r -E 'ports:' -A5 --include='docker-compose*.yml' . 2>/dev/null | head -15
+
+      echo ""
+      echo "Secret management:"
+      find . -name '*secret*' -o -name '*vault*' 2>/dev/null | head -5
+signals:
+  critical:
+  - id: ENVACCESS-CRIT-001
+    signal: Production credentials in test environment
+    evidence_pattern: Actual production secrets accessible
+    explanation: |
+      Production credentials in test environments create massive risk.
+      Test environment breaches gain production access. Credentials
+      must be environment-specific.
+    remediation: |
+      Separate credentials:
+      1. Remove all production credentials
+      2. Create test-specific credentials
+      3. Use secrets management
+      4. Audit credential usage
+      5. Rotate compromised credentials
+  - id: ENVACCESS-CRIT-002
+    signal: Test environment has production network access
+    evidence_pattern: Can reach production systems from test
+    explanation: |
+      Network access to production from test environments allows
+      lateral movement after test compromise. Test environments
+      should be network-isolated from production.
+    remediation: |
+      Implement network isolation:
+      - Segment test and production networks
+      - Remove VPN/firewall access
+      - Use separate cloud accounts
+      - Audit network paths
+  high:
+  - id: ENVACCESS-HIGH-001
+    signal: No access control on test environments
+    evidence_pattern: Anyone can access test systems
+    explanation: |
+      Uncontrolled access increases exposure and makes audit impossible.
+      Even test environments should have access control proportional
+      to their risk level.
+    remediation: |
+      Implement access control:
+      - Require authentication
+      - Document access grants
+      - Regular access reviews
+      - Revoke on role change
+  - id: ENVACCESS-HIGH-002
+    signal: Hardcoded credentials in code
+    evidence_pattern: Credentials in source files
+    explanation: |
+      Hardcoded credentials are easily extracted and often leaked
+      through version control. Credentials should be injected at
+      runtime through secure mechanisms.
+    remediation: |
+      Remove hardcoded credentials:
+      - Use environment variables
+      - Implement secrets management
+      - Scan for credential patterns
+      - Add pre-commit checks
+  medium:
+  - id: ENVACCESS-MED-001
+    signal: Weak test credentials
+    evidence_pattern: Simple passwords like 'password123'
+    remediation: Use realistic credential strength even in test
+  - id: ENVACCESS-MED-002
+    signal: No audit logging
+    evidence_pattern: Access not logged
+    remediation: Enable access logging for test environments
+  low:
+  - id: ENVACCESS-LOW-001
+    signal: Access not documented
+    evidence_pattern: Unclear who has access
+  positive:
+  - id: ENVACCESS-POS-001
+    signal: Complete network isolation
+    evidence_pattern: No path to production from test
+  - id: ENVACCESS-POS-002
+    signal: Secrets management in use
+    evidence_pattern: HashiCorp Vault or similar
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review credential storage
+    description: |
+      Check how credentials are managed.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find env files
+      command: find . -name '.env*' 2>/dev/null | head -5
+    - purpose: Check for hardcoded secrets
+      command: grep -r -l 'password\|secret' --include='*.yml' . 2>/dev/null | head -5
+    expected_findings:
+    - Credential storage
+    - Hardcoded secrets
+  - id: '2'
+    name: Assess network isolation
+    description: |
+      Check network configuration and isolation.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find exposed ports
+      command: grep -r 'ports:' -A5 --include='docker-compose*.yml' . 2>/dev/null | head -10
+    expected_findings:
+    - Network exposure
+    - Isolation status
+  - id: '3'
+    name: Verify access controls
+    description: |
+      Review access control configuration.
+    duration_estimate: 10 min
+    questions:
+    - Who can access test environments?
+    - How is access granted/revoked?
+    - Is access audited?
+    expected_findings:
+    - Access control status
+    - Audit capability
+  - id: '4'
+    name: Check production separation
+    description: |
+      Verify test cannot reach production.
+    duration_estimate: 10 min
+    questions:
+    - Can test connect to production systems?
+    - Are credentials different?
+    - Is network segmented?
+    expected_findings:
+    - Production isolation
+    - Credential separation
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: access_report
+    format: table
+    sections:
+    - Credential Management
+    - Network Isolation
+    - Access Controls
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Access Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Full access review with network testing
+    medium: Configuration analysis
+    low: Documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: env-security
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires security analysis
+    security:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 5
+closeout_checklist:
+- id: envaccess-001
+  item: Credential storage reviewed
+  level: CRITICAL
+  verification: find . -name '.env*' 2>/dev/null | wc -l
+  expected: Files documented
+- id: envaccess-002
+  item: Network isolation verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm no production network access
+  expected: Isolation confirmed
+- id: envaccess-003
+  item: Access controls assessed
+  level: WARNING
+  verification: manual
+  verification_notes: Document who has access
+  expected: Access documented
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.2
+  - framework: ISO 27001
+    controls:
+    - A.9.2
+  - framework: PCI-DSS
+    controls:
+    - '7.1'
+relationships:
+  commonly_combined:
+  - testing-quality-assurance.test-data-management.test-data-privacy
+  - security-trust.access-control.credential-management
+  - security-trust.secrets-management.secrets-storage

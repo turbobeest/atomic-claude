@@ -1,0 +1,370 @@
+audit:
+  id: reliability-resilience.resilience-testing.blast-radius-verification
+  name: Blast Radius Verification Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: resilience-testing
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: testing
+  default_profiles:
+  - full
+  - production
+  - security
+  blocks_phase: true
+  parallelizable: false
+description:
+  what: |
+    This audit verifies that chaos engineering experiments have proper blast
+    radius controls that limit the scope of impact during testing. It examines
+    targeting rules, abort conditions, magnitude limits, and containment
+    mechanisms that prevent experiments from causing unintended widespread damage.
+  why_it_matters: |
+    Chaos experiments without proper blast radius controls can cause production
+    outages worse than the failures they're designed to test. Uncontrolled
+    experiments have caused significant incidents at major organizations.
+    Proper blast radius management enables safe production chaos testing by
+    ensuring experiments affect only intended targets within defined bounds.
+  when_to_run:
+  - Before approving new chaos experiments for production
+  - After incidents caused by chaos experiments
+  - Quarterly chaos safety review
+  - When expanding chaos testing to new environments
+prerequisites:
+  required_artifacts:
+  - type: chaos-experiment-definitions
+    description: All chaos experiment configurations
+  - type: blast-radius-policies
+    description: Documented blast radius requirements
+  - type: abort-conditions
+    description: Emergency stop procedures and triggers
+  access_requirements:
+  - Read access to chaos experiment configurations
+  - Access to chaos platform admin settings
+  - Read access to targeting rules and filters
+discovery:
+  code_patterns:
+  - pattern: target|scope|limit|magnitude|percentage
+    type: keyword
+    scope: config
+    purpose: Identify targeting and limiting configurations
+  - pattern: abort|halt|stop|emergency
+    type: keyword
+    scope: config
+    purpose: Identify abort condition definitions
+  - pattern: blast.*radius|impact.*scope|containment
+    type: regex
+    scope: config
+    purpose: Identify explicit blast radius configurations
+  file_patterns:
+  - glob: '**/chaos/**/*.yaml'
+    purpose: Chaos experiment definitions
+  - glob: '**/experiments/**/config*'
+    purpose: Experiment configuration files
+  - glob: '**/safety/**/*'
+    purpose: Safety and abort configurations
+  documents_to_review:
+  - type: Chaos safety guidelines
+    purpose: Understand required safety controls
+  - type: Experiment approval process
+    purpose: Review pre-execution verification requirements
+  - type: Incident reports from chaos experiments
+    purpose: Learn from past blast radius failures
+knowledge_sources:
+  specifications:
+  - id: principles-of-chaos
+    name: Principles of Chaos Engineering
+    url: https://principlesofchaos.org/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: gremlin-blast-radius
+    name: Gremlin Blast Radius Guide
+    url: https://www.gremlin.com/docs/infrastructure-layer/targets/
+    offline_cache: true
+  - id: safe-chaos
+    name: Running Safe Chaos Experiments
+    url: https://www.gremlin.com/blog/how-to-run-a-gameday/
+    offline_cache: true
+  learning_resources:
+  - id: chaos-engineering-book
+    title: 'Chaos Engineering: System Resiliency in Practice'
+    type: book
+    reference: 'ISBN: 978-1492043867'
+tooling:
+  infrastructure_tools:
+  - tool: Gremlin
+    purpose: Review target configurations and safety limits
+    command: gremlin attack list --json | jq '.[] | {name, targets, magnitude}'
+  - tool: LitmusChaos
+    purpose: Review chaos engine specifications
+    command: kubectl get chaosengines -A -o jsonpath='{.items[*].spec}'
+  - tool: Chaos Mesh
+    purpose: Review selector and scope configurations
+    command: kubectl get chaos -A -o yaml
+  monitoring_queries:
+  - system: Prometheus
+    query: increase(chaos_experiment_aborted_total[30d])
+    purpose: Track abort frequency to identify unsafe experiments
+    threshold: Low abort rate indicates proper controls
+  - system: Prometheus
+    query: chaos_experiment_affected_targets / chaos_experiment_intended_targets
+    purpose: Verify experiments affect only intended targets
+    threshold: Ratio should be 1.0
+  scripts:
+  - id: blast-radius-validator
+    language: python
+    purpose: Validate blast radius configurations
+    source: inline
+    code: |
+      #!/usr/bin/env python3
+      """
+      Blast Radius Configuration Validator
+      Checks experiment definitions for required safety controls
+      """
+      import yaml
+
+      REQUIRED_CONTROLS = [
+          'target_percentage',
+          'affected_count_limit',
+          'abort_condition',
+          'duration_limit',
+          'rollback_procedure'
+      ]
+
+      def validate_experiment(experiment_config):
+          missing = []
+          for control in REQUIRED_CONTROLS:
+              if control not in experiment_config:
+                  missing.append(control)
+          return missing
+
+      def check_percentage_limits(config):
+          pct = config.get('target_percentage', 100)
+          if pct > 50:
+              return "WARNING: Target percentage exceeds 50%"
+          return "OK"
+signals:
+  critical:
+  - id: BRV-CRIT-001
+    signal: Experiments lack target percentage limits
+    evidence_indicators:
+    - No percentage or count limits in experiment config
+    - Targeting rules allow 100% of instances
+    explanation: |
+      Experiments without percentage limits can affect all instances of
+      a service, causing complete outages rather than partial degradation.
+      This violates the principle of minimizing blast radius.
+    remediation: Add target percentage limits (typically 1-10% for production)
+  - id: BRV-CRIT-002
+    signal: No abort conditions defined
+    evidence_indicators:
+    - Missing abort or halt conditions
+    - No automatic termination triggers
+    explanation: |
+      Without abort conditions, experiments cannot be automatically stopped
+      when causing unintended damage. This can lead to extended outages
+      during chaos testing.
+    remediation: Define metric-based abort conditions for all experiments
+  - id: BRV-CRIT-003
+    signal: Production experiments without safety approvals
+    evidence_indicators:
+    - Experiments running in production without approval workflow
+    - No pre-execution validation
+    explanation: |
+      Running unreviewed experiments in production is extremely dangerous.
+      All production chaos experiments require safety review.
+    remediation: Implement mandatory approval workflow for production experiments
+  high:
+  - id: BRV-HIGH-001
+    signal: Cross-service blast radius not considered
+    explanation: Experiments may affect downstream services unexpectedly
+    remediation: Map and limit cross-service impact for all experiments
+  - id: BRV-HIGH-002
+    signal: Duration limits missing or excessive
+    explanation: Long-running experiments increase cumulative impact
+    remediation: Set duration limits appropriate to experiment type
+  medium:
+  - id: BRV-MED-001
+    signal: Blast radius documentation incomplete
+    remediation: Document expected blast radius for each experiment
+  - id: BRV-MED-002
+    signal: Manual abort process not well-defined
+    remediation: Create clear emergency stop procedures
+  low:
+  - id: BRV-LOW-001
+    signal: Historical blast radius data not tracked
+  positive:
+  - id: BRV-POS-001
+    signal: All experiments have defined blast radius controls
+  - id: BRV-POS-002
+    signal: Automatic abort conditions trigger appropriately
+  - id: BRV-POS-003
+    signal: Graduated rollout of new experiments enforced
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review Blast Radius Policies
+    description: |
+      Examine organizational policies for chaos experiment blast radius,
+      including required limits, approval processes, and safety guidelines.
+    duration_estimate: 30 min
+    questions:
+    - What are the documented blast radius requirements?
+    - What approval process exists for production experiments?
+    - Are there environment-specific blast radius policies?
+    expected_findings:
+    - Documented blast radius policies and requirements
+    - Approval workflow documentation
+  - id: '2'
+    name: Analyze Experiment Targeting
+    description: |
+      Review targeting configurations for all experiments to verify
+      they include appropriate percentage limits and scope restrictions.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Extract Litmus target configurations
+      command: kubectl get chaosengines -A -o yaml | grep -A 20 'spec:'
+    - purpose: List Gremlin targeting rules
+      command: gremlin attack list --json | jq '.[] | .targets'
+    expected_findings:
+    - Target percentage for each experiment
+    - Scope restrictions and filters
+  - id: '3'
+    name: Verify Abort Conditions
+    description: |
+      Check that all experiments have defined abort conditions with
+      appropriate thresholds and automatic triggering.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check for abort configurations
+      command: grep -r 'abort\|halt\|stop' chaos/ experiments/
+    expected_findings:
+    - Abort condition definitions for each experiment
+    - Threshold values and metrics used for abort triggers
+  - id: '4'
+    name: Validate Cross-Service Impact
+    description: |
+      Assess whether experiments consider and limit impact on
+      services downstream of the target.
+    duration_estimate: 30 min
+    questions:
+    - Are service dependencies mapped?
+    - Do experiments account for downstream impact?
+    - Are there limits on cascading effects?
+    expected_findings:
+    - Dependency-aware blast radius configurations
+    - Cross-service impact documentation
+  - id: '5'
+    name: Test Emergency Stop Procedures
+    description: |
+      Verify that emergency stop procedures work correctly and
+      are accessible to on-call personnel.
+    duration_estimate: 30 min
+    questions:
+    - Can experiments be stopped quickly?
+    - Is the emergency stop procedure documented?
+    - Do on-call engineers know how to halt experiments?
+    expected_findings:
+    - Working emergency stop mechanism
+    - Clear documentation for experiment termination
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: blast_radius_assessment
+    format: table
+    sections:
+    - Experiment Name
+    - Target Limits
+    - Abort Conditions
+    - Compliance Status
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Safety Gaps
+    - Recommendations
+  confidence_guidance:
+    high: Configurations verified and abort conditions tested
+    medium: Configurations reviewed but not tested
+    low: Based on documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: principles-of-chaos
+      priority: required
+    - source_id: gremlin-blast-radius
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough verification of safety controls
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: brv-001
+  item: All experiments have target percentage limits
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify each experiment config includes percentage or count limits
+  expected: Confirmed by reviewer
+- id: brv-002
+  item: Abort conditions defined for all experiments
+  level: CRITICAL
+  verification: manual
+  verification_notes: Check abort condition configuration in each experiment
+  expected: Confirmed by reviewer
+- id: brv-003
+  item: Emergency stop procedure documented and tested
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify emergency stop works and is documented
+  expected: Confirmed by reviewer
+- id: brv-004
+  item: Production experiments require approval
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm approval workflow exists and is enforced
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - distributed-system
+    - microservices
+    - cloud-native
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+    - CC7.4
+  - framework: ISO 27001
+    controls:
+    - A.12.1
+    - A.14.2
+relationships:
+  commonly_combined:
+  - reliability-resilience.resilience-testing.failure-mode-coverage
+  - reliability-resilience.resilience-testing.cascading-failure-prevention
+  - reliability-resilience.fault-tolerance.graceful-degradation

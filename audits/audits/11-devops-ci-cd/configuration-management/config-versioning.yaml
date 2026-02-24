@@ -1,0 +1,339 @@
+# ============================================================
+# AUDIT: Config Versioning
+# ============================================================
+# Evaluates version control and change tracking for configuration
+
+audit:
+  id: "devops-ci-cd.configuration-management.config-versioning"
+  name: "Config Versioning"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "configuration-management"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "config"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Assesses how configuration changes are versioned, tracked, and audited.
+    Evaluates whether configuration is in version control, has change
+    history, follows review processes, and can be correlated with
+    deployments and incidents.
+
+  why_it_matters: |
+    Unversioned configuration changes cannot be audited, reviewed, or
+    rolled back. When incidents occur, understanding what configuration
+    changed is critical for diagnosis. Version control provides audit
+    trail, enables review before changes, and supports rollback. GitOps
+    makes configuration versioning the foundation of deployment.
+
+  when_to_run:
+    - "Initial configuration audit"
+    - "When implementing GitOps"
+    - "After configuration-related incidents"
+    - "Compliance reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "configuration_repository"
+      description: "Version control repository for configuration"
+    - type: "change_history"
+      description: "Configuration change logs or audit trails"
+
+  access_requirements:
+    - "Version control system access"
+    - "Configuration repository access"
+
+discovery:
+  file_patterns:
+    - glob: "**/.git"
+      purpose: "Verify git repository"
+
+    - glob: "**/k8s/**"
+      purpose: "Kubernetes configuration in version control"
+
+    - glob: "**/config/**"
+      purpose: "Configuration directories"
+
+    - glob: "**/helm/**"
+      purpose: "Helm charts in version control"
+
+knowledge_sources:
+  guides:
+    - id: "gitops"
+      name: "GitOps Principles"
+      url: "https://www.gitops.tech/"
+      offline_cache: true
+
+    - id: "argocd"
+      name: "Argo CD Documentation"
+      url: "https://argo-cd.readthedocs.io/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "git"
+      purpose: "Version control operations"
+      command: "git log --oneline -20"
+
+    - tool: "argocd"
+      purpose: "GitOps deployment tracking"
+      command: "argocd app history APP"
+
+  scripts:
+    - id: "check-config-versioning"
+      language: "bash"
+      purpose: "Verify configuration is version controlled"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Config directories in git ==="
+        git ls-files | grep -E 'config|k8s|helm|deploy' | head -20
+        echo "=== Recent config changes ==="
+        git log --oneline --all -- '*.yaml' '*.json' | head -10
+
+signals:
+  critical:
+    - id: "CICD-CONFIGVER-CRIT-001"
+      signal: "Production configuration not in version control"
+      evidence_pattern: "Config managed outside git via UI or manual edits"
+      explanation: |
+        Configuration not in version control has no history, cannot be
+        reviewed before changes, and cannot be reliably rolled back.
+        This violates GitOps principles and audit requirements.
+      remediation: "Move all configuration to version-controlled repository"
+
+    - id: "CICD-CONFIGVER-CRIT-002"
+      signal: "Configuration changes bypass review process"
+      evidence_pattern: "Direct pushes to main or production config"
+      explanation: |
+        Without review, misconfigurations deploy directly to production.
+        Code review catches errors and ensures knowledge sharing.
+      remediation: "Require PR review for all configuration changes"
+
+  high:
+    - id: "CICD-CONFIGVER-HIGH-001"
+      signal: "No correlation between config changes and deployments"
+      evidence_pattern: "Cannot determine what config was deployed when"
+      explanation: |
+        Without correlation, incident investigation cannot determine
+        if configuration changes caused problems. This extends MTTR
+        and prevents learning from incidents.
+      remediation: "Tag config versions with deployments or use GitOps"
+
+    - id: "CICD-CONFIGVER-HIGH-002"
+      signal: "Configuration and code versioned separately"
+      evidence_pattern: "Config in separate repo without synchronized versioning"
+      explanation: |
+        Separately versioned config and code can become mismatched.
+        App version X may require config version Y, but this
+        relationship is not enforced.
+      remediation: "Co-locate config with code or establish version dependencies"
+
+  medium:
+    - id: "CICD-CONFIGVER-MED-001"
+      signal: "No config change notification or alerting"
+      evidence_pattern: "Changes happen without team awareness"
+      remediation: "Configure notifications for configuration changes"
+
+    - id: "CICD-CONFIGVER-MED-002"
+      signal: "Configuration history not retained long enough"
+      evidence_pattern: "Git history truncated or branches deleted"
+      remediation: "Retain configuration history for compliance period"
+
+  low:
+    - id: "CICD-CONFIGVER-LOW-001"
+      signal: "Config commit messages not descriptive"
+
+    - id: "CICD-CONFIGVER-LOW-002"
+      signal: "No config change documentation"
+
+  positive:
+    - id: "CICD-CONFIGVER-POS-001"
+      signal: "GitOps with declarative configuration"
+
+    - id: "CICD-CONFIGVER-POS-002"
+      signal: "All config changes through reviewed PRs"
+
+    - id: "CICD-CONFIGVER-POS-003"
+      signal: "Config versions correlated with deployment events"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Verify version control usage"
+      description: |
+        Confirm all configuration is managed in version control.
+        Identify any configuration outside of git.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "List config files in git"
+          command: |
+            git ls-files | grep -E '\.(yaml|json|env|tf|hcl)$' | wc -l
+
+        - purpose: "Check for untracked config"
+          command: |
+            git status --porcelain | grep -E '\.(yaml|json|env)$' | head -10
+
+      expected_findings:
+        - "Configuration version control coverage"
+
+    - id: "2"
+      name: "Review change history"
+      description: |
+        Examine configuration change history for completeness
+        and quality of commit messages.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Recent config changes"
+          command: |
+            git log --oneline -30 -- '*.yaml' '*.json' k8s/ helm/ config/
+
+      expected_findings:
+        - "Configuration change history quality"
+
+    - id: "3"
+      name: "Assess review process"
+      description: |
+        Determine if configuration changes go through
+        code review before merging.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check branch protection"
+          command: |
+            gh api repos/:owner/:repo/branches/main/protection 2>/dev/null | jq '.required_pull_request_reviews' || echo "Unable to query"
+
+      expected_findings:
+        - "Configuration review process"
+
+    - id: "4"
+      name: "Check deployment correlation"
+      description: |
+        Verify that configuration versions can be correlated
+        with specific deployments.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check for GitOps tool"
+          command: |
+            find . -name '*argocd*' -o -name '*flux*' 2>/dev/null | head -5
+
+        - purpose: "Check deployment tags"
+          command: |
+            git tag -l | grep -E 'deploy|release|v[0-9]' | tail -10
+
+      expected_findings:
+        - "Deployment-configuration correlation"
+
+    - id: "5"
+      name: "Evaluate change notifications"
+      description: |
+        Assess how team members are notified of
+        configuration changes.
+      duration_estimate: "15 min"
+
+      questions:
+        - "How are config changes announced?"
+        - "Are there alerts for production config changes?"
+        - "Can changes be traced to individuals?"
+
+      expected_findings:
+        - "Change notification assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Version Control Assessment"
+        - "Review Process Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full version control analysis with review process verification"
+    medium: "Git history reviewed, review process not fully verified"
+    low: "Based on repository structure review only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "gitops"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed history analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "config-versioning-001"
+    item: "All configuration in version control"
+    level: "CRITICAL"
+    verification: |
+      git ls-files | grep -E '\.(yaml|json)$' | head -1 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "config-versioning-002"
+    item: "Config changes require review"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify branch protection requires PR review"
+    expected: "Confirmed by reviewer"
+
+  - id: "config-versioning-003"
+    item: "Config versions correlate with deployments"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify deployments reference specific config versions"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.6", "CC8.1"]
+    - framework: "GitOps"
+      controls: ["Declarative", "Version Controlled"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.configuration-management.environment-config"
+    - "devops-ci-cd.deployment-pipeline.deployment-automation"

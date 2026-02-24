@@ -1,0 +1,305 @@
+audit:
+  id: signal-processing-data-acquisition.sampling.sampling-rate-selection
+  name: Sampling Rate Selection Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: sampling
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: hardware-software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates sampling rate selection decisions in signal acquisition
+    systems to ensure rates are appropriately chosen for the application. It examines:
+    - Sampling rate adequacy for signal bandwidth requirements
+    - Oversampling ratios and their justification
+    - Resource utilization efficiency (memory, bandwidth, processing)
+    - Multi-rate sampling architectures and rate conversion
+    - Dynamic rate adjustment capabilities
+    - Hardware limitations and constraints
+  why_it_matters: |
+    Sampling rate selection is a critical engineering decision:
+    - Too low: Aliasing and loss of signal information
+    - Too high: Wasted storage, bandwidth, and processing resources
+    - Optimal: Balances fidelity against system constraints
+    - Multi-rate systems: Enable different rates for different signal types
+    - Dynamic rates: Adapt to changing signal characteristics
+
+    Poor sampling rate selection leads to either compromised data quality
+    or inefficient resource utilization, both of which impact system performance.
+  when_to_run:
+  - Signal acquisition system design
+  - System performance optimization
+  - When signal requirements change
+  - Resource constraint analysis
+  - Multi-channel system integration
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Sampling configuration and rate control code
+  - type: signal_specification
+    description: Signal bandwidth and resolution requirements
+  - type: system_requirements
+    description: Resource constraints and performance targets
+  access_requirements:
+  - Read access to sampling configuration code
+  - Access to signal specifications
+  - System resource documentation
+discovery:
+  code_patterns:
+  - pattern: (sample_rate|sampling_frequency|fs|sps)\s*[=:]\s*\d+
+    type: regex
+    scope: source
+    purpose: Detect sample rate configuration
+  - pattern: (oversample|decimat|downsample|upsample)
+    type: regex
+    scope: source
+    purpose: Detect multi-rate processing
+  - pattern: (rate_select|sample_rate_config|fs_config)
+    type: regex
+    scope: source
+    purpose: Detect rate selection logic
+  - pattern: (dma_buffer|sample_buffer|data_rate)
+    type: regex
+    scope: source
+    purpose: Detect resource usage patterns
+  file_patterns:
+  - glob: '**/sampling*.{c,h,cpp,py}'
+    purpose: Sampling configuration files
+  - glob: '**/config*.{json,yaml,h}'
+    purpose: System configuration
+  - glob: '**/adc*.{c,h,cpp}'
+    purpose: ADC driver files
+knowledge_sources:
+  specifications:
+  - id: ieee-1057
+    name: IEEE 1057 - Standard for Digitizing Waveform Recorders
+    url: https://standards.ieee.org/standard/1057-2017.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ti-sampling-guide
+    name: Texas Instruments Sampling Rate Selection Guide
+    url: https://www.ti.com/lit/an/slaa821/slaa821.pdf
+    offline_cache: true
+  - id: analog-oversampling
+    name: Analog Devices Oversampling Guide
+    url: https://www.analog.com/media/en/training-seminars/tutorials/MT-017.pdf
+    offline_cache: true
+tooling:
+  scripts:
+  - id: sample-rate-scanner
+    language: bash
+    purpose: Scan for sampling rate configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Sample Rate Configuration Scan ==="
+      grep -rniE "(sample_rate|sampling_frequency|fs|sps)\s*[=:]" \
+        --include="*.c" --include="*.h" --include="*.py" \
+        --include="*.json" . 2>/dev/null | head -30
+signals:
+  critical:
+  - id: SRS-CRIT-001
+    signal: Sampling rate insufficient for signal bandwidth
+    evidence_indicators:
+    - fs < 2.5 * fmax for the application
+    - No anti-aliasing protection configured
+    - Aliased components visible in data
+    explanation: |
+      Insufficient sampling rate causes irrecoverable aliasing. While
+      Nyquist requires fs > 2*fmax, practical systems need 2.5-10x
+      oversampling for realizable anti-aliasing filters.
+    remediation: |
+      - Increase sampling rate to appropriate multiple of bandwidth
+      - Consider oversampling with digital decimation
+      - Add anti-aliasing filter if not present
+      - Document bandwidth and sampling rate relationship
+    cwe: CWE-682
+  high:
+  - id: SRS-HIGH-001
+    signal: Fixed sampling rate for variable bandwidth signals
+    evidence_indicators:
+    - Single sample rate for multiple signal types
+    - No dynamic rate adjustment capability
+    - Over/under-sampling for some signal configurations
+    explanation: |
+      Fixed rates either oversample narrow-band signals (wasting resources)
+      or undersample wide-band signals (losing information). Adaptive
+      systems optimize resource utilization.
+    remediation: |
+      - Implement configurable sampling rates per signal type
+      - Add dynamic rate selection based on signal bandwidth
+      - Use multi-rate processing with appropriate decimation
+      - Document rate selection criteria for each mode
+  - id: SRS-HIGH-002
+    signal: Excessive oversampling without justification
+    evidence_indicators:
+    - Sampling rate >10x signal bandwidth
+    - No SNR improvement or filter benefit documented
+    - Resource constraints due to high data rates
+    explanation: |
+      Oversampling beyond necessity wastes memory, bandwidth, and
+      processing resources. While oversampling can improve SNR through
+      averaging, returns diminish beyond 4-8x for most applications.
+    remediation: |
+      - Document oversampling rationale (SNR, filter relaxation, etc.)
+      - Reduce oversampling if resources are constrained
+      - Implement decimation to reduce downstream data rates
+      - Balance oversampling against system requirements
+  medium:
+  - id: SRS-MED-001
+    signal: Sample rate configuration hardcoded without flexibility
+    evidence_indicators:
+    - Literal sample rate values in code
+    - No configuration mechanism for rate changes
+    - Code changes required to modify rates
+    explanation: |
+      Hardcoded sample rates make the system inflexible and difficult
+      to adapt to different signals or operating conditions. Configuration
+      should be externalized for maintainability.
+    remediation: |
+      - Move sample rate to configuration file or parameters
+      - Implement rate validation in configuration loading
+      - Add runtime rate change capability if appropriate
+      - Document valid rate ranges and constraints
+  - id: SRS-MED-002
+    signal: No documentation of rate selection rationale
+    evidence_indicators:
+    - Sample rates not linked to signal specifications
+    - No design document explaining rate choices
+    - Rates appear arbitrary
+    explanation: |
+      Without documented rationale, sample rate choices cannot be
+      validated or maintained. Changes may inadvertently violate
+      requirements or waste resources.
+    remediation: |
+      - Document signal bandwidth requirements
+      - Explain oversampling ratio selection
+      - Link rates to system constraints
+      - Include calculation or analysis supporting choices
+  low:
+  - id: SRS-LOW-001
+    signal: Non-standard sample rates used
+    evidence_indicators:
+    - Sample rates not matching common audio/video standards
+    - Odd rates complicating rate conversion
+    - Non-power-of-two rates for FFT processing
+    explanation: |
+      Non-standard rates may complicate integration with standard
+      processing libraries, make rate conversion difficult, and
+      reduce FFT efficiency.
+    remediation: |
+      - Use standard rates when possible (44.1k, 48k, 96k, etc.)
+      - Choose rates compatible with downstream processing
+      - Prefer power-of-two rates for FFT applications
+      - Document reasons for non-standard rate selection
+  positive:
+  - id: SRS-POS-001
+    signal: Well-documented rate selection with design analysis
+    evidence_indicators:
+    - Signal specifications linked to sample rates
+    - Resource analysis justifying choices
+    - Configuration flexibility implemented
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: signal-engineer
+  steps:
+  - id: '1'
+    name: Rate Configuration Review
+    description: |
+      Identify all sample rate configurations and their context.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find sample rate configurations
+      command: |
+        grep -rniE "(sample_rate|sampling_frequency|fs|sps)" \
+          --include="*.c" --include="*.h" --include="*.py" \
+          --include="*.json" . 2>/dev/null | head -30
+    expected_findings:
+    - Sample rate definitions
+    - Rate configuration mechanisms
+    - Multi-rate processing evidence
+  - id: '2'
+    name: Bandwidth Requirements Analysis
+    description: |
+      Verify sample rates match signal bandwidth requirements.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find bandwidth specifications
+      command: |
+        grep -rniE "(bandwidth|fmax|frequency.*max)" \
+          --include="*.c" --include="*.h" --include="*.md" . 2>/dev/null | head -20
+    expected_findings:
+    - Signal bandwidth specifications
+    - Nyquist margin calculations
+    - Oversampling ratios
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Rate Selection Analysis
+    - Resource Impact Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: srs-001
+  item: Sample rates documented with rationale
+  level: WARNING
+  verification: manual
+  verification_notes: Verify documentation exists linking rates to requirements
+  expected: Confirmed by reviewer
+- id: srs-002
+  item: Rates configurable without code changes
+  level: WARNING
+  verification: |
+    grep -rniE "sample_rate.*config|SAMPLE_RATE" \
+      --include="*.h" --include="*.json" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - iot-devices
+    - industrial-control
+    - scientific-instruments
+relationships:
+  commonly_combined:
+  - signal-processing.sampling.nyquist-compliance
+  - signal-processing.sampling.anti-aliasing-filter
+  - signal-processing.adc-dac.adc-resolution-adequacy
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

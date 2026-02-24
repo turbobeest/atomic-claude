@@ -1,0 +1,397 @@
+# ============================================================
+# AUDIT: Provider Version Pinning
+# ============================================================
+# Evaluates how Terraform provider versions are constrained and
+# locked to ensure reproducible deployments.
+
+audit:
+  id: "infrastructure-as-code.provider-version.provider-version-pinning"
+  name: "Provider Version Pinning"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "infrastructure-as-code"
+  category_number: 13
+  subcategory: "provider-version"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "yes"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines how Terraform provider versions are constrained
+    in configurations, evaluating:
+
+    - Version constraints in required_providers blocks
+    - Presence and completeness of .terraform.lock.hcl files
+    - Version constraint strategies (pessimistic vs exact)
+    - Lock file management and commits
+    - Platform support in lock files
+
+    The focus is on ensuring consistent, reproducible deployments
+    across different environments and team members.
+
+  why_it_matters: |
+    Without proper provider version pinning:
+
+    - Different team members get different provider versions
+    - CI/CD builds are non-reproducible
+    - Provider updates silently introduce breaking changes
+    - Security vulnerabilities may be introduced unknowingly
+    - Debugging becomes difficult when versions vary
+
+    Proper version pinning ensures every deployment uses the same
+    verified provider versions.
+
+  when_to_run:
+    - "When setting up new Terraform projects"
+    - "After unexplained deployment differences"
+    - "During security assessment"
+    - "When onboarding new team members"
+
+prerequisites:
+  required_artifacts:
+    - type: "terraform_configuration"
+      description: "Terraform configurations with provider requirements"
+
+  access_requirements:
+    - "Read access to Terraform configuration repository"
+
+discovery:
+  code_patterns:
+    - pattern: "required_providers\\s*\\{"
+      type: "regex"
+      scope: "source"
+      purpose: "Find provider version requirements"
+    - pattern: "version\\s*=\\s*\"[~>=<]"
+      type: "regex"
+      scope: "source"
+      purpose: "Find version constraints"
+    - pattern: "provider\\s+\"[^\"]+\"\\s+\\{"
+      type: "regex"
+      scope: "source"
+      purpose: "Find provider blocks"
+
+  file_patterns:
+    - glob: "**/versions.tf"
+      purpose: "Version requirement files"
+    - glob: "**/*.tf"
+      purpose: "Terraform files with provider blocks"
+    - glob: "**/.terraform.lock.hcl"
+      purpose: "Provider lock files"
+
+knowledge_sources:
+  specifications:
+    - id: "terraform-provider-versioning"
+      name: "Terraform Provider Version Constraints"
+      url: "https://developer.hashicorp.com/terraform/language/expressions/version-constraints"
+      offline_cache: true
+      priority: "required"
+    - id: "terraform-lock-files"
+      name: "Terraform Dependency Lock File"
+      url: "https://developer.hashicorp.com/terraform/language/files/dependency-lock"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "aws-provider-versioning"
+      name: "AWS Provider Version Management Best Practices"
+      url: "https://docs.aws.amazon.com/prescriptive-guidance/latest/terraform-aws-provider-best-practices/version.html"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "tflint"
+      purpose: "Checks for unpinned provider versions"
+      offline_capable: true
+    - tool: "terraform validate"
+      purpose: "Validates version constraint syntax"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "terraform providers lock"
+      purpose: "Generate lock file for multiple platforms"
+      command: "terraform providers lock -platform=linux_amd64 -platform=darwin_amd64"
+
+  scripts:
+    - id: "version-pin-check"
+      language: "bash"
+      purpose: "Check provider version pinning status"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check provider version pinning
+
+        echo "=== Provider Version Constraints ==="
+        grep -r 'version\s*=' --include='*.tf' . | grep -E 'required_providers|provider' | head -20
+
+        echo ""
+        echo "=== Lock Files ==="
+        find . -name '.terraform.lock.hcl' -type f
+
+        echo ""
+        echo "=== Unpinned Providers ==="
+        grep -r 'source\s*=' --include='*.tf' . | while read line; do
+          file=$(echo "$line" | cut -d: -f1)
+          if ! grep -q 'version\s*=' "$file" 2>/dev/null; then
+            echo "UNPINNED: $file"
+          fi
+        done
+
+signals:
+  critical:
+    - id: "IAC-PROV-CRIT-001"
+      signal: "No version constraints on providers"
+      evidence_pattern: "required_providers block without version constraints"
+      explanation: |
+        Without version constraints, terraform init downloads the latest
+        provider version, which may contain breaking changes, bugs, or
+        security vulnerabilities. Each init may produce different results.
+      remediation: |
+        Add version constraints to all providers:
+        terraform {
+          required_providers {
+            aws = {
+              source  = "hashicorp/aws"
+              version = "~> 5.0"
+            }
+          }
+        }
+
+    - id: "IAC-PROV-CRIT-002"
+      signal: "Lock file not committed to version control"
+      evidence_pattern: ".terraform.lock.hcl in .gitignore or missing"
+      explanation: |
+        The lock file pins exact provider versions and includes checksums.
+        Without it in version control, different environments may use
+        different provider versions despite constraints.
+      remediation: |
+        Commit the lock file:
+        1. Remove .terraform.lock.hcl from .gitignore
+        2. Run terraform init to generate lock file
+        3. Commit .terraform.lock.hcl to repository
+
+  high:
+    - id: "IAC-PROV-HIGH-001"
+      signal: "Version constraints too permissive (>= without upper bound)"
+      evidence_pattern: "version = \">= X.Y.Z\" without upper bound"
+      explanation: |
+        Constraints like >= allow any future version, including major
+        version upgrades that may have breaking changes.
+      remediation: |
+        Use pessimistic constraints with upper bound:
+        version = "~> 5.0"   # Allows 5.x but not 6.0
+        version = ">= 5.0, < 6.0"  # Explicit bound
+
+    - id: "IAC-PROV-HIGH-002"
+      signal: "Lock file missing platform checksums for CI/CD"
+      evidence_pattern: "Lock file only has darwin checksums, CI runs linux"
+      explanation: |
+        Lock files contain platform-specific checksums. If CI runs on
+        Linux but lock file only has macOS checksums, terraform init
+        will update the lock file or fail.
+      remediation: |
+        Generate lock file for all platforms:
+        terraform providers lock \
+          -platform=linux_amd64 \
+          -platform=darwin_amd64 \
+          -platform=darwin_arm64
+
+  medium:
+    - id: "IAC-PROV-MED-001"
+      signal: "Exact version pinning used instead of pessimistic"
+      evidence_pattern: "version = \"= 5.0.0\""
+      remediation: |
+        Consider pessimistic constraints for easier patch updates:
+        version = "~> 5.0.0"  # Allows 5.0.x patches
+
+    - id: "IAC-PROV-MED-002"
+      signal: "Version constraints in root module but not documented"
+      remediation: |
+        Document version constraint decisions in README or ADR
+
+  low:
+    - id: "IAC-PROV-LOW-001"
+      signal: "Different version constraints in different modules"
+      remediation: "Standardize on consistent version constraints"
+
+  positive:
+    - id: "IAC-PROV-POS-001"
+      signal: "Pessimistic version constraints on all providers"
+    - id: "IAC-PROV-POS-002"
+      signal: "Lock file committed with multi-platform checksums"
+    - id: "IAC-PROV-POS-003"
+      signal: "CI validates lock file is up to date"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Find provider declarations"
+      description: |
+        Locate all provider version requirements in the codebase.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find required_providers blocks"
+          command: "grep -r -A10 'required_providers' --include='*.tf' . | head -50"
+        - purpose: "Find provider blocks"
+          command: "grep -r 'provider\\s*\"' --include='*.tf' . | head -20"
+
+      expected_findings:
+        - "All provider declarations"
+        - "Version constraint patterns"
+
+    - id: "2"
+      name: "Analyze version constraints"
+      description: |
+        Evaluate the version constraint strategy used.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Extract version constraints"
+          command: "grep -r 'version\\s*=' --include='*.tf' . | head -30"
+        - purpose: "Find providers without version constraints"
+          command: |
+            grep -l 'required_providers' --include='*.tf' -r . | while read f; do
+              if ! grep -q 'version\s*=' "$f"; then
+                echo "NO VERSION: $f"
+              fi
+            done
+
+      expected_findings:
+        - "Version constraint types used"
+        - "Providers without constraints"
+
+    - id: "3"
+      name: "Check lock file status"
+      description: |
+        Verify lock files exist and are properly managed.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find lock files"
+          command: "find . -name '.terraform.lock.hcl' -type f"
+        - purpose: "Check if lock file is ignored"
+          command: "grep -r '.terraform.lock.hcl' .gitignore 2>/dev/null"
+        - purpose: "Check lock file platforms"
+          command: "grep 'h1:' .terraform.lock.hcl 2>/dev/null | head -10"
+
+      expected_findings:
+        - "Lock file presence"
+        - "Lock file in version control"
+        - "Platform checksums"
+
+    - id: "4"
+      name: "Validate lock file completeness"
+      description: |
+        Ensure lock file covers required platforms.
+      duration_estimate: "10 min"
+
+      commands:
+        - purpose: "Check for linux platform"
+          command: "grep -c 'linux_amd64' .terraform.lock.hcl 2>/dev/null || echo 0"
+        - purpose: "Check for darwin platforms"
+          command: "grep -c 'darwin' .terraform.lock.hcl 2>/dev/null || echo 0"
+
+      expected_findings:
+        - "Platform coverage"
+        - "Missing platforms"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Version Constraint Analysis"
+        - "Lock File Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "All providers analyzed and lock file verified"
+    medium: "Configuration reviewed but lock file not validated"
+    low: "Only file presence confirmed"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "terraform-provider-versioning"
+        priority: "required"
+      - source_id: "terraform-lock-files"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "Quick to scan for version constraints"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      reason: "Critical for production reproducibility"
+
+closeout_checklist:
+  - id: "provider-pin-001"
+    item: "All providers have version constraints"
+    level: "CRITICAL"
+    verification: "grep -r 'required_providers' --include='*.tf' -A5 . | grep -c 'version'"
+    expected: ">0"
+
+  - id: "provider-pin-002"
+    item: "Lock file exists and is committed"
+    level: "CRITICAL"
+    verification: "test -f .terraform.lock.hcl && ! grep -q '.terraform.lock.hcl' .gitignore && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "provider-pin-003"
+    item: "Lock file has multi-platform checksums"
+    level: "BLOCKING"
+    verification: "grep -c 'linux_amd64\\|darwin' .terraform.lock.hcl"
+    expected: ">1"
+
+  - id: "provider-pin-004"
+    item: "Version constraints use pessimistic operator"
+    level: "WARNING"
+    verification: "grep -r 'version.*~>' --include='*.tf' . | wc -l"
+    expected: ">0"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC8.1"]
+
+relationships:
+  commonly_combined:
+    - "infrastructure-as-code.provider-version.terraform-tool-version"
+    - "infrastructure-as-code.provider-version.module-version-pinning"

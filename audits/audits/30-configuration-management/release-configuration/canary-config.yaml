@@ -1,0 +1,167 @@
+# ============================================================
+# AUDIT: Canary Deployment Configuration
+# Category: 30 - Configuration Management
+# Subcategory: release-configuration
+# ============================================================
+# Configuration for canary deployments enabling gradual rollouts
+# with traffic splitting and monitoring.
+# ============================================================
+
+audit:
+  id: "configuration-management.release-configuration.canary-config"
+  name: "Canary Deployment Configuration Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "configuration-management"
+  category_number: 30
+  subcategory: "release-configuration"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+  default_profiles: ["full", "production"]
+
+description:
+  what: |
+    This audit examines canary deployment configurations used for gradual
+    rollouts. It evaluates traffic splitting configurations, promotion
+    criteria, rollback triggers, and monitoring integration for canary
+    releases.
+
+  why_it_matters: |
+    Canary deployments reduce release risk by exposing changes to a subset
+    of users first. Misconfigured canaries can either fail to catch issues
+    or accidentally expose too many users to problematic releases.
+    Proper configuration ensures effective risk mitigation.
+
+  when_to_run:
+    - "When implementing canary deployments"
+    - "After canary failures"
+    - "During deployment strategy reviews"
+    - "Before critical releases"
+
+discovery:
+  code_patterns:
+    - pattern: "(canary|traffic[-_]split|weight|percentage)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect canary configurations"
+    - pattern: "(AnalysisTemplate|Rollout|canarySteps)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect Argo Rollouts configs"
+
+  file_patterns:
+    - glob: "**/*canary*"
+      purpose: "Canary configuration files"
+    - glob: "**/rollout*.yaml"
+      purpose: "Rollout configurations"
+    - glob: "**/istio/**"
+      purpose: "Service mesh configs"
+
+signals:
+  critical:
+    - id: "CANY-CRIT-001"
+      signal: "No automated rollback for canary failures"
+      evidence_indicators:
+        - "Manual rollback only"
+        - "No failure detection"
+        - "No automatic response to metrics"
+      explanation: "Without auto-rollback, failed canaries impact users."
+      remediation: "Configure automated rollback based on metrics."
+
+  high:
+    - id: "CANY-HIGH-001"
+      signal: "Canary traffic percentage too high initially"
+      evidence_indicators:
+        - "Initial canary above 10%"
+        - "Large user exposure from start"
+        - "Risk not gradually increased"
+      explanation: "High initial percentages defeat canary purpose."
+      remediation: "Start canaries at 1-5% traffic."
+
+    - id: "CANY-HIGH-002"
+      signal: "No health metrics for canary evaluation"
+      evidence_indicators:
+        - "No success rate monitoring"
+        - "No latency tracking"
+        - "Promotion not based on metrics"
+      explanation: "Without metrics, canary success cannot be measured."
+      remediation: "Configure metrics-based canary analysis."
+
+  medium:
+    - id: "CANY-MED-001"
+      signal: "Canary promotion steps too aggressive"
+      evidence_indicators:
+        - "Large percentage jumps"
+        - "Short observation windows"
+        - "Rapid promotion to 100%"
+      explanation: "Aggressive steps reduce ability to catch issues."
+      remediation: "Use gradual promotion with adequate observation."
+
+    - id: "CANY-MED-002"
+      signal: "No canary traffic isolation"
+      evidence_indicators:
+        - "Canary shares resources with stable"
+        - "No request tagging"
+        - "Cannot isolate canary issues"
+      explanation: "Isolation enables clean comparison and debugging."
+      remediation: "Isolate canary traffic for analysis."
+
+  low:
+    - id: "CANY-LOW-001"
+      signal: "Canary configuration not documented"
+      evidence_indicators:
+        - "Promotion criteria unclear"
+        - "Rollback triggers undefined"
+        - "No runbook for canary issues"
+      explanation: "Documentation ensures consistent canary management."
+      remediation: "Document canary procedures and criteria."
+
+procedure:
+  steps:
+    - id: "1"
+      name: "Canary Config Assessment"
+      description: "Review canary deployment configurations."
+      commands:
+        - purpose: "Find canary configurations"
+          command: |
+            find . -name "*canary*" -o -name "*rollout*" 2>/dev/null | head -20
+        - purpose: "Check for traffic splitting configs"
+          command: |
+            grep -rn "weight\|traffic\|percentage" \
+              --include="*.yaml" --include="*.yml" . 2>/dev/null | head -30
+
+    - id: "2"
+      name: "Analysis Template Review"
+      description: "Examine canary analysis configuration."
+      commands:
+        - purpose: "Find analysis templates"
+          command: |
+            grep -rn "AnalysisTemplate\|metrics\|successCondition" \
+              --include="*.yaml" . 2>/dev/null | head -20
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+
+profiles:
+  membership:
+    full: {included: true, priority: 2}
+    production: {included: true, priority: 1}
+
+governance:
+  applicable_to:
+    archetypes: ["saas", "platform", "microservices"]

@@ -1,0 +1,334 @@
+audit:
+  id: infrastructure-as-code.provider-version.module-version-pinning
+  name: Module Version Pinning
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: provider-version
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines how Terraform module versions are specified and
+    locked to ensure reproducible infrastructure deployments:
+
+    - Version constraints on module source references
+    - Registry module versioning
+    - Git ref specifications (tags, branches, commits)
+    - Local module management
+    - Version upgrade strategy
+
+    Unlike providers, modules are not included in the lock file, making
+    explicit version pinning even more critical.
+  why_it_matters: |
+    Terraform modules encapsulate infrastructure patterns. Version drift
+    in modules causes significant issues:
+
+    - Breaking changes in module updates
+    - Unexpected resource modifications
+    - Security vulnerabilities from outdated modules
+    - Non-reproducible deployments
+    - Difficult debugging when versions vary
+
+    Since modules aren't in the lock file, explicit version pinning is
+    the only way to ensure consistency.
+  when_to_run:
+  - When adopting new modules
+  - During dependency audit
+  - Before major module upgrades
+  - When debugging inconsistent deployments
+prerequisites:
+  required_artifacts:
+  - type: terraform_configuration
+    description: Terraform configurations with module references
+  access_requirements:
+  - Read access to Terraform configuration repository
+discovery:
+  code_patterns:
+  - pattern: module\s+"[^"]+"\s+\{
+    type: regex
+    scope: source
+    purpose: Find module blocks
+  - pattern: source\s*=\s*"[^"]+"
+    type: regex
+    scope: source
+    purpose: Find module source references
+  - pattern: version\s*=\s*"[^"]+"
+    type: regex
+    scope: source
+    purpose: Find version constraints
+  - pattern: \?ref=
+    type: keyword
+    scope: source
+    purpose: Find git ref specifications
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files with module blocks
+  - glob: '**/modules/**'
+    purpose: Local module directories
+knowledge_sources:
+  specifications:
+  - id: terraform-module-sources
+    name: Terraform Module Sources
+    url: https://developer.hashicorp.com/terraform/language/modules/sources
+    offline_cache: true
+    priority: required
+  guides:
+  - id: module-versioning-guide
+    name: Module Versioning Best Practices
+    url: https://developer.hashicorp.com/terraform/language/modules/syntax#version
+    offline_cache: true
+  - id: terraform-registry
+    name: Terraform Registry
+    url: https://registry.terraform.io/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: tflint
+    purpose: Checks for unpinned module versions
+    offline_capable: true
+  scripts:
+  - id: module-version-audit
+    language: bash
+    purpose: Audit module version pinning
+    source: inline
+    code: |
+      #!/bin/bash
+      # Audit module version specifications
+
+      echo "=== Registry Modules ==="
+      grep -r -A5 'source\s*=.*registry' --include='*.tf' . | head -30
+
+      echo ""
+      echo "=== Git Modules ==="
+      grep -r 'source.*git' --include='*.tf' . | head -20
+
+      echo ""
+      echo "=== Modules without version/ref ==="
+      grep -r -B2 -A3 'module\s*"' --include='*.tf' . | grep -B5 'source' | grep -v 'version\|ref=' | head -30
+signals:
+  critical:
+  - id: IAC-MOD-CRIT-001
+    signal: Registry modules used without version constraint
+    evidence_pattern: source = "registry.../module" without version
+    explanation: |
+      Registry modules without version constraints always pull the
+      latest version. Any breaking change in the module immediately
+      affects your infrastructure on next init.
+    remediation: |
+      Add version constraints to registry modules:
+      module "vpc" {
+        source  = "terraform-aws-modules/vpc/aws"
+        version = "~> 5.0"
+      }
+  - id: IAC-MOD-CRIT-002
+    signal: Git modules reference branch instead of tag/commit
+    explanation: |
+      Branch references are mutable - the content changes with every
+      commit to that branch. This makes deployments non-reproducible
+      and can introduce breaking changes at any time.
+    remediation: |
+      Use tags or commit SHAs for git modules:
+      # Good - tag reference
+      source = "git::https://github.com/org/module.git?ref=v1.2.3"
+
+      # Good - commit SHA
+      source = "git::https://github.com/org/module.git?ref=abc1234"
+
+      # Bad - branch reference
+      source = "git::https://github.com/org/module.git?ref=main"
+    evidence_description: ?ref=main or ?ref=master
+  high:
+  - id: IAC-MOD-HIGH-001
+    signal: No version constraint strategy documented
+    evidence_pattern: Mix of exact, pessimistic, and range constraints
+    explanation: |
+      Inconsistent version constraint patterns across modules make
+      upgrade planning difficult and create confusion about intended
+      update behavior.
+    remediation: |
+      Establish version constraint standards:
+      - Production: Exact versions (= X.Y.Z) or tight ranges
+      - Development: Pessimistic constraints (~> X.Y)
+      - Document strategy in contribution guidelines
+  - id: IAC-MOD-HIGH-002
+    signal: External modules used directly in root without wrapper
+    evidence_pattern: Registry modules called directly without local wrapper
+    explanation: |
+      Direct external module usage makes version upgrades risky as
+      changes affect production immediately. Wrapper modules allow
+      testing version upgrades in isolation.
+    remediation: |
+      Create local wrapper modules for external dependencies:
+      # modules/vpc/main.tf
+      module "external_vpc" {
+        source  = "terraform-aws-modules/vpc/aws"
+        version = "~> 5.0"
+        # ... pinned configuration
+      }
+  medium:
+  - id: IAC-MOD-MED-001
+    signal: Module versions significantly outdated
+    remediation: |
+      Review and update module versions periodically:
+      - Check for security updates
+      - Review changelogs for improvements
+      - Test upgrades in non-production first
+  - id: IAC-MOD-MED-002
+    signal: Different versions of same module in different files
+    remediation: |
+      Standardize module versions across configuration
+  low:
+  - id: IAC-MOD-LOW-001
+    signal: Module versions not documented in comments
+    remediation: Add comments explaining version constraint rationale
+  positive:
+  - id: IAC-MOD-POS-001
+    signal: All registry modules have explicit version constraints
+  - id: IAC-MOD-POS-002
+    signal: Git modules use tag or commit SHA references
+  - id: IAC-MOD-POS-003
+    signal: Local wrapper modules around external dependencies
+  - id: IAC-MOD-POS-004
+    signal: Automated checks for module version updates
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory all module references
+    description: |
+      Find all module blocks and their source specifications.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find all module blocks
+      command: grep -r -B1 -A5 'module\s*"' --include='*.tf' . | head -50
+    - purpose: Extract module sources
+      command: grep -r 'source\s*=' --include='*.tf' . | grep -v '#' | head -30
+    expected_findings:
+    - All module references
+    - Module source types (registry, git, local)
+  - id: '2'
+    name: Analyze registry module versions
+    description: |
+      Check version constraints on registry modules.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find registry modules with versions
+      command: grep -r -A10 'module\s*"' --include='*.tf' . | grep -A5 'registry.terraform.io\|terraform-aws'
+        | head -40
+    - purpose: Find modules without version
+      command: grep -r -A5 'source.*registry' --include='*.tf' . | grep -B5 -v 'version\s*=' | head -30
+    expected_findings:
+    - Versioned registry modules
+    - Unversioned registry modules
+  - id: '3'
+    name: Analyze git module references
+    description: |
+      Check that git modules use immutable references.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find git module refs
+      command: grep -r 'source.*git.*ref=' --include='*.tf' . | head -20
+    - purpose: Find branch references
+      command: grep -r 'ref=main\|ref=master\|ref=develop' --include='*.tf' . | head -10
+    expected_findings:
+    - Git reference types used
+    - Mutable vs immutable references
+  - id: '4'
+    name: Check for local modules
+    description: |
+      Identify local modules and their organization.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find local module references
+      command: grep -r 'source.*\./' --include='*.tf' . | head -20
+    - purpose: List modules directory
+      command: find . -type d -name 'modules' | head -5
+    expected_findings:
+    - Local module usage
+    - Module organization
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Registry Module Analysis
+    - Git Module Analysis
+    - Version Strategy Assessment
+    - Recommendations
+  confidence_guidance:
+    high: All modules analyzed and versions verified
+    medium: Configuration reviewed but not all sources checked
+    low: Only file patterns matched
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-module-sources
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Quick pattern matching for versions
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      reason: Critical for production reproducibility
+closeout_checklist:
+- id: mod-version-001
+  item: All registry modules have version constraints
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify each registry module has version = constraint
+  expected: Confirmed by reviewer
+- id: mod-version-002
+  item: Git modules use tag or commit (not branch)
+  level: CRITICAL
+  verification: grep -r 'ref=main\|ref=master\|ref=develop' --include='*.tf' . | wc -l
+  expected: '0'
+- id: mod-version-003
+  item: Module versions are reasonably current
+  level: WARNING
+  verification: manual
+  verification_notes: Verify modules are not severely outdated
+  expected: Confirmed by reviewer
+- id: mod-version-004
+  item: Consistent version constraint pattern used
+  level: WARNING
+  verification: manual
+  verification_notes: Verify version constraints follow consistent pattern
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC8.1
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.provider-version.provider-version-pinning
+  - infrastructure-as-code.provider-version.upgrade-strategy

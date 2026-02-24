@@ -1,0 +1,287 @@
+audit:
+  id: performance-efficiency.throughput.write-throughput
+  name: Write Throughput Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: throughput
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures write throughput across storage systems including
+    databases, object storage, file systems, and caches. It evaluates
+    writes per second, bytes written, write latency, and identifies
+    write bottlenecks. The audit examines both transactional writes
+    and bulk data loading scenarios.
+  why_it_matters: |
+    Write throughput limits data ingestion, transaction processing,
+    and application responsiveness. A system that cannot write fast
+    enough will queue requests, timeout, or lose data. Write capacity
+    often has different limits than read capacity and requires separate
+    optimization.
+  when_to_run:
+  - When write latency increases
+  - During database scaling decisions
+  - When adding write-heavy features
+  - After storage infrastructure changes
+prerequisites:
+  required_artifacts:
+  - type: storage_metrics
+    description: Write throughput metrics for databases and storage
+  - type: storage_access
+    description: Access to storage system monitoring
+  access_requirements:
+  - Access to database write metrics
+  - Access to storage IOPS metrics
+  - Ability to run write benchmarks
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: sum(rate(pg_stat_database_tup_inserted[5m])) by (datname)
+    purpose: PostgreSQL rows inserted per second
+    threshold: Within tested limits
+  - system: CloudWatch
+    query: SELECT AVG(WriteIOPS) FROM AWS/RDS WHERE DBInstanceIdentifier='prod-db'
+    purpose: Database write IOPS
+    threshold: < 80% of provisioned IOPS
+  - system: Prometheus
+    query: |
+      rate(node_disk_written_bytes_total[5m])
+    purpose: Bytes written to disk per second
+    threshold: < disk throughput limit
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: postgres-write-tuning
+    name: PostgreSQL Write Performance Tuning
+    url: https://www.postgresql.org/docs/current/runtime-config-wal.html
+    offline_cache: true
+  - id: aws-ebs-performance
+    name: AWS EBS Performance
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html
+    offline_cache: true
+  - id: mongodb-write-concern
+    name: MongoDB Write Concern
+    url: https://www.mongodb.com/docs/manual/reference/write-concern/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: pgbench
+    purpose: Benchmark PostgreSQL write performance
+    command: pgbench -c 50 -j 4 -T 60 -N mydb
+  - tool: fio
+    purpose: Benchmark disk write performance
+    command: fio --name=write_test --rw=write --bs=4k --size=1G --numjobs=4 --runtime=60
+  - tool: redis-benchmark
+    purpose: Benchmark Redis write performance
+    command: redis-benchmark -t set -n 100000 -q
+  - tool: aws-cli
+    purpose: Check S3 upload throughput
+    command: |
+      time aws s3 cp largefile.bin s3://bucket/test/ --expected-size 1073741824
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.99,
+        sum(rate(database_write_duration_seconds_bucket[5m])) by (le)
+      )
+    purpose: P99 write latency
+  - system: Prometheus
+    query: |
+      sum(rate(database_rows_written_total[5m])) by (table)
+    purpose: Rows written per second by table
+signals:
+  critical:
+  - id: WRITE-CRIT-001
+    signal: Write throughput at 100% of storage capacity
+    evidence_threshold: write_iops >= max_iops OR write_throughput >= max_throughput
+    explanation: |
+      Saturated write capacity causes all writes to queue, increasing
+      latency exponentially and eventually causing timeouts and
+      failures. This is an immediate scaling emergency.
+    remediation: Scale storage IOPS; implement write batching; add write replicas
+  - id: WRITE-CRIT-002
+    signal: Write latency exceeding 1 second
+    evidence_threshold: write_latency_p99 > 1s
+    explanation: |
+      One-second write latency will cause transaction timeouts,
+      user-visible delays, and potential data consistency issues
+      as transactions retry or fail.
+    remediation: Investigate storage bottleneck; optimize write patterns; scale infrastructure
+  high:
+  - id: WRITE-HIGH-001
+    signal: Write IOPS at 80% of provisioned capacity
+    evidence_threshold: write_iops > 0.8 * provisioned_iops
+    explanation: |
+      Operating at 80% capacity leaves minimal headroom for traffic
+      spikes or growth. Write performance will degrade rapidly
+      as utilization increases.
+    remediation: Increase provisioned IOPS; optimize write patterns; implement caching
+  - id: WRITE-HIGH-002
+    signal: Write amplification ratio exceeds 10x
+    evidence_threshold: bytes_written / application_bytes > 10
+    explanation: |
+      High write amplification means the storage system is writing
+      far more data than the application intended, wasting capacity
+      and increasing wear on SSDs.
+    remediation: Review storage engine settings; optimize compaction; adjust write patterns
+  medium:
+  - id: WRITE-MED-001
+    signal: Write throughput metrics not collected
+    remediation: Implement write throughput monitoring
+  - id: WRITE-MED-002
+    signal: No write-specific latency tracking
+    remediation: Separate read and write latency metrics
+  low:
+  - id: WRITE-LOW-001
+    signal: Write capacity baseline not documented
+  positive:
+  - id: WRITE-POS-001
+    signal: Write utilization consistently below 50%
+  - id: WRITE-POS-002
+    signal: Write latency P99 under 50ms
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Write Targets
+    description: |
+      Identify all storage systems receiving writes and their
+      capacity limits.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check RDS instance type and IOPS
+      command: |
+        aws rds describe-db-instances --query 'DBInstances[].{ID:DBInstanceIdentifier,Class:DBInstanceClass,IOPS:Iops}'
+    - purpose: Check EBS volume types
+      command: |
+        aws ec2 describe-volumes --query 'Volumes[].{ID:VolumeId,Type:VolumeType,IOPS:Iops,Size:Size}'
+    expected_findings:
+    - Storage systems and their limits
+    - Provisioned vs burst capacity
+  - id: '2'
+    name: Measure Current Write Throughput
+    description: |
+      Measure current write rates across all storage systems.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query database write rate
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(pg_stat_database_tup_inserted[5m]+pg_stat_database_tup_updated[5m]+pg_stat_database_tup_deleted[5m]))by(datname)'
+    - purpose: Query disk write bytes
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=rate(node_disk_written_bytes_total[5m])'
+    expected_findings:
+    - Writes per second
+    - Bytes written per second
+  - id: '3'
+    name: Run Write Benchmarks
+    description: |
+      Benchmark write capacity to determine maximum throughput.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Benchmark database writes
+      command: pgbench -c 50 -j 4 -T 60 -N staging_db
+    - purpose: Benchmark disk writes
+      command: fio --name=seqwrite --rw=write --bs=128k --size=1G --numjobs=4 --runtime=60 --group_reporting
+    expected_findings:
+    - Maximum write IOPS
+    - Maximum write throughput (MB/s)
+  - id: '4'
+    name: Analyze Write Patterns
+    description: |
+      Analyze write patterns to identify optimization opportunities.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check hot tables
+      command: |
+        psql -c "SELECT relname, n_tup_ins, n_tup_upd, n_tup_del FROM pg_stat_user_tables ORDER BY n_tup_ins DESC LIMIT 10;"
+    - purpose: Check WAL generation rate
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=rate(pg_stat_archiver_archived_count[5m])'
+    expected_findings:
+    - Write distribution by table
+    - Write pattern characteristics
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Storage Inventory
+    - Write Throughput Analysis
+    - Capacity Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Benchmark results with production-like load patterns
+    medium: Production metrics analysis
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: postgres-write-tuning
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires storage access and benchmarking
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: write-001
+  item: Write IOPS below 80% of capacity
+  level: CRITICAL
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=rate(node_disk_writes_completed_total[5m])' | \
+      jq '.data.result[0].value[1] | tonumber < (PROVISIONED_IOPS * 0.8)'
+  expected: 'true'
+- id: write-002
+  item: Write latency P99 under 100ms
+  level: BLOCKING
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(database_write_duration_seconds_bucket[5m]))by(le))' | \
+      jq '.data.result[0].value[1] | tonumber < 0.1'
+  expected: 'true'
+- id: write-003
+  item: Write throughput monitoring configured
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm write metrics and dashboards exist
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - data-intensive
+    - transactional
+relationships:
+  commonly_combined:
+  - performance-efficiency.throughput.transaction-rate
+  - performance-efficiency.database-performance.write-optimization

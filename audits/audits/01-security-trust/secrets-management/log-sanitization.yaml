@@ -1,0 +1,411 @@
+audit:
+  id: security-trust.secrets-management.log-sanitization
+  name: Log Sanitization Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: secrets-management
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines application logging practices for sensitive data exposure
+    including secrets, PII, credentials, and security tokens. It evaluates log
+    sanitization mechanisms, data masking implementations, and compliance with
+    security logging best practices. Proper log sanitization prevents information
+    disclosure while maintaining audit trail integrity.
+  why_it_matters: |
+    OWASP identifies CWE-532 (Insertion of Sensitive Information into Log File)
+    and CWE-117 (Improper Output Neutralization for Logs) as critical security
+    weaknesses. Logs are often stored insecurely, retained indefinitely, and
+    accessed by many parties including support staff and third-party tools.
+    Sensitive data in logs can lead to credential theft, privacy violations,
+    and compliance failures (GDPR, HIPAA, PCI-DSS).
+  when_to_run:
+  - During security code reviews
+  - When implementing logging infrastructure
+  - Before compliance audits
+  - After adding new logging statements
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with logging statements
+  access_requirements:
+  - Read access to application source code
+  - Access to logging configuration
+discovery:
+  code_patterns:
+  - pattern: console\.(log|info|warn|error|debug)\(|logger\.|log\.(info|warn|error|debug)
+    type: regex
+    scope: source
+    purpose: Identify logging statements
+  - pattern: (?i)password|secret|token|key|credential|ssn|credit.?card
+    type: regex
+    scope: source
+    purpose: Sensitive data identifiers near logging
+  - pattern: mask|sanitize|redact|filter|scrub
+    type: regex
+    scope: source
+    purpose: Log sanitization implementations
+  - pattern: JSON\.stringify.*log|log.*JSON\.stringify
+    type: regex
+    scope: source
+    purpose: Object serialization in logs
+  file_patterns:
+  - glob: '**/*.{js,ts,py,java,go,rb}'
+    purpose: Source code files with logging
+  - glob: '**/logging*.{yaml,yml,json,xml}'
+    purpose: Logging configuration files
+  - glob: '**/log4j*.xml'
+    purpose: Log4j configuration
+  - glob: '**/logback*.xml'
+    purpose: Logback configuration
+knowledge_sources:
+  specifications:
+  - id: owasp-logging-cheatsheet
+    name: OWASP Logging Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  - id: cwe-532
+    name: 'CWE-532: Insertion of Sensitive Information into Log File'
+    url: https://cwe.mitre.org/data/definitions/532.html
+    offline_cache: true
+    priority: required
+  - id: cwe-117
+    name: 'CWE-117: Improper Output Neutralization for Logs'
+    url: https://cwe.mitre.org/data/definitions/117.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-top10-a09
+    name: OWASP Top 10 A09 - Security Logging and Monitoring Failures
+    url: https://owasp.org/Top10/2021/A09_2021-Security_Logging_and_Monitoring_Failures/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect sensitive data logging patterns
+    offline_capable: true
+  - tool: eslint-plugin-security
+    purpose: JavaScript logging security rules
+    offline_capable: true
+  scripts:
+  - id: log-sanitization-scan
+    language: bash
+    purpose: Scan for potential sensitive data in logs
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Scanning for Log Sanitization Issues ==="
+
+      # Find logging with sensitive variable names
+      grep -rn --include="*.js" --include="*.ts" -E 'console\.(log|info|warn|error).*password' . 2>/dev/null | grep -v node_modules
+
+      # Find JSON.stringify in logs
+      grep -rn --include="*.js" --include="*.ts" 'JSON\.stringify.*log|log.*JSON\.stringify' . 2>/dev/null | grep -v node_modules
+
+      # Find request body logging
+      grep -rn --include="*.js" --include="*.ts" 'log.*req\.body|console.*req\.body' . 2>/dev/null | grep -v node_modules
+signals:
+  critical:
+  - id: LOG-CRIT-001
+    signal: Passwords logged in plaintext
+    evidence_pattern: log.*password|console.*password|logger.*password
+    explanation: |
+      Logging passwords exposes authentication credentials to anyone with
+      log access. Logs are often stored unencrypted and retained for
+      extended periods. CWE-532.
+    remediation: Never log passwords; use password placeholder '[REDACTED]'
+    cwe: CWE-532
+  - id: LOG-CRIT-002
+    signal: API keys or tokens logged
+    evidence_pattern: log.*(api[_-]?key|token|secret)|console.*(api[_-]?key|token|secret)
+    explanation: |
+      Logging API keys and tokens exposes authentication material.
+      Attackers with log access can impersonate services or users. CWE-532.
+    remediation: Mask tokens showing only last 4 characters
+    cwe: CWE-532
+  - id: LOG-CRIT-003
+    signal: Full request/response bodies logged
+    evidence_pattern: log.*req\.body|log.*request\.body|console.*response\.data
+    explanation: |
+      Logging full request/response bodies may capture credentials,
+      PII, and sensitive business data. This is a common source of
+      data leaks. CWE-532.
+    remediation: Implement selective logging with sensitive field filtering
+    cwe: CWE-532
+  high:
+  - id: LOG-HIGH-001
+    signal: Personal Identifiable Information (PII) logged
+    evidence_pattern: log.*(email|ssn|phone|address)|console.*(user\.email|customer)
+    explanation: |
+      Logging PII violates privacy regulations (GDPR, CCPA) and exposes
+      personal data. Log retention makes this a persistent risk. CWE-532.
+    remediation: Mask or hash PII in logs; log only necessary identifiers
+    cwe: CWE-532
+  - id: LOG-HIGH-002
+    signal: Error stack traces with sensitive context
+    evidence_pattern: log.*stack|console.*error.*trace|logger.*exception
+    explanation: |
+      Stack traces may include sensitive variables, file paths, and
+      configuration details. In production, limit stack trace exposure. CWE-209.
+    remediation: Sanitize stack traces, remove variable values in production
+    cwe: CWE-209
+  - id: LOG-HIGH-003
+    signal: Log injection vulnerability
+    evidence_pattern: log.*\+.*req|console\.log\(.*\+.*user
+    explanation: |
+      Concatenating user input directly into log messages enables log
+      injection attacks. Attackers can forge log entries or inject
+      CRLF to create fake entries. CWE-117.
+    remediation: Use structured logging, encode/escape user input
+    cwe: CWE-117
+  - id: LOG-HIGH-004
+    signal: Credit card or financial data logged
+    evidence_pattern: log.*(card|credit|cvv|account)|console.*(payment|billing)
+    explanation: |
+      Logging payment card data violates PCI-DSS requirements and
+      exposes financial information. CWE-532.
+    remediation: Never log financial data; mask card numbers to last 4 digits
+    cwe: CWE-532
+  medium:
+  - id: LOG-MED-001
+    signal: Verbose logging enabled in production config
+    evidence_pattern: level.*debug|DEBUG.*true|verbose.*true
+    explanation: |
+      Debug-level logging in production captures excessive detail
+      that may include sensitive information. CWE-532.
+    remediation: Use INFO or WARN level in production
+    cwe: CWE-532
+  - id: LOG-MED-002
+    signal: No structured logging format
+    explanation: |
+      Unstructured logs make it difficult to implement consistent
+      sanitization and are harder to parse for security analysis.
+    remediation: Use structured logging (JSON) with defined schemas
+  - id: LOG-MED-003
+    signal: Missing log sanitization middleware
+    explanation: |
+      Without centralized sanitization, each logging call must
+      individually handle sensitive data, leading to inconsistency.
+    remediation: Implement logging middleware that automatically redacts sensitive patterns
+  positive:
+  - id: LOG-POS-001
+    signal: Centralized log sanitization implemented
+  - id: LOG-POS-002
+    signal: Structured logging with defined schema
+  - id: LOG-POS-003
+    signal: Sensitive field masking in log configuration
+  - id: LOG-POS-004
+    signal: Production log level set to INFO or higher
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify logging patterns
+    description: |
+      Locate all logging statements and understand the logging
+      framework in use.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find console.log statements
+      command: grep -rn --include='*.js' --include='*.ts' 'console\.(log|info|warn|error|debug)' . 2>/dev/null
+        | grep -v node_modules | wc -l
+    - purpose: Find logger usage
+      command: grep -rn --include='*.js' --include='*.ts' 'logger\.|log\.' . 2>/dev/null | grep -v node_modules
+        | head -30
+    - purpose: Find logging configuration
+      command: find . -name '*log*.yaml' -o -name '*log*.json' -o -name '*log*.xml' 2>/dev/null | grep
+        -v node_modules | head -10
+    expected_findings:
+    - Logging framework identification
+    - Volume of logging statements
+  - id: '2'
+    name: Scan for sensitive data logging
+    description: |
+      Search for logging statements that may contain passwords,
+      tokens, PII, or other sensitive data.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find password in logs
+      command: grep -rn --include='*.js' --include='*.ts' -E 'log.*password|console.*password' . 2>/dev/null
+        | grep -v node_modules | head -20
+    - purpose: Find token/secret in logs
+      command: grep -rn --include='*.js' --include='*.ts' -E 'log.*(token|secret|api.?key)|console.*(token|secret)'
+        . 2>/dev/null | grep -v node_modules | head -20
+    - purpose: Find request body logging
+      command: grep -rn --include='*.js' --include='*.ts' 'log.*req\.body|console.*req\.body|JSON\.stringify.*req'
+        . 2>/dev/null | grep -v node_modules | head -20
+    - purpose: Find PII in logs
+      command: grep -rn --include='*.js' --include='*.ts' -E 'log.*(email|phone|ssn|address)|console.*(user\.email)'
+        . 2>/dev/null | grep -v node_modules | head -20
+    expected_findings:
+    - Sensitive data in logging statements
+    - Request/response body logging
+  - id: '3'
+    name: Check for log sanitization
+    description: |
+      Identify sanitization mechanisms and evaluate their
+      effectiveness.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find sanitization/masking functions
+      command: grep -rn --include='*.js' --include='*.ts' -E 'mask|sanitize|redact|scrub' . 2>/dev/null
+        | grep -v node_modules | head -20
+    - purpose: Find logging middleware
+      command: grep -rn --include='*.js' --include='*.ts' 'morgan\|winston\|pino\|bunyan' . 2>/dev/null
+        | grep -v node_modules | head -10
+    - purpose: Check for structured logging
+      command: grep -rn --include='*.js' --include='*.ts' 'format.*json\|json.*format\|pino\|bunyan' .
+        2>/dev/null | grep -v node_modules | head -10
+    expected_findings:
+    - Sanitization implementations
+    - Logging framework features
+  - id: '4'
+    name: Review logging configuration
+    description: |
+      Examine logging configuration for appropriate levels,
+      output destinations, and security settings.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check log levels
+      command: grep -rn -iE 'level.*debug|log.*level|LOG_LEVEL' . 2>/dev/null | grep -v node_modules |
+        head -20
+    - purpose: Find log output configuration
+      command: grep -rn -iE 'transports|appender|handler' . 2>/dev/null | grep -v node_modules | head
+        -20
+    - purpose: Check for production config
+      command: grep -rn 'production' . 2>/dev/null | grep -iE 'log|level' | grep -v node_modules | head
+        -10
+    expected_findings:
+    - Log level configuration
+    - Production vs development settings
+  - id: '5'
+    name: Check for log injection vulnerabilities
+    description: |
+      Identify patterns that could enable log injection or
+      forging attacks.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find string concatenation in logs
+      command: grep -rn --include='*.js' --include='*.ts' -E 'log\(.*\+.*\)|console\.log\(.*\+' . 2>/dev/null
+        | grep -v node_modules | head -20
+    - purpose: Find template literals with user input
+      command: grep -rn --include='*.js' --include='*.ts' -E 'log\(`.*\$\{.*req|console.*`.*\$\{.*user'
+        . 2>/dev/null | grep -v node_modules | head -20
+    expected_findings:
+    - Log injection vulnerabilities
+    - Unsafe input handling in logs
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Sensitive Data Exposure
+    - Sanitization Assessment
+    - Compliance Considerations
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence of sensitive data in logging statements
+    medium: Logging patterns that could capture sensitive data
+    low: Configuration or pattern concerns requiring runtime verification
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-logging-cheatsheet
+      priority: required
+    - source_id: cwe-532
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough code analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: log-sanitization-001
+  item: No passwords logged
+  level: CRITICAL
+  verification: grep -rn --include='*.js' --include='*.ts' -E 'log.*password|console.*password' . 2>/dev/null
+    | grep -v node_modules | wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: log-sanitization-002
+  item: No tokens/secrets logged
+  level: CRITICAL
+  verification: grep -rn --include='*.js' --include='*.ts' -E 'log.*(token|secret)|console.*(token|secret)'
+    . 2>/dev/null | grep -v node_modules | grep -v 'mask\|redact\|sanitize' | wc -l | xargs -I {} test
+    {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: log-sanitization-003
+  item: Request body not logged directly
+  level: BLOCKING
+  verification: grep -rn --include='*.js' --include='*.ts' 'log.*req\.body|console.*req\.body' . 2>/dev/null
+    | grep -v node_modules | wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: log-sanitization-004
+  item: Structured logging in use
+  level: WARNING
+  verification: grep -rn 'pino\|bunyan\|winston.*json' . 2>/dev/null | grep -v node_modules | head -1
+    | grep -q . && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-532
+    - CWE-117
+    - CWE-209
+  - framework: OWASP Top 10
+    controls:
+    - A09:2021-Security Logging and Monitoring Failures
+  - framework: PCI-DSS
+    controls:
+    - 10.3.1
+    - 10.3.2
+  - framework: GDPR
+    controls:
+    - Article 32
+relationships:
+  commonly_combined:
+  - security-trust.secrets-management.hardcoded-secrets
+  - security-trust.secrets-management.pipeline-secrets
+  - security-trust.data-protection.pii-handling

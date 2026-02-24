@@ -1,0 +1,319 @@
+# ============================================================
+# AUDIT: Optimistic Update Handling
+# ============================================================
+# Evaluates how optimistic updates are implemented including
+# rollback handling, conflict resolution, and user feedback.
+# ============================================================
+
+audit:
+  id: "data-state-management.application-state.optimistic-update-handling"
+
+  name: "Optimistic Update Handling"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "application-state"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates optimistic update implementations including how
+    UI immediately reflects changes before server confirmation, rollback
+    handling when requests fail, conflict resolution when server state
+    differs, and user feedback about pending and failed operations.
+
+  why_it_matters: |
+    Poorly implemented optimistic updates cause confusing UX when operations
+    fail. Users believe their action succeeded only to see it disappear.
+    Without proper rollback, state becomes permanently inconsistent.
+    Without feedback, users don't know if their action is pending or
+    complete. Well-designed optimistic updates improve perceived
+    performance while maintaining reliability.
+
+  when_to_run:
+    - "When implementing optimistic UI patterns"
+    - "After user reports of disappearing actions"
+    - "When improving perceived performance"
+    - "During frontend architecture review"
+
+prerequisites:
+  required_artifacts:
+    - type: "frontend-code"
+      description: "Frontend code implementing optimistic updates"
+    - type: "api-integration"
+      description: "API integration code"
+
+  access_requirements:
+    - "Read access to frontend code"
+    - "Access to mutation/query code"
+
+discovery:
+  code_patterns:
+    - pattern: "optimistic|Optimistic|rollback|Rollback|onMutate"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify optimistic update patterns"
+    - pattern: "useMutation|mutate|apollo|tanstack|swr|revalidate"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify mutation libraries"
+    - pattern: "pending|loading|error|isLoading|isFetching"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify state management for async operations"
+
+  file_patterns:
+    - glob: "**/mutations/**/*"
+      purpose: "Mutation definitions"
+    - glob: "**/hooks/**/*"
+      purpose: "Custom hooks including mutations"
+    - glob: "**/api/**/*"
+      purpose: "API integration layer"
+
+knowledge_sources:
+  guides:
+    - id: "tanstack-optimistic"
+      name: "TanStack Query Optimistic Updates"
+      url: "https://tanstack.com/query/latest/docs/framework/react/guides/optimistic-updates"
+      offline_cache: true
+
+    - id: "apollo-optimistic"
+      name: "Apollo Client Optimistic UI"
+      url: "https://www.apollographql.com/docs/react/performance/optimistic-ui/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "mutation-linter"
+      purpose: "Verify optimistic update completeness"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "OPTIM-CRIT-001"
+      signal: "Optimistic updates without rollback on failure"
+      evidence_pattern: "onMutate without onError rollback"
+      explanation: |
+        When an optimistic update is applied but the server request fails,
+        the UI shows a state that doesn't exist on the server. Without
+        rollback, this inconsistency persists permanently.
+      remediation: "Implement rollback in onError/catch; save previous state in onMutate for restoration"
+
+    - id: "OPTIM-CRIT-002"
+      signal: "Optimistic delete without confirmation or undo"
+      evidence_pattern: "Immediate removal from UI without undo capability"
+      explanation: |
+        Optimistically deleting items without undo means failed deletes
+        show items reappearing (confusing) and successful deletes are
+        irreversible (dangerous). Users may accidentally delete items.
+      remediation: "Show pending delete state; provide undo option; confirm before optimistic remove"
+
+  high:
+    - id: "OPTIM-HIGH-001"
+      signal: "No visual feedback for pending optimistic updates"
+      evidence_pattern: "UI changes instantly without loading/pending indicator"
+      explanation: |
+        Without pending indicators, users cannot distinguish between
+        confirmed and unconfirmed changes. They may navigate away before
+        completion, or be confused when rollback occurs.
+      remediation: "Show subtle pending indicator (shimmer, opacity); indicate when fully confirmed"
+
+    - id: "OPTIM-HIGH-002"
+      signal: "Conflict not handled when server state differs"
+      evidence_pattern: "Optimistic update overwritten by server response without merge"
+      explanation: |
+        If another user modified the same data, the server response may
+        differ from the optimistic update. Blindly accepting server state
+        loses the user's intended changes.
+      remediation: "Detect conflicts between optimistic and server state; merge or prompt user"
+
+  medium:
+    - id: "OPTIM-MED-001"
+      signal: "Failed updates without user notification"
+      evidence_pattern: "Silent rollback without toast/notification"
+      remediation: "Notify user when optimistic update fails; explain what happened"
+
+    - id: "OPTIM-MED-002"
+      signal: "Retry not offered after optimistic update failure"
+      evidence_pattern: "Failed mutation without retry option"
+      remediation: "Offer retry option for failed mutations; implement exponential backoff"
+
+  low:
+    - id: "OPTIM-LOW-001"
+      signal: "Optimistic updates for operations that shouldn't be optimistic"
+
+  positive:
+    - id: "OPTIM-POS-001"
+      signal: "Complete optimistic update pattern with rollback and feedback"
+    - id: "OPTIM-POS-002"
+      signal: "Undo capability for destructive optimistic operations"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Optimistic Pattern Discovery"
+      description: |
+        Identify all optimistic update implementations
+        and their patterns.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find optimistic update code"
+          command: "grep -riE 'optimistic|Optimistic|onMutate' --include='*.ts' --include='*.tsx' --include='*.js' . 2>/dev/null | head -50"
+        - purpose: "Find mutation definitions"
+          command: "grep -riE 'useMutation|mutate\\(|useSWRMutation' --include='*.ts' --include='*.tsx' --include='*.js' . 2>/dev/null | head -50"
+        - purpose: "Find Apollo/GraphQL optimistic"
+          command: "grep -riE 'optimisticResponse|writeQuery|cache\\.modify' --include='*.ts' --include='*.tsx' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Optimistic update implementations"
+        - "Mutation library usage"
+
+    - id: "2"
+      name: "Rollback Analysis"
+      description: |
+        Verify that optimistic updates include proper
+        rollback handling for failures.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find rollback implementations"
+          command: "grep -riE 'rollback|onError|revert|restore|previousData|context\\.' --include='*.ts' --include='*.tsx' --include='*.js' . 2>/dev/null | head -50"
+        - purpose: "Find error handling in mutations"
+          command: "grep -riE 'onError|catch.*mutation|mutation.*error' --include='*.ts' --include='*.tsx' . 2>/dev/null | head -40"
+        - purpose: "Find cache invalidation on error"
+          command: "grep -riE 'invalidate|refetch|revalidate' --include='*.ts' --include='*.tsx' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Rollback implementations"
+        - "Error handling coverage"
+
+    - id: "3"
+      name: "User Feedback Analysis"
+      description: |
+        Evaluate user feedback for pending and failed
+        optimistic operations.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find pending state indicators"
+          command: "grep -riE 'isPending|isLoading|loading|pending|submitting' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -50"
+        - purpose: "Find error notifications"
+          command: "grep -riE 'toast|notification|alert.*error|error.*toast' --include='*.ts' --include='*.tsx' . 2>/dev/null | head -30"
+        - purpose: "Find undo patterns"
+          command: "grep -riE 'undo|Undo|revert|cancel' --include='*.ts' --include='*.tsx' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Pending state indicators"
+        - "Error notification patterns"
+
+    - id: "4"
+      name: "Conflict Handling Analysis"
+      description: |
+        Evaluate how conflicts between optimistic and
+        server state are handled.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find conflict handling"
+          command: "grep -riE 'conflict|Conflict|merge|reconcile|diff' --include='*.ts' --include='*.tsx' --include='*.js' . 2>/dev/null | head -30"
+        - purpose: "Find version/timestamp checking"
+          command: "grep -riE 'version|updatedAt|etag|lastModified' --include='*.ts' --include='*.tsx' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Conflict detection"
+        - "Resolution strategies"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Optimistic Pattern Inventory"
+        - "Rollback Analysis"
+        - "User Feedback"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of missing rollback or feedback"
+    medium: "Patterns exist but completeness uncertain"
+    low: "Implementation appears complete but failure scenarios need testing"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "tanstack-optimistic"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive mutation analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "optim-001"
+    item: "Optimistic updates have rollback handlers"
+    level: "CRITICAL"
+    verification: "grep -riE 'onError|rollback|revert' --include='*.ts' --include='*.tsx' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "optim-002"
+    item: "Pending state shown for optimistic updates"
+    level: "BLOCKING"
+    verification: "grep -riE 'isPending|isLoading|pending' --include='*.tsx' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "optim-003"
+    item: "Failed optimistic updates notify user"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify error notification for failed mutations"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "spa"]
+
+  compliance_frameworks:
+    - framework: "User Experience"
+      controls: ["UX-001", "UX-002"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.application-state.state-synchronization"
+    - "data-state-management.application-state.client-side-state-management"

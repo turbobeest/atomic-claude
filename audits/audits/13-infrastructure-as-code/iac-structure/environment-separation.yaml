@@ -1,0 +1,383 @@
+audit:
+  id: infrastructure-as-code.iac-structure.environment-separation
+  name: IaC Environment Separation
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: iac-structure
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates how different environments (development, staging,
+    production) are separated and isolated in Infrastructure as Code. It
+    examines the mechanisms used for environment differentiation, access
+    controls, and blast radius containment.
+
+    Key areas examined:
+    - Directory-based vs workspace-based separation
+    - Account/subscription isolation strategies
+    - Environment-specific variable management
+    - State isolation between environments
+    - CI/CD pipeline environment targeting
+    - Cross-environment dependency management
+  why_it_matters: |
+    Proper environment separation is critical for:
+    - Safety: Prevents accidental production changes during development
+    - Security: Limits blast radius of compromised credentials
+    - Compliance: Maintains audit trails per environment
+    - Testing: Enables safe experimentation in lower environments
+    - Cost: Allows different resource sizing per environment
+
+    Poor separation leads to production outages from development changes,
+    security breaches affecting all environments, and compliance failures.
+  when_to_run:
+  - During IaC architecture review
+  - Before production deployment
+  - After security incidents
+  - During compliance audits
+prerequisites:
+  required_artifacts:
+  - type: iac_repository
+    description: Access to infrastructure code repository
+  - type: ci_cd_config
+    description: Access to CI/CD pipeline configurations
+  access_requirements:
+  - Read access to IaC repositories
+  - Access to CI/CD configurations
+  - Understanding of cloud account structure
+discovery:
+  code_patterns:
+  - pattern: terraform\s+workspace
+    type: keyword
+    scope: config
+    purpose: Detect workspace-based environment separation
+  - pattern: \$\{terraform\.workspace\}
+    type: regex
+    scope: config
+    purpose: Find workspace references in configurations
+  - pattern: var\.environment
+    type: regex
+    scope: config
+    purpose: Detect environment variable usage
+  - pattern: (prod|staging|dev|production|development|qa)
+    type: regex
+    scope: config
+    purpose: Find environment identifiers
+  file_patterns:
+  - glob: '**/environments/**/*.tf'
+    purpose: Directory-based environment configurations
+  - glob: '**/prod/**/*.tf'
+    purpose: Production environment configurations
+  - glob: '**/staging/**/*.tf'
+    purpose: Staging environment configurations
+  - glob: '**/dev/**/*.tf'
+    purpose: Development environment configurations
+  - glob: '**/*.tfvars'
+    purpose: Environment-specific variable files
+  - glob: '**/terragrunt.hcl'
+    purpose: Terragrunt environment configurations
+knowledge_sources:
+  guides:
+  - id: terraform-workspaces
+    name: Terraform Workspaces
+    url: https://developer.hashicorp.com/terraform/language/state/workspaces
+    offline_cache: true
+  - id: terragrunt-environments
+    name: Terragrunt Keep Your Terraform Code DRY
+    url: https://terragrunt.gruntwork.io/docs/features/keep-your-terraform-code-dry/
+    offline_cache: true
+  - id: aws-multi-account
+    name: AWS Multi-Account Strategy
+    url: https://docs.aws.amazon.com/whitepapers/latest/organizing-your-aws-environment/organizing-your-aws-environment.html
+    offline_cache: true
+  - id: azure-management-groups
+    name: Azure Management Groups
+    url: https://docs.microsoft.com/en-us/azure/governance/management-groups/overview
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: tflint
+    purpose: Lint for environment-specific issues
+    offline_capable: true
+  - tool: checkov
+    purpose: Check for environment isolation issues
+    offline_capable: true
+  infrastructure_tools:
+  - tool: terraform workspace
+    purpose: Manage Terraform workspaces
+    command: terraform workspace list
+signals:
+  critical:
+  - id: IAC-ENV-CRIT-001
+    signal: Production and non-production share same state file
+    evidence_indicators:
+    - Single backend configuration for all environments
+    - No workspace or directory separation for state
+    explanation: |
+      Shared state files mean any apply command affects all environments.
+      A development change could destroy production resources.
+    remediation: Use separate state files per environment via workspaces, directories, or backends
+  - id: IAC-ENV-CRIT-002
+    signal: Production accessible with same credentials as development
+    evidence_indicators:
+    - Same AWS profile/credentials for all environments
+    - No account-level separation
+    explanation: |
+      Compromised development credentials could be used to access
+      and modify production infrastructure.
+    remediation: Use separate cloud accounts/subscriptions per environment with distinct credentials
+  - id: IAC-ENV-CRIT-003
+    signal: No environment differentiation in CI/CD pipelines
+    evidence_indicators:
+    - Single pipeline deploys to all environments
+    - No environment-specific approval gates
+    explanation: |
+      Without pipeline differentiation, there's no safeguard against
+      accidental production deployments.
+    remediation: Implement separate pipelines or stages with appropriate approval gates
+  high:
+  - id: IAC-ENV-HIGH-001
+    signal: Hardcoded environment values in shared code
+    evidence_pattern: (us-east-1|prod-vpc|production-subnet)
+    explanation: |
+      Hardcoded environment-specific values prevent code reuse and
+      increase risk of applying wrong configurations.
+    remediation: Use variables for all environment-specific values
+  - id: IAC-ENV-HIGH-002
+    signal: No variable file per environment
+    evidence_indicators:
+    - Single terraform.tfvars for all environments
+    - Environment selection only via workspaces
+    explanation: |
+      Without environment-specific variable files, configuration
+      differences are difficult to track and review.
+    remediation: 'Create separate .tfvars files: prod.tfvars, staging.tfvars, dev.tfvars'
+  - id: IAC-ENV-HIGH-003
+    signal: Cross-environment resource references
+    evidence_pattern: data\.terraform_remote_state\..*\.(prod|production)
+    explanation: |
+      Direct references to production resources from other environments
+      create dependencies and potential blast radius issues.
+    remediation: Use parameter stores or SSM for cross-environment data sharing
+  medium:
+  - id: IAC-ENV-MED-001
+    signal: Inconsistent environment naming
+    evidence_indicators:
+    - Mixed 'prod/production', 'dev/development' usage
+    - Inconsistent environment identifiers
+    remediation: Standardize environment naming across all configurations
+  - id: IAC-ENV-MED-002
+    signal: Environment-specific logic in modules
+    evidence_pattern: count\s*=\s*var\.environment\s*==\s*"prod"
+    remediation: Modules should be environment-agnostic; use variables for differentiation
+  - id: IAC-ENV-MED-003
+    signal: No environment tagging strategy
+    evidence_indicators:
+    - Resources lack environment tags
+    - Inconsistent environment tag values
+    remediation: Implement consistent environment tagging via default_tags
+  low:
+  - id: IAC-ENV-LOW-001
+    signal: Workspace names don't match environment names
+    evidence_indicators:
+    - Workspace 'default' used for production
+    - Non-descriptive workspace names
+    remediation: Use descriptive workspace names matching environment purpose
+  positive:
+  - id: IAC-ENV-POS-001
+    signal: Complete account-level isolation
+    evidence_indicators:
+    - Separate AWS accounts per environment
+    - Separate credentials and state backends
+  - id: IAC-ENV-POS-002
+    signal: Environment promotion workflow
+    evidence_indicators:
+    - Code flows dev -> staging -> production
+    - Approval gates at each stage
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Environment Structure Analysis
+    description: |
+      Identify how environments are structured and separated
+      in the repository organization.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find environment directories
+      command: find . -type d \( -name 'prod*' -o -name 'staging*' -o -name 'dev*' -o -name 'environments'
+        -o -name 'envs' \)
+    - purpose: List workspace usage
+      command: grep -rn 'terraform.workspace' --include='*.tf'
+    - purpose: Find environment variable files
+      command: find . -name '*.tfvars' | xargs -I{} basename {} | sort -u
+    - purpose: Check Terragrunt environment structure
+      command: find . -name 'terragrunt.hcl' -exec dirname {} \; | sort -u
+    expected_findings:
+    - Environment separation pattern (directory vs workspace)
+    - Environment-specific configurations
+    - Separation consistency
+  - id: '2'
+    name: State Isolation Verification
+    description: |
+      Verify that Terraform state is properly isolated between
+      environments to prevent cross-environment impacts.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find backend configurations
+      command: grep -rA20 'backend\s*"' --include='*.tf' | head -100
+    - purpose: Check for environment in backend key
+      command: grep -rn 'key\s*=' --include='*.tf' | grep -i backend -A5
+    - purpose: Look for workspace-based state separation
+      command: grep -rn 'prefix\s*=' --include='*.tf'
+    expected_findings:
+    - Backend configuration per environment
+    - State key patterns
+    - State isolation mechanisms
+  - id: '3'
+    name: Credential Isolation Check
+    description: |
+      Assess whether different credentials are used for
+      different environments.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find provider configurations
+      command: grep -rA10 'provider\s*"aws"\|provider\s*"azurerm"\|provider\s*"google"' --include='*.tf'
+        | head -100
+    - purpose: Check for profile/credential references
+      command: grep -rn 'profile\s*=\|credentials\s*=' --include='*.tf'
+    - purpose: Look for assume_role configurations
+      command: grep -rA5 'assume_role' --include='*.tf'
+    expected_findings:
+    - Credential configuration patterns
+    - Account/profile separation
+    - Role assumption patterns
+  - id: '4'
+    name: CI/CD Environment Targeting
+    description: |
+      Review how CI/CD pipelines target different environments
+      and what safeguards exist.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find CI/CD configuration files
+      command: find . -name '.github' -o -name '.gitlab-ci.yml' -o -name 'Jenkinsfile' -o -name 'azure-pipelines.yml'
+        -o -name '.circleci'
+    - purpose: Check for environment references in CI
+      command: grep -rn 'environment\|prod\|staging\|dev' --include='.gitlab-ci.yml' --include='*.yml'
+        --include='Jenkinsfile' 2>/dev/null | head -50
+    expected_findings:
+    - CI/CD environment targeting strategy
+    - Approval gates presence
+    - Environment-specific pipeline stages
+  - id: '5'
+    name: Cross-Environment Dependencies
+    description: |
+      Identify any dependencies between environments that
+      could cause cascading issues.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find remote state data sources
+      command: grep -rA10 'data\s*"terraform_remote_state"' --include='*.tf'
+    - purpose: Check for hardcoded cross-environment references
+      command: grep -rn 'prod\|production' --include='*.tf' $(find . -type d \( -name 'dev*' -o -name
+        'staging*' \) -print)
+    expected_findings:
+    - Cross-environment data dependencies
+    - Potential blast radius issues
+    - Dependency management patterns
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Environment Architecture
+    - Isolation Assessment
+    - Risk Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct configuration analysis with clear patterns
+    medium: Patterns identified requiring contextual interpretation
+    low: Inferred from incomplete information
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-workspaces
+      priority: required
+    - source_id: aws-multi-account
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Environment separation requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+      reason: Environment isolation is critical for security
+closeout_checklist:
+- id: env-001
+  item: State files isolated per environment
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify separate state backends or workspace-based state isolation
+  expected: Confirmed by reviewer
+- id: env-002
+  item: Separate credentials per environment
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify different AWS profiles/accounts or Azure subscriptions per environment
+  expected: Confirmed by reviewer
+- id: env-003
+  item: No hardcoded production values in non-production code
+  level: BLOCKING
+  verification: grep -rn 'prod\|production' --include='*.tf' $(find . -type d \( -name 'dev*' -o -name
+    'staging*' \) 2>/dev/null) 2>/dev/null | wc -l | xargs -I{} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: env-004
+  item: Environment-specific variable files exist
+  level: BLOCKING
+  verification: test $(find . -name '*prod*.tfvars' -o -name '*staging*.tfvars' -o -name '*dev*.tfvars'
+    | wc -l) -ge 2 && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.6
+    - CC6.7
+  - framework: CIS Controls
+    controls:
+    - Control 3
+    - Control 4
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.state-management.state-backend-security
+  - infrastructure-as-code.security-compliance.least-privilege

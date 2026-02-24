@@ -1,0 +1,333 @@
+# ============================================================
+# AUDIT: Build Speed
+# ============================================================
+# Evaluates build performance and identifies optimization opportunities
+
+audit:
+  id: "devops-ci-cd.build-pipeline.build-speed"
+  name: "Build Speed"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "build-pipeline"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes build pipeline performance including total build time,
+    step-by-step timing breakdowns, resource utilization, and bottlenecks.
+    Evaluates whether builds meet acceptable duration thresholds and
+    identifies optimization opportunities such as caching, parallelization,
+    and dependency reduction.
+
+  why_it_matters: |
+    Slow builds directly impact developer productivity and deployment
+    frequency. Long build times discourage small, frequent commits, leading
+    to larger, riskier changes. Teams with 10+ minute builds often skip
+    running tests locally, increasing CI failure rates. Build speed is a
+    key predictor of overall engineering velocity and DORA metrics.
+
+  when_to_run:
+    - "Monthly CI/CD health checks"
+    - "After adding new build steps or dependencies"
+    - "When developers complain about build times"
+    - "Before scaling team size"
+
+prerequisites:
+  required_artifacts:
+    - type: "ci_configuration"
+      description: "CI/CD pipeline configuration files"
+    - type: "build_logs"
+      description: "Historical build timing data"
+
+  access_requirements:
+    - "CI/CD system metrics and dashboards"
+    - "Build log history access"
+
+discovery:
+  file_patterns:
+    - glob: "**/.github/workflows/*.yml"
+      purpose: "GitHub Actions workflow definitions"
+
+    - glob: "**/.gitlab-ci.yml"
+      purpose: "GitLab CI configuration"
+
+    - glob: "**/Jenkinsfile"
+      purpose: "Jenkins pipeline definitions"
+
+    - glob: "**/azure-pipelines.yml"
+      purpose: "Azure DevOps pipeline configuration"
+
+    - glob: "**/bitbucket-pipelines.yml"
+      purpose: "Bitbucket pipeline configuration"
+
+  metrics_queries:
+    - system: "CI/CD Platform"
+      query: "Average build duration over last 30 days"
+      purpose: "Establish baseline build performance"
+      threshold: "<10 minutes for most projects"
+
+knowledge_sources:
+  specifications:
+    - id: "nsa-cicd-security"
+      name: "NSA/CISA: Defending CI/CD Environments"
+      url: "https://media.defense.gov/2023/Jun/28/2003249466/-1/-1/0/CSI_DEFENDING_CI_CD_ENVIRONMENTS.PDF"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "dora-metrics"
+      name: "DORA DevOps Research"
+      url: "https://dora.dev/research/"
+      offline_cache: true
+    - id: "google-sre-build"
+      name: "Google SRE Book - Release Engineering"
+      url: "https://sre.google/sre-book/release-engineering/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "gh"
+      purpose: "GitHub CLI for workflow run analysis"
+      command: "gh run list --limit 50 --json conclusion,createdAt,updatedAt"
+
+    - tool: "gitlab-cli"
+      purpose: "GitLab CLI for pipeline analysis"
+      command: "glab ci list"
+
+  monitoring_queries:
+    - system: "GitHub Actions"
+      query: "Workflow run duration histogram"
+      purpose: "Identify build time distribution and outliers"
+
+  scripts:
+    - id: "analyze-build-times"
+      language: "bash"
+      purpose: "Calculate build time statistics from CI logs"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Requires jq and gh CLI
+        gh run list --limit 100 --json conclusion,createdAt,updatedAt | \
+        jq -r '.[] | select(.conclusion=="success") |
+        ((.updatedAt | fromdateiso8601) - (.createdAt | fromdateiso8601)) / 60' | \
+        awk '{sum+=$1; count++} END {print "Average: " sum/count " minutes"}'
+
+signals:
+  critical:
+    - id: "CICD-SPEED-CRIT-001"
+      signal: "Average build time exceeds 30 minutes"
+      evidence_threshold: "build_duration_avg > 30 minutes"
+      explanation: |
+        Builds over 30 minutes severely impact developer productivity.
+        Engineers context-switch away from the task, reducing code quality
+        and increasing cognitive load. This typically indicates missing
+        caching, lack of parallelization, or unnecessary build steps.
+      remediation: "Implement aggressive caching, parallelize independent steps, remove unnecessary builds"
+
+    - id: "CICD-SPEED-CRIT-002"
+      signal: "Build times have increased >50% in last month"
+      evidence_threshold: "build_time_increase > 50%"
+      explanation: |
+        Rapid build time degradation indicates accumulating technical debt
+        in the build system. Without intervention, this trend continues
+        exponentially.
+      remediation: "Audit recent changes, implement build time monitoring alerts"
+
+  high:
+    - id: "CICD-SPEED-HIGH-001"
+      signal: "Average build time exceeds 10 minutes"
+      evidence_threshold: "build_duration_avg > 10 minutes"
+      explanation: |
+        DORA research shows elite teams have build times under 10 minutes.
+        Longer builds correlate with lower deployment frequency and
+        higher change failure rates.
+      remediation: "Target sub-10-minute builds through caching and parallelization"
+
+    - id: "CICD-SPEED-HIGH-002"
+      signal: "No build timing metrics or monitoring"
+      evidence_pattern: "No build duration tracking configured"
+      explanation: |
+        Without metrics, build degradation goes unnoticed until it becomes
+        critical. Teams cannot optimize what they do not measure.
+      remediation: "Implement build time tracking and alerting"
+
+  medium:
+    - id: "CICD-SPEED-MED-001"
+      signal: "Build steps not parallelized when independent"
+      evidence_pattern: "Sequential steps without dependencies"
+      remediation: "Configure parallel execution for independent build stages"
+
+    - id: "CICD-SPEED-MED-002"
+      signal: "Tests run sequentially instead of in parallel"
+      remediation: "Implement test parallelization and sharding"
+
+  low:
+    - id: "CICD-SPEED-LOW-001"
+      signal: "Build artifacts downloaded on every run instead of cached"
+
+  positive:
+    - id: "CICD-SPEED-POS-001"
+      signal: "Build times consistently under 5 minutes"
+
+    - id: "CICD-SPEED-POS-002"
+      signal: "Build time trending downward over time"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Gather build time metrics"
+      description: |
+        Collect build duration data from the last 30-90 days.
+        Calculate average, median, p95, and max build times.
+        Identify trends over time.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Get recent GitHub Actions run times"
+          command: |
+            gh run list --limit 100 --json conclusion,createdAt,updatedAt,name
+
+      expected_findings:
+        - "Baseline build time statistics"
+        - "Build time trends"
+
+    - id: "2"
+      name: "Analyze build step breakdown"
+      description: |
+        Identify which build steps consume the most time.
+        Look for steps that could be parallelized or cached.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Get detailed workflow run timing"
+          command: |
+            gh run view --json jobs -q '.jobs[] | {name: .name, duration: .steps[].durationMs}'
+
+      expected_findings:
+        - "Slowest build steps identified"
+        - "Parallelization opportunities"
+
+    - id: "3"
+      name: "Review caching configuration"
+      description: |
+        Check if appropriate caching is configured for dependencies,
+        build outputs, and intermediate artifacts.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check for cache configuration in workflows"
+          command: |
+            grep -r 'actions/cache\|cache:\|Cache' .github/workflows/ || echo "No caching found"
+
+      expected_findings:
+        - "Current caching strategy assessment"
+
+    - id: "4"
+      name: "Identify optimization opportunities"
+      description: |
+        Based on analysis, identify specific changes that would
+        reduce build time.
+      duration_estimate: "30 min"
+
+      questions:
+        - "Are all build steps necessary for every commit?"
+        - "Can tests be sharded across parallel runners?"
+        - "Are dependencies being rebuilt unnecessarily?"
+
+      expected_findings:
+        - "Prioritized list of optimization recommendations"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Build Time Analysis"
+        - "Bottleneck Identification"
+        - "Optimization Recommendations"
+
+  confidence_guidance:
+    high: "Based on 30+ days of build metrics with step-level timing"
+    medium: "Based on recent build runs without historical comparison"
+    low: "Based on configuration review without actual timing data"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "dora-metrics"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires metric collection and analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "build-speed-001"
+    item: "Build time metrics collected and analyzed"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm average, median, p95 build times documented"
+    expected: "Confirmed by reviewer"
+
+  - id: "build-speed-002"
+    item: "Build step timing breakdown available"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm slowest steps identified with timing data"
+    expected: "Confirmed by reviewer"
+
+  - id: "build-speed-003"
+    item: "Optimization recommendations provided"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm actionable recommendations documented"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "DORA"
+      controls: ["Lead Time for Changes"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.build-pipeline.build-caching"
+    - "devops-ci-cd.build-pipeline.build-parallelization"

@@ -1,0 +1,288 @@
+audit:
+  id: observability-instrumentation.logging.log-storage-cost
+  name: Log Storage Cost Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: logging
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes the cost of log storage infrastructure including ingestion,
+    storage, and query costs. Reviews cost drivers such as log volume,
+    retention periods, and storage tier utilization. Identifies opportunities
+    for cost optimization without sacrificing observability.
+  why_it_matters: |
+    Log storage costs can grow exponentially with application scale and become
+    a significant portion of infrastructure spend. Uncontrolled logging, excessive
+    retention, or inefficient storage choices lead to avoidable costs. Understanding
+    cost drivers enables informed trade-offs between visibility and budget.
+  when_to_run:
+  - Cost optimization initiatives
+  - Budget planning and forecasting
+  - After significant traffic growth
+  - When log costs exceed expectations
+prerequisites:
+  required_artifacts:
+  - type: cost_reports
+    description: Cloud billing or logging platform cost data
+  - type: metrics
+    description: Log volume and storage metrics
+  access_requirements:
+  - Access to billing/cost data
+  - Access to log storage metrics
+  - Access to logging platform dashboards
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: sum(increase(log_bytes_total[30d]))
+    purpose: Calculate monthly log volume
+    threshold: Track growth rate
+  - system: CloudWatch
+    query: 'CloudWatch Logs Metrics: IncomingBytes, StoredBytes'
+    purpose: AWS log storage metrics
+  - system: Elasticsearch
+    query: _cat/indices?v&s=store.size:desc
+    purpose: Index size by age
+  documents_to_review:
+  - type: Cloud billing reports
+    purpose: Identify logging-related costs
+  - type: Logging platform invoices
+    purpose: Understand pricing model and usage
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: datadog-cost
+    name: Datadog Log Management Pricing
+    url: https://www.datadoghq.com/pricing/
+    offline_cache: true
+  - id: elastic-cost
+    name: Elastic Cloud Pricing
+    url: https://www.elastic.co/pricing/
+    offline_cache: true
+  - id: splunk-cost
+    name: Splunk Pricing Guide
+    url: https://www.splunk.com/en_us/software/pricing.html
+    offline_cache: true
+  learning_resources:
+  - id: log-cost-optimization
+    title: Optimizing Observability Costs
+    type: article
+    reference: Industry best practices for log cost management
+tooling:
+  infrastructure_tools:
+  - tool: aws cli
+    purpose: Query CloudWatch Logs costs
+    command: aws ce get-cost-and-usage --service CloudWatch
+  - tool: curl
+    purpose: Query Elasticsearch storage metrics
+    command: curl -s 'elasticsearch:9200/_cat/indices?v&bytes=gb'
+  monitoring_queries:
+  - system: Prometheus
+    query: sum(rate(log_bytes_total[1h])) * 3600 * 24 * 30
+    purpose: Project monthly log volume
+  scripts:
+  - id: calculate-log-costs
+    language: bash
+    purpose: Estimate log storage costs
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Elasticsearch Index Sizes ==="
+      curl -s 'elasticsearch:9200/_cat/indices?v&bytes=gb&s=store.size:desc' | head -20
+      echo "=== Total Storage ==="
+      curl -s 'elasticsearch:9200/_cluster/stats' | jq '.indices.store.size_in_bytes / 1073741824 | "Total: \(.) GB"'
+signals:
+  critical:
+  - id: LOG-COST-CRIT-001
+    signal: Log costs exceeding 20% of infrastructure budget
+    evidence_indicators:
+    - Billing reports show disproportionate logging costs
+    - Log storage growing faster than business metrics
+    explanation: |
+      Excessive log costs indicate inefficient logging practices or
+      inappropriate retention policies that drain resources from
+      core infrastructure needs.
+    remediation: Implement volume reduction through sampling, filtering, and retention optimization
+  high:
+  - id: LOG-COST-HIGH-001
+    signal: No cost monitoring or alerting for logging
+    explanation: Costs can grow unexpectedly without visibility
+    remediation: Implement cost monitoring and budget alerts
+  - id: LOG-COST-HIGH-002
+    signal: All logs stored in hot/expensive storage tier
+    explanation: Old logs rarely accessed but stored expensively
+    remediation: Implement tiered storage with cold archival
+  medium:
+  - id: LOG-COST-MED-001
+    signal: No log volume forecasting
+    remediation: Implement capacity planning based on growth trends
+  - id: LOG-COST-MED-002
+    signal: Cost per service not tracked
+    remediation: Attribute log costs to services for accountability
+  low:
+  - id: LOG-COST-LOW-001
+    signal: Suboptimal pricing plan for current usage
+  positive:
+  - id: LOG-COST-POS-001
+    signal: Cost monitoring with budget alerts in place
+  - id: LOG-COST-POS-002
+    signal: Tiered storage optimizing cost vs. access needs
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Gather current cost data
+    description: |
+      Collect billing data and metrics related to log storage,
+      ingestion, and query costs.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Get AWS CloudWatch Logs costs
+      command: aws ce get-cost-and-usage --time-period Start=2024-01-01,End=2024-01-31 --granularity MONTHLY
+        --filter '{"Dimensions":{"Key":"SERVICE","Values":["Amazon CloudWatch"]}}' --metrics BlendedCost
+    questions:
+    - What is the total monthly spend on logging?
+    - What is the cost per GB ingested?
+    - What is the cost per GB stored?
+    expected_findings:
+    - Current log-related costs
+    - Cost breakdown by component
+  - id: '2'
+    name: Analyze volume by service
+    description: |
+      Break down log volume by service to identify the largest
+      cost contributors.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Get log volume by service
+      command: curl -s 'elasticsearch:9200/_cat/indices?v&bytes=gb' | grep logs
+    - purpose: Query Prometheus for log rates
+      command: curl -s 'prometheus:9090/api/v1/query?query=topk(10,sum(rate(log_bytes_total[24h]))by(service))'
+    expected_findings:
+    - Volume by service
+    - Top cost drivers
+  - id: '3'
+    name: Evaluate storage efficiency
+    description: |
+      Review storage tier usage, compression, and retention to
+      identify optimization opportunities.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check ILM phase distribution
+      command: 'curl -s ''elasticsearch:9200/_ilm/explain/logs-*'' | jq ''.indices | to_entries | group_by(.value.phase)
+        | map({phase: .[0].value.phase, count: length})'''
+    questions:
+    - What percentage of logs are in hot vs warm vs cold storage?
+    - Is compression enabled?
+    - Are retention policies cost-optimal?
+    expected_findings:
+    - Storage tier distribution
+    - Optimization opportunities
+  - id: '4'
+    name: Project future costs
+    description: |
+      Analyze growth trends and project future log costs based
+      on current trajectory.
+    duration_estimate: 15 min
+    questions:
+    - What is the month-over-month growth rate?
+    - How will costs scale with business growth?
+    - Are there upcoming changes that will affect volume?
+    expected_findings:
+    - Growth trajectory
+    - Projected costs
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Current Cost Analysis
+    - Cost Drivers
+    - Optimization Opportunities
+    - Recommendations
+  confidence_guidance:
+    high: Cost data directly from billing systems
+    medium: Costs estimated from volume metrics and pricing
+    low: Rough estimates based on industry benchmarks
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: log-cost-optimization
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires access to billing and runtime metrics
+    full:
+      included: true
+      priority: 3
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: log-cost-001
+  item: Log costs are monitored and tracked
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify cost dashboards or reports exist for logging infrastructure
+  expected: Confirmed by reviewer
+- id: log-cost-002
+  item: Cost attribution by service is available
+  level: WARNING
+  verification: manual
+  verification_notes: Verify log costs can be attributed to individual services
+  expected: Confirmed by reviewer
+- id: log-cost-003
+  item: Tiered storage implemented for cost optimization
+  level: WARNING
+  verification: manual
+  verification_notes: Verify ILM or equivalent moves logs to cheaper storage over time
+  expected: Confirmed by reviewer
+- id: log-cost-004
+  item: Budget alerts configured for logging costs
+  level: WARNING
+  verification: manual
+  verification_notes: Verify alerts trigger when log costs exceed thresholds
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Cost Optimization
+relationships:
+  commonly_combined:
+  - observability-instrumentation.logging.log-retention
+  - observability-instrumentation.logging.log-sampling
+  - observability-instrumentation.logging.log-aggregation

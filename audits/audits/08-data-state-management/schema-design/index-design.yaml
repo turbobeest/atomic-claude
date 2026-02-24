@@ -1,0 +1,334 @@
+# ============================================================
+# AUDIT: Index Design
+# ============================================================
+# Evaluates database index design for query performance optimization
+# while avoiding over-indexing that impacts write performance.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-design.index-design"
+
+  name: "Index Design"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-design"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates database index design including index selection,
+    composite index column ordering, covering indexes, partial indexes,
+    and index maintenance strategies. It identifies missing indexes causing
+    slow queries and excessive indexes impacting write performance.
+
+  why_it_matters: |
+    Poor index design directly impacts application performance. Missing
+    indexes cause slow queries and table scans under load. Excessive
+    indexes slow down inserts, updates, and deletes while consuming
+    storage. Proper index design balances read and write performance
+    based on actual access patterns.
+
+  when_to_run:
+    - "During database performance optimization"
+    - "When query latency increases"
+    - "Before major traffic increases"
+    - "After significant schema changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-schema"
+      description: "Database schema with index definitions"
+    - type: "query-patterns"
+      description: "Common queries and access patterns"
+
+  access_requirements:
+    - "Read access to database schemas"
+    - "Query execution plan access"
+    - "Database performance metrics (recommended)"
+
+discovery:
+  code_patterns:
+    - pattern: "CREATE INDEX|@@index|@Index"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify explicit index definitions"
+    - pattern: "WHERE.*=|ORDER BY|GROUP BY"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify query patterns that benefit from indexes"
+    - pattern: "EXPLAIN|ANALYZE"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify query analysis patterns"
+
+  file_patterns:
+    - glob: "**/migrations/**/*.sql"
+      purpose: "Database migration files with indexes"
+    - glob: "**/schema/**/*.prisma"
+      purpose: "Prisma schema with index definitions"
+    - glob: "**/indexes/**/*.sql"
+      purpose: "Index-specific migration files"
+
+knowledge_sources:
+  guides:
+    - id: "use-the-index-luke"
+      name: "Use The Index, Luke"
+      url: "https://use-the-index-luke.com/"
+      offline_cache: true
+
+    - id: "postgres-indexes"
+      name: "PostgreSQL Index Documentation"
+      url: "https://www.postgresql.org/docs/current/indexes.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "sql-performance-explained"
+      title: "SQL Performance Explained"
+      type: "book"
+      reference: "ISBN: 978-3950307825"
+
+tooling:
+  static_analysis:
+    - tool: "pg_stat_statements"
+      purpose: "Identify slow queries needing indexes"
+      offline_capable: false
+
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "PostgreSQL index inspection"
+      command: "psql -c \"SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public';\""
+    - tool: "mysql"
+      purpose: "MySQL index inspection"
+      command: "mysql -e 'SHOW INDEX FROM tablename'"
+
+  monitoring_queries:
+    - system: "PostgreSQL"
+      query: "SELECT * FROM pg_stat_user_indexes WHERE idx_scan = 0;"
+      purpose: "Find unused indexes"
+      threshold: "Zero unused indexes on production tables"
+
+signals:
+  critical:
+    - id: "IDX-CRIT-001"
+      signal: "Missing indexes on frequently queried columns"
+      evidence_pattern: "WHERE clauses on columns without indexes causing full table scans"
+      explanation: |
+        Queries without supporting indexes perform full table scans,
+        causing O(n) performance that degrades as data grows. This
+        can bring production systems to their knees under load.
+      remediation: "Add indexes on columns used in WHERE clauses, JOINs, and ORDER BY"
+
+    - id: "IDX-CRIT-002"
+      signal: "Missing indexes on foreign key columns"
+      evidence_pattern: "FOREIGN KEY columns without corresponding indexes"
+      explanation: |
+        Foreign key columns without indexes cause slow JOINs and
+        slow cascading operations. When a parent record is deleted,
+        the database must scan the entire child table.
+      remediation: "Add indexes on all foreign key columns"
+
+  high:
+    - id: "IDX-HIGH-001"
+      signal: "Composite index with incorrect column order"
+      evidence_pattern: "Index (a, b) when queries filter by b alone"
+      explanation: |
+        Composite indexes follow the leftmost prefix rule. An index
+        on (a, b) cannot efficiently serve queries that filter only
+        by b. Column order must match query patterns.
+      remediation: "Reorder composite index columns or add additional indexes for different access patterns"
+
+    - id: "IDX-HIGH-002"
+      signal: "Duplicate or redundant indexes"
+      evidence_pattern: "Index on (a) when (a, b) index exists"
+      explanation: |
+        Redundant indexes waste storage and slow down writes without
+        providing query benefits. The composite index (a, b) can
+        serve queries that would use an index on (a) alone.
+      remediation: "Remove redundant single-column indexes covered by composite indexes"
+
+  medium:
+    - id: "IDX-MED-001"
+      signal: "Over-indexing on write-heavy tables"
+      evidence_pattern: "Tables with more indexes than columns"
+      remediation: "Review and consolidate indexes based on actual query patterns"
+
+    - id: "IDX-MED-002"
+      signal: "Missing covering indexes for common queries"
+      evidence_pattern: "Queries requiring table lookups after index scan"
+      remediation: "Add INCLUDE columns to create covering indexes for common queries"
+
+  low:
+    - id: "IDX-LOW-001"
+      signal: "Full-text search without proper index"
+
+  positive:
+    - id: "IDX-POS-001"
+      signal: "Well-designed indexes matching query patterns"
+    - id: "IDX-POS-002"
+      signal: "Effective use of partial indexes for filtered queries"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Index Inventory"
+      description: |
+        Catalog all indexes in the database including their types,
+        columns, and purposes.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find index definitions in migrations"
+          command: "grep -riE 'CREATE INDEX|CREATE UNIQUE INDEX|@@index|@Index' --include='*.sql' --include='*.prisma' --include='*.ts' . 2>/dev/null | head -50"
+        - purpose: "Find implicit indexes (primary keys, unique constraints)"
+          command: "grep -riE 'PRIMARY KEY|UNIQUE' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+
+      expected_findings:
+        - "Complete index inventory"
+        - "Index types and purposes"
+
+    - id: "2"
+      name: "Foreign Key Index Analysis"
+      description: |
+        Verify that all foreign key columns have supporting indexes.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find foreign key columns"
+          command: "grep -riE '\\w+_id\\s+(INT|INTEGER|BIGINT|UUID)|REFERENCES' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+        - purpose: "Find indexes on ID columns"
+          command: "grep -riE 'INDEX.*_id|@@index.*\\[.*Id' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+
+      expected_findings:
+        - "Foreign key columns with/without indexes"
+        - "Index coverage assessment"
+
+    - id: "3"
+      name: "Query Pattern Analysis"
+      description: |
+        Analyze common query patterns to identify index requirements.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find WHERE clause patterns"
+          command: "grep -riE 'WHERE\\s+\\w+\\s*(=|>|<|IN|LIKE)' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -40"
+        - purpose: "Find ORDER BY patterns"
+          command: "grep -riE 'ORDER BY\\s+\\w+' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -30"
+        - purpose: "Find JOIN conditions"
+          command: "grep -riE 'JOIN.*ON\\s+\\w+\\.\\w+\\s*=' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Common filter columns"
+        - "Sort and join patterns"
+
+    - id: "4"
+      name: "Index Redundancy Analysis"
+      description: |
+        Identify redundant or duplicate indexes that can be consolidated.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Extract all index column combinations"
+          command: "grep -riE 'CREATE INDEX.*\\(.*\\)|@@index.*\\[' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+        - purpose: "Find potential duplicate single-column indexes"
+          command: "grep -riE 'INDEX.*\\(\\s*\\w+\\s*\\)' --include='*.sql' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Redundant index identification"
+        - "Consolidation opportunities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Index Inventory"
+        - "Coverage Analysis"
+        - "Performance Impact"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct schema evidence with clear query pattern mismatch"
+    medium: "Likely index issues based on schema analysis"
+    low: "Potential issues requiring query execution analysis"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "use-the-index-luke"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed index and query analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "idx-001"
+    item: "All indexes inventoried"
+    level: "CRITICAL"
+    verification: "grep -riE 'CREATE INDEX|@@index|@Index' --include='*.sql' --include='*.prisma' . 2>/dev/null | wc -l | xargs -I{} echo PASS"
+    expected: "PASS"
+
+  - id: "idx-002"
+    item: "Foreign key columns have indexes"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify all foreign key columns have supporting indexes"
+    expected: "Confirmed by reviewer"
+
+  - id: "idx-003"
+    item: "No redundant indexes identified"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should check for duplicate or redundant indexes"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Performance Standards"
+      controls: ["PERF-001", "PERF-002"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-design.relationship-design"
+    - "data-state-management.schema-design.normalization-appropriateness"

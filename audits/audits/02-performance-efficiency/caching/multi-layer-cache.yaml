@@ -1,0 +1,316 @@
+# ============================================================
+# MULTI-LAYER CACHE AUDIT
+# ============================================================
+# Evaluates coordination and consistency across multiple caching
+# layers (browser, CDN, application, distributed cache, database).
+
+audit:
+  id: "performance-efficiency.caching.multi-layer-cache"
+  name: "Multi-Layer Cache Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "caching"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes the interaction and coordination between multiple caching
+    layers: browser cache, CDN edge cache, reverse proxy cache, application-
+    level cache (Redis/Memcached), and database query cache. Reviews
+    TTL alignment, invalidation propagation, and consistency guarantees.
+
+  why_it_matters: |
+    Multi-layer caching provides the best performance but introduces
+    complexity in invalidation and consistency. Misaligned TTLs cause
+    outer layers to serve stale data from inner layers that have already
+    been updated. Proper coordination is essential for both performance
+    and correctness.
+
+  when_to_run:
+    - "Caching architecture review"
+    - "After adding new cache layer"
+    - "Stale data incidents"
+    - "Cache-related outages"
+
+prerequisites:
+  required_artifacts:
+    - type: "architecture_docs"
+      description: "Cache architecture documentation"
+    - type: "infrastructure_config"
+      description: "Configuration for all cache layers"
+
+  access_requirements:
+    - "Access to all cache layer configurations"
+    - "Monitoring systems for each layer"
+    - "Application source code"
+
+discovery:
+  code_patterns:
+    - pattern: "L1.*cache|L2.*cache|local.*cache|distributed.*cache"
+      type: "regex"
+      scope: "source"
+      purpose: "Find multi-layer cache references"
+
+    - pattern: "cache\\.get.*\\|\\|.*cache\\.get|first.*cache.*then"
+      type: "regex"
+      scope: "source"
+      purpose: "Find cascading cache lookups"
+
+  file_patterns:
+    - glob: "**/cache*.{py,rb,js,ts,java,go}"
+      purpose: "Cache implementation files"
+    - glob: "**/nginx*.conf"
+      purpose: "Reverse proxy cache configuration"
+    - glob: "**/varnish*.vcl"
+      purpose: "Varnish cache configuration"
+
+knowledge_sources:
+  guides:
+    - id: "cache-hierarchy"
+      name: "Building a Cache Hierarchy"
+      url: "https://aws.amazon.com/caching/best-practices/"
+      offline_cache: true
+
+    - id: "cache-invalidation-layers"
+      name: "Cache Invalidation in Distributed Systems"
+      url: "https://redis.io/docs/manual/client-side-caching/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Trace request through cache layers"
+      command: "curl -sI -H 'Cache-Control: no-cache' https://example.com/ | grep -iE 'x-cache|via|age'"
+
+    - tool: "redis-cli"
+      purpose: "Check application cache layer"
+      command: "redis-cli GET key"
+
+  scripts:
+    - id: "cache-layer-tracer"
+      language: "bash"
+      purpose: "Trace cache status across layers"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Browser/CDN Layer ==="
+        curl -sI "$1" | grep -iE 'cache-control|x-cache|cf-cache|age|via'
+        echo
+        echo "=== Application Cache ==="
+        # Check Redis for the key (requires key mapping)
+        redis-cli EXISTS "cache:$2" && echo "EXISTS in Redis" || echo "NOT in Redis"
+
+signals:
+  critical:
+    - id: "MULTI-CACHE-CRIT-001"
+      signal: "Outer layer TTL longer than inner layer"
+      evidence_pattern: "CDN max-age > Redis TTL or Browser cache > CDN cache"
+      explanation: |
+        When outer cache lives longer than inner cache, the outer layer
+        serves stale data even after inner layer has been updated. Users
+        receive outdated content until the outer layer expires.
+      remediation: "Ensure TTLs decrease from outer to inner: Browser >= CDN >= App Cache"
+
+    - id: "MULTI-CACHE-CRIT-002"
+      signal: "Invalidation does not propagate to all layers"
+      evidence_pattern: "Inner cache invalidated but outer layers unchanged"
+      explanation: |
+        Partial invalidation leaves stale data in outer layers. Database
+        updates that invalidate Redis but not CDN result in CDN serving
+        old data until TTL expires.
+      remediation: "Implement coordinated invalidation across all layers"
+
+  high:
+    - id: "MULTI-CACHE-HIGH-001"
+      signal: "No cache layer documentation"
+      evidence_pattern: "Missing architecture diagram for cache layers"
+      explanation: |
+        Without documentation, team members make inconsistent caching
+        decisions, and debugging cache issues becomes extremely difficult.
+      remediation: "Document all cache layers, their purpose, and TTL strategies"
+
+    - id: "MULTI-CACHE-HIGH-002"
+      signal: "Redundant caching causing memory waste"
+      evidence_pattern: "Same data cached identically in multiple layers"
+      explanation: |
+        Caching identical data at multiple layers without purpose wastes
+        memory and adds complexity. Each layer should serve a distinct purpose.
+      remediation: "Review layer purposes and eliminate redundancy"
+
+  medium:
+    - id: "MULTI-CACHE-MED-001"
+      signal: "Inconsistent cache key formats across layers"
+      evidence_pattern: "Different key naming in CDN vs application cache"
+      remediation: "Standardize cache key generation across layers"
+
+    - id: "MULTI-CACHE-MED-002"
+      signal: "No unified cache monitoring dashboard"
+      evidence_pattern: "Separate monitoring for each cache layer"
+      remediation: "Create unified dashboard showing all cache layer metrics"
+
+  low:
+    - id: "MULTI-CACHE-LOW-001"
+      signal: "Manual invalidation required across layers"
+      remediation: "Automate coordinated invalidation"
+
+  positive:
+    - id: "MULTI-CACHE-POS-001"
+      signal: "Properly aligned TTLs across all layers"
+
+    - id: "MULTI-CACHE-POS-002"
+      signal: "Coordinated invalidation with event-driven propagation"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map cache layer hierarchy"
+      description: |
+        Document all caching layers in the system and their relationship
+        from browser to database.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Identify HTTP cache headers"
+          command: "curl -sI https://example.com/ | grep -iE 'cache-control|via|x-cache'"
+        - purpose: "Check for reverse proxy"
+          command: "curl -sI https://example.com/ | grep -iE 'server|x-served-by'"
+
+      expected_findings:
+        - "Complete cache layer inventory"
+        - "Data flow diagram"
+
+    - id: "2"
+      name: "Analyze TTL alignment"
+      description: |
+        Compare TTL configurations across all layers to ensure proper
+        alignment (outer >= inner).
+      duration_estimate: "30 min"
+
+      expected_findings:
+        - "TTL values per layer"
+        - "Misalignment identification"
+
+    - id: "3"
+      name: "Review invalidation flow"
+      description: |
+        Trace how cache invalidation propagates through all layers when
+        source data changes.
+      duration_estimate: "45 min"
+
+      commands:
+        - purpose: "Find invalidation triggers"
+          command: "rg -n 'invalidate|purge|clear.*cache|flush.*cache' --type py --type js"
+
+      expected_findings:
+        - "Invalidation flow mapping"
+        - "Coverage gaps identified"
+
+    - id: "4"
+      name: "Test end-to-end cache behavior"
+      description: |
+        Verify caching behavior by making changes and observing propagation
+        through all layers.
+      duration_estimate: "30 min"
+
+      expected_findings:
+        - "Actual propagation timing"
+        - "Consistency verification"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Cache Layer Hierarchy"
+        - "TTL Analysis"
+        - "Invalidation Flow"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full layer tracing with end-to-end testing"
+    medium: "Configuration review with partial testing"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "cache-hierarchy"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive multi-layer analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "multi-cache-001"
+    item: "All cache layers are documented"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Architecture diagram shows all cache layers"
+    expected: "Confirmed by reviewer"
+
+  - id: "multi-cache-002"
+    item: "TTLs are properly aligned across layers"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Outer layer TTLs >= inner layer TTLs"
+    expected: "Confirmed by reviewer"
+
+  - id: "multi-cache-003"
+    item: "Invalidation propagates to all layers"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Test data change propagates through all layers"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Architecture"
+      controls: ["Cache Architecture"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.caching.browser-cache"
+    - "performance-efficiency.caching.cdn-cache"
+    - "performance-efficiency.caching.cache-invalidation"
+    - "performance-efficiency.caching.distributed-cache-consistency"

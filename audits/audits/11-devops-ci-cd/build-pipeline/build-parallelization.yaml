@@ -1,0 +1,350 @@
+# ============================================================
+# AUDIT: Build Parallelization
+# ============================================================
+# Evaluates parallel execution strategies in build pipelines
+
+audit:
+  id: "devops-ci-cd.build-pipeline.build-parallelization"
+  name: "Build Parallelization"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "build-pipeline"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes how well build pipelines leverage parallelization including
+    parallel job execution, test sharding, matrix builds, and concurrent
+    dependency installation. Evaluates whether independent tasks run
+    concurrently and identifies serialization bottlenecks.
+
+  why_it_matters: |
+    Sequential execution of independent tasks is the most common source
+    of unnecessary build time. Parallelization can reduce build times by
+    50-80% in many cases. However, poor parallelization strategy can lead
+    to resource contention, flaky tests, and debugging difficulties.
+    Proper parallelization balances speed with reliability.
+
+  when_to_run:
+    - "Initial CI/CD optimization"
+    - "After build times exceed targets"
+    - "When adding new build stages"
+    - "During capacity planning"
+
+prerequisites:
+  required_artifacts:
+    - type: "ci_configuration"
+      description: "CI/CD pipeline configuration files"
+    - type: "build_logs"
+      description: "Build execution logs with timing data"
+
+  access_requirements:
+    - "CI/CD system configuration"
+    - "Build timing and resource metrics"
+
+discovery:
+  code_patterns:
+    - pattern: "parallel:|matrix:|strategy:|fan_out|needs:|depends_on:"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify parallelization configuration"
+
+    - pattern: "\\-\\-parallel|\\-j|\\-\\-jobs|\\-\\-workers"
+      type: "regex"
+      scope: "config"
+      purpose: "Command-level parallelization flags"
+
+  file_patterns:
+    - glob: "**/.github/workflows/*.yml"
+      purpose: "GitHub Actions workflow parallelization"
+
+    - glob: "**/.gitlab-ci.yml"
+      purpose: "GitLab CI parallel jobs"
+
+    - glob: "**/Jenkinsfile"
+      purpose: "Jenkins parallel stages"
+
+    - glob: "**/jest.config.*"
+      purpose: "Jest test parallelization config"
+
+    - glob: "**/pytest.ini"
+      purpose: "Pytest parallelization config"
+
+knowledge_sources:
+  specifications:
+    - id: "nsa-cicd-security"
+      name: "NSA/CISA: Defending CI/CD Environments"
+      url: "https://media.defense.gov/2023/Jun/28/2003249466/-1/-1/0/CSI_DEFENDING_CI_CD_ENVIRONMENTS.PDF"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "github-actions-matrix"
+      name: "GitHub Actions Matrix Strategy"
+      url: "https://docs.github.com/en/actions/using-jobs/using-a-matrix-for-your-jobs"
+      offline_cache: true
+    - id: "circleci-parallelism"
+      name: "CircleCI Test Splitting"
+      url: "https://circleci.com/docs/parallelism-faster-jobs/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "gh"
+      purpose: "Analyze workflow job parallelism"
+      command: "gh run view --json jobs"
+
+  scripts:
+    - id: "analyze-parallel-jobs"
+      language: "bash"
+      purpose: "Identify parallel job opportunities in workflows"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        for workflow in .github/workflows/*.yml; do
+          echo "=== $workflow ==="
+          grep -E 'needs:|strategy:|matrix:' "$workflow" || echo "No explicit parallelization"
+        done
+
+signals:
+  critical:
+    - id: "CICD-PARALLEL-CRIT-001"
+      signal: "All build steps run sequentially despite independence"
+      evidence_pattern: "Single job with no parallelization, all steps in sequence"
+      explanation: |
+        When independent tasks (lint, test, build) run sequentially,
+        build time is the sum of all steps rather than the longest step.
+        This can double or triple build times unnecessarily.
+      remediation: "Split independent steps into parallel jobs"
+
+    - id: "CICD-PARALLEL-CRIT-002"
+      signal: "Test suite runs on single worker with >30 minute runtime"
+      evidence_threshold: "test_duration > 30 minutes on single worker"
+      explanation: |
+        Long-running test suites that don't leverage parallelization
+        create severe bottlenecks. Test parallelization can reduce
+        test time proportionally to worker count.
+      remediation: "Implement test sharding across multiple workers"
+
+  high:
+    - id: "CICD-PARALLEL-HIGH-001"
+      signal: "No matrix strategy for multi-platform or multi-version builds"
+      evidence_pattern: "Multiple similar jobs defined separately instead of matrix"
+      explanation: |
+        Duplicated job definitions for platform/version variations
+        are harder to maintain and may run sequentially.
+      remediation: "Consolidate into matrix strategy for parallel execution"
+
+    - id: "CICD-PARALLEL-HIGH-002"
+      signal: "Critical path not optimized - unnecessary dependencies"
+      evidence_pattern: "Jobs waiting on non-dependent predecessors"
+      explanation: |
+        Overly conservative job dependencies create artificial
+        serialization, extending build time unnecessarily.
+      remediation: "Review job dependencies, remove unnecessary waits"
+
+  medium:
+    - id: "CICD-PARALLEL-MED-001"
+      signal: "Test framework parallelization not configured"
+      evidence_pattern: "No --parallel, -j, or workers configuration in test commands"
+      remediation: "Configure test framework to use available CPU cores"
+
+    - id: "CICD-PARALLEL-MED-002"
+      signal: "Resource-intensive steps not scheduled for off-peak times"
+      remediation: "Schedule heavy builds during low-usage periods"
+
+  low:
+    - id: "CICD-PARALLEL-LOW-001"
+      signal: "No fail-fast configuration for matrix builds"
+
+    - id: "CICD-PARALLEL-LOW-002"
+      signal: "Parallel test output difficult to debug"
+
+  positive:
+    - id: "CICD-PARALLEL-POS-001"
+      signal: "Independent jobs run in parallel"
+
+    - id: "CICD-PARALLEL-POS-002"
+      signal: "Test suite sharded across multiple workers"
+
+    - id: "CICD-PARALLEL-POS-003"
+      signal: "Matrix strategy used for platform/version coverage"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map pipeline dependency graph"
+      description: |
+        Document the job/stage dependency structure.
+        Identify which tasks are independent and could run in parallel.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Extract job dependencies from GitHub Actions"
+          command: |
+            grep -E '^  [a-z_-]+:$|needs:' .github/workflows/*.yml 2>/dev/null
+
+      expected_findings:
+        - "Job dependency graph"
+        - "Parallelization opportunities"
+
+    - id: "2"
+      name: "Analyze current parallelization"
+      description: |
+        Identify existing parallelization configuration including
+        matrix builds, parallel jobs, and test sharding.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find parallel/matrix configurations"
+          command: |
+            grep -r 'strategy:\|matrix:\|parallel:' .github/workflows/ .gitlab-ci.yml 2>/dev/null || echo "No parallelization config found"
+
+      expected_findings:
+        - "Current parallelization strategies in use"
+
+    - id: "3"
+      name: "Review test parallelization"
+      description: |
+        Check if test frameworks are configured to run tests
+        in parallel within each worker.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check Jest parallel configuration"
+          command: |
+            grep -E 'maxWorkers|--runInBand' jest.config.* package.json 2>/dev/null || echo "No Jest config"
+
+        - purpose: "Check pytest parallel configuration"
+          command: |
+            grep -E 'addopts.*-n|pytest-xdist' pytest.ini pyproject.toml 2>/dev/null || echo "No pytest parallel config"
+
+      expected_findings:
+        - "Test framework parallelization status"
+
+    - id: "4"
+      name: "Measure parallel efficiency"
+      description: |
+        Analyze build logs to determine how much time is spent
+        waiting versus active work. Calculate parallelization efficiency.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Get job timing from recent workflow run"
+          command: |
+            gh run view --json jobs -q '.jobs[] | "\(.name): \(.conclusion) (\(.steps | length) steps)"' 2>/dev/null || echo "gh CLI unavailable"
+
+      expected_findings:
+        - "Time spent in parallel vs sequential execution"
+        - "Bottleneck identification"
+
+    - id: "5"
+      name: "Identify optimization opportunities"
+      description: |
+        Based on analysis, recommend specific parallelization
+        improvements.
+      duration_estimate: "20 min"
+
+      questions:
+        - "Can lint/test/build run in parallel?"
+        - "Can tests be sharded across workers?"
+        - "Are matrix builds appropriate for this project?"
+        - "Are there unnecessary dependencies blocking parallelism?"
+
+      expected_findings:
+        - "Prioritized parallelization recommendations"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Current Parallelization Analysis"
+        - "Bottleneck Identification"
+        - "Optimization Recommendations"
+
+  confidence_guidance:
+    high: "Build timing analyzed with job-level breakdown"
+    medium: "Configuration reviewed with limited runtime data"
+    low: "Based on configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "github-actions-matrix"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed timing analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "build-parallelization-001"
+    item: "Independent build steps run in parallel"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify lint, test, build jobs do not unnecessarily depend on each other"
+    expected: "Confirmed by reviewer"
+
+  - id: "build-parallelization-002"
+    item: "Test parallelization configured"
+    level: "BLOCKING"
+    verification: |
+      grep -rE 'maxWorkers|--parallel|-n auto|--jobs' jest.config.* pytest.ini pyproject.toml package.json 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "build-parallelization-003"
+    item: "Matrix strategy used where appropriate"
+    level: "WARNING"
+    verification: |
+      grep -r 'matrix:' .github/workflows/ .gitlab-ci.yml 2>/dev/null && echo "PASS" || echo "WARN: No matrix builds"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "DORA"
+      controls: ["Lead Time for Changes"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.build-pipeline.build-speed"
+    - "devops-ci-cd.build-pipeline.build-caching"

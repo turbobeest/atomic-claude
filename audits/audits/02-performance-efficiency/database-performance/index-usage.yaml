@@ -1,0 +1,337 @@
+# ============================================================
+# Index Usage Audit
+# ============================================================
+# Evaluates database index effectiveness, utilization patterns,
+# and identifies optimization opportunities.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.database-performance.index-usage"
+  name: "Index Usage Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "database-performance"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines database index utilization to identify unused indexes
+    (wasting write performance), underutilized indexes, indexes with poor
+    selectivity, and duplicate or redundant indexes. It evaluates whether
+    current indexes effectively support the query workload.
+
+  why_it_matters: |
+    Indexes are a double-edged sword - they speed up reads but slow down
+    writes. Unused indexes consume storage, slow INSERT/UPDATE/DELETE
+    operations, and waste backup space. Conversely, missing indexes cause
+    slow queries. Proper index hygiene is essential for balanced performance.
+
+  when_to_run:
+    - "During regular database maintenance windows"
+    - "After schema changes or new feature deployment"
+    - "When investigating write performance issues"
+    - "As part of storage optimization efforts"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-access"
+      description: "Access to database statistics views"
+    - type: "statistics-collection"
+      description: "Index statistics enabled and collected"
+
+  access_requirements:
+    - "Read access to pg_stat_user_indexes or equivalent"
+    - "Access to index metadata"
+    - "Read access to table statistics"
+
+discovery:
+  metrics_queries:
+    - system: "PostgreSQL"
+      query: |
+        SELECT schemaname, relname, indexrelname, idx_scan, idx_tup_read
+        FROM pg_stat_user_indexes
+        ORDER BY idx_scan ASC
+      purpose: "Index scan counts to identify unused indexes"
+      threshold: "Indexes with 0 scans may be candidates for removal"
+    - system: "PostgreSQL"
+      query: |
+        SELECT pg_size_pretty(pg_indexes_size(relid)) as index_size, relname
+        FROM pg_stat_user_tables
+        ORDER BY pg_indexes_size(relid) DESC
+      purpose: "Index storage consumption"
+      threshold: "Large unused indexes are high-priority removal candidates"
+    - system: "MySQL"
+      query: |
+        SELECT * FROM sys.schema_unused_indexes
+      purpose: "Identify unused indexes in MySQL"
+      threshold: "Should be empty for optimized database"
+
+  file_patterns:
+    - glob: "**/migrations/*.sql"
+      purpose: "Database migration files with index definitions"
+    - glob: "**/schema.sql"
+      purpose: "Schema definitions"
+
+knowledge_sources:
+  specifications:
+    - id: "postgres-indexes"
+      name: "PostgreSQL Indexes"
+      url: "https://www.postgresql.org/docs/current/indexes.html"
+      offline_cache: true
+      priority: "required"
+    - id: "mysql-indexes"
+      name: "MySQL Index Optimization"
+      url: "https://dev.mysql.com/doc/refman/8.0/en/optimization-indexes.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "index-selection"
+      name: "Index Selection Strategies"
+      url: "https://use-the-index-luke.com/sql/where-clause"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "Query index statistics"
+      command: "psql -c 'SELECT * FROM pg_stat_user_indexes'"
+    - tool: "pg_stat_statements"
+      purpose: "Correlate queries with index usage"
+      command: "psql -c 'SELECT query, calls FROM pg_stat_statements ORDER BY calls DESC'"
+
+  monitoring_queries:
+    - system: "PostgreSQL"
+      query: |
+        SELECT relname, idx_scan, seq_scan,
+               CASE WHEN idx_scan + seq_scan > 0
+                    THEN round(100.0 * idx_scan / (idx_scan + seq_scan), 1)
+                    ELSE 0 END as idx_scan_pct
+        FROM pg_stat_user_tables
+        ORDER BY seq_scan DESC
+      purpose: "Table index vs sequential scan ratio"
+
+signals:
+  critical:
+    - id: "IDX-CRIT-001"
+      signal: "Large indexes with zero scans indicating waste"
+      evidence_threshold: "pg_indexes_size > 1GB AND idx_scan = 0"
+      explanation: |
+        Large unused indexes waste significant storage, slow all write
+        operations to the table, increase backup sizes, and consume
+        memory for index maintenance. The cost is ongoing with zero benefit.
+      remediation: "Verify index is truly unused across all query patterns, then DROP"
+
+    - id: "IDX-CRIT-002"
+      signal: "Critical queries not using available indexes"
+      evidence_pattern: "EXPLAIN shows Seq Scan with suitable index available"
+      explanation: |
+        When queries don't use available indexes, it indicates either
+        outdated statistics, index corruption, or query planner issues.
+        This causes unnecessary performance degradation.
+      remediation: "ANALYZE table, check index health, review query patterns"
+
+  high:
+    - id: "IDX-HIGH-001"
+      signal: "Duplicate or redundant indexes"
+      evidence_pattern: "Multiple indexes with same leading columns"
+      explanation: |
+        Duplicate indexes provide no query benefit but double the write
+        overhead. A composite index on (a, b) can serve queries on just (a),
+        making a separate index on (a) redundant.
+      remediation: "Remove redundant indexes after verifying query coverage"
+
+    - id: "IDX-HIGH-002"
+      signal: "Indexes with poor selectivity"
+      evidence_threshold: "Index returns > 20% of table rows on typical query"
+      explanation: |
+        Low-selectivity indexes are often not used by the query planner
+        because sequential scans are cheaper. The index exists but provides
+        no benefit while incurring write overhead.
+      remediation: "Consider partial index, composite index, or removal"
+
+  medium:
+    - id: "IDX-MED-001"
+      signal: "Index bloat exceeding 30%"
+      evidence_threshold: "dead_tuple_percent > 30%"
+      remediation: "REINDEX or VACUUM FULL to reclaim space"
+
+    - id: "IDX-MED-002"
+      signal: "Sequential scans preferred over index scans"
+      evidence_threshold: "seq_scan > idx_scan for indexed columns"
+      remediation: "Check random_page_cost setting and index statistics"
+
+  low:
+    - id: "IDX-LOW-001"
+      signal: "Indexes on rarely queried tables"
+
+  positive:
+    - id: "IDX-POS-001"
+      signal: "High index scan ratio on frequently queried tables"
+    - id: "IDX-POS-002"
+      signal: "No duplicate or redundant indexes"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory all indexes"
+      description: |
+        Collect complete index inventory with size, scan counts, and
+        associated tables.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List all indexes with statistics"
+          command: |
+            psql -c "SELECT schemaname, relname, indexrelname, idx_scan, idx_tup_read, pg_size_pretty(pg_relation_size(indexrelid)) as size FROM pg_stat_user_indexes ORDER BY pg_relation_size(indexrelid) DESC"
+        - purpose: "Total index storage"
+          command: |
+            psql -c "SELECT pg_size_pretty(sum(pg_relation_size(indexrelid))) as total_index_size FROM pg_stat_user_indexes"
+      expected_findings:
+        - "Complete index inventory"
+        - "Index sizes and usage counts"
+
+    - id: "2"
+      name: "Identify unused indexes"
+      description: |
+        Find indexes that have never been scanned, representing pure
+        overhead with no query benefit.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find unused indexes (PostgreSQL)"
+          command: |
+            psql -c "SELECT schemaname, relname, indexrelname, pg_size_pretty(pg_relation_size(indexrelid)) as size FROM pg_stat_user_indexes WHERE idx_scan = 0 AND indexrelname NOT LIKE '%_pkey' ORDER BY pg_relation_size(indexrelid) DESC"
+        - purpose: "Find unused indexes (MySQL)"
+          command: |
+            mysql -e "SELECT * FROM sys.schema_unused_indexes WHERE object_schema NOT IN ('mysql', 'sys')"
+      expected_findings:
+        - "List of unused indexes"
+        - "Storage wasted on unused indexes"
+
+    - id: "3"
+      name: "Detect duplicate indexes"
+      description: |
+        Identify redundant indexes that duplicate coverage of other indexes.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find duplicate indexes (PostgreSQL)"
+          command: |
+            psql -c "SELECT pg_get_indexdef(indexrelid) as definition, count(*) FROM pg_indexes GROUP BY pg_get_indexdef(indexrelid) HAVING count(*) > 1"
+        - purpose: "Find indexes with same leading columns"
+          command: |
+            psql -c "SELECT a.indexrelid::regclass, b.indexrelid::regclass FROM pg_index a, pg_index b WHERE a.indexrelid < b.indexrelid AND a.indrelid = b.indrelid AND a.indkey[0] = b.indkey[0]"
+      expected_findings:
+        - "Duplicate index definitions"
+        - "Redundant indexes by leading column"
+
+    - id: "4"
+      name: "Analyze index effectiveness"
+      description: |
+        Evaluate how effectively indexes are serving the query workload
+        by comparing index scans to sequential scans.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Index vs sequential scan ratio by table"
+          command: |
+            psql -c "SELECT relname, seq_scan, idx_scan, CASE WHEN seq_scan + idx_scan > 0 THEN round(100.0 * idx_scan / (seq_scan + idx_scan), 1) ELSE 0 END as idx_pct FROM pg_stat_user_tables WHERE seq_scan + idx_scan > 1000 ORDER BY idx_pct ASC"
+        - purpose: "Tables with high sequential scan counts"
+          command: |
+            psql -c "SELECT relname, seq_scan, seq_tup_read FROM pg_stat_user_tables WHERE seq_scan > 1000 ORDER BY seq_tup_read DESC LIMIT 20"
+      expected_findings:
+        - "Index effectiveness by table"
+        - "Tables needing better indexes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Index Inventory"
+        - "Unused Index Analysis"
+        - "Duplicate Index Detection"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Statistics from production with representative workload"
+    medium: "Statistics available but limited time range"
+    low: "Non-production or recently reset statistics"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "postgres-indexes"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed index analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "idx-001"
+    item: "No large unused indexes (>100MB with 0 scans)"
+    level: "CRITICAL"
+    verification: |
+      psql -c "SELECT count(*) FROM pg_stat_user_indexes WHERE idx_scan = 0 AND pg_relation_size(indexrelid) > 100000000" -t | grep -q "^0$"
+    expected: "true"
+
+  - id: "idx-002"
+    item: "No duplicate indexes"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review duplicate index detection results"
+    expected: "Confirmed by reviewer"
+
+  - id: "idx-003"
+    item: "Index scan ratio > 90% for large tables"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify index scan percentage for tables > 10k rows"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.database-performance.missing-index"
+    - "performance-efficiency.database-performance.query-optimization"

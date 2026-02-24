@@ -1,0 +1,385 @@
+# ============================================================
+# AUDIT: Shotgun Surgery Risk Analysis
+# ============================================================
+# Identifies code smells where simple changes require edits
+# to many different classes or modules.
+# ============================================================
+
+audit:
+  id: "architecture-design.cohesion.shotgun-surgery-risk"
+  name: "Shotgun Surgery Risk Analysis"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "cohesion"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit identifies shotgun surgery risk - a code smell from
+    Martin Fowler's refactoring catalog where a single change requires
+    making many small modifications to numerous classes. It analyzes
+    git history, code structure, and common change patterns to find
+    areas where changes consistently scatter across the codebase.
+
+  why_it_matters: |
+    Shotgun surgery indicates:
+    - Divergent change - one class affected by multiple change reasons
+    - Poor cohesion - related logic scattered across classes
+    - High maintenance cost - simple changes take disproportionate time
+    - Error risk - easy to miss locations that need updating
+    - Knowledge diffusion - no single place understands a concern
+    Addressing shotgun surgery dramatically improves development velocity.
+
+  when_to_run:
+    - "When simple changes consistently require many file edits"
+    - "During refactoring prioritization"
+    - "After observing high bug rates from incomplete changes"
+    - "When code review finds frequently scattered changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+    - type: "version_control"
+      description: "Git history for change pattern analysis"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Read access to git history"
+
+discovery:
+  code_patterns:
+    - pattern: "TODO.*all.*places|TODO.*everywhere|TODO.*remember"
+      type: "regex"
+      scope: "source"
+      purpose: "Find comments indicating scattered changes"
+
+    - pattern: "// also (change|update|modify) in"
+      type: "regex"
+      scope: "source"
+      purpose: "Find explicit coupling comments"
+
+  file_patterns:
+    - glob: "**/*.java"
+      purpose: "Java source files"
+    - glob: "**/*.ts"
+      purpose: "TypeScript source files"
+    - glob: "**/*.py"
+      purpose: "Python source files"
+
+knowledge_sources:
+  specifications:
+    - id: "refactoring-catalog"
+      name: "Refactoring Catalog - Shotgun Surgery"
+      url: "https://refactoring.guru/smells/shotgun-surgery"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "code-smells"
+      name: "Code Smells - Martin Fowler"
+      url: "https://martinfowler.com/bliki/CodeSmell.html"
+      offline_cache: true
+
+    - id: "ddd-evans"
+      name: "Domain-Driven Design Reference"
+      url: "https://www.domainlanguage.com/ddd/reference/"
+      offline_cache: true
+
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "pragmatic-programmer"
+      name: "Pragmatic Programmer Tips"
+      url: "https://pragprog.com/tips/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "refactoring"
+      title: "Refactoring: Improving the Design of Existing Code"
+      type: "book"
+      reference: "Martin Fowler - 2nd Edition"
+
+    - id: "working-with-legacy"
+      title: "Working Effectively with Legacy Code"
+      type: "book"
+      reference: "Michael Feathers"
+
+tooling:
+  static_analysis:
+    - tool: "CodeScene"
+      purpose: "Detect temporal coupling and change patterns"
+      offline_capable: false
+
+    - tool: "SonarQube"
+      purpose: "Identify code smells and duplication"
+      offline_capable: false
+
+    - tool: "PMD"
+      purpose: "Static analysis for code smells"
+      offline_capable: true
+
+  scripts:
+    - id: "shotgun-analyzer"
+      language: "bash"
+      purpose: "Analyze multi-file commits in git history"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find commits that touch many files
+        echo "=== Commits Touching Many Files ==="
+        git log --oneline --stat -n 200 | grep -E "^[a-f0-9]|files changed" | \
+          awk '/^[a-f0-9]/{commit=$0} /files changed/{if($1>5) print commit ": " $1 " files"}' | head -20
+
+        echo "=== Most Frequently Changed Files ==="
+        git log --oneline --name-only -n 200 | grep -E "\.(java|ts|py)$" | sort | uniq -c | sort -rn | head -20
+
+signals:
+  critical:
+    - id: "SHOTGUN-CRIT-001"
+      signal: "Semantic change requires >10 file modifications"
+      evidence_pattern: "Adding new field/enum value requires changes in >10 files"
+      explanation: |
+        When a conceptually simple change like adding a new status or field
+        requires modifying many files, there's severe coupling and scatter.
+        This exponentially increases bug risk and maintenance cost.
+      remediation: "Apply Move Method/Field; create single source of truth"
+
+    - id: "SHOTGUN-CRIT-002"
+      signal: "Configuration change scattered across codebase"
+      evidence_pattern: "Hard-coded values repeated in multiple locations"
+      explanation: |
+        Scattered configuration creates inconsistency risk and makes
+        changes tedious and error-prone.
+      remediation: "Centralize configuration; use constants or config files"
+
+  high:
+    - id: "SHOTGUN-HIGH-001"
+      signal: "Git history shows consistent multi-file commits for similar changes"
+      evidence_pattern: "Same types of changes repeatedly touch same file groups"
+      explanation: |
+        Repeated patterns of scattered changes indicate structural problems
+        that will continue causing issues until addressed.
+      remediation: "Identify the scattered concern; consolidate into single module"
+
+    - id: "SHOTGUN-HIGH-002"
+      signal: "Parallel class hierarchies"
+      evidence_pattern: "Adding type requires new classes in multiple hierarchies"
+      explanation: |
+        Parallel hierarchies require synchronized changes and are a classic
+        source of shotgun surgery.
+      remediation: "Collapse hierarchies; use composition or visitor pattern"
+
+  medium:
+    - id: "SHOTGUN-MED-001"
+      signal: "Feature flags checked in multiple locations"
+      evidence_pattern: "Same feature toggle evaluated in many classes"
+      remediation: "Centralize feature toggle evaluation; use strategy pattern"
+
+    - id: "SHOTGUN-MED-002"
+      signal: "Logging format changes require many file updates"
+      evidence_pattern: "Log message patterns duplicated across codebase"
+      remediation: "Use centralized logging with structured context"
+
+  low:
+    - id: "SHOTGUN-LOW-001"
+      signal: "Import changes required across many files"
+      remediation: "Consider re-exporting from central index"
+
+  positive:
+    - id: "SHOTGUN-POS-001"
+      signal: "Changes consistently localized to single module"
+    - id: "SHOTGUN-POS-002"
+      signal: "Single source of truth for configuration and constants"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze git commit sizes"
+      description: |
+        Review git history to find commits that touch many files,
+        indicating potential shotgun surgery.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find high file-count commits"
+          command: "git log --oneline --shortstat -n 200 | grep -E '^[a-f0-9]|files changed' | awk '/^[a-f0-9]/{c=$0} /files changed/{if($1>5)print c\": \"$1\" files\"}' | head -20"
+        - purpose: "Analyze commit message patterns"
+          command: "git log --oneline -n 100 | grep -iE 'all|everywhere|multiple|across' | head -20"
+      expected_findings:
+        - "Commits with high file counts"
+        - "Commit patterns indicating scatter"
+
+    - id: "2"
+      name: "Identify change hotspots"
+      description: |
+        Find files that frequently change together, indicating
+        coupling that causes shotgun surgery.
+      duration_estimate: "35 min"
+      commands:
+        - purpose: "Find frequently changed files"
+          command: "git log --oneline --name-only -n 200 | grep -E '\\.(java|ts|py)$' | sort | uniq -c | sort -rn | head -20"
+        - purpose: "Find co-change patterns"
+          command: "git log --oneline --name-only -n 50 | awk '/^[a-f0-9]/{c=1} c&&!/^[a-f0-9]/{print}' | head -40"
+      expected_findings:
+        - "Files with highest change frequency"
+        - "Co-change relationships"
+
+    - id: "3"
+      name: "Find scattered constants and configuration"
+      description: |
+        Identify hard-coded values and configuration that appears
+        in multiple locations.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find hard-coded strings"
+          command: "grep -rn '\"http://\\|\"https://\\|\"api/' --include='*.java' --include='*.ts' | head -20"
+        - purpose: "Find magic numbers"
+          command: "grep -rn '= [0-9]\\{3,\\}' --include='*.java' --include='*.ts' | grep -v 'test\\|Test' | head -20"
+      expected_findings:
+        - "Duplicated configuration values"
+        - "Magic numbers across files"
+
+    - id: "4"
+      name: "Analyze parallel structures"
+      description: |
+        Find parallel class hierarchies or patterns that require
+        synchronized changes.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find similar class names suggesting parallel hierarchies"
+          command: "find . -name '*.java' | xargs grep -l 'class.*Handler\\|class.*Factory\\|class.*Processor' | head -20"
+        - purpose: "Find enum usage patterns"
+          command: "grep -rn 'switch.*case\\|when.*is' --include='*.java' --include='*.kt' | wc -l"
+      expected_findings:
+        - "Parallel hierarchy indicators"
+        - "Switch statement proliferation"
+
+    - id: "5"
+      name: "Review refactoring opportunities"
+      description: |
+        Based on findings, identify specific refactorings that
+        would reduce shotgun surgery risk.
+      duration_estimate: "25 min"
+      questions:
+        - "Which concerns are most scattered?"
+        - "What would be the single source of truth for each?"
+        - "Can we apply Move Method/Field to consolidate?"
+      expected_findings:
+        - "Prioritized refactoring list"
+        - "Expected improvement from each refactoring"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "change_analysis"
+      format: "tabular"
+      sections:
+        - "High File-Count Commits"
+        - "Change Hotspots"
+        - "Co-Change Patterns"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Shotgun Surgery Patterns"
+        - "Refactoring Recommendations"
+
+  confidence_guidance:
+    high: "Git analysis confirms repeated pattern"
+    medium: "Structural analysis suggests risk"
+    low: "Potential issue, needs verification"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "refactoring-catalog"
+        priority: "required"
+      - source_id: "code-smells"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires git history analysis"
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "shotgun-surgery-001"
+    item: "Multi-file commit patterns analyzed"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Commits with >10 files have documented reasons"
+    expected: "Confirmed by reviewer"
+
+  - id: "shotgun-surgery-002"
+    item: "Scattered concerns identified and documented"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Top 5 shotgun surgery risks listed with remediation"
+    expected: "Confirmed by reviewer"
+
+  - id: "shotgun-surgery-003"
+    item: "Configuration centralized or plan documented"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Hard-coded values have consolidation plan"
+    expected: "Confirmed by reviewer"
+
+  - id: "shotgun-surgery-004"
+    item: "Refactoring backlog prioritized"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Shotgun surgery fixes prioritized in backlog"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modifiability"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.cohesion.feature-scattering"
+    - "architecture-design.cohesion.class-cohesion"
+    - "architecture-design.design-principles.single-responsibility"

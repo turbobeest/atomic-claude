@@ -1,0 +1,378 @@
+# ============================================================
+# AUDIT: Business Rule Enforcement
+# ============================================================
+
+audit:
+  id: "data-state-management.data-validation.business-rule-enforcement"
+  name: "Business Rule Enforcement Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-validation"
+
+  tier: "expert"
+  estimated_duration: "120 minutes"
+
+  completeness: "requires_discovery"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates how business rules are enforced throughout the application,
+    examining rule centralization, consistency across layers, rule engine
+    usage, and separation of business logic from infrastructure concerns.
+    Analyzes whether domain invariants are properly protected.
+
+  why_it_matters: |
+    Scattered business rules lead to inconsistent behavior, bugs that appear
+    when accessing data through different paths, and difficulty maintaining
+    compliance. When rules are duplicated across UI, API, and database layers,
+    they inevitably diverge, causing data corruption and audit failures.
+
+  when_to_run:
+    - "Domain model reviews"
+    - "Compliance audits"
+    - "After major feature additions"
+    - "When business rules change frequently"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code including domain layer"
+    - type: "business_requirements"
+      description: "Business rules documentation"
+
+  access_requirements:
+    - "Read access to application source code"
+    - "Access to business requirements documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "if.*status.*==|switch.*state"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect state-based business rules"
+
+    - pattern: "throw.*Exception.*if|raise.*Error.*if"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect rule violation handling"
+
+    - pattern: "@Rule|@BusinessRule|@Invariant|@Constraint"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect explicit rule annotations"
+
+    - pattern: "validate.*business|enforce.*rule|check.*policy"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect rule enforcement methods"
+
+  file_patterns:
+    - glob: "**/rules/**"
+      purpose: "Business rules modules"
+    - glob: "**/policies/**"
+      purpose: "Policy implementations"
+    - glob: "**/domain/**"
+      purpose: "Domain layer with invariants"
+    - glob: "**/specifications/**"
+      purpose: "Specification pattern implementations"
+
+knowledge_sources:
+  learning_resources:
+    - id: "ddd-blue"
+      title: "Domain-Driven Design: Tackling Complexity in the Heart of Software"
+      type: "book"
+      reference: "Eric Evans, ISBN: 978-0321125217"
+
+    - id: "specification-pattern"
+      title: "Specification Pattern"
+      type: "article"
+      reference: "Martin Fowler - Specifications"
+
+  guides:
+    - id: "rule-engine-patterns"
+      name: "Rule Engine Design Patterns"
+      url: "https://martinfowler.com/bliki/RulesEngine.html"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "custom-rule-analyzer"
+      purpose: "Detect business rule patterns and distribution"
+      offline_capable: true
+
+  scripts:
+    - id: "business-rule-scan"
+      language: "bash"
+      purpose: "Scan for business rule patterns"
+      source: "inline"
+      code: |
+        echo "=== Business Rule Analysis ==="
+        echo "--- State transition checks ---"
+        grep -rn "status\s*==\|state\s*==" \
+          --include="*.js" --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | head -30
+
+        echo "--- Business validation methods ---"
+        grep -rn "validate\|isValid\|canBe\|allows\|permits" \
+          --include="*.js" --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+
+signals:
+  critical:
+    - id: "BRE-CRIT-001"
+      signal: "Business rules duplicated across multiple layers"
+      evidence_pattern: "Same validation in controller, service, and repository"
+      explanation: |
+        Duplicated business rules inevitably diverge over time. When the same
+        rule exists in UI, API, and database layers, changes must be
+        synchronized perfectly or data corruption occurs.
+      remediation: "Centralize rules in domain layer; other layers delegate to domain"
+
+    - id: "BRE-CRIT-002"
+      signal: "Critical business invariants not enforced in domain model"
+      evidence_pattern: "Direct state mutation without validation"
+      explanation: |
+        Domain invariants must be enforced by the domain model itself, not
+        by callers remembering to validate. This is the essence of
+        encapsulation and the root cause of corrupt data states.
+      remediation: "Make invariant-violating states unrepresentable in domain model"
+
+  high:
+    - id: "BRE-HIGH-001"
+      signal: "Business rules in controllers instead of domain"
+      evidence_pattern: "Complex if/else chains in request handlers"
+      explanation: |
+        Controllers should delegate business decisions to the domain layer.
+        Rules in controllers cannot be reused and are easily bypassed.
+      remediation: "Move business logic to domain services or entities"
+
+    - id: "BRE-HIGH-002"
+      signal: "State transitions allowed without validation"
+      evidence_pattern: "Status field directly assignable without guards"
+      explanation: |
+        Invalid state transitions (e.g., canceled order to shipped) corrupt
+        data and break business processes. State machines must enforce
+        valid transitions.
+      remediation: "Implement state machine pattern with explicit transitions"
+
+    - id: "BRE-HIGH-003"
+      signal: "Business rules enforced only in database constraints"
+      evidence_pattern: "CHECK constraints with no application-level equivalent"
+      explanation: |
+        Database-only rules provide no user feedback and cause cryptic errors.
+        Application should validate before attempting operations.
+      remediation: "Mirror database constraints in application validation"
+
+  medium:
+    - id: "BRE-MED-001"
+      signal: "Magic numbers representing business thresholds"
+      evidence_pattern: "Hardcoded values like 'if (amount > 10000)'"
+      remediation: "Extract business constants to configuration with names"
+
+    - id: "BRE-MED-002"
+      signal: "No audit trail for rule changes"
+      evidence_pattern: "Rules changed without versioning or history"
+      remediation: "Implement rule versioning and change tracking"
+
+    - id: "BRE-MED-003"
+      signal: "Rules scattered across multiple services"
+      evidence_pattern: "Different microservices validate same entity differently"
+      remediation: "Establish single source of truth for entity validation"
+
+  low:
+    - id: "BRE-LOW-001"
+      signal: "Business rules not documented in code"
+      evidence_pattern: "Complex conditions without explaining comments"
+      remediation: "Add documentation explaining business rationale"
+
+    - id: "BRE-LOW-002"
+      signal: "No specification pattern for complex rules"
+      evidence_pattern: "Complex boolean logic inline instead of named specs"
+      remediation: "Use specification pattern for composable rules"
+
+  positive:
+    - id: "BRE-POS-001"
+      signal: "Domain model enforces all invariants"
+      evidence_pattern: "Private setters with validation guards"
+
+    - id: "BRE-POS-002"
+      signal: "Specification pattern for complex business rules"
+      evidence_pattern: "Named, composable rule objects"
+
+    - id: "BRE-POS-003"
+      signal: "State machine for entity lifecycle"
+      evidence_pattern: "Explicit state transitions with guards"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Business Rules"
+      description: |
+        Catalog business rules from requirements and code.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find validation patterns"
+          command: |
+            grep -rn "validate\|isValid\|canBe\|invariant\|assert" \
+              --include="*.js" --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | grep -v test | head -50
+        - purpose: "Find business exception throwing"
+          command: |
+            grep -rn "BusinessException\|DomainException\|ValidationException\|InvalidState" \
+              --include="*.js" --include="*.ts" --include="*.java" . 2>/dev/null | head -30
+
+      expected_findings:
+        - "Business rule inventory"
+        - "Rule enforcement locations"
+
+    - id: "2"
+      name: "Analyze Rule Distribution"
+      description: |
+        Determine where rules are enforced (UI, API, domain, database).
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find controller-level validations"
+          command: |
+            grep -rn "if.*return.*BadRequest\|if.*throw.*400" \
+              --include="*.js" --include="*.ts" --include="*.java" . 2>/dev/null | head -30
+        - purpose: "Find database constraints"
+          command: |
+            grep -rn "CHECK\|CONSTRAINT\|UNIQUE\|FOREIGN KEY" \
+              --include="*.sql" --include="*.migration.*" . 2>/dev/null | head -30
+
+      expected_findings:
+        - "Layer distribution of rules"
+        - "Duplicate rule locations"
+
+    - id: "3"
+      name: "Review Domain Model"
+      description: |
+        Examine how domain entities enforce their invariants.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find entity definitions"
+          command: |
+            grep -rn "class.*Entity\|class.*Aggregate\|@Entity" \
+              --include="*.java" --include="*.ts" --include="*.cs" . 2>/dev/null | head -30
+        - purpose: "Find state management"
+          command: |
+            grep -rn "setState\|setStatus\|transition\|changeState" \
+              --include="*.java" --include="*.ts" --include="*.py" . 2>/dev/null | head -30
+
+      expected_findings:
+        - "Invariant enforcement quality"
+        - "State management approach"
+
+    - id: "4"
+      name: "Check Rule Consistency"
+      description: |
+        Verify rules are applied consistently across access paths.
+      duration_estimate: "35 min"
+      questions:
+        - "Are rules enforced identically via API and direct DB access?"
+        - "Do all services apply the same rules for shared entities?"
+        - "Are rules version-controlled and auditable?"
+      expected_findings:
+        - "Consistency assessment"
+        - "Gap identification"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "rule_inventory"
+        - "distribution_map"
+        - "consistency_gaps"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Rule Catalog"
+        - "Distribution Analysis"
+        - "Consistency Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear rule duplication or missing enforcement detected"
+    medium: "Rule implementation pattern suggests potential inconsistency"
+    low: "Requires domain expert to confirm rule completeness"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "ddd-blue"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires deep domain analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "bre-001"
+    item: "Business rules centralized in domain layer"
+    level: "CRITICAL"
+    verification: |
+      find . -type d -name "domain" -not -path "*/node_modules/*" 2>/dev/null | \
+        wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "bre-002"
+    item: "State transitions explicitly guarded"
+    level: "BLOCKING"
+    verification: |
+      grep -rn "transition\|changeState\|setState" --include="*.java" --include="*.ts" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "bre-003"
+    item: "No business rules in controller layer only"
+    level: "WARNING"
+    verification: |
+      grep -rn "controller.*validate\|handler.*business" --include="*.java" --include="*.ts" . 2>/dev/null | \
+        wc -l | xargs -I {} test {} -lt 5 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["enterprise", "domain-heavy"]
+
+  compliance_frameworks:
+    - framework: "SOX"
+      controls: ["Business Process Controls"]
+    - framework: "ISO 27001"
+      controls: ["A.14.2.5"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-validation.input-validation"
+    - "data-state-management.data-validation.constraint-validation"
+    - "architecture-design.boundaries-modularity.bounded-context"

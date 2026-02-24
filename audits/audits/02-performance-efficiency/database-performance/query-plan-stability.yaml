@@ -1,0 +1,294 @@
+audit:
+  id: performance-efficiency.database-performance.query-plan-stability
+  name: Query Plan Stability Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: database-performance
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: data
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates query execution plan stability over time, identifying
+    queries that experience plan regressions, parameter sniffing problems,
+    or inconsistent plan selection. It examines how changes in data distribution,
+    statistics, or parameters affect query plan choices.
+  why_it_matters: |
+    Query plan instability causes unpredictable performance. A query that ran
+    in 10ms yesterday might take 10 seconds today due to a plan change. Plan
+    regressions often occur after statistics updates, configuration changes,
+    or data growth. Understanding and controlling plan stability is essential
+    for predictable database performance.
+  when_to_run:
+  - After database upgrades or configuration changes
+  - When investigating intermittent slow queries
+  - After major data loads or schema changes
+  - Following statistics updates (ANALYZE)
+prerequisites:
+  required_artifacts:
+  - type: database-access
+    description: Access to EXPLAIN and query history
+  - type: query-history
+    description: Historical query performance data
+  access_requirements:
+  - EXPLAIN privileges
+  - Access to pg_stat_statements with query history
+  - Access to auto_explain logs if available
+discovery:
+  metrics_queries:
+  - system: PostgreSQL
+    query: |
+      SELECT query, calls,
+             stddev_exec_time / NULLIF(mean_exec_time, 0) as cv,
+             min_exec_time, max_exec_time, mean_exec_time
+      FROM pg_stat_statements
+      WHERE calls > 100 AND stddev_exec_time IS NOT NULL
+      ORDER BY stddev_exec_time / NULLIF(mean_exec_time, 0) DESC NULLS LAST
+    purpose: Queries with high execution time variance
+    threshold: CV > 1 suggests plan instability
+  - system: PostgreSQL
+    query: |
+      SELECT query, calls, mean_exec_time,
+             max_exec_time / NULLIF(min_exec_time, 0) as max_min_ratio
+      FROM pg_stat_statements
+      WHERE calls > 10
+      ORDER BY max_exec_time / NULLIF(min_exec_time, 0) DESC NULLS LAST
+    purpose: Queries with large execution time spread
+    threshold: Ratio > 10x suggests instability
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  specifications:
+  - id: postgres-planner
+    name: PostgreSQL Query Planner
+    url: https://www.postgresql.org/docs/current/planner-optimizer.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: plan-stability
+    name: Query Plan Stability in PostgreSQL
+    url: https://www.postgresql.org/docs/current/runtime-config-query.html
+    offline_cache: true
+  - id: plan-guides
+    name: Using Plan Hints
+    url: https://www.postgresql.org/docs/current/explicit-joins.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: auto_explain
+    purpose: Log execution plans automatically
+    command: LOAD 'auto_explain'; SET auto_explain.log_min_duration = '100ms'
+  - tool: pg_plan_guarantee
+    purpose: Plan stability analysis extension
+    command: SELECT * FROM pg_plan_guarantee.query_plans
+  monitoring_queries:
+  - system: PostgreSQL
+    query: |
+      SELECT query,
+             stddev_exec_time::int as stddev_ms,
+             mean_exec_time::int as mean_ms,
+             (stddev_exec_time / NULLIF(mean_exec_time, 0))::numeric(10,2) as cv
+      FROM pg_stat_statements
+      WHERE calls > 50 AND stddev_exec_time > mean_exec_time
+      ORDER BY stddev_exec_time DESC
+    purpose: High-variance queries indicating plan instability
+signals:
+  critical:
+  - id: PLAN-CRIT-001
+    signal: Query performance regression after statistics update
+    evidence_threshold: mean_exec_time increased > 10x after ANALYZE
+    explanation: |
+      Statistics updates can cause the planner to choose different (worse)
+      plans. A query that was fast becomes slow due to changed cost estimates.
+      This is especially common after data distribution changes.
+    remediation: Investigate plan change, consider plan guides or hints
+  - id: PLAN-CRIT-002
+    signal: Extreme execution time variance suggesting plan flapping
+    evidence_threshold: max_exec_time > 100x min_exec_time for same query
+    explanation: |
+      Large variance indicates the same query gets different plans at
+      different times. This unpredictability makes performance SLAs
+      impossible to meet and causes user complaints.
+    remediation: Stabilize plan with hints, fix statistics, or restructure query
+  high:
+  - id: PLAN-HIGH-001
+    signal: Parameter sniffing causing suboptimal plans
+    evidence_pattern: Same prepared statement with varying performance by parameter
+    explanation: |
+      The plan created for the first parameter value may be terrible for
+      other values. A plan optimized for a selective value performs poorly
+      when given a common value.
+    remediation: Use PREPARE with GENERIC_PLAN or add conditional logic
+  - id: PLAN-HIGH-002
+    signal: Plan changes after database upgrade or migration
+    evidence_threshold: Queries slower after version change
+    explanation: |
+      Database version upgrades often change planner behavior. New cost
+      models or optimizer improvements can inadvertently regress some
+      queries while improving others.
+    remediation: Compare plans before/after, adjust configuration or use hints
+  medium:
+  - id: PLAN-MED-001
+    signal: Stale statistics causing suboptimal plans
+    evidence_threshold: last_analyze > 7 days on frequently modified tables
+    remediation: Schedule regular ANALYZE or tune autovacuum
+  - id: PLAN-MED-002
+    signal: Non-default planner settings without documentation
+    evidence_pattern: Changed planner GUCs without rationale
+    remediation: Document reasons for planner setting changes
+  low:
+  - id: PLAN-LOW-001
+    signal: Plan caching disabled for dynamic queries
+  positive:
+  - id: PLAN-POS-001
+    signal: Consistent execution times across query runs
+  - id: PLAN-POS-002
+    signal: Regular statistics maintenance in place
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify variable-performance queries
+    description: |
+      Find queries with high execution time variance that suggest
+      plan instability.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Queries with high coefficient of variation
+      command: |
+        psql -c "SELECT query, calls, mean_exec_time::int as mean_ms, stddev_exec_time::int as stddev_ms, min_exec_time::int as min_ms, max_exec_time::int as max_ms FROM pg_stat_statements WHERE calls > 50 AND stddev_exec_time > mean_exec_time ORDER BY stddev_exec_time DESC LIMIT 20"
+    - purpose: Queries with extreme min/max spread
+      command: |
+        psql -c "SELECT query, min_exec_time::int, max_exec_time::int, max_exec_time / NULLIF(min_exec_time, 0.01) as ratio FROM pg_stat_statements WHERE calls > 10 AND max_exec_time > min_exec_time * 10 ORDER BY ratio DESC NULLS LAST LIMIT 20"
+    expected_findings:
+    - Queries with unstable performance
+    - Variance metrics
+  - id: '2'
+    name: Analyze current plans
+    description: |
+      Generate execution plans for variable queries and examine
+      plan structure and cost estimates.
+    duration_estimate: 40 min
+    commands:
+    - purpose: EXPLAIN for variable query
+      command: |
+        psql -c "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) <variable_query>"
+    - purpose: Compare plan with different parameters
+      command: |
+        psql -c "EXPLAIN (ANALYZE) SELECT * FROM table WHERE id = 1" && psql -c "EXPLAIN (ANALYZE) SELECT * FROM table WHERE id = 999999"
+    expected_findings:
+    - Current execution plans
+    - Plan variations by parameter
+  - id: '3'
+    name: Check statistics freshness
+    description: |
+      Verify that table statistics are current and representative
+      of actual data distribution.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Statistics freshness by table
+      command: |
+        psql -c "SELECT relname, last_analyze, last_autoanalyze, n_mod_since_analyze FROM pg_stat_user_tables ORDER BY n_mod_since_analyze DESC NULLS LAST LIMIT 20"
+    - purpose: Tables needing ANALYZE
+      command: |
+        psql -c "SELECT relname, n_mod_since_analyze FROM pg_stat_user_tables WHERE n_mod_since_analyze > 10000 ORDER BY n_mod_since_analyze DESC"
+    expected_findings:
+    - Stale statistics
+    - Tables modified since last analyze
+  - id: '4'
+    name: Review planner configuration
+    description: |
+      Examine planner configuration settings that affect plan
+      selection and stability.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check planner settings
+      command: |
+        psql -c "SELECT name, setting, unit, source FROM pg_settings WHERE category LIKE '%Planner%' AND source != 'default' ORDER BY name"
+    - purpose: Check cost estimation parameters
+      command: |
+        psql -c "SELECT name, setting FROM pg_settings WHERE name IN ('random_page_cost', 'seq_page_cost', 'cpu_tuple_cost', 'effective_cache_size')"
+    expected_findings:
+    - Non-default planner settings
+    - Cost parameters
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Variable Query Analysis
+    - Plan Stability Assessment
+    - Statistics Review
+    - Recommendations
+  confidence_guidance:
+    high: Multiple EXPLAIN ANALYZE runs showing variation
+    medium: Statistics analysis without plan capture
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: postgres-planner
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires historical performance analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: plan-001
+  item: No queries with execution time variance > 10x
+  level: CRITICAL
+  verification: |
+    psql -c "SELECT count(*) FROM pg_stat_statements WHERE calls > 50 AND max_exec_time > min_exec_time * 10 AND max_exec_time > 1000" -t | grep -q "^0$"
+  expected: 'true'
+- id: plan-002
+  item: Statistics current on all high-traffic tables
+  level: BLOCKING
+  verification: |
+    psql -c "SELECT count(*) FROM pg_stat_user_tables WHERE seq_scan + idx_scan > 1000 AND (last_analyze IS NULL OR last_analyze < now() - interval '7 days')" -t | grep -q "^0$"
+  expected: 'true'
+- id: plan-003
+  item: Planner configuration documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify non-default planner settings are documented
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+relationships:
+  commonly_combined:
+  - performance-efficiency.database-performance.query-optimization
+  - performance-efficiency.database-performance.database-configuration

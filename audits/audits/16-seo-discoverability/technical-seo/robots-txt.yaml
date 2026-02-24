@@ -1,0 +1,322 @@
+audit:
+  id: seo-discoverability.technical-seo.robots-txt
+  name: Robots.txt Configuration Audit
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: seo-discoverability
+  category_number: 16
+  subcategory: technical-seo
+  tier: expert
+  estimated_duration: 30-60 minutes
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: config
+  default_profiles:
+  - full
+  - quick
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the robots.txt file configuration to ensure it
+    properly guides search engine crawlers. It validates syntax according
+    to RFC 9309, checks for common misconfigurations, verifies sitemap
+    declarations, evaluates bot-specific rules, and identifies directives
+    that may unintentionally block important content.
+  why_it_matters: |
+    Robots.txt is the first file search engines check when crawling a
+    website. Misconfigurations can completely block search engines from
+    accessing your content, waste crawl budget on unimportant pages, or
+    expose sensitive areas. A properly configured robots.txt optimizes
+    crawl efficiency and protects private content.
+  when_to_run:
+  - Before launching a new website
+  - After any robots.txt modifications
+  - When experiencing crawl or indexation issues
+  - During technical SEO audits
+  - After site migrations
+prerequisites:
+  required_artifacts:
+  - type: robots_txt
+    description: Access to robots.txt file at domain root
+  access_requirements:
+  - HTTP access to /robots.txt
+  - Google Search Console for testing (optional)
+discovery:
+  code_patterns:
+  - pattern: 'User-agent:'
+    type: keyword
+    scope: config
+    purpose: Identify bot-specific rule blocks
+  - pattern: 'Disallow:'
+    type: keyword
+    scope: config
+    purpose: Find paths blocked from crawling
+  - pattern: 'Allow:'
+    type: keyword
+    scope: config
+    purpose: Find paths explicitly allowed
+  - pattern: 'Sitemap:'
+    type: keyword
+    scope: config
+    purpose: Identify sitemap declarations
+  file_patterns:
+  - glob: '**/robots.txt'
+    purpose: Locate robots.txt file
+knowledge_sources:
+  specifications:
+  - id: rfc9309
+    name: 'RFC 9309: Robots Exclusion Protocol'
+    url: https://www.rfc-editor.org/rfc/rfc9309
+    offline_cache: true
+    priority: required
+  guides:
+  - id: google-robots-txt
+    name: 'Google: Create and Submit a robots.txt File'
+    url: https://developers.google.com/search/docs/crawling-indexing/robots/create-robots-txt
+    offline_cache: true
+  - id: google-robots-testing
+    name: 'Google: Test Your robots.txt'
+    url: https://support.google.com/webmasters/answer/6062598
+    offline_cache: true
+  - id: yoast-robots-txt
+    name: 'Yoast: The Ultimate Guide to Robots.txt'
+    url: https://yoast.com/ultimate-guide-robots-txt/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: Google Search Console Robots.txt Tester
+    purpose: Official Google syntax validation
+    offline_capable: false
+  - tool: Screaming Frog SEO Spider
+    purpose: Robots.txt analysis and directive checking
+    offline_capable: true
+  infrastructure_tools:
+  - tool: curl
+    purpose: Fetch and inspect robots.txt
+    command: curl -s https://example.com/robots.txt
+  - tool: wget
+    purpose: Download robots.txt for analysis
+    command: wget https://example.com/robots.txt
+  scripts:
+  - id: robots-txt-validator
+    language: bash
+    purpose: Basic robots.txt validation
+    source: inline
+    code: |
+      #!/bin/bash
+      DOMAIN=$1
+      ROBOTS_URL="$DOMAIN/robots.txt"
+
+      echo "=== Fetching robots.txt from $ROBOTS_URL ==="
+
+      # Check HTTP status
+      STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$ROBOTS_URL")
+      echo "HTTP Status: $STATUS"
+
+      if [ "$STATUS" == "200" ]; then
+        echo ""
+        echo "=== Content ==="
+        curl -s "$ROBOTS_URL"
+
+        echo ""
+        echo "=== Analysis ==="
+        echo "User-agents defined:"
+        curl -s "$ROBOTS_URL" | grep -c "User-agent:"
+        echo "Disallow rules:"
+        curl -s "$ROBOTS_URL" | grep -c "Disallow:"
+        echo "Sitemap declarations:"
+        curl -s "$ROBOTS_URL" | grep -i "Sitemap:"
+      fi
+signals:
+  critical:
+  - id: ROBOTS-CRIT-001
+    signal: 'Robots.txt blocks entire site with Disallow: /'
+    evidence_pattern: 'Disallow: /'
+    explanation: |
+      A Disallow: / directive under User-agent: * blocks all search
+      engine crawlers from accessing any content on the site. This
+      is sometimes left from development/staging environments.
+    remediation: 'Remove or comment out the Disallow: / directive'
+  - id: ROBOTS-CRIT-002
+    signal: Robots.txt returns 5xx error
+    evidence_indicators:
+    - HTTP 500/502/503/504 status code
+    explanation: |
+      If robots.txt returns a server error, search engines may treat
+      it as if crawling is blocked, or they may ignore it entirely,
+      leading to unpredictable crawl behavior.
+    remediation: Fix server issues and ensure robots.txt returns 200 OK
+  high:
+  - id: ROBOTS-HIGH-001
+    signal: Important sections blocked unintentionally
+    explanation: |
+      Overly broad Disallow rules may block important content areas
+      that should be crawled and indexed.
+    remediation: Review and narrow Disallow rules to target only non-indexable content
+  - id: ROBOTS-HIGH-002
+    signal: Syntax errors in robots.txt
+    explanation: |
+      Invalid syntax may cause search engines to misinterpret directives,
+      leading to unexpected crawl behavior.
+    remediation: Validate syntax using Google's robots.txt Tester
+  medium:
+  - id: ROBOTS-MED-001
+    signal: No sitemap declaration in robots.txt
+    remediation: 'Add Sitemap: directive pointing to XML sitemap'
+  - id: ROBOTS-MED-002
+    signal: Crawl-delay directive used (may be ignored)
+    remediation: Consider using GSC crawl rate settings instead for Googlebot
+  low:
+  - id: ROBOTS-LOW-001
+    signal: Robots.txt over 500KB (may be ignored by some bots)
+  - id: ROBOTS-LOW-002
+    signal: Redundant or overlapping rules
+  positive:
+  - id: ROBOTS-POS-001
+    signal: Robots.txt properly configured with sitemap reference
+  - id: ROBOTS-POS-002
+    signal: Appropriate bot-specific rules for different crawlers
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Fetch and Validate Robots.txt
+    description: |
+      Retrieve the robots.txt file and verify it returns a proper
+      HTTP 200 response with valid content.
+    duration_estimate: 5 min
+    commands:
+    - purpose: Check HTTP status and content
+      command: curl -sI https://example.com/robots.txt && curl -s https://example.com/robots.txt
+    expected_findings:
+    - HTTP status code
+    - File content
+    - Content-type header
+  - id: '2'
+    name: Analyze Directive Structure
+    description: |
+      Parse the robots.txt to understand all User-agent blocks,
+      Disallow rules, Allow rules, and Sitemap declarations.
+    duration_estimate: 10 min
+    expected_findings:
+    - List of targeted user-agents
+    - Blocked paths per user-agent
+    - Allowed paths (exceptions)
+    - Sitemap locations
+  - id: '3'
+    name: Validate Syntax
+    description: |
+      Use Google's robots.txt Tester to validate syntax and
+      check for parsing errors.
+    duration_estimate: 10 min
+    expected_findings:
+    - Syntax errors
+    - Warnings
+    - Rule interpretation
+  - id: '4'
+    name: Test Critical URLs
+    description: |
+      Test whether important page types are allowed or blocked
+      by the current robots.txt configuration.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Test specific URL in GSC tester
+      command: Use Google Search Console robots.txt Tester
+    expected_findings:
+    - Blocked important pages
+    - Allowed sensitive pages
+  - id: '5'
+    name: Review for Security Exposure
+    description: |
+      Check if robots.txt reveals sensitive paths that should
+      not be publicly discoverable.
+    duration_estimate: 10 min
+    questions:
+    - Does robots.txt expose admin paths?
+    - Are internal tools or APIs revealed?
+    - Could blocked paths inform attackers?
+    expected_findings:
+    - Sensitive paths exposed
+    - Security recommendations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Configuration Summary
+    - Syntax Validation Results
+    - Critical Issues
+    - Recommendations
+  confidence_guidance:
+    high: Issues verified via GSC robots.txt Tester
+    medium: Issues identified via manual review
+    low: Potential issues based on best practice comparison
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: rfc9309
+      priority: required
+    - source_id: google-robots-txt
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: robots-txt-001
+  item: Robots.txt returns HTTP 200
+  level: CRITICAL
+  verification: curl -s -o /dev/null -w '%{http_code}' https://example.com/robots.txt
+  expected: '200'
+- id: robots-txt-002
+  item: 'No blanket Disallow: / for User-agent: *'
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review robots.txt for site-wide blocking rules
+  expected: Confirmed by reviewer
+- id: robots-txt-003
+  item: Sitemap declaration present
+  level: BLOCKING
+  verification: curl -s https://example.com/robots.txt | grep -i 'Sitemap:'
+  expected: 'At least one Sitemap: directive found'
+- id: robots-txt-004
+  item: Syntax validated with no errors
+  level: WARNING
+  verification: manual
+  verification_notes: Test in Google Search Console robots.txt Tester
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - marketing-site
+    - ecommerce
+    - content-site
+  compliance_frameworks:
+  - framework: SEO Best Practices
+    controls:
+    - Crawl Control
+    - Technical SEO
+relationships:
+  commonly_combined:
+  - seo-discoverability.technical-seo.crawlability
+  - seo-discoverability.technical-seo.xml-sitemap

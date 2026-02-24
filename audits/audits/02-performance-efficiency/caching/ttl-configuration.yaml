@@ -1,0 +1,319 @@
+# ============================================================
+# TTL CONFIGURATION AUDIT
+# ============================================================
+# Evaluates Time-To-Live settings for cached data to ensure
+# appropriate freshness, consistency, and resource utilization.
+
+audit:
+  id: "performance-efficiency.caching.ttl-configuration"
+  name: "TTL Configuration Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "caching"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes TTL (Time-To-Live) configurations across all caching layers
+    to ensure appropriate data freshness, prevent stale data issues, and
+    optimize cache utilization. Reviews TTL values relative to data
+    volatility and business requirements.
+
+  why_it_matters: |
+    TTL misconfiguration causes either stale data (TTL too long) or poor
+    cache efficiency (TTL too short). Security-sensitive data like sessions
+    and tokens require strict TTLs. Incorrect TTLs can lead to data
+    inconsistency, security vulnerabilities, and wasted cache resources.
+
+  when_to_run:
+    - "Cache implementation review"
+    - "Stale data incidents"
+    - "Cache efficiency optimization"
+    - "Security audit for session/token handling"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with cache TTL settings"
+    - type: "configuration"
+      description: "Cache and application configuration files"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Configuration management access"
+
+discovery:
+  code_patterns:
+    - pattern: "ttl|TTL|expire|EXPIRE|timeout|TIMEOUT"
+      type: "regex"
+      scope: "source"
+      purpose: "Find TTL configuration"
+
+    - pattern: "setex|SETEX|psetex|PSETEX|expire_in"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Redis TTL operations"
+
+    - pattern: "cache\\.set.*\\d+|cache\\.put.*\\d+"
+      type: "regex"
+      scope: "source"
+      purpose: "Find cache set with TTL parameter"
+
+    - pattern: "max-age|max_age|s-maxage"
+      type: "regex"
+      scope: "source"
+      purpose: "Find HTTP cache TTL headers"
+
+  file_patterns:
+    - glob: "**/cache*.{py,rb,js,ts,java,yaml,yml}"
+      purpose: "Cache configuration files"
+    - glob: "**/settings*.{py,yaml,yml,json}"
+      purpose: "Application settings with TTL values"
+    - glob: "**/config/**/*.{yaml,yml,json}"
+      purpose: "Configuration files"
+
+knowledge_sources:
+  specifications:
+    - id: "http-cache-control"
+      name: "HTTP Cache-Control"
+      url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "redis-expire"
+      name: "Redis Key Expiration"
+      url: "https://redis.io/commands/expire/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Find TTL patterns in code"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "redis-cli"
+      purpose: "Check TTL of existing keys"
+      command: "redis-cli TTL <key>"
+
+    - tool: "redis-cli"
+      purpose: "Find keys with no TTL"
+      command: "redis-cli SCAN 0 MATCH '*' COUNT 100 | xargs -I {} redis-cli TTL {}"
+
+signals:
+  critical:
+    - id: "TTL-CRIT-001"
+      signal: "Session or authentication tokens with no TTL"
+      evidence_pattern: "session.*cache\\.set(?!.*ttl|expire)|token.*cache\\.set(?!.*ttl|expire)"
+      explanation: |
+        Sessions and tokens without TTL persist indefinitely, creating security
+        vulnerabilities. Stolen tokens remain valid forever, and session hijacking
+        has no natural expiration.
+      remediation: "Add appropriate TTL (e.g., 24h for sessions, 1h for tokens)"
+
+    - id: "TTL-CRIT-002"
+      signal: "Hardcoded TTL values without configuration"
+      evidence_pattern: "ttl\\s*=\\s*\\d{6,}|expire.*\\d{6,}"
+      explanation: |
+        Large hardcoded TTL values cannot be adjusted without code deployment.
+        This prevents operational response to cache issues and makes TTL
+        tuning impossible without releases.
+      remediation: "Move TTL values to configuration with sensible defaults"
+
+  high:
+    - id: "TTL-HIGH-001"
+      signal: "Inconsistent TTLs for same data type"
+      evidence_pattern: "Same entity cached with different TTLs across codebase"
+      explanation: |
+        Inconsistent TTLs for the same data type cause unpredictable freshness
+        and make debugging cache issues extremely difficult.
+      remediation: "Centralize TTL configuration per entity type"
+
+    - id: "TTL-HIGH-002"
+      signal: "TTL longer than data volatility warrants"
+      evidence_pattern: "Frequently changing data with TTL > 1 hour"
+      explanation: |
+        Long TTLs on volatile data guarantee serving stale information.
+        Users see outdated data until cache expires.
+      remediation: "Reduce TTL or implement active invalidation"
+
+  medium:
+    - id: "TTL-MED-001"
+      signal: "Very short TTLs causing cache thrashing"
+      evidence_threshold: "TTL < 60 seconds for non-volatile data"
+      remediation: "Increase TTL to improve hit rate"
+
+    - id: "TTL-MED-002"
+      signal: "No TTL jitter causing synchronized expiration"
+      evidence_pattern: "All entries expire at same time"
+      remediation: "Add random jitter to TTLs to spread expiration"
+
+  low:
+    - id: "TTL-LOW-001"
+      signal: "TTL values not documented"
+      remediation: "Document TTL rationale for each cached entity type"
+
+  positive:
+    - id: "TTL-POS-001"
+      signal: "TTLs aligned with data update frequency"
+
+    - id: "TTL-POS-002"
+      signal: "Configurable TTLs with environment-specific overrides"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory TTL configurations"
+      description: |
+        Catalog all TTL settings across the codebase and configuration
+        files for each cached data type.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find TTL settings in code"
+          command: "rg -n 'ttl|TTL|expire|EXPIRE|timeout' --type py --type js --type java -C 2"
+        - purpose: "Find TTL in config files"
+          command: "rg -n 'ttl|expire|timeout' --type yaml --type json"
+
+      expected_findings:
+        - "TTL values by entity type"
+        - "Configuration location"
+
+    - id: "2"
+      name: "Map TTLs to data volatility"
+      description: |
+        For each cached data type, assess the data volatility (how often
+        it changes) and compare against the configured TTL.
+      duration_estimate: "30 min"
+
+      questions:
+        - "How frequently does this data change?"
+        - "What is the business impact of stale data?"
+        - "Are there active invalidation mechanisms?"
+
+      expected_findings:
+        - "TTL appropriateness assessment"
+        - "Staleness risk identification"
+
+    - id: "3"
+      name: "Review security-sensitive TTLs"
+      description: |
+        Specifically audit TTLs for sessions, tokens, permissions, and
+        other security-sensitive cached data.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find session/auth caching"
+          command: "rg -n 'session|token|auth|permission' --type py --type js | grep -i cache"
+
+      expected_findings:
+        - "Security-sensitive TTL audit"
+        - "Token expiration verification"
+
+    - id: "4"
+      name: "Check for TTL antipatterns"
+      description: |
+        Identify TTL antipatterns like synchronized expiration, missing
+        jitter, and overly granular TTL values.
+      duration_estimate: "20 min"
+
+      expected_findings:
+        - "Antipattern identification"
+        - "Improvement opportunities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "TTL Inventory"
+        - "Security Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct code analysis with data volatility verification"
+    medium: "Code analysis without business context"
+    low: "Configuration review only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "http-cache-control"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "ttl-001"
+    item: "All session/token caches have TTL configured"
+    level: "CRITICAL"
+    verification: "rg -l 'session.*cache\\.set(?!.*ttl|expire)|token.*cache\\.set(?!.*ttl|expire)' && echo FAIL || echo PASS"
+    expected: "PASS"
+
+  - id: "ttl-002"
+    item: "TTL values are configurable, not hardcoded"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "TTLs defined in configuration files, not inline code"
+    expected: "Confirmed by reviewer"
+
+  - id: "ttl-003"
+    item: "TTLs are appropriate for data volatility"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms TTL matches data change frequency"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Security Best Practices"
+      controls: ["Session Management"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.caching.cache-invalidation"
+    - "performance-efficiency.caching.cache-hit-rate"
+    - "security.session-management.session-timeout"

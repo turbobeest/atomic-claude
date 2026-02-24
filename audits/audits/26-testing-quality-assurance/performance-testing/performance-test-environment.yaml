@@ -1,0 +1,350 @@
+# ============================================================
+# AUDIT: Performance Test Environment
+# ============================================================
+# Evaluates the performance testing environment setup and
+# production parity.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.performance-testing.performance-test-environment"
+  name: "Performance Test Environment"
+  version: "1.0.0"
+  last_updated: "2026-01-22"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 26
+  subcategory: "performance-testing"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the performance testing environment including infrastructure
+    parity with production, data volume representativeness, network
+    topology similarity, and isolation from other testing activities.
+    Verifies that performance test results will be meaningful.
+
+  why_it_matters: |
+    Performance tests are only valuable if the environment matches
+    production. Testing on undersized instances, with tiny datasets,
+    or different network topology produces misleading results. Teams
+    may ship code that passes performance tests but fails in production
+    due to environmental differences.
+
+  when_to_run:
+    - "Performance test environment setup"
+    - "Infrastructure changes"
+    - "Before major performance testing"
+    - "Quarterly environment review"
+
+prerequisites:
+  required_artifacts:
+    - type: "environment_config"
+      description: "Performance test environment configuration"
+    - type: "production_specs"
+      description: "Production environment specifications"
+
+  access_requirements:
+    - "Infrastructure configuration access"
+    - "Environment specifications"
+
+discovery:
+  file_patterns:
+    - glob: "**/terraform/**/perf*"
+      purpose: "Performance environment IaC"
+    - glob: "**/k8s/**/perf*"
+      purpose: "Performance environment k8s configs"
+
+  documents_to_review:
+    - type: "Environment specifications"
+      purpose: "Compare prod vs perf environment"
+    - type: "Infrastructure diagrams"
+      purpose: "Verify topology similarity"
+
+knowledge_sources:
+  guides:
+    - id: "perf-env"
+      name: "Performance Test Environment Setup"
+      url: "https://www.perfmatrix.com/performance-test-environment/"
+      offline_cache: true
+    - id: "env-parity"
+      name: "Environment Parity Best Practices"
+      url: "https://12factor.net/dev-prod-parity"
+      offline_cache: true
+
+  learning_resources:
+    - id: "perf-testing"
+      title: "Performance Testing Guidance"
+      type: "documentation"
+      reference: "https://docs.microsoft.com/en-us/azure/architecture/framework/scalability/performance-test"
+
+tooling:
+  infrastructure_tools:
+    - tool: "Terraform"
+      purpose: "Infrastructure provisioning"
+      offline_capable: true
+    - tool: "Kubernetes"
+      purpose: "Container orchestration"
+      offline_capable: false
+
+  scripts:
+    - id: "env-comparison"
+      language: "bash"
+      purpose: "Compare environments"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Performance Environment Analysis ==="
+
+        echo "Performance environment configs:"
+        find . -name '*perf*' -path '*terraform*' -o -name '*perf*' -path '*k8s*' 2>/dev/null | head -10
+
+        echo ""
+        echo "Instance types/sizes:"
+        grep -r 'instance_type\|machine_type\|size' --include='*.tf' --include='*.yaml' . 2>/dev/null | grep -i perf | head -10
+
+        echo ""
+        echo "Database configurations:"
+        grep -r 'db\|database\|rds' --include='*.tf' . 2>/dev/null | grep -i perf | head -10
+
+signals:
+  critical:
+    - id: "PERFENV-CRIT-001"
+      signal: "Performance environment significantly undersized"
+      evidence_pattern: "Perf env instances much smaller than production"
+      explanation: |
+        Performance results from undersized environments are meaningless.
+        A system that handles 1000 req/s on a small instance may not
+        scale linearly to production hardware. Resource contention
+        patterns differ with size.
+      remediation: |
+        Size performance environment appropriately:
+        - Match production instance types (or scaled equivalent)
+        - Use same number of instances or proportional
+        - Document any intentional differences
+        - Apply scaling factor to interpret results
+
+    - id: "PERFENV-CRIT-002"
+      signal: "Test data volume doesn't match production"
+      evidence_pattern: "Perf tests against tiny dataset"
+      explanation: |
+        Database performance varies dramatically with data volume.
+        Queries that are fast on 1000 rows may be slow on 10 million.
+        Index behavior, query plans, and cache effectiveness all
+        depend on data volume.
+      remediation: |
+        Use production-representative data:
+        - Match production table sizes (or significant sample)
+        - Include data distribution patterns
+        - Populate indexes appropriately
+        - Consider data masking for privacy
+
+  high:
+    - id: "PERFENV-HIGH-001"
+      signal: "Network topology differs from production"
+      evidence_pattern: "Different zones, regions, or network path"
+      explanation: |
+        Network latency significantly impacts performance. Testing
+        with services in the same zone when production crosses zones
+        produces artificially good results.
+      remediation: |
+        Match network topology:
+        - Same region/zone configuration
+        - Similar load balancer setup
+        - Equivalent CDN configuration
+        - Network latency simulation if needed
+
+    - id: "PERFENV-HIGH-002"
+      signal: "Performance environment not isolated"
+      evidence_pattern: "Other tests run during performance testing"
+      explanation: |
+        Shared resources invalidate performance results. Other tests
+        consuming CPU, memory, or bandwidth affect measurements,
+        making results inconsistent and unreliable.
+      remediation: |
+        Isolate performance testing:
+        - Dedicated performance test cluster
+        - Schedule exclusive testing windows
+        - Monitor for resource contention
+        - Validate environment isolation before tests
+
+  medium:
+    - id: "PERFENV-MED-001"
+      signal: "Cache configuration differs from production"
+      evidence_pattern: "Different cache sizes or providers"
+      remediation: "Match cache configuration (Redis size, CDN settings)"
+
+    - id: "PERFENV-MED-002"
+      signal: "Third-party services not simulated"
+      evidence_pattern: "Real third-party calls in perf tests"
+      remediation: "Use mocks or sandboxes to avoid external dependencies"
+
+  low:
+    - id: "PERFENV-LOW-001"
+      signal: "Environment configuration not documented"
+      evidence_pattern: "No perf env documentation"
+
+  positive:
+    - id: "PERFENV-POS-001"
+      signal: "Production-equivalent environment"
+      evidence_pattern: "Perf env matches prod specifications"
+
+    - id: "PERFENV-POS-002"
+      signal: "Isolated and dedicated environment"
+      evidence_pattern: "Exclusive perf testing infrastructure"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Document production specs"
+      description: |
+        Gather production environment specifications for comparison.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find prod configs"
+          command: "find . -name '*prod*' -path '*terraform*' 2>/dev/null | head -10"
+      expected_findings:
+        - "Production specifications"
+        - "Instance types and counts"
+
+    - id: "2"
+      name: "Compare performance environment"
+      description: |
+        Compare perf environment against production specifications.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find perf configs"
+          command: "find . -name '*perf*' -path '*terraform*' 2>/dev/null | head -10"
+        - purpose: "Compare instance sizes"
+          command: "grep -r 'instance_type' --include='*.tf' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Environment differences"
+        - "Sizing comparison"
+
+    - id: "3"
+      name: "Verify data representativeness"
+      description: |
+        Check if performance test data matches production volumes.
+      duration_estimate: "15 min"
+      questions:
+        - "What is the test data volume?"
+        - "Does it match production scale?"
+        - "Are data patterns representative?"
+      expected_findings:
+        - "Data volume comparison"
+        - "Representativeness assessment"
+
+    - id: "4"
+      name: "Check isolation"
+      description: |
+        Verify performance environment is isolated.
+      duration_estimate: "15 min"
+      questions:
+        - "Is the environment dedicated?"
+        - "Are there scheduling controls?"
+        - "How is isolation enforced?"
+      expected_findings:
+        - "Isolation status"
+        - "Contention risks"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "comparison_matrix"
+      format: "table"
+      sections:
+        - "Production vs Perf Specs"
+        - "Data Volume Comparison"
+        - "Isolation Status"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Environment Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full configuration comparison"
+    medium: "Partial comparison"
+    low: "Documentation review only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "perf-env"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure analysis"
+    production:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 6
+
+closeout_checklist:
+  - id: "perfenv-001"
+    item: "Production specs documented"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Document production environment specifications"
+    expected: "Confirmed by reviewer"
+
+  - id: "perfenv-002"
+    item: "Environment comparison completed"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Compare perf vs prod configurations"
+    expected: "Confirmed by reviewer"
+
+  - id: "perfenv-003"
+    item: "Isolation verified"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm perf environment is isolated"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Performance Efficiency"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.performance-testing.load-test-coverage"
+    - "testing-quality-assurance.test-environment.environment-parity"
+    - "testing-quality-assurance.test-data-management.test-data-strategy"

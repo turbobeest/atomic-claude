@@ -1,0 +1,338 @@
+# ============================================================
+# BROWSER CACHE AUDIT
+# ============================================================
+# Evaluates HTTP caching headers and browser caching strategies
+# for optimal client-side caching performance.
+
+audit:
+  id: "performance-efficiency.caching.browser-cache"
+  name: "Browser Cache Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "caching"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes HTTP caching headers (Cache-Control, ETag, Last-Modified, Expires)
+    for static and dynamic assets to ensure optimal browser caching behavior.
+    Reviews cache busting strategies, immutable asset handling, and
+    conditional request support.
+
+  why_it_matters: |
+    Proper browser caching dramatically reduces server load, bandwidth costs,
+    and improves user experience through faster page loads. Missing or
+    incorrect cache headers force unnecessary round-trips to origin servers
+    and re-download of unchanged content.
+
+  when_to_run:
+    - "Frontend performance optimization"
+    - "CDN configuration review"
+    - "After deployment pipeline changes"
+    - "Bandwidth cost analysis"
+
+prerequisites:
+  required_artifacts:
+    - type: "web_server"
+      description: "Access to web server or CDN configuration"
+    - type: "deployed_application"
+      description: "Running application to test headers"
+
+  access_requirements:
+    - "HTTP access to application endpoints"
+    - "Web server configuration access"
+    - "Build pipeline access for asset naming"
+
+discovery:
+  code_patterns:
+    - pattern: "Cache-Control|cache-control|max-age|s-maxage"
+      type: "regex"
+      scope: "config"
+      purpose: "Find cache header configuration"
+
+    - pattern: "ETag|etag|Last-Modified|last-modified"
+      type: "regex"
+      scope: "config"
+      purpose: "Find conditional caching configuration"
+
+    - pattern: "immutable|stale-while-revalidate|stale-if-error"
+      type: "regex"
+      scope: "config"
+      purpose: "Find advanced cache directives"
+
+  file_patterns:
+    - glob: "**/nginx*.conf"
+      purpose: "Nginx caching configuration"
+    - glob: "**/apache*.conf"
+      purpose: "Apache caching configuration"
+    - glob: "**/.htaccess"
+      purpose: "Apache per-directory cache rules"
+    - glob: "**/vercel.json"
+      purpose: "Vercel cache configuration"
+    - glob: "**/next.config.{js,ts}"
+      purpose: "Next.js cache configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc-7234"
+      name: "RFC 7234: HTTP Caching"
+      url: "https://datatracker.ietf.org/doc/html/rfc7234"
+      offline_cache: true
+      priority: "required"
+
+    - id: "cache-control-mdn"
+      name: "MDN Cache-Control"
+      url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "web-dev-caching"
+      name: "Web.dev HTTP Caching Guide"
+      url: "https://web.dev/http-cache/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Inspect HTTP cache headers"
+      command: "curl -I https://example.com/static/app.js"
+
+    - tool: "curl"
+      purpose: "Test conditional request (ETag)"
+      command: "curl -I -H 'If-None-Match: \"abc123\"' https://example.com/api/data"
+
+    - tool: "curl"
+      purpose: "Test conditional request (Last-Modified)"
+      command: "curl -I -H 'If-Modified-Since: Wed, 01 Jan 2025 00:00:00 GMT' https://example.com/static/style.css"
+
+  scripts:
+    - id: "cache-header-checker"
+      language: "bash"
+      purpose: "Check cache headers for multiple URLs"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        for url in "$@"; do
+          echo "=== $url ==="
+          curl -sI "$url" | grep -iE 'cache-control|etag|last-modified|expires|vary'
+          echo
+        done
+
+signals:
+  critical:
+    - id: "BROWSER-CACHE-CRIT-001"
+      signal: "No caching headers for static assets"
+      evidence_pattern: "Static files (JS/CSS/images) missing Cache-Control"
+      explanation: |
+        Without cache headers, browsers may re-request static assets on every
+        page load, wasting bandwidth and significantly degrading performance.
+        Static assets should be cached aggressively.
+      remediation: "Add 'Cache-Control: max-age=31536000, immutable' for hashed static assets"
+
+    - id: "BROWSER-CACHE-CRIT-002"
+      signal: "Private data returned with public cache headers"
+      evidence_pattern: "User-specific data with Cache-Control: public"
+      explanation: |
+        Public cache headers on private data allows intermediate caches (CDN,
+        proxies) to store and serve user-specific data to other users,
+        causing security and privacy violations.
+      remediation: "Use 'Cache-Control: private, no-store' for user-specific data"
+
+  high:
+    - id: "BROWSER-CACHE-HIGH-001"
+      signal: "HTML pages cached without validation"
+      evidence_pattern: "HTML with max-age but no ETag or must-revalidate"
+      explanation: |
+        Caching HTML without validation mechanisms means users may not
+        receive updated content or security fixes until cache expires.
+      remediation: "Add 'no-cache, must-revalidate' or short max-age with ETag"
+
+    - id: "BROWSER-CACHE-HIGH-002"
+      signal: "Missing Vary header for content negotiation"
+      evidence_pattern: "Content varies by Accept-Encoding but no Vary header"
+      explanation: |
+        Without Vary header, caches may serve wrong content variant
+        (e.g., gzipped content to client not supporting gzip).
+      remediation: "Add 'Vary: Accept-Encoding' for compressed resources"
+
+  medium:
+    - id: "BROWSER-CACHE-MED-001"
+      signal: "Short cache duration for immutable assets"
+      evidence_threshold: "Hashed assets with max-age < 1 year"
+      remediation: "Extend to max-age=31536000 with immutable directive"
+
+    - id: "BROWSER-CACHE-MED-002"
+      signal: "Missing stale-while-revalidate for dynamic content"
+      evidence_pattern: "API responses without stale-while-revalidate"
+      remediation: "Add stale-while-revalidate for improved perceived performance"
+
+  low:
+    - id: "BROWSER-CACHE-LOW-001"
+      signal: "Using Expires header instead of Cache-Control"
+      evidence_pattern: "Expires:.*without Cache-Control"
+      remediation: "Migrate to Cache-Control for better control"
+
+  positive:
+    - id: "BROWSER-CACHE-POS-001"
+      signal: "Hashed static assets with immutable caching"
+
+    - id: "BROWSER-CACHE-POS-002"
+      signal: "Proper ETag and conditional request support"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory cacheable resources"
+      description: |
+        Catalog all resource types served by the application and their
+        current caching configurations.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Check static asset caching"
+          command: "curl -sI https://example.com/static/app.js | grep -iE 'cache-control|etag|expires'"
+        - purpose: "Check API response caching"
+          command: "curl -sI https://example.com/api/public/data | grep -iE 'cache-control|etag|vary'"
+        - purpose: "Check HTML caching"
+          command: "curl -sI https://example.com/ | grep -iE 'cache-control|etag|last-modified'"
+
+      expected_findings:
+        - "Resource caching inventory"
+        - "Header configuration mapping"
+
+    - id: "2"
+      name: "Verify cache header correctness"
+      description: |
+        Validate that cache headers are appropriate for each resource type
+        and do not create security or freshness issues.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Test conditional request support"
+          command: "curl -sI -H 'If-None-Match: W/\"test\"' https://example.com/static/app.js | head -1"
+
+      expected_findings:
+        - "Header correctness assessment"
+        - "Security classification review"
+
+    - id: "3"
+      name: "Analyze cache busting strategy"
+      description: |
+        Review how the application handles cache invalidation for updated
+        assets (content hashing, query strings, versioning).
+      duration_estimate: "20 min"
+
+      expected_findings:
+        - "Cache busting mechanism identification"
+        - "Deployment cache invalidation review"
+
+    - id: "4"
+      name: "Test browser caching behavior"
+      description: |
+        Verify actual browser caching behavior using browser developer tools
+        or automated testing.
+      duration_estimate: "30 min"
+
+      expected_findings:
+        - "Real-world caching verification"
+        - "Edge case identification"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Resource Caching Inventory"
+        - "Security Assessment"
+        - "Performance Recommendations"
+
+  confidence_guidance:
+    high: "Direct header inspection with browser verification"
+    medium: "Configuration review with header testing"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "rfc-7234"
+        priority: "required"
+      - source_id: "cache-control-mdn"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "browser-cache-001"
+    item: "Static assets have appropriate cache headers"
+    level: "CRITICAL"
+    verification: "curl -sI https://example.com/static/app.js | grep -qi 'cache-control.*max-age' && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "browser-cache-002"
+    item: "Private data uses private or no-store directives"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms user-specific endpoints use private caching"
+    expected: "Confirmed by reviewer"
+
+  - id: "browser-cache-003"
+    item: "Vary header present for content negotiation"
+    level: "BLOCKING"
+    verification: "curl -sI https://example.com/ | grep -qi 'vary:' && echo PASS || echo NEEDS_REVIEW"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Web Performance"
+      controls: ["Caching Best Practices"]
+    - framework: "Privacy"
+      controls: ["Cache Data Classification"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.caching.cdn-cache"
+    - "performance-efficiency.frontend-performance.asset-optimization"
+    - "security.headers.security-headers"

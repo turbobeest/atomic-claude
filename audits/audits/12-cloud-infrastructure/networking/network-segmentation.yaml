@@ -1,0 +1,393 @@
+audit:
+  id: cloud-infrastructure.networking.network-segmentation
+  name: Network Segmentation
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: networking
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: security
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates network segmentation implementation including subnet isolation,
+    tier separation, environment boundaries, and micro-segmentation controls.
+    Examines whether network architecture limits blast radius of security
+    incidents and enforces appropriate access boundaries.
+  why_it_matters: |
+    Network segmentation is a critical security control that limits lateral
+    movement during breaches. Flat networks allow attackers to move freely
+    once they gain initial access. Proper segmentation contains breaches,
+    protects sensitive data, and enables compliance with frameworks requiring
+    network isolation (PCI-DSS, HIPAA, SOC 2).
+  when_to_run:
+  - Security assessments
+  - Compliance audits
+  - Architecture reviews
+  - After security incidents
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to VPC, subnet, and security group configurations
+  - type: data_classification
+    description: Data sensitivity classification
+  access_requirements:
+  - VPC and subnet configurations
+  - Security group and NACL rules
+  - Application architecture documentation
+discovery:
+  code_patterns:
+  - pattern: 0\.0\.0\.0/0
+    type: regex
+    scope: config
+    purpose: Find overly permissive network rules
+  - pattern: ingress.*from_port.*0.*to_port.*65535
+    type: regex
+    scope: config
+    purpose: Find rules allowing all ports
+  file_patterns:
+  - glob: '**/terraform/**/*security*.tf'
+    purpose: Find Terraform security group configurations
+  - glob: '**/terraform/**/*nacl*.tf'
+    purpose: Find NACL configurations
+  - glob: '**/k8s/**/*network*.yaml'
+    purpose: Find Kubernetes network policies
+knowledge_sources:
+  specifications:
+  - id: nist-segmentation
+    name: NIST Network Segmentation Guidelines
+    url: https://csrc.nist.gov/publications/detail/sp/800-125b/final
+    offline_cache: true
+    priority: required
+  - id: aws-security-groups
+    name: AWS Security Groups
+    url: https://docs.aws.amazon.com/vpc/latest/userguide/VPC_SecurityGroups.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: 'NIST SP 800-207: Zero Trust Architecture'
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  guides:
+  - id: cis-aws-networking
+    name: CIS AWS Foundations - Networking
+    url: https://www.cisecurity.org/benchmark/amazon_web_services
+    offline_cache: true
+  - id: zero-trust
+    name: Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: List security groups with rules
+    command: aws ec2 describe-security-groups
+  - tool: AWS CLI
+    purpose: List NACLs
+    command: aws ec2 describe-network-acls
+  - tool: kubectl
+    purpose: List network policies
+    command: kubectl get networkpolicies --all-namespaces
+  scripts:
+  - id: segmentation-analyzer
+    language: bash
+    purpose: Analyze network segmentation
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Network Segmentation Analysis ==="
+
+      # Check for overly permissive security groups
+      echo "Security Groups with 0.0.0.0/0 Ingress:"
+      aws ec2 describe-security-groups \
+        --query 'SecurityGroups[?IpPermissions[?IpRanges[?CidrIp==`0.0.0.0/0`]]].{ID:GroupId,Name:GroupName,VPC:VpcId}' \
+        --output table
+
+      # Check for security groups allowing all ports
+      echo ""
+      echo "Security Groups Allowing All Ports:"
+      aws ec2 describe-security-groups \
+        --query 'SecurityGroups[?IpPermissions[?FromPort==`-1` || (FromPort==`0` && ToPort==`65535`)]].{ID:GroupId,Name:GroupName}' \
+        --output table
+
+      # Subnet analysis
+      echo ""
+      echo "Subnet Distribution (Public vs Private):"
+      aws ec2 describe-subnets \
+        --query 'Subnets[].{VPC:VpcId,Subnet:SubnetId,CIDR:CidrBlock,Public:MapPublicIpOnLaunch}' \
+        --output table
+
+      # Check for NACLs (beyond default)
+      echo ""
+      echo "Custom Network ACLs:"
+      aws ec2 describe-network-acls \
+        --query 'NetworkAcls[?IsDefault==`false`].{ID:NetworkAclId,VPC:VpcId}' \
+        --output table
+signals:
+  critical:
+  - id: SEGMENTATION-CRIT-001
+    signal: Database tier directly accessible from internet
+    evidence_indicators:
+    - Database security group allows 0.0.0.0/0 ingress
+    - Database in public subnet
+    - RDS publicly accessible flag true
+    explanation: |
+      Databases should never be directly internet-accessible. This
+      exposes sensitive data to direct attack and violates all
+      security frameworks.
+    remediation: Move databases to private subnets; access via bastion or VPN only
+  - id: SEGMENTATION-CRIT-002
+    signal: No network separation between environments
+    evidence_indicators:
+    - Production and development in same VPC
+    - No security group boundaries between environments
+    explanation: |
+      Environment mixing allows development access to production data
+      and enables accidental or malicious production changes from
+      less-secured development environments.
+    remediation: Separate environments into distinct VPCs or accounts
+  - id: SEGMENTATION-CRIT-003
+    signal: Flat network with no tier separation
+    evidence_indicators:
+    - All instances in same subnet
+    - Single security group for all resources
+    - No network policies in Kubernetes
+    explanation: |
+      Flat networks allow unrestricted lateral movement once an
+      attacker gains access to any system. Segmentation limits
+      blast radius.
+    remediation: Implement tiered architecture with web, app, and data subnets
+  high:
+  - id: SEGMENTATION-HIGH-001
+    signal: Security groups allow all traffic between tiers
+    evidence_pattern: All ports open between web and database tiers
+    explanation: |
+      Tiers should only communicate on necessary ports. Allowing
+      all traffic defeats the purpose of segmentation.
+    remediation: Restrict security group rules to specific required ports
+  - id: SEGMENTATION-HIGH-002
+    signal: Kubernetes network policies not implemented
+    evidence_pattern: No NetworkPolicy resources in cluster
+    explanation: |
+      Without network policies, all pods can communicate with all
+      other pods. This creates a flat network within Kubernetes.
+    remediation: Implement default-deny network policies with explicit allows
+  - id: SEGMENTATION-HIGH-003
+    signal: Management ports exposed to broad network
+    evidence_indicators:
+    - SSH (22) open to 0.0.0.0/0
+    - RDP (3389) open to broad ranges
+    explanation: |
+      Management ports should be restricted to bastion hosts or
+      VPN endpoints, not broadly accessible.
+    remediation: Restrict management access to bastion/VPN with specific IPs
+  medium:
+  - id: SEGMENTATION-MED-001
+    signal: NACLs not used as additional defense layer
+    remediation: Implement NACLs for subnet-level controls
+  - id: SEGMENTATION-MED-002
+    signal: No micro-segmentation for sensitive workloads
+    remediation: Implement additional isolation for PCI/HIPAA workloads
+  - id: SEGMENTATION-MED-003
+    signal: Cross-VPC traffic not monitored
+    remediation: Enable flow logs for cross-VPC connections
+  low:
+  - id: SEGMENTATION-LOW-001
+    signal: Segmentation architecture not documented
+    remediation: Document network segmentation design and rationale
+  positive:
+  - id: SEGMENTATION-POS-001
+    signal: Clear tier separation with restrictive security groups
+  - id: SEGMENTATION-POS-002
+    signal: Kubernetes network policies with default deny
+  - id: SEGMENTATION-POS-003
+    signal: Environment isolation at VPC or account level
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Subnet Tier Analysis
+    description: |
+      Analyze subnet structure to understand tier separation
+      and public vs private segmentation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Map subnet types and purposes
+      command: aws ec2 describe-subnets --query 'Subnets[].{VPC:VpcId,ID:SubnetId,CIDR:CidrBlock,AZ:AvailabilityZone,Public:MapPublicIpOnLaunch,Name:Tags[?Key==`Name`].Value|[0]}'
+        --output table
+    - purpose: Check route tables for public subnets
+      command: aws ec2 describe-route-tables --query 'RouteTables[].{ID:RouteTableId,VPC:VpcId,HasIGW:Routes[?GatewayId
+        && starts_with(GatewayId,`igw-`)].DestinationCidrBlock}' --output yaml
+    expected_findings:
+    - Public subnet identification
+    - Tier structure mapping
+  - id: '2'
+    name: Security Group Analysis
+    description: |
+      Analyze security group rules for overly permissive
+      configurations and proper tier boundaries.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find permissive ingress rules
+      command: aws ec2 describe-security-groups --query 'SecurityGroups[?IpPermissions[?IpRanges[?CidrIp==`0.0.0.0/0`]]].{ID:GroupId,Name:GroupName,Rules:IpPermissions[].{From:FromPort,To:ToPort,Proto:IpProtocol}}'
+        --output yaml
+    - purpose: List all security groups
+      command: aws ec2 describe-security-groups --query 'SecurityGroups[].{ID:GroupId,Name:GroupName,VPC:VpcId,IngressCount:length(IpPermissions),EgressCount:length(IpPermissionsEgress)}'
+        --output table
+    expected_findings:
+    - Overly permissive rules
+    - Inter-tier communication patterns
+  - id: '3'
+    name: NACL Assessment
+    description: |
+      Review Network ACL configurations for additional
+      segmentation controls.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List NACLs with rules
+      command: aws ec2 describe-network-acls --query 'NetworkAcls[].{ID:NetworkAclId,VPC:VpcId,Default:IsDefault,EntryCount:length(Entries)}'
+        --output table
+    expected_findings:
+    - Custom NACL usage
+    - Subnet-level restrictions
+  - id: '4'
+    name: Kubernetes Network Policy Review
+    description: |
+      If Kubernetes is deployed, analyze network policies
+      for pod-to-pod segmentation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List network policies
+      command: kubectl get networkpolicies --all-namespaces -o wide 2>/dev/null || echo 'No Kubernetes
+        or no access'
+    - purpose: Check for namespaces without policies
+      command: 'for ns in $(kubectl get ns -o name 2>/dev/null); do count=$(kubectl get networkpolicies
+        -n ${ns#namespace/} --no-headers 2>/dev/null | wc -l); echo "$ns: $count policies"; done'
+    expected_findings:
+    - Network policy coverage
+    - Default deny implementation
+  - id: '5'
+    name: Environment Boundary Review
+    description: |
+      Verify separation between environments (dev, staging, prod)
+      at network level.
+    duration_estimate: 30 min
+    questions:
+    - Are environments in separate VPCs or accounts?
+    - Can development resources access production?
+    - Is there network-level isolation for compliance workloads?
+    expected_findings:
+    - Environment isolation status
+    - Cross-environment access paths
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Tier Analysis
+    - Security Group Assessment
+    - Environment Isolation
+    - Recommendations
+  - type: diagram
+    format: text
+    contents: Network segmentation diagram
+  confidence_guidance:
+    high: Full access to security groups, NACLs, and network policies
+    medium: Partial access or limited to subset of accounts
+    low: Read-only access to configuration descriptions
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: nist-segmentation
+      priority: required
+    - source_id: zero-trust
+      priority: recommended
+  limitations:
+  - Cannot access live configurations offline
+  - Rule analysis requires API access
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Critical security control
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: segmentation-001
+  item: No databases directly internet accessible
+  level: CRITICAL
+  verification: aws rds describe-db-instances --query 'DBInstances[?PubliclyAccessible==`true`]' --output
+    text | grep -q . && echo FAIL || echo PASS
+  expected: PASS
+- id: segmentation-002
+  item: Tier separation verified
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm separate subnets for web, app, and data tiers
+  expected: Confirmed by reviewer
+- id: segmentation-003
+  item: Security groups reviewed for permissiveness
+  level: BLOCKING
+  verification: manual
+  verification_notes: Document all 0.0.0.0/0 ingress rules with justification
+  expected: Confirmed by reviewer
+- id: segmentation-004
+  item: Environment isolation verified
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm network boundaries between environments
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: PCI-DSS
+    controls:
+    - '1.2'
+    - '1.3'
+    - '2.2'
+  - framework: HIPAA
+    controls:
+    - 164.312(e)(1)
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.6
+  - framework: CIS AWS
+    controls:
+    - '5.1'
+    - '5.2'
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.networking.vpc-design
+  - cloud-infrastructure.networking.network-security-groups
+  - security.access-control.least-privilege

@@ -1,0 +1,295 @@
+audit:
+  id: scalability-capacity.async-queue-scalability.backpressure-mechanism
+  name: Backpressure Mechanism Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: async-queue-scalability
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates backpressure mechanisms that prevent system overload when
+    consumers cannot keep pace with producers. Analyzes flow control
+    implementations including producer blocking, rate limiting, load
+    shedding, and queue overflow policies. Examines how backpressure
+    signals propagate through the system and trigger appropriate responses.
+  why_it_matters: |
+    Without backpressure, fast producers overwhelm slow consumers, causing
+    unbounded memory growth, cascading failures, and data loss. Backpressure
+    creates a feedback loop that maintains system stability under load by
+    slowing producers or shedding load gracefully. Missing or poorly
+    implemented backpressure is a leading cause of production outages.
+  when_to_run:
+  - During architecture review of async systems
+  - When experiencing memory issues in queue infrastructure
+  - After incidents involving queue overflow
+  - Before production deployment of high-throughput systems
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Producer and consumer implementation code
+  - type: queue_configuration
+    description: Queue broker configurations with flow control settings
+  - type: architecture_docs
+    description: System architecture showing data flow paths
+  access_requirements:
+  - Access to producer and consumer source code
+  - Access to queue/broker configurations
+  - Access to rate limiting configurations
+discovery:
+  code_patterns:
+  - pattern: backpressure|back-pressure|flowControl
+    type: regex
+    scope: source
+    purpose: Find explicit backpressure implementations
+  - pattern: rateLimit|rateLimiter|throttle
+    type: regex
+    scope: source
+    purpose: Find rate limiting code
+  - pattern: overflow|reject|drop.*policy
+    type: regex
+    scope: config
+    purpose: Find overflow handling configurations
+  - pattern: block.*full|blocking.*queue
+    type: regex
+    scope: source
+    purpose: Find blocking behavior on queue full
+  file_patterns:
+  - glob: '**/*producer*.{java,ts,py,go}'
+    purpose: Producer implementation with flow control
+  - glob: '**/*limiter*.{java,ts,py,go}'
+    purpose: Rate limiter implementations
+  - glob: '**/rabbitmq*.conf'
+    purpose: RabbitMQ flow control settings
+  metrics_queries:
+  - system: Prometheus
+    query: rate(messages_dropped_total[5m])
+    purpose: Message drop rate indicating backpressure activation
+    threshold: Should be near zero under normal load
+  - system: Prometheus
+    query: rate(producer_blocked_total[5m])
+    purpose: Producer blocking events
+    threshold: Monitor for sustained blocking
+knowledge_sources:
+  guides:
+  - id: reactive-streams
+    name: Reactive Streams Specification
+    url: https://www.reactive-streams.org/
+    offline_cache: true
+  - id: rabbitmq-flow
+    name: RabbitMQ Flow Control
+    url: https://www.rabbitmq.com/flow-control.html
+    offline_cache: true
+  papers:
+  - id: backpressure-patterns
+    title: Backpressure Patterns for Resilient Systems
+    url: https://www.infoq.com/articles/reactive-streams-back-pressure/
+  learning_resources:
+  - id: reactive-design
+    title: Reactive Design Patterns
+    type: book
+    reference: ISBN 978-1617291807
+tooling:
+  infrastructure_tools:
+  - tool: rabbitmqctl
+    purpose: Check flow control status
+    command: rabbitmqctl list_connections flow_blocked
+  - tool: kafka-producer-perf-test
+    purpose: Test producer behavior under backpressure
+    command: kafka-producer-perf-test.sh --throughput -1
+  monitoring_queries:
+  - system: Prometheus
+    query: rabbitmq_global_publishers_flow_blocked
+    purpose: Publishers experiencing flow control
+  - system: Prometheus
+    query: kafka_producer_buffer_available_bytes
+    purpose: Producer buffer availability
+  scripts:
+  - id: backpressure-checker
+    language: bash
+    purpose: Find backpressure implementations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "Searching for backpressure patterns..."
+      grep -r "backpressure\|flowControl\|rateLimit" --include='*.java' --include='*.ts' . 2>/dev/null
+signals:
+  critical:
+  - id: BACKPRESSURE-CRIT-001
+    signal: No backpressure mechanism for unbounded producers
+    evidence_pattern: Absence of flow control, rate limiting, or blocking
+    explanation: |
+      Producers without backpressure will flood consumers and queues
+      during traffic spikes, causing memory exhaustion, data loss,
+      and cascading system failures.
+    remediation: Implement producer blocking, rate limiting, or reactive backpressure
+  - id: BACKPRESSURE-CRIT-002
+    signal: Fire-and-forget publishing without acknowledgment
+    evidence_pattern: publish() without awaiting or callback handling
+    explanation: |
+      Without acknowledgment, producers cannot detect when consumers
+      are overwhelmed, preventing any form of backpressure.
+    remediation: Use publisher confirms or synchronous publishing
+  high:
+  - id: BACKPRESSURE-HIGH-001
+    signal: Queue overflow policy silently drops messages
+    explanation: Data loss occurs without producer awareness or logging
+    remediation: Configure dead letter queues and alerting for drops
+  - id: BACKPRESSURE-HIGH-002
+    signal: Rate limits not propagated to upstream systems
+    explanation: Upstream continues overloading despite downstream limits
+    remediation: Implement end-to-end backpressure propagation
+  medium:
+  - id: BACKPRESSURE-MED-001
+    signal: Backpressure thresholds not tuned to capacity
+    remediation: Calibrate thresholds based on consumer throughput
+  - id: BACKPRESSURE-MED-002
+    signal: No graceful degradation under backpressure
+    remediation: Implement load shedding for non-critical messages
+  low:
+  - id: BACKPRESSURE-LOW-001
+    signal: Backpressure events not logged or monitored
+  positive:
+  - id: BACKPRESSURE-POS-001
+    signal: Reactive streams with proper backpressure semantics
+  - id: BACKPRESSURE-POS-002
+    signal: End-to-end flow control from producer to consumer
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map Data Flow Paths
+    description: |
+      Identify all producer-consumer pairs and the queues/streams
+      connecting them, noting where backpressure could occur.
+    duration_estimate: 30 min
+    expected_findings:
+    - Complete data flow topology
+    - Potential backpressure points
+  - id: '2'
+    name: Analyze Producer Implementations
+    description: |
+      Review producer code for flow control, blocking behavior,
+      rate limiting, and acknowledgment handling.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find producer patterns
+      command: grep -r 'send\|publish\|produce' --include='*.java' .
+    expected_findings:
+    - Producer backpressure mechanisms
+    - Acknowledgment handling
+  - id: '3'
+    name: Review Queue Overflow Policies
+    description: |
+      Examine queue configurations for overflow handling,
+      dead letter routing, and memory limits.
+    duration_estimate: 30 min
+    expected_findings:
+    - Overflow policy per queue
+    - DLQ configurations
+  - id: '4'
+    name: Evaluate Rate Limiting
+    description: |
+      Assess rate limiting implementations at API gateways,
+      producers, and consumers.
+    duration_estimate: 30 min
+    questions:
+    - Is rate limiting applied at the edge?
+    - How are limits propagated upstream?
+    - What happens when limits are hit?
+    expected_findings:
+    - Rate limiting coverage
+    - Limit propagation mechanisms
+  - id: '5'
+    name: Test Backpressure Behavior
+    description: |
+      Review or simulate scenarios where consumers are slower
+      than producers to verify backpressure activation.
+    duration_estimate: 30 min
+    expected_findings:
+    - Backpressure trigger conditions
+    - System behavior under pressure
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Data Flow Map
+    - Backpressure Coverage Analysis
+    - Gap Identification
+    - Recommendations
+  confidence_guidance:
+    high: Code reviewed, configurations verified, behavior tested
+    medium: Code and config reviewed without load testing
+    low: Partial code review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: reactive-streams
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough code and configuration analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: backpressure-001
+  item: All producer paths have backpressure mechanisms
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify each producer has flow control, blocking, or rate limiting
+  expected: Confirmed by reviewer
+- id: backpressure-002
+  item: Queue overflow policies configured with DLQ
+  level: BLOCKING
+  verification: manual
+  verification_notes: All queues have overflow handling with dead letter routing
+  expected: Confirmed by reviewer
+- id: backpressure-003
+  item: Backpressure events are monitored and alerted
+  level: WARNING
+  verification: manual
+  verification_notes: Metrics and alerts exist for flow control activation
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - event-driven
+    - microservices
+    - data-pipeline
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.1
+    - CC7.2
+relationships:
+  commonly_combined:
+  - scalability-capacity.async-queue-scalability.queue-depth-scaling
+  - scalability-capacity.async-queue-scalability.consumer-scaling

@@ -1,0 +1,293 @@
+# ============================================================
+# AUDIT: Load Balancer Configuration Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.high-availability.load-balancer-configuration"
+  name: "Load Balancer Configuration Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "high-availability"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines load balancer configuration including health check settings,
+    load balancing algorithms, connection draining, timeout configurations,
+    SSL/TLS termination, and failover behavior. Covers both application
+    load balancers (L7) and network load balancers (L4).
+
+  why_it_matters: |
+    Load balancers are the entry point for traffic and critical to high
+    availability. Misconfiguration can cause uneven load distribution,
+    connection failures during deployments, SSL vulnerabilities, or
+    complete service unavailability. Proper configuration ensures traffic
+    is distributed to healthy instances and gracefully handles failures.
+
+  when_to_run:
+    - "During initial infrastructure setup"
+    - "When experiencing load distribution issues"
+    - "After scaling or architecture changes"
+    - "During security reviews for SSL/TLS configuration"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure"
+      description: "Access to load balancer configuration"
+    - type: "config"
+      description: "Infrastructure as code files (Terraform, CloudFormation, etc.)"
+
+  access_requirements:
+    - "Cloud console or CLI access to load balancer configuration"
+    - "Access to infrastructure as code repository"
+    - "Access to monitoring dashboards for load balancer metrics"
+
+discovery:
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Find Terraform load balancer configurations"
+    - glob: "**/cloudformation/**/*.yaml"
+      purpose: "Find CloudFormation load balancer configurations"
+    - glob: "**/nginx*.conf"
+      purpose: "Find nginx load balancer configurations"
+
+  code_patterns:
+    - pattern: "aws_lb|aws_alb|google_compute_forwarding_rule|azurerm_lb"
+      type: "keyword"
+      scope: "config"
+      purpose: "Identify cloud load balancer resources"
+
+knowledge_sources:
+  specifications:
+    - id: "aws-elb-docs"
+      name: "AWS Elastic Load Balancing Documentation"
+      url: "https://docs.aws.amazon.com/elasticloadbalancing/"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "nginx-lb-guide"
+      name: "NGINX Load Balancing Guide"
+      url: "https://docs.nginx.com/nginx/admin-guide/load-balancer/"
+      offline_cache: true
+    - id: "release-it"
+      name: "Michael Nygard - Release It!"
+      url: "https://pragprog.com/titles/mnee2/release-it-second-edition/"
+      offline_cache: true
+    - id: "sre-book"
+      name: "Site Reliability Engineering"
+      url: "https://sre.google/sre-book/table-of-contents/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws cli"
+      purpose: "Inspect AWS load balancer configuration"
+      command: "aws elbv2 describe-load-balancers"
+    - tool: "terraform"
+      purpose: "Review infrastructure as code"
+      command: "terraform show -json | jq '.values.root_module.resources[] | select(.type | contains(\"lb\"))'"
+
+  monitoring_queries:
+    - system: "CloudWatch/Prometheus"
+      query: "Load balancer request count, latency, and error metrics"
+      purpose: "Verify load distribution and health"
+
+signals:
+  critical:
+    - id: "HA-LB-CRIT-001"
+      signal: "No health checks configured on load balancer"
+      evidence_indicators:
+        - "Health check configuration missing"
+        - "Health check path not specified"
+      explanation: |
+        Without health checks, the load balancer will route traffic to
+        unhealthy backends, causing user-facing errors.
+      remediation: "Configure appropriate health checks for all target groups"
+
+    - id: "HA-LB-CRIT-002"
+      signal: "Single point of failure in load balancer architecture"
+      evidence_indicators:
+        - "Single load balancer instance"
+        - "Load balancer in single availability zone"
+      explanation: |
+        A single load balancer creates a single point of failure that
+        can take down the entire service.
+      remediation: "Deploy redundant load balancers across multiple availability zones"
+
+  high:
+    - id: "HA-LB-HIGH-001"
+      signal: "Connection draining not enabled"
+      explanation: "Without draining, active connections are terminated during backend removal"
+      remediation: "Enable connection draining with appropriate timeout"
+
+    - id: "HA-LB-HIGH-002"
+      signal: "Health check thresholds too aggressive or too lenient"
+      explanation: "Aggressive thresholds cause flapping; lenient ones delay failure detection"
+      remediation: "Tune health check thresholds based on service characteristics"
+
+  medium:
+    - id: "HA-LB-MED-001"
+      signal: "Suboptimal load balancing algorithm for workload type"
+      remediation: "Select algorithm appropriate for traffic patterns (round robin, least connections, etc.)"
+
+    - id: "HA-LB-MED-002"
+      signal: "Timeout values not aligned with backend processing times"
+      remediation: "Configure timeouts to accommodate expected request durations"
+
+  low:
+    - id: "HA-LB-LOW-001"
+      signal: "Access logs not enabled for load balancer"
+
+  positive:
+    - id: "HA-LB-POS-001"
+      signal: "Cross-zone load balancing enabled"
+    - id: "HA-LB-POS-002"
+      signal: "SSL/TLS termination with modern cipher suites"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Load Balancers"
+      description: |
+        Identify all load balancers in the infrastructure and their purposes.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List AWS load balancers"
+          command: "aws elbv2 describe-load-balancers --query 'LoadBalancers[*].[LoadBalancerName,Type,Scheme]'"
+      expected_findings:
+        - "Complete inventory of load balancers"
+        - "Load balancer types and purposes"
+
+    - id: "2"
+      name: "Review Health Check Configuration"
+      description: |
+        Examine health check settings for each target group.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Get target group health check settings"
+          command: "aws elbv2 describe-target-groups --query 'TargetGroups[*].[TargetGroupName,HealthCheckPath,HealthCheckIntervalSeconds,HealthyThresholdCount,UnhealthyThresholdCount]'"
+      expected_findings:
+        - "Health check paths and intervals"
+        - "Threshold configurations"
+
+    - id: "3"
+      name: "Analyze Traffic Distribution"
+      description: |
+        Review load balancing algorithm and traffic distribution patterns.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check listener configuration"
+          command: "aws elbv2 describe-listeners --load-balancer-arn <arn>"
+      expected_findings:
+        - "Load balancing algorithm in use"
+        - "Stickiness configuration"
+
+    - id: "4"
+      name: "Verify Redundancy Configuration"
+      description: |
+        Confirm load balancer redundancy across availability zones.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check availability zone distribution"
+          command: "aws elbv2 describe-load-balancers --query 'LoadBalancers[*].AvailabilityZones'"
+      expected_findings:
+        - "Multi-AZ deployment confirmation"
+        - "Cross-zone load balancing status"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Load Balancer Inventory"
+        - "Health Check Configuration Review"
+        - "Redundancy Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct access to load balancer configuration and metrics"
+    medium: "Infrastructure as code review without runtime verification"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-elb-docs"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure access"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "load-balancer-001"
+    item: "Health checks configured for all target groups"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify health check configuration exists for each target group"
+    expected: "Confirmed by reviewer"
+
+  - id: "load-balancer-002"
+    item: "Load balancer deployed across multiple availability zones"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm multi-AZ deployment"
+    expected: "Confirmed by reviewer"
+
+  - id: "load-balancer-003"
+    item: "Connection draining enabled"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify deregistration delay is configured"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC6.1", "A1.2"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.high-availability.health-check"
+    - "reliability-resilience.high-availability.zero-downtime-deployment"

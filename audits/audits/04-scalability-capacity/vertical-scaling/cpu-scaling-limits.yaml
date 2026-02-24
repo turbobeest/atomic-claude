@@ -1,0 +1,307 @@
+# ============================================================
+# AUDIT: CPU Scaling Limits Audit
+# Category: Scalability & Capacity > Vertical Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.vertical-scaling.cpu-scaling-limits"
+  name: "CPU Scaling Limits Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "vertical-scaling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates CPU scaling constraints and identifies when adding more CPU
+    stops improving performance. Reviews application threading models,
+    CPU-bound vs I/O-bound characteristics, lock contention, and parallelization
+    efficiency. Determines the optimal CPU allocation and scaling ceiling.
+
+  why_it_matters: |
+    Adding CPU doesn't linearly improve performance due to Amdahl's Law,
+    lock contention, and I/O bottlenecks. Some applications plateau at 4 cores,
+    others can utilize 96+. Understanding CPU scaling limits prevents waste
+    and guides the decision between vertical and horizontal scaling.
+
+  when_to_run:
+    - "During capacity planning"
+    - "When performance doesn't improve with more CPU"
+    - "Before purchasing larger instances"
+    - "When optimizing CPU-intensive workloads"
+
+prerequisites:
+  required_artifacts:
+    - type: "application_config"
+      description: "Thread pool and concurrency configuration"
+    - type: "performance_data"
+      description: "CPU utilization and profiling data"
+
+  access_requirements:
+    - "Application configuration access"
+    - "Metrics system access"
+    - "Profiling tool access (optional)"
+
+discovery:
+  code_patterns:
+    - pattern: "(thread.*pool|executor|parallelism|concurrent)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect threading configuration"
+
+    - pattern: "(synchronized|lock|mutex|semaphore)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect synchronization points"
+
+    - pattern: "(cpu:|resources.*cpu)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect container CPU limits"
+
+  file_patterns:
+    - glob: "**/k8s/**/*.yaml"
+      purpose: "Kubernetes deployment files"
+    - glob: "**/application*.yaml"
+      purpose: "Application configuration"
+
+knowledge_sources:
+  guides:
+    - id: "amdahl-law"
+      name: "Understanding Amdahl's Law"
+      url: "https://en.wikipedia.org/wiki/Amdahl%27s_law"
+      offline_cache: true
+
+    - id: "java-concurrency"
+      name: "Java Concurrency in Practice"
+      url: "https://jcip.net/"
+      offline_cache: false
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Check CPU allocation and usage"
+      command: "kubectl top pods --sort-by=cpu"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "rate(container_cpu_usage_seconds_total[5m]) / container_spec_cpu_quota * container_spec_cpu_period"
+      purpose: "CPU utilization percentage"
+      threshold: "< 0.8 for headroom"
+
+    - system: "Prometheus"
+      query: "rate(process_cpu_seconds_total[5m]) / count(count(node_cpu_seconds_total) by (cpu))"
+      purpose: "CPU utilization vs available cores"
+      threshold: "Linear scaling indicates good parallelization"
+
+  scripts:
+    - id: "cpu-scaling-analyzer"
+      language: "bash"
+      purpose: "Analyze CPU configuration and usage"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Container CPU Limits ==="
+        kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.containers[0].resources.limits.cpu}{"\n"}{end}'
+        echo "=== Thread Pool Configuration ==="
+        rg '(thread.*pool|parallelism|executor)' --type yaml --type properties
+        echo "=== Current CPU Usage ==="
+        kubectl top pods --sort-by=cpu
+
+signals:
+  critical:
+    - id: "CPU-CRIT-001"
+      signal: "Single-threaded bottleneck limiting CPU scaling"
+      evidence_indicators:
+        - "CPU usage capped at ~100% of one core regardless of allocation"
+        - "Main processing thread at 100% while others idle"
+      explanation: |
+        Single-threaded code sections create a hard scaling limit. No amount
+        of additional CPU will improve performance beyond this bottleneck.
+      remediation: "Identify and parallelize single-threaded bottlenecks"
+
+    - id: "CPU-CRIT-002"
+      signal: "No CPU limits configured"
+      evidence_indicators:
+        - "Container without CPU limit"
+        - "Unbounded CPU requests"
+      explanation: |
+        Without limits, applications can starve other workloads of CPU,
+        causing unpredictable cluster-wide performance issues.
+      remediation: "Configure explicit CPU limits for all containers"
+
+  high:
+    - id: "CPU-HIGH-001"
+      signal: "High lock contention reducing CPU efficiency"
+      evidence_indicators:
+        - "Many synchronized blocks in hot paths"
+        - "CPU utilization low despite threads waiting"
+      explanation: |
+        Lock contention means threads wait for locks instead of using CPU.
+        Adding more CPU doesn't help; reducing contention does.
+      remediation: "Reduce lock scope, use lock-free data structures, or partition work"
+
+    - id: "CPU-HIGH-002"
+      signal: "Thread pool size not scaling with CPU allocation"
+      evidence_pattern: "thread.*pool.*size.*=.*[0-9]$|pool.*size.*=.*1[0-6]$"
+      explanation: |
+        Fixed thread pools can't utilize additional CPU. The pool becomes
+        the bottleneck even when more CPU is available.
+      remediation: "Configure thread pools based on available CPU (Runtime.availableProcessors)"
+
+  medium:
+    - id: "CPU-MED-001"
+      signal: "I/O-bound workload unlikely to benefit from more CPU"
+      evidence_indicators:
+        - "Low CPU utilization with high throughput"
+        - "Most time spent in I/O wait"
+      remediation: "Focus on I/O optimization rather than CPU scaling"
+
+  positive:
+    - id: "CPU-POS-001"
+      signal: "Linear CPU scaling observed under load"
+      evidence_threshold: "throughput_increase / cpu_increase > 0.8"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review CPU configuration"
+      description: |
+        Collect CPU allocation settings including container limits,
+        thread pool sizes, and parallelism settings.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find CPU limits"
+          command: "rg 'cpu:' --type yaml -A 2 -B 2"
+        - purpose: "Find thread pool configuration"
+          command: "rg '(thread.*pool|parallelism|executor)' --type yaml --type properties"
+      expected_findings:
+        - "CPU allocation per service"
+        - "Thread pool sizing"
+
+    - id: "2"
+      name: "Analyze CPU utilization patterns"
+      description: |
+        Review CPU utilization to identify whether workloads are
+        CPU-bound, I/O-bound, or contention-limited.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Current CPU usage"
+          command: "kubectl top pods --sort-by=cpu"
+      expected_findings:
+        - "CPU utilization levels"
+        - "Identification of workload type"
+
+    - id: "3"
+      name: "Identify scaling bottlenecks"
+      description: |
+        Analyze code patterns and profiling data to identify what
+        limits CPU scaling.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find synchronization points"
+          command: "rg '(synchronized|lock|Lock\\.)' --type java"
+      expected_findings:
+        - "Lock contention points"
+        - "Single-threaded bottlenecks"
+        - "CPU scaling ceiling estimate"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "CPU Configuration Analysis"
+        - "Scaling Efficiency Assessment"
+        - "Bottleneck Identification"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Profiling data confirms scaling behavior"
+    medium: "Metrics suggest scaling pattern"
+    low: "Code analysis without runtime verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "amdahl-law"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cpu-limits-001"
+    item: "All containers have CPU limits"
+    level: "CRITICAL"
+    verification: "kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{.spec.containers[0].resources.limits.cpu}{\"\\n\"}{end}' | grep -v '[0-9]' || echo 'PASS'"
+    expected: "PASS (all pods have limits)"
+
+  - id: "cpu-limits-002"
+    item: "Thread pools scale with available CPU"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify thread pools use availableProcessors() or similar"
+    expected: "Dynamic thread pool sizing"
+
+  - id: "cpu-limits-003"
+    item: "CPU scaling efficiency documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Document expected throughput increase per CPU increase"
+    expected: "Scaling characteristics documented"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["PERF-1", "COST-4"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.vertical-scaling.resource-ceiling"
+    - "scalability-capacity.vertical-scaling.memory-scaling-limits"
+    - "scalability-capacity.vertical-scaling.oversizing-rightsizing"

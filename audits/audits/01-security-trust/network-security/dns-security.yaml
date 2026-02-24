@@ -1,0 +1,445 @@
+audit:
+  id: security-trust.network-security.dns-security
+  name: DNS Security Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: network-security
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines DNS infrastructure security including DNSSEC
+    implementation, DNS server configuration, zone transfer restrictions,
+    DNS-over-HTTPS/TLS deployment, and cache poisoning mitigations. It
+    evaluates both authoritative DNS servers and resolvers used by the
+    organization.
+  why_it_matters: |
+    DNS is fundamental to internet connectivity and a prime target for
+    attacks. DNS spoofing and cache poisoning can redirect users to
+    malicious sites. The IDC 2022 report shows 88% of organizations
+    experienced DNS attacks. Compromised DNS enables phishing, data
+    theft, and service disruption. DNSSEC provides cryptographic
+    authentication but requires proper implementation.
+  when_to_run:
+  - Initial security assessment
+  - DNS infrastructure changes
+  - Domain registration changes
+  - After security incidents
+  - Annual security review
+prerequisites:
+  required_artifacts:
+  - type: domain_list
+    description: List of all domains owned by the organization
+  - type: dns_inventory
+    description: DNS server inventory (authoritative and resolvers)
+  access_requirements:
+  - DNS server access for configuration review
+  - Domain registrar access
+  - Cloud DNS management access
+discovery:
+  code_patterns:
+  - pattern: allow-transfer|zone-transfer|axfr
+    type: regex
+    scope: config
+    purpose: Identify zone transfer configurations
+  - pattern: dnssec|dnskey|rrsig|nsec
+    type: regex
+    scope: config
+    purpose: Identify DNSSEC configurations
+  - pattern: dns-over-https|dns-over-tls|doh|dot
+    type: regex
+    scope: config
+    purpose: Identify encrypted DNS configurations
+  file_patterns:
+  - glob: '**/named.conf*'
+    purpose: BIND DNS server configuration
+  - glob: '**/zones/*.zone'
+    purpose: DNS zone files
+  - glob: '**/unbound.conf'
+    purpose: Unbound resolver configuration
+knowledge_sources:
+  specifications:
+  - id: rfc-4033
+    name: RFC 4033 - DNS Security Introduction and Requirements
+    url: https://datatracker.ietf.org/doc/html/rfc4033
+    offline_cache: true
+    priority: required
+  - id: rfc-8484
+    name: RFC 8484 - DNS Queries over HTTPS (DoH)
+    url: https://datatracker.ietf.org/doc/html/rfc8484
+    offline_cache: true
+    priority: recommended
+  - id: nsa-network-infrastructure
+    name: NSA Network Infrastructure Security Guide
+    url: https://media.defense.gov/2022/Jun/15/2003018261/-1/-1/0/CTR_NSA_NETWORK_INFRASTRUCTURE_SECURITY_GUIDE_20220615.PDF
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: cloudflare-dns-security
+    name: Cloudflare DNS Security Guide
+    url: https://www.cloudflare.com/learning/dns/dns-security/
+    offline_cache: true
+  - id: nist-dns-deployment
+    name: NIST Secure DNS Deployment Guide
+    url: https://csrc.nist.gov/publications/detail/sp/800-81/2/final
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: dig
+    purpose: Query DNS records and test DNSSEC
+    command: dig +dnssec example.com
+  - tool: nslookup
+    purpose: Basic DNS queries
+    command: nslookup -type=any example.com
+  - tool: dnssec-verify
+    purpose: Verify DNSSEC chain
+    command: delv @8.8.8.8 example.com
+  scripts:
+  - id: dnssec-check
+    language: bash
+    purpose: Check DNSSEC status for domains
+    source: inline
+    code: |
+      #!/bin/bash
+      for domain in $@; do
+        dig +short +dnssec $domain DS && \
+          echo "$domain: DNSSEC enabled" || \
+          echo "$domain: DNSSEC not enabled"
+      done
+signals:
+  critical:
+  - id: DNS-CRIT-001
+    signal: Zone transfers allowed to any host
+    cwe_id: CWE-200
+    evidence_pattern: allow-transfer.*any|zone-transfer.*\*
+    explanation: |
+      Unrestricted zone transfers expose the entire DNS zone contents
+      including all hostnames and IP addresses. Attackers use this for
+      reconnaissance to map internal infrastructure.
+    remediation: Restrict zone transfers to specific secondary DNS servers by IP
+  - id: DNS-CRIT-002
+    signal: DNS server version exposed
+    cwe_id: CWE-200
+    evidence_pattern: version.*bind|version.*string
+    explanation: |
+      Exposed DNS server versions enable attackers to identify known
+      vulnerabilities in specific software versions.
+    remediation: Configure DNS server to hide or spoof version information
+  - id: DNS-CRIT-003
+    signal: DNS resolver accepts recursive queries from internet
+    cwe_id: CWE-406
+    evidence_indicators:
+    - recursion yes with no ACL
+    - Open resolver accessible from internet
+    - DNS amplification possible
+    explanation: |
+      Open recursive resolvers can be abused for DNS amplification DDoS
+      attacks. Attackers send small queries that generate large responses
+      to victim IP addresses.
+    remediation: Restrict recursive queries to internal networks only
+  high:
+  - id: DNS-HIGH-001
+    signal: DNSSEC not enabled for domain
+    cwe_id: CWE-345
+    evidence_indicators:
+    - No DS record at registrar
+    - No DNSKEY in zone
+    - DNSSEC validation fails
+    explanation: |
+      Without DNSSEC, DNS responses can be spoofed through cache poisoning
+      attacks. Users may be redirected to malicious servers without
+      detection.
+    remediation: Enable DNSSEC signing on authoritative servers and publish DS records
+  - id: DNS-HIGH-002
+    signal: No source port randomization
+    cwe_id: CWE-330
+    evidence_indicators:
+    - Predictable source ports for queries
+    - Source port randomization disabled
+    explanation: |
+      Without source port randomization, DNS cache poisoning attacks
+      become significantly easier as attackers can predict response
+      ports.
+    remediation: Enable source port randomization on all DNS resolvers
+  - id: DNS-HIGH-003
+    signal: Wildcard DNS records without purpose
+    cwe_id: CWE-200
+    evidence_pattern: \*\s+IN\s+(A|AAAA|CNAME)
+    explanation: |
+      Wildcard DNS records can mask subdomain enumeration and may expose
+      services unintentionally. They should only be used with specific
+      business justification.
+    remediation: Remove unnecessary wildcard records; use explicit records
+  - id: DNS-HIGH-004
+    signal: DNS queries unencrypted
+    cwe_id: CWE-319
+    evidence_indicators:
+    - No DoH or DoT configured
+    - DNS queries sent in plaintext
+    - Local resolver uses UDP port 53 only
+    explanation: |
+      Unencrypted DNS queries allow network observers to monitor browsing
+      activity and potentially modify responses in transit.
+    remediation: Implement DNS-over-HTTPS (DoH) or DNS-over-TLS (DoT)
+  medium:
+  - id: DNS-MED-001
+    signal: Missing CAA records
+    cwe_id: CWE-295
+    evidence_pattern: No CAA record found
+    explanation: |
+      Certificate Authority Authorization (CAA) records specify which CAs
+      can issue certificates for the domain. Without CAA, any CA can issue
+      certificates, increasing risk of mis-issuance.
+    remediation: Add CAA records specifying authorized certificate authorities
+  - id: DNS-MED-002
+    signal: SPF/DKIM/DMARC not configured
+    evidence_indicators:
+    - No SPF TXT record
+    - No DKIM selector records
+    - No DMARC policy
+    explanation: |
+      Email authentication records help prevent domain spoofing in phishing
+      attacks. Organizations should implement all three.
+    remediation: Configure SPF, DKIM, and DMARC records for all domains
+  - id: DNS-MED-003
+    signal: Excessive TTL values
+    evidence_pattern: TTL.*86400|TTL.*604800
+    explanation: |
+      Very long TTL values slow down incident response as cached records
+      persist even after updates. Balance caching benefits with agility.
+    remediation: Set appropriate TTL values based on change frequency (typically 300-3600)
+  low:
+  - id: DNS-LOW-001
+    signal: No DNS query logging
+    evidence_indicators:
+    - Query logging disabled
+    - No DNS analytics configured
+    explanation: |
+      DNS query logs are valuable for security monitoring and incident
+      investigation.
+    remediation: Enable DNS query logging with appropriate retention
+  positive:
+  - id: DNS-POS-001
+    signal: DNSSEC properly configured with valid chain
+    explanation: DNSSEC provides cryptographic authentication of DNS responses
+  - id: DNS-POS-002
+    signal: DNS-over-HTTPS/TLS enabled
+    explanation: Encrypted DNS prevents eavesdropping and tampering
+  - id: DNS-POS-003
+    signal: CAA records configured
+    explanation: CAA records restrict certificate issuance to authorized CAs
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory DNS Infrastructure
+    description: |
+      Document all DNS servers (authoritative and resolvers), domains,
+      and third-party DNS services used by the organization.
+    duration_estimate: 15 min
+    commands:
+    - purpose: List Route 53 hosted zones
+      command: aws route53 list-hosted-zones
+    - purpose: List Cloud DNS zones
+      command: gcloud dns managed-zones list
+    expected_findings:
+    - Complete DNS infrastructure inventory
+    - Third-party DNS service usage
+  - id: '2'
+    name: Test Zone Transfer Restrictions
+    description: |
+      Attempt zone transfers from external networks to verify they are
+      properly restricted to authorized secondary servers.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Attempt zone transfer
+      command: dig @ns1.example.com example.com AXFR
+    - purpose: Test all nameservers
+      command: for ns in $(dig +short NS example.com); do dig @$ns example.com AXFR; done
+    expected_findings:
+    - Zone transfers should be refused
+    - No zone data leaked
+  - id: '3'
+    name: Verify DNSSEC Implementation
+    description: |
+      Check DNSSEC signing on all domains and verify the complete chain
+      of trust from root to domain.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for DS records
+      command: dig example.com DS +short
+    - purpose: Verify DNSSEC chain
+      command: delv @8.8.8.8 example.com +rtrace
+    - purpose: Test DNSSEC validation
+      command: dig +dnssec +cd example.com
+    expected_findings:
+    - DNSSEC status for each domain
+    - Chain validation results
+  - id: '4'
+    name: Check DNS Server Configuration
+    description: |
+      Review DNS server configurations for security settings including
+      recursion controls, version hiding, and query limits.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check BIND version exposure
+      command: dig @ns1.example.com version.bind chaos txt
+    - purpose: Test for open resolver
+      command: dig @public-dns-ip google.com +short
+    - purpose: Check recursion settings
+      command: grep -E 'recursion|allow-recursion' /etc/named.conf
+    expected_findings:
+    - Server version exposure status
+    - Recursion restriction status
+  - id: '5'
+    name: Verify Email Security Records
+    description: |
+      Check SPF, DKIM, and DMARC configurations for email security.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check SPF record
+      command: dig example.com TXT +short | grep spf
+    - purpose: Check DMARC record
+      command: dig _dmarc.example.com TXT +short
+    - purpose: Check CAA record
+      command: dig example.com CAA +short
+    expected_findings:
+    - Email authentication record status
+    - CAA record configuration
+  - id: '6'
+    name: Test Encrypted DNS
+    description: |
+      Verify DNS-over-HTTPS or DNS-over-TLS is configured and working
+      for internal resolvers.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Test DoH resolver
+      command: 'curl -H ''accept: application/dns-json'' ''https://cloudflare-dns.com/dns-query?name=example.com'''
+    - purpose: Test DoT resolver
+      command: kdig @1.1.1.1 +tls example.com
+    expected_findings:
+    - Encrypted DNS capability status
+    - Configuration for internal use
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - DNSSEC Status
+    - Server Security Assessment
+    - Email Authentication
+    - Recommendations
+  confidence_guidance:
+    high: Direct testing of DNS infrastructure with configuration review
+    medium: External testing only without configuration access
+    low: Based on documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: rfc-4033
+      priority: required
+    - source_id: cloudflare-dns-security
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: DNS audit requires comprehensive testing across infrastructure
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: dns-001
+  item: Zone transfers restricted to authorized servers
+  level: CRITICAL
+  verification: dig @$NS $DOMAIN AXFR 2>&1 | grep -q 'Transfer failed\|refused' && echo 'PASS' || echo
+    'FAIL'
+  expected: PASS
+- id: dns-002
+  item: DNS server version hidden
+  level: CRITICAL
+  verification: dig @$NS version.bind chaos txt +short 2>/dev/null | grep -qiE 'bind|dns' && echo 'FAIL'
+    || echo 'PASS'
+  expected: PASS
+- id: dns-003
+  item: DNSSEC enabled on domains
+  level: BLOCKING
+  verification: dig $DOMAIN DS +short | grep -q . && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: dns-004
+  item: No open recursive resolver
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test that recursive queries from internet are refused
+  expected: Confirmed by reviewer
+- id: dns-005
+  item: CAA records configured
+  level: WARNING
+  verification: dig $DOMAIN CAA +short | grep -q . && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: dns-006
+  item: SPF and DMARC configured
+  level: WARNING
+  verification: dig $DOMAIN TXT +short | grep -q 'v=spf1' && dig _dmarc.$DOMAIN TXT +short | grep -q 'v=DMARC1'
+    && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-2
+    - PR.DS-5
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.7
+  - framework: PCI-DSS
+    controls:
+    - 1.1.6
+    - '4.1'
+relationships:
+  commonly_combined:
+  - security-trust.network-security.tls-configuration
+  - security-trust.network-security.ddos-protection
+  - security-trust.cryptography.certificate-management

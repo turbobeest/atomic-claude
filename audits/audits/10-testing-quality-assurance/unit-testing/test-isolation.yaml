@@ -1,0 +1,342 @@
+# ============================================================
+# AUDIT: Test Isolation
+# ============================================================
+# Evaluates whether unit tests are properly isolated from
+# external dependencies and other tests.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.unit-testing.test-isolation"
+  name: "Test Isolation"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 10
+  subcategory: "unit-testing"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Assesses whether unit tests are properly isolated from external
+    dependencies (databases, APIs, file systems) and from each other.
+    Evaluates use of mocks, stubs, and dependency injection to achieve
+    isolation. Checks for shared state that could cause test interdependence.
+
+  why_it_matters: |
+    Non-isolated tests are slow, flaky, and difficult to debug. Tests
+    that depend on external services fail when those services are unavailable.
+    Tests that share state can pass or fail depending on execution order,
+    creating non-deterministic results and eroding trust in the test suite.
+
+  when_to_run:
+    - "Test suite reliability assessment"
+    - "After flaky test investigations"
+    - "Test architecture reviews"
+    - "Before parallelizing test execution"
+
+prerequisites:
+  required_artifacts:
+    - type: "test_suite"
+      description: "Unit test files to analyze"
+    - type: "source_code"
+      description: "Source code to understand dependency patterns"
+
+  access_requirements:
+    - "Source code repository access"
+
+discovery:
+  file_patterns:
+    - glob: "**/*.test.{js,ts,jsx,tsx}"
+      purpose: "JavaScript/TypeScript unit tests"
+    - glob: "**/*.spec.{js,ts,jsx,tsx}"
+      purpose: "Spec-style unit tests"
+    - glob: "**/test_*.py"
+      purpose: "Python unit tests"
+    - glob: "**/__mocks__/**"
+      purpose: "Jest mock directories"
+
+  code_patterns:
+    - pattern: "beforeAll|beforeEach|afterAll|afterEach"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify setup/teardown hooks"
+    - pattern: "jest\\.mock|vi\\.mock|@Mock"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify mocking patterns"
+    - pattern: "global\\.|window\\.|process\\.env"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify global state access in tests"
+    - pattern: "fetch\\(|axios\\.|http\\."
+      type: "regex"
+      scope: "source"
+      purpose: "Identify HTTP calls in tests"
+
+knowledge_sources:
+  specifications:
+    - id: "xunit-patterns"
+      name: "xUnit Test Patterns"
+      url: "http://xunitpatterns.com/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "test-isolation"
+      name: "Unit Test Isolation Best Practices"
+      url: "https://martinfowler.com/bliki/UnitTest.html"
+      offline_cache: true
+    - id: "test-doubles"
+      name: "Test Doubles (Mocks, Stubs, Fakes)"
+      url: "https://martinfowler.com/bliki/TestDouble.html"
+      offline_cache: true
+    - id: "tdd-by-example"
+      name: "Kent Beck - Test Driven Development"
+      url: "https://www.oreilly.com/library/view/test-driven-development/0321146530/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "xunit-patterns-book"
+      title: "xUnit Test Patterns: Refactoring Test Code"
+      type: "book"
+      reference: "ISBN 978-0131495050"
+
+tooling:
+  static_analysis:
+    - tool: "eslint-plugin-jest"
+      purpose: "Detect common testing anti-patterns"
+      offline_capable: true
+
+  scripts:
+    - id: "isolation-checker"
+      language: "bash"
+      purpose: "Check for isolation issues in tests"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Test Isolation Analysis ==="
+        echo "Direct HTTP calls in tests:"
+        grep -r -n "fetch\|axios\|http\." --include="*.test.*" --include="*.spec.*" . 2>/dev/null | grep -v mock | head -20
+        echo ""
+        echo "Database connections in tests:"
+        grep -r -n "connect\|createConnection\|mongoose" --include="*.test.*" --include="*.spec.*" . 2>/dev/null | grep -v mock | head -10
+        echo ""
+        echo "Global state mutations:"
+        grep -r -n "global\.\|window\.\|process\.env" --include="*.test.*" --include="*.spec.*" . 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "ISOLATION-CRIT-001"
+      signal: "Unit tests make real network calls"
+      evidence_pattern: "fetch/axios without mocking in unit tests"
+      explanation: |
+        Real network calls make tests slow, flaky, and dependent on
+        external service availability. Unit tests should mock all I/O.
+      remediation: "Mock all HTTP calls using jest.mock, nock, or similar"
+
+    - id: "ISOLATION-CRIT-002"
+      signal: "Unit tests connect to real databases"
+      evidence_pattern: "Database connection strings in unit test files"
+      explanation: |
+        Database dependencies make tests slow, require infrastructure,
+        and can cause data corruption or interference between tests.
+      remediation: "Use in-memory databases or mock the data layer"
+
+  high:
+    - id: "ISOLATION-HIGH-001"
+      signal: "Tests share mutable global state"
+      evidence_pattern: "Global variable mutations without cleanup"
+      explanation: |
+        Shared mutable state causes tests to affect each other,
+        leading to order-dependent failures and flaky tests.
+      remediation: "Reset global state in afterEach hooks"
+
+    - id: "ISOLATION-HIGH-002"
+      signal: "Tests depend on execution order"
+      evidence_pattern: "Tests fail when run in isolation or shuffled"
+      explanation: |
+        Order-dependent tests indicate hidden state dependencies
+        that make the test suite unreliable and hard to maintain.
+      remediation: "Ensure each test sets up its own required state"
+
+  medium:
+    - id: "ISOLATION-MED-001"
+      signal: "Incomplete mock cleanup in teardown"
+      evidence_pattern: "afterEach missing jest.clearAllMocks()"
+      remediation: "Add proper mock cleanup in afterEach hooks"
+
+    - id: "ISOLATION-MED-002"
+      signal: "File system operations in unit tests"
+      evidence_pattern: "fs.readFile/writeFile without mocking"
+      remediation: "Mock file system operations or use memfs"
+
+  low:
+    - id: "ISOLATION-LOW-001"
+      signal: "Date/time dependencies not mocked"
+      evidence_pattern: "new Date() used without jest.useFakeTimers()"
+
+  positive:
+    - id: "ISOLATION-POS-001"
+      signal: "Comprehensive mocking strategy in place"
+      evidence_pattern: "__mocks__ directory with module mocks"
+    - id: "ISOLATION-POS-002"
+      signal: "Proper setup/teardown in all test files"
+      evidence_pattern: "beforeEach/afterEach consistently used"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Scan for external dependencies"
+      description: |
+        Search test files for patterns indicating external dependencies
+        like HTTP calls, database connections, or file system access.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find network calls in tests"
+          command: "grep -r -l 'fetch\\|axios\\|http\\.' --include='*.test.*' --include='*.spec.*' . 2>/dev/null | grep -v node_modules | head -20"
+        - purpose: "Find database usage in tests"
+          command: "grep -r -l 'mongoose\\|sequelize\\|prisma\\|knex' --include='*.test.*' --include='*.spec.*' . 2>/dev/null | grep -v node_modules | head -10"
+      expected_findings:
+        - "Tests with external dependencies"
+        - "Dependency types identified"
+
+    - id: "2"
+      name: "Analyze mocking patterns"
+      description: |
+        Review how external dependencies are mocked and whether
+        mocking is consistently applied.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find mock usage"
+          command: "grep -r -c 'jest\\.mock\\|vi\\.mock\\|mock\\(' --include='*.test.*' . 2>/dev/null | grep -v ':0' | head -20"
+        - purpose: "Check for mock directory"
+          command: "find . -type d -name '__mocks__' 2>/dev/null"
+      expected_findings:
+        - "Mocking patterns in use"
+        - "Consistency of mocking"
+
+    - id: "3"
+      name: "Check for shared state"
+      description: |
+        Identify tests that mutate global state or share state
+        between test cases.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find global state access"
+          command: "grep -r -n 'global\\.' --include='*.test.*' . 2>/dev/null | grep -v node_modules | head -20"
+        - purpose: "Check cleanup hooks"
+          command: "grep -r -c 'afterEach\\|afterAll' --include='*.test.*' . 2>/dev/null | grep -v ':0' | head -20"
+      expected_findings:
+        - "Global state dependencies"
+        - "Cleanup patterns"
+
+    - id: "4"
+      name: "Test isolation verification"
+      description: |
+        Verify tests can run in isolation and in random order.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Run tests in random order (if supported)"
+          command: "npm test -- --runInBand --randomize 2>/dev/null || echo 'Random order not supported'"
+      expected_findings:
+        - "Tests pass in random order"
+        - "Individual test isolation"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "isolation_report"
+      format: "table"
+      sections:
+        - "External Dependencies Found"
+        - "Mocking Analysis"
+        - "Shared State Issues"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Isolation Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Static analysis plus runtime verification"
+    medium: "Static analysis only"
+    low: "Based on file pattern sampling"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "test-isolation"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Isolation analysis requires thorough review"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "isolation-001"
+    item: "External dependencies identified"
+    level: "CRITICAL"
+    verification: "grep -r 'fetch\\|axios' --include='*.test.*' . 2>/dev/null | wc -l"
+    expected: "PASS (count documented)"
+
+  - id: "isolation-002"
+    item: "Mocking strategy assessed"
+    level: "BLOCKING"
+    verification: "find . -name '__mocks__' 2>/dev/null | wc -l"
+    expected: "PASS (strategy documented)"
+
+  - id: "isolation-003"
+    item: "Shared state issues documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Document any shared state concerns found"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Testability"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.unit-testing.mock-stub-usage"
+    - "testing-quality-assurance.unit-testing.test-maintainability"
+    - "testing-quality-assurance.integration-testing.integration-test-isolation"

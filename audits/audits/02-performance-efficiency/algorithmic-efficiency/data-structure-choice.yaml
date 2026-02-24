@@ -1,0 +1,312 @@
+# ============================================================
+# DATA STRUCTURE CHOICE AUDIT
+# ============================================================
+# Evaluates whether appropriate data structures are used for
+# the access patterns and operations performed.
+
+audit:
+  id: "performance-efficiency.algorithmic-efficiency.data-structure-choice"
+  name: "Data Structure Choice Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "algorithmic-efficiency"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes code to verify that data structures are appropriate for their
+    usage patterns. Identifies arrays used for lookups (should be maps),
+    linked lists used for random access (should be arrays), and other
+    mismatches between data structure and access pattern.
+
+  why_it_matters: |
+    Choosing the right data structure can make the difference between O(1)
+    and O(n) for common operations. Using an array for frequent lookups
+    means O(n) per lookup instead of O(1) with a hash map. With 10,000
+    lookups per request, this is the difference between milliseconds and seconds.
+
+  when_to_run:
+    - "Code review for data-heavy features"
+    - "Performance optimization"
+    - "New developer onboarding"
+    - "Architecture review"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+
+  access_requirements:
+    - "Source code repository access"
+
+discovery:
+  code_patterns:
+    - pattern: "\\.find\\(.*=>|\\.find\\(function"
+      type: "regex"
+      scope: "source"
+      purpose: "Find linear searches that could use Map/Set"
+
+    - pattern: "\\.includes\\(|\\.indexOf\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find existence checks that could use Set"
+
+    - pattern: "\\[.*\\]\\.filter\\(.*\\)\\.length|array\\.filter.*\\.length"
+      type: "regex"
+      scope: "source"
+      purpose: "Find counting patterns that could use Map"
+
+    - pattern: "list\\[\\d+\\]|ArrayList.*get\\(|linked.*\\[\\d+\\]"
+      type: "regex"
+      scope: "source"
+      purpose: "Find random access on linked structures"
+
+  file_patterns:
+    - glob: "**/*.{py,js,ts,java,go,rb}"
+      purpose: "Source code files"
+
+knowledge_sources:
+  learning_resources:
+    - id: "data-structures"
+      title: "Data Structures and Algorithms"
+      type: "book"
+      reference: "ISBN: 978-0-262-03384-8"
+
+    - id: "big-o-cheatsheet"
+      title: "Big O Cheat Sheet"
+      type: "article"
+      reference: "https://www.bigocheatsheet.com/"
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Find data structure usage patterns"
+      offline_capable: true
+
+    - tool: "ESLint (eslint-plugin-unicorn)"
+      purpose: "Suggest Set/Map over array methods"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "DS-CRIT-001"
+      signal: "Array used for frequent lookups by key"
+      evidence_pattern: "array.find(x => x.id === searchId) called frequently"
+      explanation: |
+        Using array.find() for lookups is O(n) per lookup. In a loop or
+        high-frequency code path, this becomes O(n*m) or worse. A Map
+        provides O(1) lookup.
+      remediation: "Convert to Map<key, value> for O(1) lookup"
+
+    - id: "DS-CRIT-002"
+      signal: "Repeated existence checks using array.includes()"
+      evidence_pattern: "array.includes() in hot path or loop"
+      explanation: |
+        array.includes() is O(n). If checking existence frequently, use
+        Set which provides O(1) has() operation.
+      remediation: "Convert to Set for O(1) existence checks"
+
+  high:
+    - id: "DS-HIGH-001"
+      signal: "Object used as ordered collection"
+      evidence_pattern: "Relying on object key order for iteration"
+      explanation: |
+        JavaScript object property order is not guaranteed across engines
+        for all key types. Use Map for ordered key-value pairs or Array
+        for ordered collections.
+      remediation: "Use Map for ordered key-value pairs"
+
+    - id: "DS-HIGH-002"
+      signal: "Array used for queue/dequeue operations"
+      evidence_pattern: "array.shift() or array.unshift() called frequently"
+      explanation: |
+        Array shift/unshift are O(n) because they reindex all elements.
+        For queue patterns, use a proper queue implementation or index-based
+        approach.
+      remediation: "Implement proper queue or use deque library"
+
+  medium:
+    - id: "DS-MED-001"
+      signal: "Nested arrays for matrix operations"
+      evidence_pattern: "array[i][j] access patterns without typed arrays"
+      explanation: |
+        For numerical matrix operations, typed arrays provide better
+        cache locality and performance than nested arrays.
+      remediation: "Consider flat typed arrays for numerical matrices"
+
+    - id: "DS-MED-002"
+      signal: "String concatenation for building large strings"
+      evidence_pattern: "str += ... in loops"
+      explanation: |
+        Repeated string concatenation creates many intermediate objects.
+        Use array.join() or StringBuilder pattern.
+      remediation: "Collect in array and join, or use StringBuilder"
+
+  low:
+    - id: "DS-LOW-001"
+      signal: "Primitive array where typed array would suffice"
+      evidence_pattern: "Number arrays that could use Float64Array"
+      remediation: "Consider typed arrays for uniform numeric data"
+
+  positive:
+    - id: "DS-POS-001"
+      signal: "Map/Set used appropriately for lookups and existence"
+
+    - id: "DS-POS-002"
+      signal: "Data structure choice documented with rationale"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Find array-based lookups"
+      description: |
+        Identify code using array methods for lookups that could benefit
+        from hash-based data structures.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find find() usage"
+          command: "rg -n '\\.find\\(' --type js --type ts --type py -C 2"
+        - purpose: "Find includes() usage"
+          command: "rg -n '\\.includes\\(' --type js --type ts -C 2"
+        - purpose: "Find indexOf() usage"
+          command: "rg -n '\\.indexOf\\(' --type js --type ts --type py -C 2"
+
+      expected_findings:
+        - "Array lookup patterns"
+        - "Frequency and context assessment"
+
+    - id: "2"
+      name: "Analyze access patterns"
+      description: |
+        For each identified usage, determine the access pattern (lookup,
+        existence check, iteration) and frequency.
+      duration_estimate: "30 min"
+
+      expected_findings:
+        - "Access pattern classification"
+        - "Frequency estimation"
+
+    - id: "3"
+      name: "Identify inefficient queue operations"
+      description: |
+        Find array shift/unshift operations that indicate queue usage
+        without proper queue implementation.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find shift/unshift"
+          command: "rg -n '\\.shift\\(|\\.unshift\\(' --type js --type ts -C 2"
+
+      expected_findings:
+        - "Queue pattern identification"
+        - "Performance impact assessment"
+
+    - id: "4"
+      name: "Review Map/Set usage"
+      description: |
+        Verify that Map and Set are used where appropriate and consistently
+        throughout the codebase.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find Map/Set usage"
+          command: "rg -n 'new Map\\(|new Set\\(|Map<|Set<' --type js --type ts --type java"
+
+      expected_findings:
+        - "Proper usage catalog"
+        - "Consistency assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Data Structure Mismatches"
+        - "Recommendations"
+        - "Migration Guide"
+
+  confidence_guidance:
+    high: "Direct access pattern analysis with frequency data"
+    medium: "Pattern matching with context analysis"
+    low: "Surface-level pattern detection"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "big-o-cheatsheet"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "ds-001"
+    item: "No array.find/includes in hot paths"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms hot paths use Map/Set for lookups"
+    expected: "Confirmed by reviewer"
+
+  - id: "ds-002"
+    item: "No shift/unshift in performance-critical code"
+    level: "BLOCKING"
+    verification: "rg -l '\\.shift\\(|\\.unshift\\(' --type js --type ts | wc -l | awk '{if($1==0)print \"PASS\"; else print \"REVIEW: \"$1\" files\"}'"
+    expected: "PASS or justified"
+
+  - id: "ds-003"
+    item: "Map/Set used for lookups and existence checks"
+    level: "WARNING"
+    verification: "rg -c 'new Map|new Set' --type js --type ts | awk -F: '{sum+=$2}END{if(sum>0)print \"PASS: \"sum\" usages\"; else print \"REVIEW\"}'"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Code Quality"
+      controls: ["Efficiency"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.algorithmic-efficiency.time-complexity"
+    - "performance-efficiency.algorithmic-efficiency.space-complexity"
+    - "performance-efficiency.algorithmic-efficiency.hot-path-optimization"

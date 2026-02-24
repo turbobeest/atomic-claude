@@ -1,0 +1,375 @@
+# ============================================================
+# AUDIT FILE: Mesh Configuration
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.service-mesh.mesh-configuration"
+  name: "Mesh Configuration"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "service-mesh"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates service mesh configuration including control plane settings,
+    sidecar configuration, resource allocation, version compatibility,
+    proxy settings, and operational configuration. Examines MeshConfig,
+    IstioOperator, or equivalent mesh configuration resources for proper
+    settings and operational readiness.
+
+  why_it_matters: |
+    Mesh configuration directly impacts reliability, performance, and security
+    of all services in the mesh. Misconfigured settings can cause outages,
+    performance degradation, or security vulnerabilities. Proper configuration
+    ensures the mesh operates efficiently and provides consistent behavior
+    across all services.
+
+  when_to_run:
+    - "After mesh installation or upgrades"
+    - "Before production deployments"
+    - "During performance tuning exercises"
+    - "After unexplained mesh behavior issues"
+
+prerequisites:
+  required_artifacts:
+    - type: "service-mesh"
+      description: "Running service mesh installation"
+    - type: "mesh-configs"
+      description: "Mesh configuration resources"
+
+  access_requirements:
+    - "kubectl access to mesh namespace"
+    - "Access to mesh configuration resources"
+    - "istioctl or equivalent CLI access"
+
+discovery:
+  file_patterns:
+    - glob: "**/istio*.yaml"
+      purpose: "Istio configuration files"
+    - glob: "**/meshconfig*.yaml"
+      purpose: "Mesh configuration"
+    - glob: "**/operator*.yaml"
+      purpose: "Operator configurations"
+    - glob: "**/proxyconfig*.yaml"
+      purpose: "Proxy configurations"
+
+  code_patterns:
+    - pattern: "IstioOperator"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find Istio operator configurations"
+    - pattern: "MeshConfig"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find mesh config settings"
+    - pattern: "defaultConfig:"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find default proxy settings"
+
+knowledge_sources:
+  specifications:
+    - id: "istio-config"
+      name: "Istio Configuration Reference"
+      url: "https://istio.io/latest/docs/reference/config/"
+      offline_cache: true
+      priority: "required"
+    - id: "nist-800-207"
+      name: "NIST SP 800-207: Zero Trust Architecture"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-207/final"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "istio-install"
+      name: "Istio Installation Guide"
+      url: "https://istio.io/latest/docs/setup/install/"
+      offline_cache: true
+    - id: "istio-performance"
+      name: "Istio Performance Best Practices"
+      url: "https://istio.io/latest/docs/ops/deployment/performance-and-scalability/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "istioctl"
+      purpose: "Analyze mesh configuration"
+      command: "istioctl analyze --all-namespaces"
+    - tool: "istioctl-version"
+      purpose: "Check version compatibility"
+      command: "istioctl version"
+    - tool: "kubectl"
+      purpose: "View mesh configurations"
+      command: "kubectl get configmap istio -n istio-system -o yaml"
+
+  scripts:
+    - id: "mesh-config-audit"
+      language: "bash"
+      purpose: "Audit mesh configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Mesh Version ==="
+        istioctl version
+        echo "=== Configuration Analysis ==="
+        istioctl analyze --all-namespaces
+        echo "=== Control Plane Resources ==="
+        kubectl get pods -n istio-system -o wide
+        kubectl top pods -n istio-system
+        echo "=== Mesh Configuration ==="
+        kubectl get configmap istio -n istio-system -o yaml | head -100
+
+signals:
+  critical:
+    - id: "MESH-CFG-CRIT-001"
+      signal: "Control plane version mismatch"
+      evidence_pattern: "istiod version differs from proxy version by major version"
+      explanation: |
+        Version mismatches between control plane and data plane can
+        cause unexpected behavior, configuration errors, and potential
+        security issues.
+      remediation: "Upgrade all components to compatible versions"
+    - id: "MESH-CFG-CRIT-002"
+      signal: "Control plane single point of failure"
+      evidence_pattern: "Single istiod replica in production"
+      explanation: |
+        Single control plane replica means mesh management fails if
+        that pod fails. New workloads cannot get configuration.
+      remediation: "Deploy multiple control plane replicas"
+
+  high:
+    - id: "MESH-CFG-HIGH-001"
+      signal: "Resource limits not configured for control plane"
+      evidence_pattern: "istiod pods without resource limits"
+      explanation: |
+        Unbounded resource consumption can affect cluster stability
+        and other workloads.
+      remediation: "Configure appropriate resource requests and limits"
+    - id: "MESH-CFG-HIGH-002"
+      signal: "Deprecated configuration options in use"
+      evidence_pattern: "istioctl analyze warnings about deprecated config"
+      explanation: |
+        Deprecated options may be removed in future versions, causing
+        upgrade failures or unexpected behavior changes.
+      remediation: "Update configuration to use current options"
+    - id: "MESH-CFG-HIGH-003"
+      signal: "Proxy resource limits inappropriate"
+      evidence_pattern: "Default proxy limits too low for workload"
+      explanation: |
+        Insufficient proxy resources cause performance degradation
+        and potential service failures under load.
+      remediation: "Tune proxy resources based on workload requirements"
+
+  medium:
+    - id: "MESH-CFG-MED-001"
+      signal: "Using default mesh configuration"
+      evidence_pattern: "Mesh running with all default settings"
+      remediation: "Review and customize configuration for production needs"
+    - id: "MESH-CFG-MED-002"
+      signal: "Missing horizontal pod autoscaling for control plane"
+      evidence_pattern: "No HPA for istiod"
+      remediation: "Configure HPA for control plane components"
+    - id: "MESH-CFG-MED-003"
+      signal: "Inconsistent proxy configuration across namespaces"
+      evidence_pattern: "Different ProxyConfig in different namespaces"
+      remediation: "Standardize proxy configuration unless variation is intentional"
+
+  low:
+    - id: "MESH-CFG-LOW-001"
+      signal: "Verbose logging in production"
+      evidence_pattern: "Debug log level enabled"
+      remediation: "Set appropriate log levels for production"
+    - id: "MESH-CFG-LOW-002"
+      signal: "Missing configuration documentation"
+      remediation: "Document non-default configuration choices"
+
+  positive:
+    - id: "MESH-CFG-POS-001"
+      signal: "Control plane properly sized and redundant"
+    - id: "MESH-CFG-POS-002"
+      signal: "Configuration validated by istioctl analyze"
+    - id: "MESH-CFG-POS-003"
+      signal: "Version compatibility maintained"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Check version compatibility"
+      description: |
+        Verify control plane and data plane versions are compatible.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Check versions"
+          command: "istioctl version"
+        - purpose: "Check proxy versions"
+          command: "istioctl proxy-status"
+      expected_findings:
+        - "Version inventory"
+        - "Compatibility status"
+
+    - id: "2"
+      name: "Analyze mesh configuration"
+      description: |
+        Run configuration analysis to identify issues and warnings.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Analyze configuration"
+          command: "istioctl analyze --all-namespaces"
+        - purpose: "Get mesh config"
+          command: "kubectl get configmap istio -n istio-system -o yaml"
+      expected_findings:
+        - "Configuration issues"
+        - "Deprecation warnings"
+
+    - id: "3"
+      name: "Review control plane resources"
+      description: |
+        Examine control plane deployment for proper sizing and redundancy.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check control plane pods"
+          command: "kubectl get pods -n istio-system -o wide"
+        - purpose: "Check resource usage"
+          command: "kubectl top pods -n istio-system"
+        - purpose: "Check HPA"
+          command: "kubectl get hpa -n istio-system"
+      expected_findings:
+        - "Control plane sizing"
+        - "Resource utilization"
+
+    - id: "4"
+      name: "Assess proxy configuration"
+      description: |
+        Review default and per-workload proxy configurations.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Get default proxy config"
+          command: "kubectl get configmap istio-sidecar-injector -n istio-system -o yaml | grep -A 50 'values:'"
+        - purpose: "Check proxy resources"
+          command: "kubectl get pods -A -o json | jq '.items[] | select(.spec.containers[].name==\"istio-proxy\") | {namespace: .metadata.namespace, name: .metadata.name, resources: .spec.containers[] | select(.name==\"istio-proxy\") | .resources}' | head -50"
+      expected_findings:
+        - "Proxy configuration assessment"
+        - "Resource allocation review"
+
+    - id: "5"
+      name: "Verify operational readiness"
+      description: |
+        Check operational aspects like logging, monitoring integration,
+        and backup/recovery procedures.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check logging config"
+          command: "kubectl logs -n istio-system deploy/istiod --tail=20"
+        - purpose: "Check mesh metrics"
+          command: "kubectl get service -n istio-system | grep prometheus"
+      expected_findings:
+        - "Operational health"
+        - "Monitoring integration"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Configuration Analysis"
+        - "Control Plane Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct configuration inspection, tool analysis"
+    medium: "Inferred from operational data"
+    low: "Based on defaults or missing configuration"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "istio-config"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires running mesh inspection"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "mesh-configuration-001"
+    item: "Version compatibility verified"
+    level: "CRITICAL"
+    verification: "istioctl version -o json | jq '.meshVersion[].Component | contains(\"SYNCED\")' | grep -q true && echo PASS || echo FAIL"
+    expected: "PASS"
+  - id: "mesh-configuration-002"
+    item: "Control plane has multiple replicas"
+    level: "CRITICAL"
+    verification: "kubectl get deploy istiod -n istio-system -o json | jq '.spec.replicas' | awk '{print ($1>=2)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "mesh-configuration-003"
+    item: "No critical configuration issues"
+    level: "BLOCKING"
+    verification: "istioctl analyze --all-namespaces 2>&1 | grep -c 'Error' | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "mesh-configuration-004"
+    item: "Control plane resource limits configured"
+    level: "BLOCKING"
+    verification: "kubectl get deploy istiod -n istio-system -o json | jq '.spec.template.spec.containers[].resources.limits' | grep -q memory && echo PASS || echo FAIL"
+    expected: "PASS"
+  - id: "mesh-configuration-005"
+    item: "No deprecated configuration warnings"
+    level: "WARNING"
+    verification: "istioctl analyze --all-namespaces 2>&1 | grep -ic 'deprecated' | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.1", "A1.2"]
+    - framework: "ISO27001"
+      controls: ["A.12.1.2", "A.14.2.2"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.service-mesh.service-mesh-security"
+    - "cloud-infrastructure.service-mesh.traffic-management"
+    - "cloud-infrastructure.containers.container-orchestration"

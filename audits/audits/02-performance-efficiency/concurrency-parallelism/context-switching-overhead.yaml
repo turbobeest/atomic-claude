@@ -1,0 +1,344 @@
+# ============================================================
+# CONTEXT SWITCHING OVERHEAD AUDIT
+# ============================================================
+# Identifies patterns that cause excessive context switching,
+# degrading system performance.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.concurrency-parallelism.context-switching-overhead"
+  name: "Context Switching Overhead Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "concurrency-parallelism"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes code and configurations for patterns that cause excessive thread
+    or process context switching. Examines thread counts, synchronization
+    patterns, and scheduling hints that impact the frequency of context
+    switches and their associated CPU overhead.
+
+  why_it_matters: |
+    Each context switch has overhead: saving and restoring CPU state, cache
+    invalidation, and TLB flushes. Excessive context switching wastes CPU
+    cycles on overhead rather than useful work. Systems with too many threads
+    relative to cores spend significant time switching rather than executing.
+
+  when_to_run:
+    - "When CPU utilization is high but throughput is low"
+    - "When profiling shows high system/kernel time"
+    - "After increasing thread counts"
+    - "When latency is inconsistent"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code and configuration"
+    - type: "runtime_access"
+      description: "Ability to measure context switches"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Access to run profiling tools"
+
+discovery:
+  code_patterns:
+    - pattern: "Thread\\.yield|sched_yield|runtime\\.Gosched"
+      type: "regex"
+      scope: "source"
+      purpose: "Find explicit yields that may cause excessive switching"
+
+    - pattern: "sleep\\(0\\)|Sleep\\(0\\)|time\\.Sleep\\(0\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find spin-yielding patterns"
+
+    - pattern: "newFixedThreadPool\\([0-9]{3,}|maxThreads.*[0-9]{3,}"
+      type: "regex"
+      scope: "source"
+      purpose: "Find large thread pool configurations"
+
+    - pattern: "while.*!|spin|busy.*wait"
+      type: "regex"
+      scope: "source"
+      purpose: "Find busy-waiting patterns"
+
+  file_patterns:
+    - glob: "**/*.java"
+      purpose: "Java source files"
+    - glob: "**/*.go"
+      purpose: "Go source files"
+    - glob: "**/*.py"
+      purpose: "Python source files"
+    - glob: "**/application.yml"
+      purpose: "Configuration files"
+
+knowledge_sources:
+  guides:
+    - id: "linux-scheduling"
+      name: "Linux Process Scheduling"
+      url: "https://www.kernel.org/doc/html/latest/scheduler/index.html"
+      offline_cache: true
+
+    - id: "jvm-threading"
+      name: "JVM Threading Model"
+      url: "https://docs.oracle.com/javase/specs/jls/se17/html/jls-17.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "context-switch-cost"
+      title: "Measuring Context Switch Costs"
+      type: "article"
+      reference: "https://eli.thegreenplace.net/2018/measuring-context-switching-and-memory-overheads-for-linux-threads/"
+
+tooling:
+  static_analysis:
+    - tool: "grep"
+      purpose: "Find patterns causing context switches"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "perf stat"
+      purpose: "Measure context switch counts"
+      command: "perf stat -e context-switches ./app"
+
+    - tool: "vmstat"
+      purpose: "Monitor context switch rate"
+      command: "vmstat 1"
+
+    - tool: "pidstat"
+      purpose: "Per-process context switches"
+      command: "pidstat -w 1"
+
+  scripts:
+    - id: "count-threads"
+      language: "bash"
+      purpose: "Count active threads"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Count threads for Java process
+        jcmd <pid> Thread.print | grep -c "tid="
+        # Count for any process
+        ls /proc/<pid>/task | wc -l
+
+signals:
+  critical:
+    - id: "CTXSW-CRIT-001"
+      signal: "Thread count vastly exceeds CPU cores"
+      evidence_pattern: "maxThreads.*[0-9]{4,}|pool.*size.*[0-9]{3,}"
+      explanation: |
+        Having hundreds or thousands of threads on a system with tens of
+        cores guarantees excessive context switching. The scheduler spends
+        more time switching than threads spend executing.
+      remediation: "Size thread pools proportional to cores; use async I/O for I/O-bound work"
+
+    - id: "CTXSW-CRIT-002"
+      signal: "Busy-waiting (spin-wait) loop"
+      evidence_pattern: "while.*!\\w+\\s*\\)|while.*true.*\\{\\s*\\}"
+      explanation: |
+        Busy-waiting consumes CPU cycles checking a condition repeatedly.
+        This wastes CPU and can cause priority inversion where the waiter
+        prevents the signaler from running.
+      remediation: "Use blocking waits (condition variables, channels, semaphores)"
+
+  high:
+    - id: "CTXSW-HIGH-001"
+      signal: "Explicit yield in application code"
+      evidence_pattern: "Thread\\.yield|sched_yield|runtime\\.Gosched"
+      explanation: |
+        Explicit yields force context switches. Application code rarely needs
+        to yield; it usually indicates a workaround for a concurrency bug.
+      remediation: "Use proper synchronization instead of yielding"
+
+    - id: "CTXSW-HIGH-002"
+      signal: "Sleep(0) for yielding"
+      evidence_pattern: "sleep\\(0\\)|Sleep\\(0\\)|time\\.Sleep\\(0\\)"
+      explanation: |
+        Sleep(0) is used as a yield, forcing a context switch. This is
+        wasteful and usually indicates missing synchronization.
+      remediation: "Replace with proper wait/notify or blocking operations"
+
+    - id: "CTXSW-HIGH-003"
+      signal: "Creating thread per request"
+      evidence_pattern: "new Thread.*request|Thread.*per.*connection"
+      explanation: |
+        Creating a new thread for each request incurs thread creation
+        overhead and causes high context switch rates under load.
+      remediation: "Use thread pools or async I/O"
+
+  medium:
+    - id: "CTXSW-MED-001"
+      signal: "Fine-grained locking causing frequent blocking"
+      evidence_pattern: "synchronized.*\\{\\s*\\w+;\\s*\\}"
+      remediation: "Consider coarser locking or lock-free algorithms if switching is excessive"
+
+    - id: "CTXSW-MED-002"
+      signal: "Short-lived tasks overwhelming scheduler"
+      evidence_pattern: "submit\\(.*\\)->.*[0-9]ms|task.*duration.*<.*1ms"
+      remediation: "Batch small tasks together to reduce scheduling overhead"
+
+  low:
+    - id: "CTXSW-LOW-001"
+      signal: "Thread priority manipulation"
+      evidence_pattern: "setPriority|nice|setpriority"
+      remediation: "Avoid priority manipulation unless necessary; can cause starvation"
+
+  positive:
+    - id: "CTXSW-POS-001"
+      signal: "Thread pool sized to cores"
+      evidence_pattern: "Runtime.*availableProcessors|runtime\\.NumCPU"
+
+    - id: "CTXSW-POS-002"
+      signal: "Async I/O for I/O-bound operations"
+      evidence_pattern: "CompletableFuture|asyncio|async/await"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Measure context switch rate"
+      description: |
+        Establish baseline context switch rate under typical load.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Measure context switches"
+          command: "perf stat -e context-switches -p <pid> sleep 10"
+        - purpose: "Monitor switch rate"
+          command: "vmstat 1 10"
+      expected_findings:
+        - "Context switches per second"
+        - "Baseline for comparison"
+
+    - id: "2"
+      name: "Count threads"
+      description: |
+        Determine how many threads the application runs.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Count JVM threads"
+          command: "jcmd <pid> Thread.print | grep -c 'tid='"
+        - purpose: "Count process threads"
+          command: "ls /proc/<pid>/task | wc -l"
+      expected_findings:
+        - "Total thread count"
+        - "Thread-to-core ratio"
+
+    - id: "3"
+      name: "Find problematic patterns"
+      description: |
+        Search code for patterns known to cause excessive switching.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find yields and busy-waits"
+          command: "grep -rn 'yield\\|while.*!\\|spin\\|busy' --include='*.java' --include='*.go' ."
+        - purpose: "Find thread creation"
+          command: "grep -rn 'new Thread\\|Thread.*start' --include='*.java' ."
+      expected_findings:
+        - "Busy-wait locations"
+        - "Excessive thread creation"
+
+    - id: "4"
+      name: "Analyze thread pool configurations"
+      description: |
+        Review thread pool sizes relative to system capacity.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find pool configurations"
+          command: "grep -rn 'pool.*size\\|maxThreads\\|ThreadPoolExecutor' --include='*.java' --include='*.yml' ."
+      expected_findings:
+        - "Pool size configurations"
+        - "Sizing appropriateness"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Context Switch Metrics"
+        - "Problematic Patterns"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Measured high context switch rate with identified cause"
+    medium: "Code patterns suggest excessive switching"
+    low: "Potential issue requiring runtime measurement"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "linux-scheduling"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime measurement"
+    full:
+      included: true
+      priority: 3
+    production:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "context-switch-001"
+    item: "Thread count reasonable relative to cores"
+    level: "CRITICAL"
+    verification: "test $(nproc) -lt $(jcmd <pid> Thread.print | grep -c 'tid=') && echo FAIL || echo PASS"
+    expected: "PASS"
+
+  - id: "context-switch-002"
+    item: "No busy-waiting patterns"
+    level: "BLOCKING"
+    verification: "grep -rn 'while.*!\\|spin.*wait' --include='*.java' --include='*.go' . | wc -l"
+    expected: "0"
+
+  - id: "context-switch-003"
+    item: "Context switch rate within acceptable range"
+    level: "WARNING"
+    verification: "perf stat -e context-switches -p <pid> sleep 10"
+    threshold: "< 100,000 cs/sec per core under load"
+
+governance:
+  applicable_to:
+    archetypes: ["api", "service"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.concurrency-parallelism.worker-pool-sizing"
+    - "performance-efficiency.concurrency-parallelism.lock-contention"

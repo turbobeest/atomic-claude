@@ -1,0 +1,311 @@
+audit:
+  id: cost-economics.cost-optimization.spot-instances
+  name: Spot Instances Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: cost-optimization
+  tier: expert
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the organization's use of Spot Instances
+    (AWS), Spot VMs (Azure), or Preemptible VMs (GCP) for workloads
+    that can tolerate interruption. It evaluates Spot adoption,
+    interruption handling, diversification strategy, and savings realized.
+  why_it_matters: |
+    Spot Instances offer up to 90% discount compared to on-demand pricing.
+    Many workloads (batch processing, CI/CD, stateless services, dev/test)
+    can run on Spot with proper interruption handling. Organizations not
+    leveraging Spot are leaving significant savings on the table.
+  when_to_run:
+  - Quarterly Spot strategy review
+  - When deploying new interruptible workloads
+  - After Spot interruption incidents
+  - During cost optimization initiatives
+prerequisites:
+  required_artifacts:
+  - type: spot-usage
+    description: Current Spot Instance usage and history
+  - type: workload-analysis
+    description: Workload interruptibility assessment
+  - type: interruption-handling
+    description: Documentation of Spot interruption procedures
+  access_requirements:
+  - Access to Spot Instance usage reports
+  - Access to EC2 Spot Fleet configurations
+  - Access to workload architecture documentation
+  - Access to Spot interruption logs
+discovery:
+  spot_eligible_workloads:
+  - category: Batch processing
+    suitability: Excellent
+  - category: CI/CD pipelines
+    suitability: Excellent
+  - category: Development/Test
+    suitability: Excellent
+  - category: Stateless web services
+    suitability: Good with proper handling
+  - category: Big data/Analytics
+    suitability: Excellent
+  - category: Machine learning training
+    suitability: Good with checkpointing
+  api_queries:
+  - provider: AWS
+    service: EC2
+    operation: DescribeSpotInstanceRequests
+  - provider: AWS
+    service: EC2
+    operation: DescribeSpotFleetRequests
+  - provider: AWS
+    service: Cost Explorer
+    purpose: Spot vs On-demand cost comparison
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: aws-spot-instances
+    name: AWS Spot Instances Documentation
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-spot-instances.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: spot-best-practices
+    name: Spot Instance Best Practices
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-best-practices.html
+    offline_cache: true
+  - id: finops-spot
+    name: FinOps - Spot and Preemptible Resources
+    url: https://www.finops.org/framework/capabilities/
+    offline_cache: true
+tooling:
+  aws_tools:
+  - tool: Spot Advisor
+    purpose: Interruption frequency by instance type
+  - tool: EC2 Fleet
+    purpose: Mixed instance type Spot strategies
+  - tool: Spot Placement Score
+    purpose: Capacity availability assessment
+  third_party_tools:
+  - tool: Spot.io (by NetApp)
+    purpose: Automated Spot management
+  - tool: Karpenter
+    purpose: Kubernetes Spot node provisioning
+  - tool: AWS Node Termination Handler
+    purpose: Graceful Spot interruption handling
+signals:
+  critical:
+  - id: SPOT-CRIT-001
+    signal: Spot-eligible workloads running 100% on-demand
+    evidence_pattern: Batch, dev/test on-demand without Spot assessment
+    explanation: |
+      When clearly interruptible workloads run entirely on-demand,
+      the organization is missing 60-90% potential savings. Even
+      conservative Spot adoption can significantly reduce costs.
+    remediation: Assess and migrate interruptible workloads to Spot
+  high:
+  - id: SPOT-HIGH-001
+    signal: Spot usage without interruption handling
+    evidence_pattern: No termination notice handling configured
+    explanation: |
+      Spot Instances can be interrupted with 2-minute notice. Without
+      proper handling, interruptions cause job failures and service
+      disruptions that erode Spot benefits.
+    remediation: Implement Spot interruption handling mechanisms
+  - id: SPOT-HIGH-002
+    signal: Single instance type Spot strategy
+    evidence_pattern: Spot requests limited to one instance type
+    explanation: |
+      Relying on a single instance type increases interruption risk
+      and may result in capacity unavailability. Diversification
+      across instance types significantly reduces risk.
+    remediation: Implement instance type diversification
+  medium:
+  - id: SPOT-MED-001
+    signal: High Spot interruption rate affecting workloads
+    evidence_threshold: interruption_rate > 20%
+    remediation: Adjust instance type selection or capacity pools
+  - id: SPOT-MED-002
+    signal: Spot savings not tracked or reported
+    evidence_pattern: No visibility into Spot savings achieved
+    remediation: Implement Spot savings tracking and reporting
+  low:
+  - id: SPOT-LOW-001
+    signal: No Spot usage guidelines documented
+    evidence_pattern: Ad-hoc Spot decisions by teams
+    remediation: Document Spot usage guidelines and patterns
+  positive:
+  - id: SPOT-POS-001
+    signal: Comprehensive Spot adoption for eligible workloads
+  - id: SPOT-POS-002
+    signal: Robust interruption handling with graceful degradation
+  - id: SPOT-POS-003
+    signal: Diversified instance type strategy with low interruption
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory current Spot usage
+    description: |
+      Catalog all Spot Instance usage including instance types,
+      workloads, and configuration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List Spot Fleet requests
+      command: aws ec2 describe-spot-fleet-requests
+    - purpose: List active Spot instances
+      command: |
+        aws ec2 describe-instances \
+          --filters Name=instance-lifecycle,Values=spot \
+          --query 'Reservations[].Instances[].[InstanceId,InstanceType]'
+    expected_findings:
+    - Current Spot usage
+    - Instance type distribution
+  - id: '2'
+    name: Identify Spot-eligible workloads
+    description: |
+      Analyze workloads to identify candidates for Spot based on
+      interruptibility, statefulness, and criticality.
+    duration_estimate: 60 min
+    expected_findings:
+    - Spot-eligible workloads
+    - Migration candidates
+    - Workload interruptibility assessment
+  - id: '3'
+    name: Evaluate interruption handling
+    description: |
+      Review mechanisms for handling Spot interruptions including
+      termination notices, checkpointing, and failover.
+    duration_estimate: 30 min
+    expected_findings:
+    - Interruption handling mechanisms
+    - Graceful shutdown procedures
+    - Gaps in handling
+  - id: '4'
+    name: Analyze diversification strategy
+    description: |
+      Assess instance type and availability zone diversification
+      to minimize interruption risk.
+    duration_estimate: 30 min
+    expected_findings:
+    - Instance type diversity
+    - AZ distribution
+    - Capacity pool analysis
+  - id: '5'
+    name: Calculate savings and potential
+    description: |
+      Quantify current Spot savings and potential additional savings
+      from expanding Spot adoption.
+    duration_estimate: 30 min
+    expected_findings:
+    - Current Spot savings
+    - Additional savings potential
+    - Cost-benefit analysis
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Current Spot Usage
+    - Eligible Workload Analysis
+    - Risk Assessment
+    - Savings Analysis
+    - Recommendations
+  - type: metrics_dashboard
+    metrics:
+    - Spot usage percentage
+    - Spot savings realized
+    - Interruption rate
+    - Instance type diversity score
+  confidence_guidance:
+    high: Complete Spot data with workload analysis
+    medium: Partial Spot data or limited workload visibility
+    low: Minimal Spot usage data
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-spot-instances
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires workload analysis
+    full:
+      included: true
+      priority: 2
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: spot-001
+  item: Spot-eligible workloads identified
+  level: CRITICAL
+  verification: manual
+  expected: Assessment completed
+- id: spot-002
+  item: Interruption handling verified
+  level: BLOCKING
+  verification: manual
+  expected: Handling in place for Spot workloads
+- id: spot-003
+  item: Diversification strategy implemented
+  level: WARNING
+  verification: manual
+  expected: Multiple instance types configured
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - batch-processing
+    - ml-training
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Workload Optimization
+  - framework: AWS Well-Architected
+    controls:
+    - COST-08
+relationships:
+  commonly_combined:
+  - cost-economics.cost-optimization.rightsizing
+  - cost-economics.resource-efficiency.utilization-analysis
+  - cost-economics.cost-optimization.reserved-instances

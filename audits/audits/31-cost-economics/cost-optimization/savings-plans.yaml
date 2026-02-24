@@ -1,0 +1,327 @@
+audit:
+  id: cost-economics.cost-optimization.savings-plans
+  name: Savings Plans Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: cost-optimization
+  tier: expert
+  estimated_duration: 3-5 hours  # median: 4h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: organizational
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates the organization's use of AWS Savings Plans
+    (or equivalent Azure/GCP offerings) including Compute Savings Plans,
+    EC2 Instance Savings Plans, and SageMaker Savings Plans. It analyzes
+    coverage levels, utilization rates, and optimal plan configuration.
+  why_it_matters: |
+    Savings Plans offer up to 72% discount with greater flexibility than
+    Reserved Instances. Compute Savings Plans automatically apply across
+    instance families, regions, and compute services. Proper Savings Plan
+    management can save millions annually while maintaining architectural
+    flexibility.
+  when_to_run:
+  - Monthly Savings Plans review
+  - Before major architectural changes
+  - When evaluating RI vs SP strategy
+  - During commitment purchase planning
+prerequisites:
+  required_artifacts:
+  - type: savings-plans-inventory
+    description: List of all active Savings Plans
+  - type: usage-data
+    description: Historical compute usage for coverage analysis
+  - type: cost-projections
+    description: Forecasted compute spend
+  access_requirements:
+  - Access to AWS Savings Plans console/API
+  - Access to Cost Explorer SP reports
+  - Access to compute usage metrics
+discovery:
+  savings_plan_types:
+  - type: Compute Savings Plans
+    flexibility: Highest
+    discount: Up to 66%
+    applies_to: EC2, Fargate, Lambda
+  - type: EC2 Instance Savings Plans
+    flexibility: Medium
+    discount: Up to 72%
+    applies_to: Specific instance family in region
+  - type: SageMaker Savings Plans
+    flexibility: Service-specific
+    discount: Up to 64%
+    applies_to: SageMaker instances
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: aws-savings-plans-types
+    name: AWS Savings Plans Types
+    url: https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: sp-vs-ri
+    name: Savings Plans vs Reserved Instances
+    url: https://aws.amazon.com/savingsplans/faq/
+    offline_cache: true
+  - id: finops-sp-strategy
+    name: FinOps Savings Plans Strategy
+    url: https://www.finops.org/framework/capabilities/commitment-discounts/
+    offline_cache: true
+tooling:
+  aws_tools:
+  - tool: Savings Plans Console
+    purpose: Visual SP management and recommendations
+  - tool: Cost Explorer
+    purpose: SP utilization and coverage analysis
+    command: |
+      aws ce get-savings-plans-utilization \
+        --time-period Start=2025-01-01,End=2025-01-22
+signals:
+  critical:
+  - id: SP-CRIT-001
+    signal: Savings Plans utilization below 70%
+    evidence_threshold: sp_utilization < 70%
+    explanation: |
+      Low Savings Plan utilization indicates over-commitment. The
+      committed hourly spend is not being fully used, resulting in
+      wasted commitment costs.
+    remediation: Avoid additional SPs until utilization improves
+  - id: SP-CRIT-002
+    signal: No Savings Plans despite significant stable compute spend
+    evidence_threshold: stable_compute_spend > $50000/month without SP
+    explanation: |
+      Large, stable compute workloads without Savings Plans represent
+      significant missed savings. Even conservative SP purchases would
+      yield substantial returns.
+    remediation: Purchase Savings Plans aligned with baseline usage
+  high:
+  - id: SP-HIGH-001
+    signal: EC2 Instance Savings Plans limiting flexibility
+    evidence_pattern: Instance family SPs preventing modernization
+    explanation: |
+      EC2 Instance Savings Plans lock in specific instance families.
+      If architecture is evolving, Compute Savings Plans offer better
+      flexibility despite slightly lower discounts.
+    remediation: Evaluate Compute SP vs Instance SP trade-offs
+  - id: SP-HIGH-002
+    signal: Savings Plans not covering Fargate/Lambda usage
+    evidence_pattern: Significant Fargate/Lambda on-demand spend
+    explanation: |
+      Compute Savings Plans cover Fargate and Lambda in addition to
+      EC2. Organizations with significant serverless spend should
+      ensure SP coverage applies.
+    remediation: Verify Compute SP is applying to serverless
+  medium:
+  - id: SP-MED-001
+    signal: No upfront vs partial upfront analysis
+    evidence_pattern: All SPs purchased with same payment option
+    remediation: Analyze NPV of payment options for optimization
+  - id: SP-MED-002
+    signal: SP purchase decisions not aligned with usage trends
+    evidence_pattern: SPs purchased without trend analysis
+    remediation: Base SP purchases on usage trend analysis
+  low:
+  - id: SP-LOW-001
+    signal: SP inventory not regularly reviewed
+    evidence_pattern: No documented SP review process
+    remediation: Implement monthly SP review cadence
+  positive:
+  - id: SP-POS-001
+    signal: Savings Plans utilization consistently above 95%
+  - id: SP-POS-002
+    signal: Optimal mix of Compute and Instance Savings Plans
+  - id: SP-POS-003
+    signal: SP coverage aligned with baseline compute usage
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory active Savings Plans
+    description: |
+      Catalog all active Savings Plans including type, term,
+      hourly commitment, and payment option.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List active Savings Plans
+      command: |
+        aws savingsplans describe-savings-plans \
+          --states active \
+          --output json > savings-plans.json
+    expected_findings:
+    - SP inventory
+    - Total hourly commitment
+  - id: '2'
+    name: Analyze utilization
+    description: |
+      Review Savings Plans utilization to identify under-committed
+      or over-committed scenarios.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get SP utilization
+      command: |
+        aws ce get-savings-plans-utilization \
+          --time-period Start=2025-01-01,End=2025-01-22 \
+          --granularity DAILY
+    expected_findings:
+    - Daily utilization rates
+    - Utilization trends
+  - id: '3'
+    name: Assess coverage
+    description: |
+      Evaluate what percentage of eligible spend is covered by
+      Savings Plans.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get SP coverage
+      command: |
+        aws ce get-savings-plans-coverage \
+          --time-period Start=2025-01-01,End=2025-01-22 \
+          --granularity MONTHLY
+    expected_findings:
+    - Coverage by service
+    - On-demand spend eligible for coverage
+  - id: '4'
+    name: Review purchase recommendations
+    description: |
+      Analyze AWS recommendations for additional Savings Plans
+      purchases.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get SP recommendations
+      command: |
+        aws ce get-savings-plans-purchase-recommendation \
+          --savings-plans-type COMPUTE_SP \
+          --term-in-years ONE_YEAR \
+          --payment-option NO_UPFRONT \
+          --lookback-period-in-days SIXTY_DAYS
+    expected_findings:
+    - Recommended purchases
+    - Estimated savings
+  - id: '5'
+    name: Evaluate SP type strategy
+    description: |
+      Assess whether the mix of Compute vs Instance Savings Plans
+      is optimal for the organization's flexibility needs.
+    duration_estimate: 30 min
+    expected_findings:
+    - SP type distribution
+    - Flexibility assessment
+    - Strategy recommendations
+  - id: '6'
+    name: Calculate optimization opportunity
+    description: |
+      Quantify potential savings from optimizing Savings Plans
+      coverage and utilization.
+    duration_estimate: 20 min
+    expected_findings:
+    - Current savings from SPs
+    - Additional savings potential
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Savings Plans Portfolio
+    - Utilization and Coverage Analysis
+    - Strategy Recommendations
+    - Purchase Recommendations
+  - type: metrics_dashboard
+    metrics:
+    - SP utilization rate
+    - SP coverage rate
+    - Monthly savings from SPs
+    - On-demand spend eligible for SP
+  confidence_guidance:
+    high: 60+ days utilization data with complete SP inventory
+    medium: 30-60 days data
+    low: Less than 30 days data
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-savings-plans-types
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+      reduced_scope: Utilization check only
+    full:
+      included: true
+      priority: 1
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: sp-001
+  item: SP utilization above 85%
+  level: CRITICAL
+  verification: automated
+  expected: utilization >= 85%
+- id: sp-002
+  item: Coverage appropriate for baseline usage
+  level: BLOCKING
+  verification: manual
+  expected: Coverage analysis completed
+- id: sp-003
+  item: SP type strategy documented
+  level: WARNING
+  verification: manual
+  expected: Strategy documented
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - hybrid
+    - aws-primary
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Commitment Based Discounts
+  - framework: AWS Well-Architected
+    controls:
+    - COST-07
+relationships:
+  commonly_combined:
+  - cost-economics.cost-optimization.reserved-instances
+  - cost-economics.cost-optimization.rightsizing
+  - cost-economics.financial-governance.forecasting

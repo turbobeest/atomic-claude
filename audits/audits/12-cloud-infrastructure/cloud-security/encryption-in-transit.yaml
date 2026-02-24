@@ -1,0 +1,360 @@
+audit:
+  id: cloud-infrastructure.cloud-security.encryption-in-transit
+  name: Encryption in Transit
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: cloud-security
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates encryption in transit configuration for cloud services and
+    applications including TLS configuration, certificate management,
+    protocol versions, cipher suites, load balancer SSL policies,
+    database connection encryption, API endpoint security, and
+    internal service communication encryption.
+  why_it_matters: |
+    Encryption in transit protects data from interception during transmission.
+    Without proper TLS configuration, attackers can eavesdrop on sensitive
+    communications, steal credentials, and perform man-in-the-middle attacks.
+    Weak cipher suites and outdated protocols provide false sense of security
+    while remaining vulnerable to known attacks.
+  when_to_run:
+  - Before exposing services to the internet
+  - After TLS certificate renewals or changes
+  - Regular security audits (quarterly minimum)
+  - After vulnerability disclosures affecting TLS
+prerequisites:
+  required_artifacts:
+  - type: endpoints
+    description: List of service endpoints to assess
+  - type: load-balancers
+    description: Load balancer and CDN configurations
+  access_requirements:
+  - Permissions to view load balancer configurations
+  - Access to certificate manager
+  - Network access to test endpoints
+discovery:
+  file_patterns:
+  - glob: '**/alb*.tf'
+    purpose: Application Load Balancer configurations
+  - glob: '**/cloudfront*.tf'
+    purpose: CloudFront configurations
+  - glob: '**/listener*.tf'
+    purpose: Listener configurations
+  - glob: '**/certificate*.tf'
+    purpose: Certificate configurations
+  code_patterns:
+  - pattern: ssl_policy.*ELBSecurityPolicy
+    type: regex
+    scope: config
+    purpose: Find SSL policy configurations
+  - pattern: TLSv1\.[01]
+    type: regex
+    scope: config
+    purpose: Detect outdated TLS versions
+  - pattern: protocol.*HTTPS
+    type: regex
+    scope: config
+    purpose: Find HTTPS configurations
+knowledge_sources:
+  specifications:
+  - id: tls-best-practices
+    name: TLS Best Practices
+    url: https://wiki.mozilla.org/Security/Server_Side_TLS
+    offline_cache: true
+    priority: required
+  - id: aws-elb-ssl
+    name: AWS ELB SSL Policies
+    url: https://docs.aws.amazon.com/elasticloadbalancing/latest/application/create-https-listener.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ssl-labs
+    name: SSL Labs Best Practices
+    url: https://github.com/ssllabs/research/wiki/SSL-and-TLS-Deployment-Best-Practices
+    offline_cache: true
+  - id: nist-tls
+    name: NIST TLS Guidelines
+    url: https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-52r2.pdf
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: aws-cli
+    purpose: Query load balancer SSL settings
+    command: aws elbv2 describe-listeners --load-balancer-arn <arn>
+  - tool: ssllabs-scan
+    purpose: Comprehensive TLS assessment
+    command: ssllabs-scan --grade <domain>
+  - tool: testssl.sh
+    purpose: Command-line TLS testing
+    command: testssl.sh <domain>
+  - tool: nmap
+    purpose: SSL/TLS enumeration
+    command: nmap --script ssl-enum-ciphers -p 443 <host>
+  scripts:
+  - id: tls-audit
+    language: bash
+    purpose: Audit TLS configuration
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== ALB SSL Policies ==="
+      aws elbv2 describe-listeners --query 'Listeners[*].[ListenerArn,Protocol,SslPolicy]' --output table
+      echo "=== Certificate Status ==="
+      aws acm list-certificates --query 'CertificateSummaryList[*].[DomainName,Status]' --output table
+      echo "=== CloudFront SSL ==="
+      aws cloudfront list-distributions --query 'DistributionList.Items[*].[Id,ViewerCertificate.MinimumProtocolVersion]' --output table
+signals:
+  critical:
+  - id: ENC-TRANSIT-CRIT-001
+    signal: Services accessible over unencrypted HTTP
+    evidence_pattern: Listener on port 80 without redirect to HTTPS
+    explanation: |
+      Unencrypted HTTP exposes all data in transit including
+      credentials, session tokens, and sensitive information to
+      interception.
+    remediation: Redirect all HTTP to HTTPS, remove HTTP listeners if not needed
+  - id: ENC-TRANSIT-CRIT-002
+    signal: TLS 1.0 or 1.1 enabled
+    evidence_pattern: SSL policy includes TLSv1.0 or TLSv1.1
+    explanation: |
+      TLS 1.0 and 1.1 have known vulnerabilities (BEAST, POODLE)
+      and are deprecated by all major browsers and compliance
+      frameworks.
+    remediation: Update SSL policy to support only TLS 1.2+
+  - id: ENC-TRANSIT-CRIT-003
+    signal: Expired TLS certificates
+    evidence_pattern: Certificate NotAfter date in the past
+    explanation: |
+      Expired certificates cause service outages and security
+      warnings. Users may be trained to click through warnings.
+    remediation: Renew certificates before expiration, enable auto-renewal
+  high:
+  - id: ENC-TRANSIT-HIGH-001
+    signal: Weak cipher suites enabled
+    evidence_pattern: DES, 3DES, RC4, or export ciphers supported
+    explanation: |
+      Weak ciphers can be broken with modern computing resources.
+      Attackers can force downgrade to weak ciphers.
+    remediation: Use modern security policy supporting only strong ciphers
+  - id: ENC-TRANSIT-HIGH-002
+    signal: Certificate expiring soon
+    evidence_pattern: Certificate expires within 30 days
+    explanation: |
+      Imminent expiration risks service outages if renewal is missed.
+    remediation: Renew certificates, implement automated renewal
+  - id: ENC-TRANSIT-HIGH-003
+    signal: Database connections not encrypted
+    evidence_pattern: RDS connections without SSL enforcement
+    explanation: |
+      Unencrypted database connections expose queries and data
+      to network interception.
+    remediation: Enforce SSL for all database connections
+  medium:
+  - id: ENC-TRANSIT-MED-001
+    signal: HSTS not enabled
+    evidence_pattern: Missing Strict-Transport-Security header
+    remediation: Enable HSTS with appropriate max-age
+  - id: ENC-TRANSIT-MED-002
+    signal: Certificate not using modern algorithms
+    evidence_pattern: RSA < 2048 bits or SHA-1 signatures
+    remediation: Reissue certificates with RSA 2048+ or ECDSA
+  - id: ENC-TRANSIT-MED-003
+    signal: Perfect forward secrecy not supported
+    evidence_pattern: No ECDHE or DHE cipher suites
+    remediation: Enable cipher suites supporting PFS
+  low:
+  - id: ENC-TRANSIT-LOW-001
+    signal: Certificate chain incomplete
+    remediation: Include intermediate certificates in chain
+  - id: ENC-TRANSIT-LOW-002
+    signal: CAA records not configured
+    remediation: Configure DNS CAA records to restrict certificate issuance
+  positive:
+  - id: ENC-TRANSIT-POS-001
+    signal: TLS 1.3 supported with strong ciphers
+  - id: ENC-TRANSIT-POS-002
+    signal: HSTS enabled with long max-age
+  - id: ENC-TRANSIT-POS-003
+    signal: All database connections encrypted
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory public endpoints
+    description: |
+      Identify all public-facing endpoints and load balancers
+      requiring TLS assessment.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List ALB listeners
+      command: aws elbv2 describe-listeners --query 'Listeners[*].[ListenerArn,Protocol,Port,SslPolicy]'
+        --output table
+    - purpose: List CloudFront distributions
+      command: aws cloudfront list-distributions --query 'DistributionList.Items[*].[Id,DomainName,ViewerCertificate]'
+    expected_findings:
+    - Endpoint inventory
+    - Protocol and port mapping
+  - id: '2'
+    name: Assess TLS configuration
+    description: |
+      Analyze TLS settings including protocol versions and cipher suites.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check SSL policy details
+      command: aws elbv2 describe-ssl-policies --names <policy-name>
+    - purpose: Test endpoint TLS
+      command: testssl.sh <domain>
+    expected_findings:
+    - Protocol version support
+    - Cipher suite analysis
+  - id: '3'
+    name: Review certificate status
+    description: |
+      Check certificate validity, expiration, and configuration.
+    duration_estimate: 25 min
+    commands:
+    - purpose: List certificates
+      command: aws acm list-certificates --query 'CertificateSummaryList[*].[DomainName,Status]'
+    - purpose: Get certificate details
+      command: aws acm describe-certificate --certificate-arn <arn>
+    - purpose: Check expiring soon
+      command: aws acm list-certificates --query 'CertificateSummaryList[*]' | jq '.[] | select(.NotAfter
+        < (now + 2592000))'
+    expected_findings:
+    - Certificate inventory
+    - Expiration timeline
+  - id: '4'
+    name: Check database encryption
+    description: |
+      Verify database connections require TLS encryption.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check RDS SSL enforcement
+      command: aws rds describe-db-parameters --db-parameter-group-name <name> --query 'Parameters[?ParameterName==`rds.force_ssl`]'
+    - purpose: Check RDS CA certificate
+      command: aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,CACertificateIdentifier]'
+    expected_findings:
+    - Database SSL enforcement
+    - Certificate status
+  - id: '5'
+    name: Verify internal service encryption
+    description: |
+      Check encryption for internal service communication.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Check VPC endpoint encryption
+      command: aws ec2 describe-vpc-endpoints --query 'VpcEndpoints[*].[VpcEndpointId,ServiceName,PrivateDnsEnabled]'
+    expected_findings:
+    - Internal encryption status
+    - Service mesh TLS (if applicable)
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - TLS Configuration Analysis
+    - Certificate Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct TLS testing results, API queries
+    medium: Configuration analysis without active testing
+    low: Inferred from partial data
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: tls-best-practices
+      priority: required
+    - source_id: aws-elb-ssl
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires endpoint testing
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: encryption-in-transit-001
+  item: All public endpoints use HTTPS
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify no HTTP-only listeners for public services
+  expected: Confirmed by reviewer
+- id: encryption-in-transit-002
+  item: TLS 1.2 minimum enforced
+  level: CRITICAL
+  verification: manual
+  expected: PASS
+  verification_notes: 'Requires variable substitution: testssl.sh <domain> | grep -q ''TLS 1.0'' && echo
+    FAIL || echo PASS'
+- id: encryption-in-transit-003
+  item: No certificates expiring within 30 days
+  level: BLOCKING
+  verification: aws acm list-certificates --query 'CertificateSummaryList[*]' | jq '[.[] | select(.NotAfter
+    < (now + 2592000))] | length' | awk '{print ($1==0)?"PASS":"FAIL"}'
+  expected: PASS
+- id: encryption-in-transit-004
+  item: Database connections enforce SSL
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify rds.force_ssl or equivalent is enabled
+  expected: Confirmed by reviewer
+- id: encryption-in-transit-005
+  item: Strong cipher suites only
+  level: WARNING
+  verification: manual
+  expected: PASS
+  verification_notes: 'Requires variable substitution: testssl.sh <domain> | grep -c ''WEAK'' | awk ''{print
+    ($1==0)?"PASS":"FAIL"}'''
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.7
+  - framework: PCI-DSS
+    controls:
+    - '4.1'
+  - framework: HIPAA
+    controls:
+    - 164.312(e)(1)
+    - 164.312(e)(2)(ii)
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-2
+    - PR.DS-5
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.cloud-security.encryption-at-rest
+  - cloud-infrastructure.service-mesh.service-mesh-security
+  - cloud-infrastructure.containers.container-networking

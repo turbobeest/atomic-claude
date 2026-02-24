@@ -1,0 +1,229 @@
+audit:
+  id: dependency-supply-chain.dependency-inventory.manifest-completeness
+  name: Manifest Completeness Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: dependency-inventory
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: dependencies
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit verifies that dependency manifest files are complete, accurate,
+    and properly structured. It checks for missing dependencies, orphaned entries,
+    proper separation of production and development dependencies, and adherence
+    to manifest file best practices.
+  why_it_matters: |
+    Incomplete or inaccurate manifests lead to deployment failures, security
+    blind spots, and wasted developer time. Missing dependencies cause runtime
+    errors, while orphaned dependencies bloat applications and increase attack
+    surface. Proper manifest hygiene is essential for maintainability.
+  when_to_run:
+  - After removing features or dependencies
+  - Before major releases
+  - During code reviews
+  - When builds behave unexpectedly
+prerequisites:
+  required_artifacts:
+  - type: dependency_manifest
+    description: package.json, requirements.txt, go.mod, etc.
+  - type: source_code
+    description: Application source code for import analysis
+  access_requirements:
+  - Read access to source code and manifest files
+discovery:
+  file_patterns:
+  - glob: '**/package.json'
+    purpose: Find npm manifests
+  - glob: '**/requirements.txt'
+    purpose: Find Python requirements
+  - glob: '**/setup.py'
+    purpose: Find Python setup files
+  - glob: '**/pyproject.toml'
+    purpose: Find Python project files
+  - glob: '**/go.mod'
+    purpose: Find Go modules
+  - glob: '**/Cargo.toml'
+    purpose: Find Rust manifests
+  - glob: '**/pom.xml'
+    purpose: Find Maven POMs
+  - glob: '**/build.gradle'
+    purpose: Find Gradle builds
+knowledge_sources:
+  guides:
+  - id: npm-package-json
+    name: npm package.json Documentation
+    url: https://docs.npmjs.com/cli/v9/configuring-npm/package-json
+  - id: pypa-declaring-deps
+    name: PyPA Declaring Dependencies
+    url: https://packaging.python.org/en/latest/specifications/declaring-project-metadata/
+tooling:
+  analysis_tools:
+  - tool: depcheck
+    purpose: Find unused npm dependencies
+  - tool: npm-check
+    purpose: Check for outdated and unused packages
+  - tool: pip-check
+    purpose: Verify pip dependencies are met
+  - tool: deptry
+    purpose: Find unused Python dependencies
+  - tool: go mod tidy
+    purpose: Clean up Go module dependencies
+signals:
+  critical:
+  - id: DEP-MAN-CRIT-001
+    signal: Dependencies used in code but not declared in manifest
+    evidence_indicators:
+    - Import statements for undeclared packages
+    - Runtime 'module not found' errors
+    explanation: |
+      Missing dependencies cause applications to fail at runtime. This often
+      indicates reliance on globally installed packages or transitive
+      dependencies that may change or disappear.
+    remediation: Add all directly imported packages to manifest
+  high:
+  - id: DEP-MAN-HIGH-001
+    signal: Production dependencies incorrectly marked as dev dependencies
+    evidence_indicators:
+    - Runtime packages in devDependencies
+    - Production failures in minimal installs
+    remediation: Move required packages to production dependencies
+  - id: DEP-MAN-HIGH-002
+    signal: Significant number of unused dependencies declared
+    evidence_indicators:
+    - More than 10% of dependencies unused
+    - Dependencies from removed features still present
+    remediation: Remove unused dependencies to reduce attack surface
+  medium:
+  - id: DEP-MAN-MED-001
+    signal: Dev dependencies included in production dependencies
+    evidence_indicators:
+    - Test frameworks in dependencies
+    - Linters in production bundle
+    remediation: Move dev-only packages to devDependencies
+  - id: DEP-MAN-MED-002
+    signal: Duplicate dependencies with different versions
+    evidence_indicators:
+    - Same package declared multiple times
+    - Version conflicts in resolution
+    remediation: Consolidate to single version
+  low:
+  - id: DEP-MAN-LOW-001
+    signal: Missing manifest metadata fields
+    evidence_indicators:
+    - No description, author, or license in manifest
+    - Empty or minimal manifest
+    remediation: Add recommended metadata fields
+  - id: DEP-MAN-LOW-002
+    signal: Dependencies not grouped logically
+    evidence_indicators:
+    - Random ordering in manifest
+    - No peer dependencies defined where expected
+    remediation: Organize dependencies by type and purpose
+  positive:
+  - id: DEP-MAN-POS-001
+    signal: Manifest accurately reflects actual dependencies
+  - id: DEP-MAN-POS-002
+    signal: Clean separation of dev and production dependencies
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Check for Unused Dependencies
+    description: Identify dependencies declared but not imported
+    commands:
+    - purpose: Find unused npm dependencies
+      command: npx depcheck --json 2>/dev/null | head -100 || echo 'depcheck not applicable'
+    - purpose: Find unused Python dependencies
+      command: deptry . 2>/dev/null || echo 'deptry not applicable'
+  - id: '2'
+    name: Check for Missing Dependencies
+    description: Identify imports without corresponding declarations
+    commands:
+    - purpose: Check npm for missing dependencies
+      command: npx depcheck --json 2>/dev/null | jq '.missing' || echo 'depcheck not applicable'
+    - purpose: Verify Python requirements
+      command: pip check 2>/dev/null || echo 'pip check not applicable'
+  - id: '3'
+    name: Verify Dependency Categories
+    description: Check proper separation of dev and prod dependencies
+    commands:
+    - purpose: List dev vs prod dependencies
+      command: 'cat package.json 2>/dev/null | jq ''{dependencies: .dependencies | keys | length, devDependencies:
+        .devDependencies | keys | length}'' || echo ''package.json not found'''
+  - id: '4'
+    name: Clean Up Module Dependencies
+    description: Use package manager tools to verify completeness
+    commands:
+    - purpose: Tidy Go modules
+      command: go mod tidy -v 2>&1 | head -20 || echo 'go mod not applicable'
+  - id: '5'
+    name: Validate Manifest Structure
+    description: Ensure manifest follows correct format
+    commands:
+    - purpose: Validate package.json
+      command: npm pkg fix --dry-run 2>&1 || echo 'npm pkg not applicable'
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    description: List of missing, unused, and miscategorized dependencies
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Unused Dependencies
+    - Missing Dependencies
+    - Categorization Issues
+    - Recommendations
+closeout_checklist:
+- id: dep-man-001
+  item: No missing dependencies identified
+  level: CRITICAL
+  verification: depcheck/deptry shows no missing
+- id: dep-man-002
+  item: Unused dependencies removed or justified
+  level: REQUIRED
+  verification: depcheck shows no unused
+- id: dep-man-003
+  item: Proper dev/prod separation
+  level: REQUIRED
+  verification: Manual review of categories
+  agent_alternative: Use static analysis tools to generate metrics; check for existing code review comments
+- id: dep-man-004
+  item: Manifest metadata complete
+  level: RECOMMENDED
+  verification: Review manifest fields
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SOC 2
+    control: CC8.1
+    description: Change management accuracy
+  - framework: ISO 27001
+    control: A.14.2.1
+    description: Secure development policy
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.dependency-inventory.dependency-enumeration
+  depends_on: []
+  feeds_into:
+  - dependency-supply-chain.supply-chain-security.sbom-generation

@@ -1,0 +1,333 @@
+# ============================================================
+# AUDIT: Denormalization Justification
+# ============================================================
+# Evaluates whether denormalized data structures have proper
+# justification, maintenance strategies, and consistency mechanisms.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-design.denormalization-justification"
+
+  name: "Denormalization Justification"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-design"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines denormalized data structures to verify they have
+    documented justification, consistency maintenance mechanisms, and
+    appropriate update strategies. It identifies unjustified denormalization
+    that creates data integrity risks and evaluates whether performance
+    benefits outweigh maintenance costs.
+
+  why_it_matters: |
+    Denormalization without proper justification and maintenance creates
+    significant data integrity risks. Redundant data can become inconsistent
+    through update anomalies, partial failures, or concurrent modifications.
+    Each denormalization decision should be explicitly justified with
+    documented performance requirements and consistency guarantees.
+
+  when_to_run:
+    - "During database design review"
+    - "When data inconsistencies are discovered"
+    - "Before adding new denormalized structures"
+    - "During performance optimization initiatives"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-schema"
+      description: "Database schema with denormalized structures"
+    - type: "data-flow-documentation"
+      description: "Documentation of data update patterns"
+
+  access_requirements:
+    - "Read access to database schemas and migrations"
+    - "Access to application code handling denormalized data"
+    - "Performance metrics (recommended)"
+
+discovery:
+  code_patterns:
+    - pattern: "materialized.*view|MATERIALIZED VIEW"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify materialized views (denormalized aggregates)"
+    - pattern: "_count|_total|_sum|_cache|_denorm"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify denormalized counter/aggregate columns"
+    - pattern: "TRIGGER.*UPDATE|after_update|before_save"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify triggers maintaining denormalized data"
+
+  file_patterns:
+    - glob: "**/migrations/**/*.sql"
+      purpose: "Database migration files"
+    - glob: "**/triggers/**/*.sql"
+      purpose: "Database trigger definitions"
+    - glob: "**/views/**/*.sql"
+      purpose: "View and materialized view definitions"
+
+knowledge_sources:
+  guides:
+    - id: "denormalization-patterns"
+      name: "Database Denormalization Patterns"
+      url: "https://www.mongodb.com/docs/manual/data-modeling/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "ddia"
+      title: "Designing Data-Intensive Applications"
+      type: "book"
+      reference: "ISBN: 978-1449373320"
+
+tooling:
+  static_analysis:
+    - tool: "schema-diff"
+      purpose: "Compare normalized vs denormalized structures"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "PostgreSQL materialized view inspection"
+      command: "psql -c \"SELECT matviewname FROM pg_matviews;\""
+
+  scripts:
+    - id: "find-denorm-columns"
+      language: "bash"
+      purpose: "Find columns likely to be denormalized"
+      source: "inline"
+      code: |
+        grep -riE '_(count|total|sum|avg|cache|cached|denorm|snapshot)' \
+          --include='*.sql' --include='*.prisma' . 2>/dev/null
+
+signals:
+  critical:
+    - id: "DENORM-CRIT-001"
+      signal: "Denormalized data without consistency maintenance mechanism"
+      evidence_pattern: "Redundant columns without triggers, events, or sync jobs"
+      explanation: |
+        Denormalized data without automatic consistency maintenance will
+        inevitably become stale or inconsistent. Manual synchronization is
+        error-prone and often forgotten during edge case updates.
+      remediation: "Implement triggers, event handlers, or scheduled sync jobs to maintain consistency"
+
+    - id: "DENORM-CRIT-002"
+      signal: "Multiple update paths for denormalized data"
+      evidence_pattern: "Same denormalized column updated from multiple code locations"
+      explanation: |
+        When denormalized data can be modified through multiple code paths,
+        race conditions and inconsistencies become likely. Each path may
+        have different validation or calculation logic.
+      remediation: "Centralize denormalized data updates through a single service or trigger"
+
+  high:
+    - id: "DENORM-HIGH-001"
+      signal: "Denormalization without documented performance justification"
+      evidence_pattern: "Redundant columns without ADR or design documentation"
+      explanation: |
+        Denormalization adds maintenance burden and consistency risks. Without
+        documented performance requirements, it's impossible to evaluate
+        whether the tradeoff is worthwhile or if the optimization is premature.
+      remediation: "Document performance requirements and measurements justifying each denormalization"
+
+    - id: "DENORM-HIGH-002"
+      signal: "Stale materialized views with infrequent refresh"
+      evidence_pattern: "REFRESH MATERIALIZED VIEW in scheduled jobs > 1 hour"
+      explanation: |
+        Materialized views that refresh infrequently can serve significantly
+        stale data. The acceptable staleness depends on business requirements
+        but should be explicitly documented.
+      remediation: "Implement REFRESH CONCURRENTLY with appropriate frequency or use incremental refresh"
+
+  medium:
+    - id: "DENORM-MED-001"
+      signal: "Denormalized counters without atomic updates"
+      evidence_pattern: "UPDATE table SET count = count + 1 without transaction or lock"
+      remediation: "Use atomic increment operations or database-level counters"
+
+    - id: "DENORM-MED-002"
+      signal: "Cached aggregates without invalidation strategy"
+      evidence_pattern: "Cached values without TTL, version, or event-based invalidation"
+      remediation: "Implement explicit cache invalidation through events or TTL"
+
+  low:
+    - id: "DENORM-LOW-001"
+      signal: "Overly aggressive denormalization for read-heavy workloads"
+
+  positive:
+    - id: "DENORM-POS-001"
+      signal: "Well-documented denormalization with consistency guarantees"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Denormalized Structures"
+      description: |
+        Locate all denormalized data structures including materialized
+        views, computed columns, cached aggregates, and redundant data.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find materialized views"
+          command: "grep -riE 'MATERIALIZED VIEW|CREATE.*VIEW.*AS' --include='*.sql' . 2>/dev/null | head -30"
+        - purpose: "Find denormalized columns by naming convention"
+          command: "grep -riE '_(count|total|sum|cached|denorm|snapshot)' --include='*.sql' --include='*.prisma' --include='*.ts' . 2>/dev/null | head -40"
+        - purpose: "Find redundant foreign key data"
+          command: "grep -riE 'redundant|denormalized|cached.*for.*performance' --include='*.sql' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "List of materialized views"
+        - "Denormalized columns and their purposes"
+
+    - id: "2"
+      name: "Analyze Consistency Mechanisms"
+      description: |
+        Identify how denormalized data is kept consistent with
+        source data through triggers, events, or sync jobs.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find database triggers"
+          command: "grep -riE 'CREATE TRIGGER|AFTER INSERT|AFTER UPDATE|BEFORE INSERT' --include='*.sql' . 2>/dev/null | head -30"
+        - purpose: "Find event handlers for data sync"
+          command: "grep -riE '@EventHandler|@Subscribe|on\\([\"'\\'].*created|updated' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -30"
+        - purpose: "Find scheduled sync jobs"
+          command: "grep -riE '@Scheduled|cron|setInterval.*sync|REFRESH MATERIALIZED' --include='*.ts' --include='*.py' --include='*.java' --include='*.sql' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Trigger definitions maintaining consistency"
+        - "Event handlers synchronizing denormalized data"
+        - "Scheduled jobs for refresh/sync"
+
+    - id: "3"
+      name: "Review Justification Documentation"
+      description: |
+        Check for documented justification of each denormalization
+        decision including performance requirements and measurements.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find ADRs related to denormalization"
+          command: "find . -type f -name '*.md' -exec grep -l -iE 'denormali|performance|caching.*strategy' {} \\; 2>/dev/null | head -20"
+        - purpose: "Find inline documentation"
+          command: "grep -riE 'denormalized.*because|cached.*for.*performance|optimization:' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Architecture Decision Records for denormalization"
+        - "Performance justification documentation"
+
+    - id: "4"
+      name: "Evaluate Update Paths"
+      description: |
+        Trace all code paths that modify denormalized data to
+        identify potential inconsistency risks.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find update statements for denormalized columns"
+          command: "grep -riE 'UPDATE.*SET.*(count|total|cached)' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -30"
+        - purpose: "Find increment operations"
+          command: "grep -riE '\\+\\+|\\+= 1|increment|decrement' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | grep -iE 'count|total' | head -20"
+
+      expected_findings:
+        - "All code paths updating denormalized data"
+        - "Potential race conditions or inconsistencies"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Denormalization Inventory"
+        - "Consistency Analysis"
+        - "Documentation Gaps"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Denormalization clearly identified with observable consistency gaps"
+    medium: "Likely denormalization based on patterns, needs verification"
+    low: "Suspected denormalization based on naming or structure"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "denormalization-patterns"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed schema and code analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "denorm-001"
+    item: "All denormalized structures identified and cataloged"
+    level: "CRITICAL"
+    verification: "grep -riE '_(count|total|sum|cached|denorm)' --include='*.sql' --include='*.prisma' . 2>/dev/null | wc -l | xargs -I{} echo PASS"
+    expected: "PASS"
+
+  - id: "denorm-002"
+    item: "Consistency mechanisms documented for each denormalization"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify each denormalized structure has documented consistency maintenance"
+    expected: "Confirmed by reviewer"
+
+  - id: "denorm-003"
+    item: "Performance justification exists for denormalization decisions"
+    level: "WARNING"
+    verification: "find . -type f -name '*.md' -exec grep -l -i 'denormali' {} \\; 2>/dev/null | wc -l | xargs -I{} test {} -ge 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Data Quality Standards"
+      controls: ["DQ-003", "DQ-004"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-design.normalization-appropriateness"
+    - "data-state-management.schema-design.data-modeling-quality"

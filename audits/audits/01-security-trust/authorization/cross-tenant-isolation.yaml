@@ -1,0 +1,396 @@
+audit:
+  id: security-trust.authorization.cross-tenant-isolation
+  name: Cross-Tenant Isolation Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authorization
+  tier: expert
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    Examines multi-tenant applications for cross-tenant data leakage and
+    isolation violations. Analyzes tenant identification, data partitioning,
+    query scoping, cache isolation, and API boundaries to ensure complete
+    separation between tenants. Covers both logical and physical isolation
+    mechanisms.
+  why_it_matters: |
+    Cross-tenant vulnerabilities allow attackers to access other tenants' data
+    by exploiting shared infrastructure. High-profile incidents include
+    Azurescape (Azure Container Instances), AWS AppSync cross-account access,
+    and Azure cross-tenant data exposure (Tenable). These vulnerabilities
+    combine BOLA with tenant context manipulation for severe data breaches.
+  when_to_run:
+  - Initial multi-tenant security assessment
+  - After changes to tenant isolation logic
+  - Before adding new tenants
+  - During compliance audits (SOC 2, ISO 27001)
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Multi-tenant application source code
+  - type: configuration
+    description: Tenant configuration and isolation settings
+  - type: database_schema
+    description: Database schema showing tenant separation
+  access_requirements:
+  - Read access to source code repository
+  - Access to database schema
+  - Understanding of multi-tenant architecture
+discovery:
+  code_patterns:
+  - pattern: (tenant|tenantId|tenant_id|orgId|organizationId)
+    type: regex
+    scope: source
+    purpose: Identify tenant identification patterns
+  - pattern: (getCurrentTenant|getTenantId|resolveTenant)
+    type: regex
+    scope: source
+    purpose: Find tenant context resolution
+  - pattern: where.*tenant|filter.*tenant|scope.*tenant
+    type: regex
+    scope: source
+    purpose: Locate tenant-scoped queries
+  - pattern: (cache|redis|memcache).*get.*(?!tenant)
+    type: regex
+    scope: source
+    purpose: Find potentially unscoped cache access
+  - pattern: X-Tenant-Id|tenant.*header|subdomain.*tenant
+    type: regex
+    scope: source
+    purpose: Identify tenant identification mechanisms
+  file_patterns:
+  - glob: '**/tenant/**'
+    purpose: Tenant management modules
+  - glob: '**/multitenancy/**'
+    purpose: Multi-tenancy implementation
+  - glob: '**/middleware/**'
+    purpose: Tenant context middleware
+  - glob: '**/repositories/**'
+    purpose: Data access with tenant scoping
+  - glob: '**/schema/**'
+    purpose: Database schema with tenant partitioning
+knowledge_sources:
+  specifications:
+  - id: owasp-tenant-isolation
+    name: OWASP Cloud Tenant Isolation Project
+    url: https://owasp.org/www-project-cloud-tenant-isolation/
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: nist-multitenancy
+    name: NIST Cloud Computing Security
+    url: https://csrc.nist.gov/publications/detail/sp/800-144/final
+    offline_cache: true
+  - id: owasp-authz
+    name: OWASP Authorization Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect missing tenant filters
+    offline_capable: true
+  - tool: CodeQL
+    purpose: Analyze tenant data flow
+    offline_capable: true
+  scripts:
+  - id: tenant-isolation-search
+    language: bash
+    purpose: Find tenant isolation patterns
+    source: inline
+    code: |
+      # Search for tenant-related patterns
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs}" \
+        -E "(tenant|Tenant|TENANT|organization|org)" .
+signals:
+  critical:
+  - id: TENANT-CRIT-001
+    signal: Database query without tenant filter
+    evidence_pattern: findAll\(\)|find\(\{\}\)(?!.*tenantId|where.*tenant)
+    cwe: CWE-639
+    explanation: |
+      Database queries retrieve data without tenant scoping, allowing
+      one tenant to access other tenants' data. All data access must
+      include tenant context filtering.
+    remediation: 'Add tenant filter to all queries: find({tenantId: currentTenant.id})'
+  - id: TENANT-CRIT-002
+    signal: Tenant ID from untrusted source
+    evidence_pattern: tenantId\s*=\s*(req|request|body|params|query)
+    cwe: CWE-639
+    explanation: |
+      Tenant identifier comes from user-controllable input rather than
+      secure session context. Attackers can access other tenants by
+      manipulating the tenant ID parameter.
+    remediation: Derive tenant ID from authenticated session, not user input
+  - id: TENANT-CRIT-003
+    signal: Cross-tenant cache poisoning possible
+    evidence_pattern: cache\.(set|put)\(.*(?!tenantId|tenant)
+    cwe: CWE-524
+    explanation: |
+      Cache keys do not include tenant context, allowing cache poisoning
+      attacks where one tenant's cached data is served to another.
+    remediation: 'Include tenant ID in all cache keys: `${tenantId}:${resourceKey}`'
+  high:
+  - id: TENANT-HIGH-001
+    signal: Missing tenant middleware on routes
+    evidence_pattern: router\.(get|post|put|delete)(?!.*tenant.*middleware)
+    cwe: CWE-639
+    explanation: |
+      API routes do not consistently apply tenant context middleware,
+      creating paths where tenant isolation is not enforced.
+    remediation: Apply tenant context middleware to all multi-tenant routes
+  - id: TENANT-HIGH-002
+    signal: Tenant context not propagated to async operations
+    evidence_pattern: async|await|Promise(?!.*tenant.*context)
+    cwe: CWE-567
+    explanation: |
+      Asynchronous operations lose tenant context, potentially accessing
+      wrong tenant's data in background jobs or callbacks.
+    remediation: Propagate tenant context through async boundaries using AsyncLocalStorage or similar
+  - id: TENANT-HIGH-003
+    signal: Shared connection pool without tenant isolation
+    evidence_pattern: (connectionPool|pool|dataSource)(?!.*tenant)
+    cwe: CWE-639
+    explanation: |
+      Database connection pool is shared without tenant-aware routing,
+      risking cross-tenant data access.
+    remediation: Implement tenant-aware connection routing or use schema-per-tenant
+  medium:
+  - id: TENANT-MED-001
+    signal: Tenant ID in URL path (enumerable)
+    evidence_pattern: \/tenant\/:[a-z]+\/|\/org\/:[a-z]+
+    cwe: CWE-200
+    remediation: Use opaque tenant identifiers; derive from authentication
+  - id: TENANT-MED-002
+    signal: Missing tenant boundary in file storage
+    evidence_pattern: upload|storage|s3.*put(?!.*tenantId|tenant)
+    cwe: CWE-639
+    remediation: Partition file storage by tenant ID
+  low:
+  - id: TENANT-LOW-001
+    signal: Tenant audit logging incomplete
+    evidence_pattern: (log|audit)(?!.*tenantId|tenant)
+    remediation: Include tenant context in all audit logs
+  positive:
+  - id: TENANT-POS-001
+    signal: Row-level security for tenant isolation
+    evidence_pattern: (RLS|row.*level.*security|policy.*tenant)
+  - id: TENANT-POS-002
+    signal: Schema-per-tenant isolation
+    evidence_pattern: (schema|database).*tenant|tenant.*schema
+  - id: TENANT-POS-003
+    signal: Tenant context middleware applied globally
+    evidence_pattern: app\.use\(.*tenant|global.*middleware.*tenant
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map Tenant Identification Mechanisms
+    description: |
+      Identify how tenant context is established and propagated
+      throughout the application.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find tenant identification patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(getCurrentTenant|getTenantId|resolveTenant|tenantContext)" .
+    - purpose: Find tenant header/subdomain extraction
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(X-Tenant-Id|subdomain|host.*tenant)" .
+    expected_findings:
+    - Tenant identification mechanism
+    - Tenant context storage/propagation
+  - id: '2'
+    name: Analyze Data Access Tenant Scoping
+    description: |
+      Verify that all database queries include tenant filtering
+      to prevent cross-tenant data access.
+    duration_estimate: 40 min
+    commands:
+    - purpose: Find database queries
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(findAll|findMany|find|select|where)" . | head -50
+    - purpose: Check for tenant scoping
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(where|filter).*tenantId" .
+    expected_findings:
+    - Tenant scoping on all queries
+    - Repository-level tenant enforcement
+  - id: '3'
+    name: Verify Tenant Source Security
+    description: |
+      Ensure tenant context comes from trusted authentication
+      sources, not user-controllable input.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find tenant from request parameters
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "tenantId.*=.*(req|request|body|params|query)" .
+    - purpose: Find tenant from secure session
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "tenant.*(session|token|jwt|auth)" .
+    expected_findings:
+    - Tenant derived from authenticated session
+    - No user-controllable tenant parameters
+  - id: '4'
+    name: Audit Cache and Shared Resources
+    description: |
+      Verify that caches and shared resources maintain
+      tenant isolation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find cache operations
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(cache|redis|memcache)\\.(get|set|put)" .
+    - purpose: Check for tenant-scoped cache keys
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "cache.*key.*(tenant|\\\$\\{tenant)" .
+    expected_findings:
+    - Tenant-scoped cache keys
+    - Isolated shared resource access
+  - id: '5'
+    name: Review Async Context Propagation
+    description: |
+      Verify tenant context is properly propagated through
+      asynchronous operations.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find async operations
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(async|await|Promise|CompletableFuture|goroutine)" . | head -30
+    - purpose: Check for context propagation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(AsyncLocalStorage|ThreadLocal|Context.*tenant)" .
+    expected_findings:
+    - Async context propagation mechanism
+    - Tenant context in background jobs
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Tenant Isolation Architecture
+    - Data Leakage Risks
+    - Remediation Priorities
+  confidence_guidance:
+    high: Complete tenant isolation verified at all layers
+    medium: Tenant isolation present but gaps identified
+    low: Multi-tenant patterns found but isolation unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-tenant-isolation
+      priority: required
+    - source_id: owasp-authz
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Cross-tenant audit requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: tenant-001
+  item: All queries include tenant filter
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "findAll\|findMany" . | wc -l && \
+    grep -rn --include="*.{js,ts,py,java,go}" "(findAll\|findMany).*tenant" . | wc -l
+  expected: Counts should match
+- id: tenant-002
+  item: Tenant ID not from user input
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "tenantId.*=.*(req|request|body|params)" . | wc -l
+  expected: '0'
+- id: tenant-003
+  item: Cache keys include tenant context
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "cache.*set" . | wc -l && \
+    grep -rn --include="*.{js,ts,py,java,go}" "cache.*tenant" . | wc -l
+  expected: Counts should match or no cache usage
+- id: tenant-004
+  item: Tenant context propagated to async operations
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(AsyncLocalStorage|ThreadLocal|Context\.tenant)" . | wc -l
+  expected: Greater than 0 if async operations exist
+governance:
+  applicable_to:
+    archetypes:
+    - multi-tenant
+    - saas
+    - enterprise
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.3
+  - framework: ISO 27001
+    controls:
+    - A.9.4.1
+  - framework: OWASP
+    controls:
+    - Cloud Tenant Isolation
+relationships:
+  commonly_combined:
+  - security-trust.authorization.bola-prevention
+  - security-trust.authorization.resource-permission
+  - security-trust.data-protection.data-isolation

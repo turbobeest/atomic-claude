@@ -1,0 +1,367 @@
+# ============================================================
+# AUDIT: Regression Coverage
+# ============================================================
+# Evaluates test coverage for preventing regression of previously
+# fixed bugs and ensuring changes don't break existing functionality.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.test-coverage.regression-coverage"
+  name: "Regression Coverage"
+  version: "1.0.0"
+  last_updated: "2026-01-22"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 26
+  subcategory: "test-coverage"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether test suites adequately prevent regression of previously
+    fixed bugs and protect existing functionality from new changes. Analyzes
+    correlation between bug fixes and test additions, reviews regression test
+    naming conventions, and assesses CI regression test execution.
+
+  why_it_matters: |
+    Regression bugs - previously fixed issues that reappear - are particularly
+    damaging to user trust and team morale. Every bug fix should include a
+    test that would have caught the bug and prevents reoccurrence. Without
+    regression test discipline, teams repeatedly fix the same bugs.
+
+  when_to_run:
+    - "After bug fix deployment"
+    - "Before major releases"
+    - "Sprint retrospective test reviews"
+    - "Test suite maintenance cycles"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Source code with test suite"
+    - type: "issue_tracker"
+      description: "Bug tracking history"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Git history for bug fix correlation"
+    - "Issue tracker access"
+
+discovery:
+  file_patterns:
+    - glob: "**/regression/**"
+      purpose: "Regression test directories"
+    - glob: "**/*regression*.{js,ts,py,java}"
+      purpose: "Regression test files"
+
+  code_patterns:
+    - pattern: "regression|ISSUE-|BUG-|FIX-|GH-"
+      type: "regex"
+      scope: "test"
+      purpose: "Tests linked to bug fixes"
+    - pattern: "it\\s*\\(['\"].*fix|test.*fix|regression"
+      type: "regex"
+      scope: "test"
+      purpose: "Test names indicating bug fixes"
+
+knowledge_sources:
+  specifications:
+    - id: "regression-testing"
+      name: "ISTQB Regression Testing"
+      url: "https://glossary.istqb.org/en/term/regression-testing"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "regression-strategy"
+      name: "Regression Testing Strategy Guide"
+      url: "https://www.guru99.com/regression-testing.html"
+      offline_cache: true
+    - id: "tdd-bug-fix"
+      name: "TDD and Bug Fixing"
+      url: "https://www.jamesshore.com/v2/blog/2005/red-green-refactor"
+      offline_cache: true
+
+  learning_resources:
+    - id: "continuous-testing"
+      title: "Continuous Testing for DevOps Professionals"
+      type: "book"
+      reference: "ISBN 978-1484242339"
+
+tooling:
+  static_analysis:
+    - tool: "git log analysis"
+      purpose: "Correlate bug fixes with test additions"
+      offline_capable: true
+    - tool: "Test impact analysis"
+      purpose: "Identify tests covering changed code"
+      offline_capable: true
+
+  scripts:
+    - id: "regression-analyzer"
+      language: "bash"
+      purpose: "Analyze regression test coverage"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Regression Coverage Analysis ==="
+
+        echo "Bug fix commits in last 90 days:"
+        git log --since="90 days ago" --oneline --grep="fix" --grep="bug" | wc -l
+
+        echo ""
+        echo "Test additions in bug fix commits:"
+        for commit in $(git log --since="90 days ago" --oneline --grep="fix" | cut -d' ' -f1 | head -20); do
+          test_files=$(git diff-tree --no-commit-id --name-only -r $commit | grep -E "test|spec" | wc -l)
+          if [ $test_files -gt 0 ]; then
+            echo "$commit: $test_files test files"
+          fi
+        done
+
+        echo ""
+        echo "Tests with regression/fix in name:"
+        grep -r -l -E "(regression|fix|bug)" --include="*.test.*" --include="test_*" . 2>/dev/null | wc -l
+
+signals:
+  critical:
+    - id: "REGRESSION-CRIT-001"
+      signal: "Bug fixes committed without corresponding tests"
+      evidence_pattern: "Fix commits with no test file changes"
+      explanation: |
+        Bug fixes without regression tests will regress. The same bug
+        will return when code changes, causing repeated customer impact
+        and wasted developer time fixing the same issue multiple times.
+      remediation: |
+        Enforce regression test policy:
+        1. Require test changes in bug fix PRs
+        2. Add pre-commit hooks checking for tests
+        3. Code review checklist including regression test verification
+        4. Write the failing test first (TDD approach)
+
+    - id: "REGRESSION-CRIT-002"
+      signal: "Repeated bug fixes for same issue"
+      evidence_pattern: "Multiple commits fixing same issue number"
+      explanation: |
+        Repeated fixes indicate missing or inadequate regression tests.
+        Each fix should make reoccurrence impossible through testing.
+      remediation: |
+        For repeated bugs:
+        1. Analyze why previous fix didn't hold
+        2. Add comprehensive regression tests covering all variants
+        3. Consider integration tests if unit tests insufficient
+        4. Document root cause and prevention
+
+  high:
+    - id: "REGRESSION-HIGH-001"
+      signal: "Regression tests not executed in CI"
+      evidence_pattern: "CI config excludes or skips regression tests"
+      explanation: |
+        Regression tests only prevent regressions if they run on every
+        change. Skipping them defeats their purpose and allows previously
+        fixed bugs to return undetected.
+      remediation: |
+        Ensure CI runs all regression tests:
+        - Remove skip annotations from regression tests
+        - Include regression test directories in CI config
+        - Monitor regression test execution in CI logs
+
+    - id: "REGRESSION-HIGH-002"
+      signal: "Regression tests not linked to issues"
+      evidence_pattern: "Tests lack issue/bug references"
+      explanation: |
+        Without issue links, it's unclear why tests exist and whether
+        they can be safely modified or removed during refactoring.
+        Documentation of the original bug helps maintain the test.
+      remediation: |
+        Link tests to issues:
+        - Include issue number in test name or comment
+        - Reference bug ticket in test description
+        - Create convention: test_issue_123_description()
+
+  medium:
+    - id: "REGRESSION-MED-001"
+      signal: "No regression test directory structure"
+      evidence_pattern: "Regression tests mixed without organization"
+      remediation: "Create dedicated regression test directory or naming convention"
+
+    - id: "REGRESSION-MED-002"
+      signal: "Regression test coverage declining"
+      evidence_pattern: "Ratio of bug fixes to new tests decreasing"
+      remediation: "Reinforce regression test requirements in development process"
+
+  low:
+    - id: "REGRESSION-LOW-001"
+      signal: "Regression tests lack documentation"
+      evidence_pattern: "Tests exist but purpose unclear"
+
+  positive:
+    - id: "REGRESSION-POS-001"
+      signal: "All bug fixes include regression tests"
+      evidence_pattern: "100% correlation between fix commits and test additions"
+
+    - id: "REGRESSION-POS-002"
+      signal: "Regression test suite organized and documented"
+      evidence_pattern: "Clear structure with issue references"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze bug fix history"
+      description: |
+        Review recent bug fix commits to establish baseline for
+        regression test expectations.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Count recent bug fixes"
+          command: "git log --since='6 months ago' --oneline --grep='fix' | wc -l"
+        - purpose: "Sample bug fix commits"
+          command: "git log --since='3 months ago' --oneline --grep='fix' | head -20"
+      expected_findings:
+        - "Bug fix volume"
+        - "Fix commit patterns"
+
+    - id: "2"
+      name: "Correlate fixes with tests"
+      description: |
+        Check whether bug fix commits include corresponding test additions.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check for tests in fix commits"
+          command: |
+            for commit in $(git log --since='3 months ago' --oneline --grep='fix' | cut -d' ' -f1 | head -10); do
+              tests=$(git diff-tree --no-commit-id --name-only -r $commit 2>/dev/null | grep -E 'test|spec' | wc -l)
+              echo "$commit: $tests test files"
+            done
+      expected_findings:
+        - "Test/fix correlation rate"
+        - "Commits lacking tests"
+
+    - id: "3"
+      name: "Review regression test organization"
+      description: |
+        Assess how regression tests are organized and documented.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find regression test files"
+          command: "find . -name '*regression*' -o -name '*fix*' | grep -E 'test|spec' | head -20"
+        - purpose: "Check for issue references in tests"
+          command: "grep -r -E '(ISSUE|BUG|FIX|GH)-[0-9]+' --include='*.test.*' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Regression test structure"
+        - "Issue reference patterns"
+
+    - id: "4"
+      name: "Verify CI execution"
+      description: |
+        Confirm regression tests are included in CI pipeline.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Check CI config for test exclusions"
+          command: "cat .github/workflows/*.yml 2>/dev/null | grep -E 'skip|exclude|ignore' | head -10"
+      expected_findings:
+        - "CI regression test coverage"
+        - "Any excluded tests"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "correlation_report"
+      format: "table"
+      sections:
+        - "Bug Fix to Test Correlation"
+        - "Regression Test Inventory"
+        - "CI Execution Status"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Regression Test Analysis"
+        - "Process Recommendations"
+
+  confidence_guidance:
+    high: "Full git history analysis with commit correlation"
+    medium: "Sample-based analysis of recent fixes"
+    low: "Estimated from test naming patterns"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "regression-testing"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires historical analysis"
+    production:
+      included: true
+      priority: 5
+    full:
+      included: true
+      priority: 7
+
+closeout_checklist:
+  - id: "regression-001"
+    item: "Bug fix commit analysis completed"
+    level: "CRITICAL"
+    verification: "git log --since='3 months ago' --grep='fix' | head -1 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "regression-002"
+    item: "Fix/test correlation measured"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Document percentage of fix commits with tests"
+    expected: "Confirmed by reviewer"
+
+  - id: "regression-003"
+    item: "CI regression execution verified"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm regression tests run in CI"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability"]
+    - framework: "CMMI"
+      controls: ["VER 1.3"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.test-coverage.code-coverage"
+    - "testing-quality-assurance.test-effectiveness.defect-detection-rate"
+    - "testing-quality-assurance.test-effectiveness.test-maintenance-burden"

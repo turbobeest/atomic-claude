@@ -1,0 +1,531 @@
+audit:
+  id: security-trust.data-protection.backup-security
+  name: Backup Security Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: data-protection
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: security
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the security posture of backup systems and processes,
+    focusing on four critical areas:
+
+    1. Encryption of Backups: Verifies that backup data is encrypted both at
+       rest and in transit using strong cryptographic algorithms (AES-256 or
+       equivalent).
+
+    2. Access Controls: Evaluates authentication, authorization, and least
+       privilege principles applied to backup systems and stored backup data.
+
+    3. Offsite Storage: Assesses geographic separation, cloud provider security,
+       and disaster recovery capabilities of offsite backup storage.
+
+    4. Integrity Verification: Reviews mechanisms for detecting tampering,
+       corruption, or unauthorized modification of backup data including
+       checksums, digital signatures, and regular verification testing.
+  why_it_matters: |
+    Backup systems are prime targets for attackers because they contain
+    complete copies of sensitive data, often with weaker security controls
+    than production systems. Compromised backups can lead to:
+
+    - Data breaches exposing historical sensitive information
+    - Ransomware attacks encrypting both production and backup data
+    - Compliance violations (GDPR Article 32, HIPAA, PCI-DSS)
+    - Failed disaster recovery due to corrupted or inaccessible backups
+    - Regulatory fines up to 4% of annual turnover under GDPR
+
+    A backup system without proper security is effectively a liability rather
+    than an asset.
+  when_to_run:
+  - Initial security assessment of backup infrastructure
+  - After changes to backup systems or providers
+  - Following security incidents involving data exfiltration
+  - Annual compliance audits (SOC 2, ISO 27001, GDPR)
+  - Before and after cloud migration projects
+prerequisites:
+  required_artifacts:
+  - type: configuration
+    description: Access to backup system configuration files
+  - type: documentation
+    description: Backup policy and procedure documentation
+  - type: infrastructure
+    description: Backup storage locations and access credentials for review
+  access_requirements:
+  - Read access to backup configuration files and scripts
+  - Access to backup storage inventory and metadata
+  - Read access to IAM policies governing backup systems
+  - Access to backup monitoring and alerting configurations
+discovery:
+  code_patterns:
+  - pattern: (?i)(backup|dump|export).*password\s*[=:]\s*['"][^'"]+['"]
+    type: regex
+    scope: config
+    purpose: Detect hardcoded credentials in backup scripts
+  - pattern: (?i)encryption\s*[=:]\s*(false|none|disabled|off)
+    type: regex
+    scope: config
+    purpose: Identify disabled encryption settings
+  - pattern: (?i)(aws_access_key|aws_secret|api_key|token)\s*[=:]
+    type: regex
+    scope: config
+    purpose: Find exposed cloud credentials in backup configs
+  - pattern: (?i)--no-encrypt|--skip-encryption|encrypt=false
+    type: regex
+    scope: source
+    purpose: Detect backup commands bypassing encryption
+  - pattern: (?i)(chmod|chown).*777|666
+    type: regex
+    scope: source
+    purpose: Find overly permissive backup file permissions
+  file_patterns:
+  - glob: '**/*backup*.{sh,py,yaml,yml,json,conf,config}'
+    purpose: Backup scripts and configuration files
+  - glob: '**/cron.d/*backup*'
+    purpose: Scheduled backup job definitions
+  - glob: '**/*.bak'
+    purpose: Backup files potentially left in accessible locations
+  - glob: '**/docker-compose*.yml'
+    purpose: Container backup volume configurations
+  - glob: '**/terraform/**/*.tf'
+    purpose: Infrastructure-as-code backup configurations
+knowledge_sources:
+  specifications:
+  - id: nist-800-53-cp9
+    name: NIST SP 800-53 Rev 5 - CP-9 System Backup
+    url: https://csf.tools/reference/nist-sp-800-53/r5/cp/cp-9/
+    offline_cache: true
+    priority: required
+  - id: nist-800-111
+    name: NIST SP 800-111 Guide to Storage Encryption
+    url: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-111.pdf
+    offline_cache: true
+    priority: required
+  - id: gdpr-art32
+    name: GDPR Article 32 - Security of Processing
+    url: https://gdpr-info.eu/art-32-gdpr/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: iso27001-a813
+    name: ISO 27001:2022 Annex A 8.13 - Information Backup
+    url: https://hightable.io/iso-27001-annex-a-8-13-information-backup/
+    offline_cache: true
+  - id: cis-controls
+    name: CIS Controls v8 - Data Recovery
+    url: https://www.cisecurity.org/controls
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: grep/ripgrep
+    purpose: Pattern matching for insecure configurations
+    offline_capable: true
+  - tool: trivy
+    purpose: Container and IaC security scanning for backup configs
+    offline_capable: true
+  infrastructure_tools:
+  - tool: aws-cli
+    purpose: Verify S3 backup bucket encryption and policies
+    command: aws s3api get-bucket-encryption --bucket BACKUP_BUCKET
+  - tool: az-cli
+    purpose: Check Azure backup vault encryption settings
+    command: az backup vault show --resource-group RG --name VAULT
+  - tool: gcloud
+    purpose: Verify GCS backup bucket encryption
+    command: gcloud storage buckets describe gs://BACKUP_BUCKET --format='value(encryption)'
+signals:
+  critical:
+  - id: BACKUP-CRIT-001
+    signal: Unencrypted backup storage detected
+    evidence_pattern: (?i)encryption\s*[=:]\s*(false|none|disabled|off)|--no-encrypt
+    cwe: CWE-311
+    explanation: |
+      Backup data stored without encryption exposes all historical data to
+      unauthorized access. This violates GDPR Article 32, NIST CP-9(8),
+      and ISO 27001 Annex A 8.13 requirements for protecting backup
+      confidentiality.
+    remediation: |
+      Enable AES-256 encryption for all backup storage:
+      - AWS S3: Enable SSE-S3 or SSE-KMS encryption
+      - Azure: Enable Storage Service Encryption with customer-managed keys
+      - GCP: Enable Cloud KMS encryption for backup buckets
+      - On-premise: Use encrypted backup tools (restic, borgbackup with encryption)
+  - id: BACKUP-CRIT-002
+    signal: Backup credentials exposed in plaintext
+    evidence_pattern: (?i)(password|secret|key|token)\s*[=:]\s*['"][^'"]{8,}['"]
+    cwe: CWE-312
+    explanation: |
+      Hardcoded credentials in backup scripts or configuration files can be
+      exploited to gain unauthorized access to backup storage, potentially
+      compromising all backed-up data across the organization.
+    remediation: |
+      Remove hardcoded credentials and implement secure alternatives:
+      - Use environment variables or secrets management (Vault, AWS Secrets Manager)
+      - Implement IAM roles and service accounts for cloud backups
+      - Use credential rotation policies
+      - Encrypt configuration files containing any residual credentials
+  - id: BACKUP-CRIT-003
+    signal: Backup storage publicly accessible
+    evidence_pattern: (?i)(public-read|AllUsers|anonymous|\*.*allow)
+    cwe: CWE-284
+    explanation: |
+      Publicly accessible backup storage exposes complete data copies to
+      the internet. This is a severe data breach waiting to happen and
+      violates virtually all data protection regulations.
+    remediation: |
+      Immediately restrict backup storage access:
+      - Remove all public access permissions
+      - Implement private endpoints/VPC access only
+      - Enable access logging to detect unauthorized access attempts
+      - Use presigned URLs with short expiration for authorized access
+  high:
+  - id: BACKUP-HIGH-001
+    signal: No backup integrity verification configured
+    evidence_pattern: (?i)(checksum|hash|verify|integrity)\s*[=:]\s*(false|none|disabled)
+    cwe: CWE-354
+    explanation: |
+      Without integrity verification, corrupted or tampered backups may go
+      undetected until a restore is attempted, potentially during a crisis.
+      NIST CP-9(1) requires testing for reliability and integrity.
+    remediation: |
+      Implement backup integrity verification:
+      - Enable SHA-256 checksums for all backup files
+      - Configure automated integrity verification on backup completion
+      - Implement periodic restoration testing (at least quarterly)
+      - Alert on integrity check failures
+  - id: BACKUP-HIGH-002
+    signal: Overly permissive backup file permissions
+    evidence_pattern: (chmod|chown).*777|666|world-readable|o\+r
+    cwe: CWE-732
+    explanation: |
+      Backup files with world-readable or overly permissive permissions
+      allow any user on the system to access sensitive backup data,
+      violating the principle of least privilege.
+    remediation: |
+      Restrict backup file permissions:
+      - Use chmod 600 or 640 for backup files
+      - Ensure backup directories are 700 or 750
+      - Implement dedicated backup service accounts
+      - Use ACLs for granular access control where needed
+  - id: BACKUP-HIGH-003
+    signal: Missing offsite backup storage
+    evidence_indicators:
+    - All backup paths reference local or single-site storage
+    - No cloud storage or geographic separation configured
+    - DR site not mentioned in backup configuration
+    explanation: |
+      Single-site backup storage creates a single point of failure. Site
+      disasters (fire, flood, ransomware) can destroy both production
+      data and backups simultaneously.
+    remediation: |
+      Implement offsite backup strategy:
+      - Configure 3-2-1 backup rule (3 copies, 2 media types, 1 offsite)
+      - Use geographically separated cloud storage
+      - Implement cross-region replication for critical backups
+      - Document and test offsite recovery procedures
+  - id: BACKUP-HIGH-004
+    signal: Backup retention policy missing or inadequate
+    evidence_indicators:
+    - No retention period defined in configuration
+    - Retention period shorter than regulatory requirements
+    - No versioning or point-in-time recovery capability
+    explanation: |
+      Without proper retention policies, backups may be deleted before
+      compliance requirements are met, or kept indefinitely creating
+      unnecessary data exposure risk.
+    remediation: |
+      Define and implement backup retention policy:
+      - Align retention periods with regulatory requirements (GDPR, HIPAA, etc.)
+      - Implement automated lifecycle policies for backup aging
+      - Enable versioning for point-in-time recovery
+      - Document retention decisions and ensure legal/compliance review
+  medium:
+  - id: BACKUP-MED-001
+    signal: Backup encryption key stored alongside backups
+    evidence_pattern: (?i)(key|password)\.txt|encryption\.key
+    cwe: CWE-321
+    explanation: |
+      Storing encryption keys alongside encrypted backups defeats the
+      purpose of encryption - an attacker gaining access to backup storage
+      automatically has the decryption capability.
+    remediation: |
+      Separate key management from backup storage:
+      - Use dedicated key management systems (AWS KMS, HashiCorp Vault)
+      - Store keys in different access domains than backup data
+      - Implement key rotation policies
+      - Maintain secure key recovery procedures
+  - id: BACKUP-MED-002
+    signal: No backup access logging configured
+    evidence_pattern: (?i)logging\s*[=:]\s*(false|none|disabled)
+    cwe: CWE-778
+    explanation: |
+      Without access logging, unauthorized backup access or exfiltration
+      cannot be detected or investigated. This hampers incident response
+      and compliance with audit trail requirements.
+    remediation: |
+      Enable comprehensive backup access logging:
+      - Enable cloud storage access logging (S3 access logs, Azure Storage Analytics)
+      - Log all backup read/write/delete operations
+      - Send logs to SIEM for correlation and alerting
+      - Implement log retention matching backup retention
+  - id: BACKUP-MED-003
+    signal: Weak encryption algorithm in use
+    evidence_pattern: (?i)(des|3des|rc4|md5|sha1)(?!-)
+    cwe: CWE-327
+    explanation: |
+      Deprecated encryption algorithms (DES, 3DES, RC4) or weak hashing
+      (MD5, SHA1) do not provide adequate protection for backup data and
+      may violate compliance requirements.
+    remediation: |
+      Upgrade to modern cryptographic algorithms:
+      - Use AES-256-GCM for encryption
+      - Use SHA-256 or SHA-3 for integrity verification
+      - Implement TLS 1.2+ for backups in transit
+      - Audit and replace all legacy cryptographic usage
+  low:
+  - id: BACKUP-LOW-001
+    signal: Backup schedule not aligned with RPO requirements
+    evidence_indicators:
+    - Backup frequency is daily but RPO requires hourly
+    - No documented RPO/RTO analysis for backup configuration
+    remediation: |
+      Review and align backup schedules with business continuity requirements.
+      Document RPO/RTO decisions and ensure backup frequency meets them.
+  - id: BACKUP-LOW-002
+    signal: Backup documentation incomplete or outdated
+    evidence_indicators:
+    - Backup procedures not documented
+    - Documentation does not match current configuration
+    - Recovery procedures not tested or documented
+    remediation: |
+      Update backup documentation to include current configurations,
+      recovery procedures, and contact information for backup system owners.
+  positive:
+  - id: BACKUP-POS-001
+    signal: Encryption enabled for all backup storage
+    evidence_indicators:
+    - AES-256 encryption configured for backup data at rest
+    - TLS 1.2+ configured for backup data in transit
+    - Key management properly separated from backup storage
+  - id: BACKUP-POS-002
+    signal: Comprehensive backup integrity verification in place
+    evidence_indicators:
+    - SHA-256 checksums generated and verified for backups
+    - Regular restoration testing scheduled and documented
+    - Automated alerting on integrity check failures
+  - id: BACKUP-POS-003
+    signal: Robust offsite backup strategy implemented
+    evidence_indicators:
+    - 3-2-1 backup rule followed
+    - Geographic separation of backup copies
+    - Cross-region replication configured and tested
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Discover Backup Configuration
+    description: |
+      Identify all backup-related configuration files, scripts, and
+      infrastructure definitions across the codebase and infrastructure.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find backup configuration files
+      command: find . -type f \( -name '*backup*' -o -name '*dump*' \) 2>/dev/null | head -50
+    - purpose: Search for backup-related code patterns
+      command: grep -r -l -i 'backup\|dump\|snapshot' --include='*.yaml' --include='*.yml' --include='*.sh'
+        --include='*.py' . 2>/dev/null | head -30
+    expected_findings:
+    - List of backup scripts and configuration files
+    - Infrastructure-as-code defining backup resources
+    - Cron jobs or scheduled tasks for backups
+  - id: '2'
+    name: Verify Encryption Configuration
+    description: |
+      Examine all discovered backup configurations for encryption settings,
+      verifying both at-rest and in-transit encryption is properly enabled.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check for unencrypted backup configurations
+      command: grep -r -i -n 'encryption.*false\|encrypt.*none\|--no-encrypt' . 2>/dev/null
+    - purpose: Verify AWS S3 bucket encryption (if applicable)
+      command: aws s3api get-bucket-encryption --bucket ${BACKUP_BUCKET} 2>/dev/null || echo 'Bucket encryption
+        not configured or access denied'
+    expected_findings:
+    - Encryption status for each backup storage location
+    - Encryption algorithms in use
+    - Any gaps in encryption coverage
+  - id: '3'
+    name: Assess Access Controls
+    description: |
+      Review authentication, authorization, and access control mechanisms
+      protecting backup systems and stored backup data.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find hardcoded credentials
+      command: grep -r -i -n 'password\s*=\|secret\s*=\|key\s*=' --include='*backup*' . 2>/dev/null
+    - purpose: Check backup file permissions
+      command: find . -name '*.bak' -o -name '*.backup' -o -name '*.dump' 2>/dev/null | xargs ls -la 2>/dev/null
+        | head -20
+    expected_findings:
+    - Credential management practices for backup systems
+    - Permission settings on backup files
+    - IAM policies governing backup access
+  - id: '4'
+    name: Evaluate Offsite Storage
+    description: |
+      Verify geographic separation of backups and disaster recovery
+      capabilities of offsite storage.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Identify backup storage locations
+      command: grep -r -i -n 's3://\|gs://\|azure://\|/backup\|backup.*path' . 2>/dev/null | head -30
+    expected_findings:
+    - Number of backup storage locations
+    - Geographic distribution of backups
+    - Cloud provider redundancy settings
+  - id: '5'
+    name: Review Integrity Verification
+    description: |
+      Assess mechanisms for verifying backup integrity including checksums,
+      signatures, and restoration testing procedures.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find integrity verification configuration
+      command: grep -r -i -n 'checksum\|hash\|verify\|integrity\|sha256\|md5' --include='*backup*' . 2>/dev/null
+    expected_findings:
+    - Integrity verification mechanisms in use
+    - Restoration testing schedule and procedures
+    - Alerting on integrity failures
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Encryption Assessment
+    - Access Control Findings
+    - Offsite Storage Evaluation
+    - Integrity Verification Status
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence from configuration files and infrastructure, verified through multiple methods
+    medium: Configuration indicates practice but verification limited, or partial coverage found
+    low: Inference based on absence of evidence or limited access to systems
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: nist-800-53-cp9
+      priority: required
+    - source_id: gdpr-art32
+      priority: required
+    - source_id: iso27001-a813
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Comprehensive backup security review requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: backup-001
+  item: All backup storage locations use encryption at rest
+  level: CRITICAL
+  verification: |
+    grep -r -i 'encryption.*false\|encrypt.*none\|--no-encrypt' . 2>/dev/null | wc -l | xargs -I {} sh -c '[ {} -eq 0 ] && echo PASS || echo FAIL'
+  expected: PASS
+- id: backup-002
+  item: No hardcoded credentials in backup configurations
+  level: CRITICAL
+  verification: |
+    grep -r -E "(password|secret|key|token)\s*[=:]\s*['\"][^'\"]{8,}['\"]" --include='*backup*' . 2>/dev/null | grep -v '#' | wc -l | xargs -I {} sh -c '[ {} -eq 0 ] && echo PASS || echo FAIL'
+  expected: PASS
+- id: backup-003
+  item: Backup storage not publicly accessible
+  level: CRITICAL
+  verification: |
+    grep -r -i 'public-read\|AllUsers\|anonymous' --include='*.tf' --include='*.yaml' --include='*.yml' . 2>/dev/null | wc -l | xargs -I {} sh -c '[ {} -eq 0 ] && echo PASS || echo FAIL'
+  expected: PASS
+- id: backup-004
+  item: Backup integrity verification enabled
+  level: BLOCKING
+  verification: manual
+  verification_notes: Reviewer should confirm checksums or hashes are generated and verified for backups
+  expected: Confirmed by reviewer
+- id: backup-005
+  item: Offsite backup storage configured
+  level: BLOCKING
+  verification: manual
+  verification_notes: Reviewer should confirm backups are stored in geographically separated locations
+  expected: Confirmed by reviewer
+- id: backup-006
+  item: Backup file permissions are restrictive
+  level: WARNING
+  verification: |
+    find . -name '*.bak' -o -name '*.backup' 2>/dev/null | xargs ls -la 2>/dev/null | grep -E 'rw.rw.rw|rwxrwxrwx' | wc -l | xargs -I {} sh -c '[ {} -eq 0 ] && echo PASS || echo FAIL'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST SP 800-53
+    controls:
+    - CP-9
+    - CP-9(1)
+    - CP-9(3)
+    - CP-9(5)
+    - CP-9(8)
+    - SC-28
+  - framework: GDPR
+    controls:
+    - Article 32
+  - framework: ISO 27001:2022
+    controls:
+    - A.8.13
+    - A.8.24
+  - framework: CIS Controls v8
+    controls:
+    - '11.1'
+    - '11.2'
+    - '11.3'
+    - '11.4'
+    - '11.5'
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.7
+    - A1.2
+relationships:
+  commonly_combined:
+  - security-trust.data-protection.encryption-at-rest
+  - security-trust.secrets-management.secrets-storage
+  - security-trust.cryptography.key-management

@@ -1,0 +1,334 @@
+audit:
+  id: architecture-design.extensibility-evolution.backward-compatibility-design
+  name: Backward Compatibility Design Assessment
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: architecture-design
+  category_number: 7
+  subcategory: extensibility-evolution
+  tier: expert
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - architecture
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates architectural support for backward compatibility -
+    the ability to evolve APIs, data formats, and interfaces without
+    breaking existing clients. It assesses versioning strategies, deprecation
+    practices, and evolution patterns.
+  why_it_matters: |
+    Poor backward compatibility causes:
+    - Client breakage requiring coordinated upgrades
+    - Forced big-bang migrations
+    - Loss of customer trust
+    - Inability to evolve independently
+    - API adoption reluctance
+    Good compatibility design enables gradual, safe evolution.
+  when_to_run:
+  - Before API/schema changes
+  - During version planning
+  - When breaking changes are proposed
+  - During public API design
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: API and schema source code
+  - type: api_definitions
+    description: API contracts (OpenAPI, protobuf)
+  - type: version_control
+    description: History of API changes
+  access_requirements:
+  - Read access to source code
+  - Access to API documentation
+discovery:
+  code_patterns:
+  - pattern: '@Deprecated|@deprecated|DEPRECATED'
+    type: regex
+    scope: source
+    purpose: Find deprecation markers
+  - pattern: /v[0-9]+/|/api/v[0-9]
+    type: regex
+    scope: source
+    purpose: Find API versioning
+  - pattern: 'default\s*:|optional\s+|\?:'
+    type: regex
+    scope: source
+    purpose: Find optional fields for evolution
+  file_patterns:
+  - glob: '**/openapi.yaml'
+    purpose: REST API definitions
+  - glob: '**/*.proto'
+    purpose: Protocol buffer schemas
+  - glob: '**/CHANGELOG.md'
+    purpose: Change documentation
+knowledge_sources:
+  specifications:
+  - id: semver
+    name: Semantic Versioning
+    url: https://semver.org/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: api-evolution
+    name: Evolving HTTP APIs
+    url: https://www.mnot.net/blog/2012/12/04/api-evolution
+    offline_cache: true
+  - id: protobuf-evolution
+    name: Protocol Buffer Evolution
+    url: https://developers.google.com/protocol-buffers/docs/overview#updating
+    offline_cache: true
+  - id: refactoring-fowler
+    name: Refactoring Catalog
+    url: https://refactoring.com/catalog/
+    offline_cache: true
+  - id: clean-architecture
+    name: Clean Architecture
+    url: https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html
+    offline_cache: true
+  learning_resources:
+  - id: api-design
+    title: API Design Patterns
+    type: book
+    reference: JJ Geewax
+tooling:
+  static_analysis:
+  - tool: openapi-diff
+    purpose: Compare OpenAPI versions for breaking changes
+    offline_capable: true
+  - tool: buf
+    purpose: Check protobuf backward compatibility
+    offline_capable: true
+  - tool: api-compat
+    purpose: Analyze API compatibility
+    offline_capable: true
+  scripts:
+  - id: compatibility-checker
+    language: bash
+    purpose: Check compatibility patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Deprecation Markers ==="
+      grep -rn "@Deprecated\|@deprecated\|DEPRECATED" --include="*.java" --include="*.ts" | head -30
+
+      echo "=== API Versions ==="
+      grep -rn "/v[0-9]/\|/api/v[0-9]" --include="*.java" --include="*.yaml" | head -20
+
+      echo "=== Optional Fields ==="
+      grep -rn "optional\|nullable\|@Nullable" --include="*.java" --include="*.proto" | head -20
+signals:
+  critical:
+  - id: COMPAT-CRIT-001
+    signal: Breaking change without versioning
+    evidence_pattern: Required field added without new API version
+    explanation: |
+      Adding required fields, removing fields, or changing types without
+      versioning breaks all existing clients immediately with no migration path.
+    remediation: Version the API; make new fields optional with defaults
+  - id: COMPAT-CRIT-002
+    signal: No API versioning strategy
+    evidence_pattern: API has no version in URL, header, or media type
+    explanation: |
+      Without versioning, any change is potentially breaking. There's
+      no way to evolve the API while supporting existing clients.
+    remediation: Implement versioning (URL path, header, or media type)
+  high:
+  - id: COMPAT-HIGH-001
+    signal: Deprecated API without replacement
+    evidence_pattern: '@Deprecated without pointing to alternative'
+    explanation: |
+      Deprecation without clear migration path leaves clients stranded.
+      They know something will break but not how to fix it.
+    remediation: Document replacement API in deprecation notice
+  - id: COMPAT-HIGH-002
+    signal: Field renaming in serialized formats
+    evidence_pattern: JSON/protobuf field renamed without compatibility
+    explanation: |
+      Field renames in wire formats break deserialization for clients
+      using old field names.
+    remediation: Keep old name as alias; use field numbers in protobuf
+  medium:
+  - id: COMPAT-MED-001
+    signal: No deprecation period defined
+    evidence_pattern: Items deprecated without removal timeline
+    remediation: Define deprecation policy with clear timelines
+  - id: COMPAT-MED-002
+    signal: Breaking changes in minor versions
+    evidence_pattern: API breaks between 1.1 and 1.2
+    remediation: Follow semver; breaking changes only in major versions
+  low:
+  - id: COMPAT-LOW-001
+    signal: Inconsistent versioning format
+    remediation: Standardize version format across APIs
+  positive:
+  - id: COMPAT-POS-001
+    signal: Clear API versioning strategy
+  - id: COMPAT-POS-002
+    signal: Deprecation notices with migration guides
+  - id: COMPAT-POS-003
+    signal: Backward compatible schema evolution
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Assess versioning strategy
+    description: |
+      Identify how APIs and schemas are versioned.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find API versions in URLs
+      command: grep -rn '/v[0-9]/' --include='*.java' --include='*.yaml' | head -30
+    - purpose: Find version headers
+      command: grep -rn 'Accept-Version\|API-Version\|X-Version' --include='*.java' --include='*.yaml'
+        | head -20
+    expected_findings:
+    - Versioning approach
+    - Version consistency
+  - id: '2'
+    name: Review deprecation practices
+    description: |
+      Check how deprecated features are marked and communicated.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find deprecations
+      command: grep -rn '@Deprecated' --include='*.java' -A2 | head -40
+    - purpose: Check deprecation documentation
+      command: grep -rn 'deprecated.*since\|deprecated.*use\|deprecated.*replaced' --include='*.java'
+        | head -20
+    expected_findings:
+    - Deprecation coverage
+    - Migration guidance
+  - id: '3'
+    name: Analyze schema evolution patterns
+    description: |
+      Check if schemas support backward compatible evolution.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find optional fields
+      command: grep -rn 'optional\|@Nullable\|?:' --include='*.proto' --include='*.ts' --include='*.java'
+        | head -30
+    - purpose: Find default values
+      command: grep -rn 'default.*=\|@Default' --include='*.java' --include='*.proto' | head -20
+    expected_findings:
+    - Optional field usage
+    - Default value patterns
+  - id: '4'
+    name: Review breaking change history
+    description: |
+      Analyze git history for breaking changes and how they
+      were handled.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find breaking change commits
+      command: git log --oneline -n 200 | grep -iE 'break|remove|delete.*api\|rename' | head -20
+    - purpose: Check changelog for breaking
+      command: grep -iE 'breaking|incompatible' $(find . -name 'CHANGELOG*') 2>/dev/null | head -20
+    expected_findings:
+    - Breaking change frequency
+    - Communication of breaks
+  - id: '5'
+    name: Develop compatibility recommendations
+    description: |
+      Based on findings, recommend improvements to
+      compatibility practices.
+    duration_estimate: 30 min
+    questions:
+    - Is versioning sufficient for planned evolution?
+    - Are deprecations communicated clearly?
+    - Do schemas support safe evolution?
+    expected_findings:
+    - Improvement recommendations
+    - Policy suggestions
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: compatibility_report
+    format: prose
+    sections:
+    - Versioning Strategy
+    - Deprecation Practices
+    - Evolution Patterns
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Compatibility Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Clear compatibility issue identified
+    medium: Practice could improve
+    low: Minor enhancement opportunity
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: semver
+      priority: required
+    - source_id: api-evolution
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: compat-001
+  item: API versioning strategy defined and implemented
+  level: CRITICAL
+  verification: manual
+  verification_notes: All APIs have version in URL, header, or media type
+  expected: Confirmed by reviewer
+- id: compat-002
+  item: No breaking changes in minor versions
+  level: CRITICAL
+  verification: manual
+  verification_notes: Semver followed; breaks only in major
+  expected: Confirmed by reviewer
+- id: compat-003
+  item: Deprecations have migration path documented
+  level: BLOCKING
+  verification: manual
+  verification_notes: All @Deprecated have replacement documented
+  expected: Confirmed by reviewer
+- id: compat-004
+  item: Schemas use optional fields for evolution
+  level: WARNING
+  verification: manual
+  verification_notes: New fields are optional with defaults
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - api
+    - library
+    - framework
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Compatibility
+    - Coexistence
+relationships:
+  commonly_combined:
+  - architecture-design.extensibility-evolution.change-impact-analysis
+  - architecture-design.design-principles.open-closed-principle
+  - architecture-design.coupling.interface-coupling

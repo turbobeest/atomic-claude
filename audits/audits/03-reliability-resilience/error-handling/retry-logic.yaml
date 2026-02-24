@@ -1,0 +1,299 @@
+audit:
+  id: reliability-resilience.error-handling.retry-logic
+  name: Retry Logic Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: error-handling
+  tier: phd
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines retry mechanisms for handling transient failures including
+    network timeouts, service unavailability, and rate limiting. Reviews
+    implementation of exponential backoff with jitter, maximum retry limits,
+    idempotency handling, and integration with circuit breakers. Ensures
+    retries don't amplify failures or cause cascade effects.
+  why_it_matters: |
+    Proper retry logic is essential for resilient distributed systems.
+    Without it, transient failures become permanent failures. However,
+    poorly implemented retries can amplify failures, create retry storms,
+    or overwhelm recovering services. The difference between graceful
+    degradation and cascading failure often lies in retry implementation.
+  when_to_run:
+  - Before deploying to production
+  - After adding new external integrations
+  - During resilience reviews
+  - After outage post-mortems
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with external integrations
+  - type: architecture_docs
+    description: System architecture showing external dependencies
+  access_requirements:
+  - Read access to source code
+  - Understanding of external service dependencies
+discovery:
+  code_patterns:
+  - pattern: retry|Retry|RETRY
+    type: keyword
+    scope: source
+    purpose: Find retry implementations
+  - pattern: backoff|Backoff|exponential
+    type: keyword
+    scope: source
+    purpose: Find backoff implementations
+  - pattern: maxRetries|max_retries|retryCount|retry_count
+    type: regex
+    scope: source
+    purpose: Find retry limit configurations
+  - pattern: jitter|randomize|randomDelay
+    type: keyword
+    scope: source
+    purpose: Find jitter implementations
+  - pattern: while.*retry|for.*retry
+    type: regex
+    scope: source
+    purpose: Find loop-based retry patterns
+  file_patterns:
+  - glob: '**/client/**/*.{java,ts,go,py}'
+    purpose: HTTP/API client implementations
+  - glob: '**/integration/**/*.{java,ts,go,py}'
+    purpose: External integration code
+  - glob: '**/retry/**/*.{java,ts,go,py}'
+    purpose: Dedicated retry modules
+  - glob: '**/config/**/*retry*.{yaml,json,properties}'
+    purpose: Retry configuration
+knowledge_sources:
+  guides:
+  - id: aws-retry
+    name: AWS Exponential Backoff and Jitter
+    url: https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+    offline_cache: true
+  - id: google-retry
+    name: Google Cloud Retry Strategy
+    url: https://cloud.google.com/storage/docs/retry-strategy
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  papers:
+  - id: thundering-herd
+    title: Avoiding Thundering Herd Problems
+    url: https://brooker.co.za/blog/2022/02/28/retries.html
+  learning_resources:
+  - id: release-it
+    title: Release It! - Stability Patterns
+    type: book
+    reference: 'ISBN: 978-1680502398'
+tooling:
+  static_analysis:
+  - tool: SonarQube
+    purpose: Detect common retry anti-patterns
+    offline_capable: false
+  scripts:
+  - id: analyze-retry-patterns
+    language: bash
+    purpose: Find and analyze retry implementations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Retry Configurations ==="
+      grep -rn "maxRetries\|max_retries\|retryCount\|retry_count" --include="*.java" --include="*.ts" --include="*.go" --include="*.py" . 2>/dev/null | head -20
+      echo ""
+      echo "=== Backoff Implementations ==="
+      grep -rn "backoff\|Backoff\|exponential" --include="*.java" --include="*.ts" --include="*.go" --include="*.py" . 2>/dev/null | head -20
+      echo ""
+      echo "=== Potential Retry Loops Without Backoff ==="
+      grep -rn "while.*retry\|for.*retry" --include="*.java" --include="*.ts" --include="*.go" --include="*.py" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: RETRY-CRIT-001
+    signal: Infinite or unbounded retry loops
+    evidence_pattern: while\s*\(true\).*retry|for\s*\(;;\)
+    explanation: |
+      Unbounded retry loops can cause resource exhaustion, prevent
+      graceful degradation, and amplify failures across the system.
+    remediation: Always configure maximum retry attempts with appropriate limits
+  - id: RETRY-CRIT-002
+    signal: Retries without backoff on external services
+    evidence_pattern: retry.*sleep\(0\)|retry(?!.*backoff)
+    explanation: |
+      Retrying immediately without backoff can overwhelm recovering
+      services and create thundering herd problems.
+    remediation: Implement exponential backoff with jitter for all retries
+  high:
+  - id: RETRY-HIGH-001
+    signal: No jitter in retry backoff
+    evidence_pattern: backoff(?!.*jitter|.*random)
+    explanation: |
+      Without jitter, retries from multiple clients synchronize and
+      create thundering herd problems on the target service.
+    remediation: Add randomized jitter (typically 0-100% of backoff interval)
+  - id: RETRY-HIGH-002
+    signal: Non-idempotent operations being retried
+    evidence_pattern: retry.*POST|retry.*create|retry.*insert
+    explanation: |
+      Retrying non-idempotent operations can cause duplicate data,
+      double-charging, or other consistency issues.
+    remediation: Ensure idempotency via idempotency keys or only retry idempotent operations
+  medium:
+  - id: RETRY-MED-001
+    signal: Inconsistent retry configuration across services
+    remediation: Standardize retry policies and make them configurable
+  - id: RETRY-MED-002
+    signal: Retry on all errors instead of transient ones
+    remediation: Only retry transient failures; fail fast on permanent errors
+  - id: RETRY-MED-003
+    signal: No retry metrics or observability
+    remediation: Add metrics for retry attempts, successes, and exhaustion
+  low:
+  - id: RETRY-LOW-001
+    signal: Hardcoded retry parameters
+    remediation: Make retry configuration externalized and tunable
+  positive:
+  - id: RETRY-POS-001
+    signal: Exponential backoff with jitter implemented
+  - id: RETRY-POS-002
+    signal: Retry policies distinguish transient from permanent failures
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory retry mechanisms
+    description: |
+      Identify all retry implementations across the codebase including
+      library usage and custom implementations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find retry implementations
+      command: grep -rln 'retry\|Retry' --include='*.java' --include='*.ts' --include='*.go' --include='*.py'
+        . 2>/dev/null
+    expected_findings:
+    - List of retry implementations
+    - Libraries in use for retry logic
+  - id: '2'
+    name: Analyze backoff strategies
+    description: |
+      Review backoff implementations to verify exponential backoff
+      and jitter are properly configured.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find backoff configurations
+      command: grep -rn -A5 'backoff\|Backoff' --include='*.java' --include='*.ts' --include='*.go' --include='*.py'
+        . 2>/dev/null | head -60
+    expected_findings:
+    - Backoff strategy quality
+    - Jitter implementation status
+  - id: '3'
+    name: Check retry limits and exhaustion handling
+    description: |
+      Verify maximum retry limits are configured and there's proper
+      handling when retries are exhausted.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find retry limit configurations
+      command: grep -rn 'maxRetries\|max_retries\|MaxRetries\|MAX_RETRIES' --include='*.java' --include='*.ts'
+        --include='*.go' --include='*.py' --include='*.yaml' --include='*.json' . 2>/dev/null
+    expected_findings:
+    - Retry limits configured
+    - Exhaustion handling patterns
+  - id: '4'
+    name: Verify idempotency handling
+    description: |
+      Check that non-idempotent operations are either not retried
+      or have idempotency mechanisms in place.
+    duration_estimate: 30 min
+    expected_findings:
+    - Idempotency patterns in use
+    - Risk of duplicate operations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Retry Pattern Analysis
+    - Risk Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence of problematic retry patterns
+    medium: Pattern suggests potential issues
+    low: Requires load testing to confirm behavior
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: aws-retry
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough analysis of retry patterns
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: retry-logic-001
+  item: All retries have maximum attempt limits
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review all retry implementations to ensure max attempts are configured
+  expected: Confirmed by reviewer
+- id: retry-logic-002
+  item: Exponential backoff implemented for external service calls
+  level: CRITICAL
+  verification: grep -rn 'exponential\|Exponential' --include='*.java' --include='*.ts' --include='*.go'
+    --include='*.py' . 2>/dev/null | wc -l | xargs -I{} sh -c 'if [ {} -gt 0 ]; then echo PASS; else echo
+    FAIL; fi'
+  expected: PASS
+- id: retry-logic-003
+  item: Jitter included in backoff calculations
+  level: BLOCKING
+  verification: grep -rni 'jitter\|random.*delay\|randomize' --include='*.java' --include='*.ts' --include='*.go'
+    --include='*.py' . 2>/dev/null | wc -l | xargs -I{} sh -c 'if [ {} -gt 0 ]; then echo PASS; else echo
+    FAIL; fi'
+  expected: PASS
+- id: retry-logic-004
+  item: Retry metrics are captured
+  level: WARNING
+  verification: manual
+  verification_notes: Verify retry attempts and outcomes are logged or metered
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Retry Budgets
+    - Exponential Backoff
+relationships:
+  commonly_combined:
+  - reliability-resilience.error-handling.partial-failure-handling
+  - reliability-resilience.error-handling.error-rate-monitoring

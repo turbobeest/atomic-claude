@@ -1,0 +1,397 @@
+# ============================================================
+# AUDIT FILE: Observability Integration
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.service-mesh.observability-integration"
+  name: "Observability Integration"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "service-mesh"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates service mesh observability integration including distributed
+    tracing, metrics collection, access logging, service graph visualization,
+    and integration with monitoring platforms. Examines how the mesh provides
+    visibility into service communication, performance, and errors without
+    requiring application changes.
+
+  why_it_matters: |
+    Observability is critical for understanding distributed system behavior,
+    debugging issues, and monitoring performance. Service mesh provides
+    infrastructure-level observability without application instrumentation.
+    Poor observability integration leads to blind spots in monitoring,
+    slower incident resolution, and missed performance optimization
+    opportunities.
+
+  when_to_run:
+    - "After service mesh installation or upgrades"
+    - "When debugging performance or connectivity issues"
+    - "During observability platform integration"
+    - "Before production deployments"
+
+prerequisites:
+  required_artifacts:
+    - type: "service-mesh"
+      description: "Running service mesh with observability features"
+    - type: "observability-stack"
+      description: "Prometheus, Jaeger/Zipkin, Grafana or equivalents"
+
+  access_requirements:
+    - "Access to mesh telemetry configuration"
+    - "Access to tracing backend"
+    - "Access to metrics endpoint"
+
+discovery:
+  file_patterns:
+    - glob: "**/telemetry*.yaml"
+      purpose: "Mesh telemetry configuration"
+    - glob: "**/prometheus*.yaml"
+      purpose: "Prometheus configurations"
+    - glob: "**/jaeger*.yaml"
+      purpose: "Jaeger tracing configurations"
+    - glob: "**/envoyfilter*.yaml"
+      purpose: "Envoy filter configurations"
+
+  code_patterns:
+    - pattern: "accessLogFile"
+      type: "keyword"
+      scope: "config"
+      purpose: "Access logging configuration"
+    - pattern: "tracing:"
+      type: "keyword"
+      scope: "config"
+      purpose: "Tracing configuration"
+    - pattern: "enableTracing"
+      type: "keyword"
+      scope: "config"
+      purpose: "Tracing enablement"
+
+  metrics_queries:
+    - system: "Prometheus"
+      query: "istio_requests_total"
+      purpose: "Verify mesh metrics collection"
+      threshold: "Should return results"
+    - system: "Prometheus"
+      query: "istio_request_duration_milliseconds_bucket"
+      purpose: "Verify latency metrics"
+      threshold: "Should return histogram data"
+
+knowledge_sources:
+  specifications:
+    - id: "istio-observability"
+      name: "Istio Observability"
+      url: "https://istio.io/latest/docs/concepts/observability/"
+      offline_cache: true
+      priority: "required"
+    - id: "opentelemetry"
+      name: "OpenTelemetry Specification"
+      url: "https://opentelemetry.io/docs/specs/"
+      offline_cache: true
+      priority: "recommended"
+    - id: "nist-800-207"
+      name: "NIST SP 800-207: Zero Trust Architecture"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-207/final"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "istio-telemetry"
+      name: "Istio Telemetry Configuration"
+      url: "https://istio.io/latest/docs/tasks/observability/"
+      offline_cache: true
+    - id: "distributed-tracing"
+      name: "Distributed Tracing Best Practices"
+      url: "https://istio.io/latest/docs/tasks/observability/distributed-tracing/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "istioctl"
+      purpose: "Analyze mesh observability"
+      command: "istioctl experimental describe pod <pod>"
+    - tool: "prometheus"
+      purpose: "Query mesh metrics"
+      command: "curl -s prometheus:9090/api/v1/query?query=istio_requests_total"
+    - tool: "jaeger"
+      purpose: "Query distributed traces"
+      command: "kubectl port-forward svc/jaeger-query -n istio-system 16686"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "rate(istio_requests_total{reporter=\"source\"}[5m])"
+      purpose: "Request rate by service"
+    - system: "Prometheus"
+      query: "histogram_quantile(0.99, rate(istio_request_duration_milliseconds_bucket[5m]))"
+      purpose: "P99 latency"
+
+  scripts:
+    - id: "observability-audit"
+      language: "bash"
+      purpose: "Audit observability configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Telemetry Configuration ==="
+        kubectl get telemetry -A
+        echo "=== Mesh metrics test ==="
+        kubectl exec deploy/prometheus -n istio-system -- curl -s localhost:9090/api/v1/query?query=istio_requests_total | jq '.data.result | length'
+        echo "=== Access logging check ==="
+        istioctl proxy-config log <pod> --level debug
+
+signals:
+  critical:
+    - id: "OBS-INT-CRIT-001"
+      signal: "No metrics collection from mesh"
+      evidence_pattern: "istio_requests_total returns no results"
+      explanation: |
+        Without metrics, there is no visibility into service health,
+        performance, or traffic patterns. Incident detection and
+        response is severely impaired.
+      remediation: "Verify Prometheus scraping mesh telemetry endpoints"
+    - id: "OBS-INT-CRIT-002"
+      signal: "Distributed tracing not configured"
+      evidence_pattern: "No trace data in tracing backend"
+      explanation: |
+        Without tracing, debugging distributed systems is extremely
+        difficult. Request flows across services cannot be visualized.
+      remediation: "Enable tracing in mesh configuration and deploy tracing backend"
+
+  high:
+    - id: "OBS-INT-HIGH-001"
+      signal: "Access logging disabled"
+      evidence_pattern: "accessLogFile not configured"
+      explanation: |
+        Access logs provide detailed request-level information essential
+        for security analysis and debugging. Without them, investigating
+        issues is more difficult.
+      remediation: "Enable access logging in mesh configuration"
+    - id: "OBS-INT-HIGH-002"
+      signal: "Trace sampling too aggressive"
+      evidence_pattern: "Sampling rate > 10% in production"
+      explanation: |
+        High trace sampling rates create significant overhead and storage
+        costs. It can impact application performance.
+      remediation: "Reduce sampling rate to 1-5% for production"
+    - id: "OBS-INT-HIGH-003"
+      signal: "Missing service-level dashboards"
+      evidence_pattern: "No Grafana dashboards for mesh services"
+      explanation: |
+        Without dashboards, the collected telemetry data is underutilized.
+        Operators cannot quickly assess service health.
+      remediation: "Deploy service mesh dashboards to visualization platform"
+
+  medium:
+    - id: "OBS-INT-MED-001"
+      signal: "Metrics retention too short"
+      evidence_pattern: "Prometheus retention < 15 days"
+      remediation: "Configure appropriate metrics retention for trend analysis"
+    - id: "OBS-INT-MED-002"
+      signal: "Trace context not propagated"
+      evidence_pattern: "Traces break at service boundaries"
+      remediation: "Ensure applications propagate trace headers"
+    - id: "OBS-INT-MED-003"
+      signal: "Missing SLO definitions"
+      evidence_pattern: "No service level objectives defined"
+      remediation: "Define SLOs using mesh metrics for key services"
+
+  low:
+    - id: "OBS-INT-LOW-001"
+      signal: "Default Istio metrics not customized"
+      remediation: "Consider customizing metrics for specific needs"
+    - id: "OBS-INT-LOW-002"
+      signal: "No alerting on mesh metrics"
+      remediation: "Configure alerts for critical mesh metrics"
+
+  positive:
+    - id: "OBS-INT-POS-001"
+      signal: "Comprehensive metrics collection active"
+    - id: "OBS-INT-POS-002"
+      signal: "Distributed tracing with appropriate sampling"
+    - id: "OBS-INT-POS-003"
+      signal: "Service dashboards and SLOs defined"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Verify metrics collection"
+      description: |
+        Confirm mesh metrics are being collected and available
+        in the monitoring system.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check telemetry config"
+          command: "kubectl get telemetry -A -o yaml"
+        - purpose: "Query mesh metrics"
+          command: "curl -s prometheus:9090/api/v1/query?query=istio_requests_total | jq '.data.result | length'"
+        - purpose: "Verify metrics endpoint"
+          command: "istioctl proxy-config endpoints <pod> | grep prometheus"
+      expected_findings:
+        - "Metrics collection status"
+        - "Available mesh metrics"
+
+    - id: "2"
+      name: "Assess distributed tracing"
+      description: |
+        Review tracing configuration and verify traces are being
+        collected and stored.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check tracing config"
+          command: "kubectl get configmap istio -n istio-system -o yaml | grep -A 10 tracing"
+        - purpose: "Verify trace backend"
+          command: "kubectl get pods -n istio-system | grep jaeger"
+      expected_findings:
+        - "Tracing configuration status"
+        - "Trace sampling rate"
+
+    - id: "3"
+      name: "Review access logging"
+      description: |
+        Verify access logging is configured and examine log format.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check access log config"
+          command: "kubectl get envoyfilter -A -o yaml | grep -A 10 accessLog"
+        - purpose: "Sample access logs"
+          command: "kubectl logs <pod> -c istio-proxy --tail=10"
+      expected_findings:
+        - "Access logging status"
+        - "Log format assessment"
+
+    - id: "4"
+      name: "Evaluate visualization and dashboards"
+      description: |
+        Review available dashboards and visualization for mesh
+        observability data.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check Grafana dashboards"
+          command: "kubectl get configmap -n istio-system -l grafana_dashboard=1"
+        - purpose: "Check Kiali installation"
+          command: "kubectl get pods -n istio-system | grep kiali"
+      expected_findings:
+        - "Dashboard availability"
+        - "Visualization tool status"
+
+    - id: "5"
+      name: "Verify trace context propagation"
+      description: |
+        Ensure trace context is properly propagated across services.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check trace propagation"
+          command: "kubectl exec <pod> -- curl -v internal-service 2>&1 | grep -i x-request-id"
+      expected_findings:
+        - "Context propagation status"
+        - "Trace continuity assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Metrics Collection Assessment"
+        - "Distributed Tracing Status"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct query results, configuration verification"
+    medium: "Inferred from partial data or configuration"
+    low: "Based on absence of expected elements"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "istio-observability"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires access to observability stack"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "observability-integration-001"
+    item: "Mesh metrics being collected"
+    level: "CRITICAL"
+    verification: "curl -s prometheus:9090/api/v1/query?query=istio_requests_total | jq '.data.result | length' | awk '{print ($1>0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "observability-integration-002"
+    item: "Distributed tracing enabled"
+    level: "CRITICAL"
+    verification: "kubectl get pods -n istio-system | grep -E 'jaeger|zipkin' | grep -q Running && echo PASS || echo FAIL"
+    expected: "PASS"
+  - id: "observability-integration-003"
+    item: "Access logging configured"
+    level: "BLOCKING"
+    verification: "kubectl logs <pod> -c istio-proxy --tail=1 | grep -q '\"' && echo PASS || echo FAIL"
+    expected: "PASS"
+  - id: "observability-integration-004"
+    item: "Service dashboards available"
+    level: "WARNING"
+    verification: "kubectl get configmap -n istio-system -l grafana_dashboard=1 | grep -q . && echo PASS || echo FAIL"
+    expected: "PASS"
+  - id: "observability-integration-005"
+    item: "Trace sampling rate appropriate"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify sampling rate is between 1-5% for production"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.2", "CC7.3"]
+    - framework: "ISO27001"
+      controls: ["A.12.4.1", "A.12.4.3"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.service-mesh.service-mesh-security"
+    - "cloud-infrastructure.containers.container-logging"
+    - "cloud-infrastructure.cloud-security.security-monitoring"

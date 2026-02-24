@@ -1,0 +1,311 @@
+audit:
+  id: testing-quality-assurance.test-environment.environment-parity
+  name: Environment Parity
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: testing-quality-assurance
+  category_number: 26
+  subcategory: test-environment
+  tier: expert
+  estimated_duration: 45-60 min
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the similarity between test/staging environments and
+    production. Assesses software versions, configuration alignment,
+    infrastructure parity, and data representativeness to ensure
+    tests reflect real-world behavior.
+  why_it_matters: |
+    Tests that pass in dissimilar environments provide false confidence.
+    "Works on my machine" and "works in staging" failures occur when
+    environments differ. The closer test environments mirror production,
+    the more meaningful test results are.
+  when_to_run:
+  - Environment setup
+  - Post-deployment issue investigation
+  - Infrastructure updates
+  - Testing process assessment
+prerequisites:
+  required_artifacts:
+  - type: environment_config
+    description: Environment configuration files
+  - type: infrastructure_specs
+    description: Infrastructure as code definitions
+  access_requirements:
+  - Environment configuration access
+  - Infrastructure documentation
+discovery:
+  file_patterns:
+  - glob: '**/docker-compose*.yml'
+    purpose: Docker configurations
+  - glob: '**/terraform/**/*.tf'
+    purpose: Terraform definitions
+  - glob: '**/.env*'
+    purpose: Environment variables
+  - glob: '**/kubernetes/**/*.yaml'
+    purpose: Kubernetes manifests
+  code_patterns:
+  - pattern: NODE_ENV|RAILS_ENV|ENVIRONMENT
+    type: regex
+    scope: config
+    purpose: Environment detection
+knowledge_sources:
+  guides:
+  - id: twelve-factor
+    name: 12-Factor App - Dev/Prod Parity
+    url: https://12factor.net/dev-prod-parity
+    offline_cache: true
+  - id: env-management
+    name: Environment Management Guide
+    url: https://docs.docker.com/compose/environment-variables/
+    offline_cache: true
+  learning_resources:
+  - id: devops-practices
+    title: DevOps Practices
+    type: guide
+    reference: Infrastructure as Code Best Practices
+tooling:
+  static_analysis:
+  - tool: Config comparison tools
+    purpose: Environment diff detection
+    offline_capable: true
+  scripts:
+  - id: parity-check
+    language: bash
+    purpose: Analyze environment parity
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Environment Parity Analysis ==="
+
+      echo "Environment configuration files:"
+      find . -name '.env*' -o -name 'docker-compose*.yml' 2>/dev/null | head -10
+
+      echo ""
+      echo "Environment variables per file:"
+      for f in $(find . -name '.env*' 2>/dev/null | head -5); do
+        echo "$f: $(wc -l < "$f" 2>/dev/null) variables"
+      done
+
+      echo ""
+      echo "Docker compose environments:"
+      find . -name 'docker-compose*.yml' 2>/dev/null
+
+      echo ""
+      echo "Terraform environments:"
+      find . -path '*terraform*' -name '*.tf' 2>/dev/null | head -10
+
+      echo ""
+      echo "Version pinning:"
+      grep -r -E 'version.*[0-9]+\.[0-9]+' --include='*.yml' --include='*.yaml' . 2>/dev/null | head -10
+signals:
+  critical:
+  - id: PARITY-CRIT-001
+    signal: Major version differences between environments
+    evidence_pattern: Different major versions of databases, runtimes
+    explanation: |
+      Major version differences cause behavior changes that tests
+      can't catch. Node 18 vs 20, Postgres 14 vs 16 - these have
+      different features and behaviors that affect application code.
+    remediation: |
+      Align environment versions:
+      1. Document all version requirements
+      2. Pin versions in all environments
+      3. Automate version synchronization
+      4. Update all environments together
+      5. Test version upgrades across environments
+  - id: PARITY-CRIT-002
+    signal: Test environment missing critical services
+    evidence_pattern: Services in production not in test
+    explanation: |
+      Missing services in test environments means that integration
+      with those services is never tested. Issues only appear in
+      production when the service interaction fails.
+    remediation: |
+      Add missing services:
+      - Inventory all production services
+      - Add to test environments (or mocks)
+      - Configure service connections
+      - Verify service availability in CI
+  high:
+  - id: PARITY-HIGH-001
+    signal: Configuration drift between environments
+    evidence_pattern: Settings differ without documentation
+    explanation: |
+      Configuration drift causes unpredictable behavior. Settings
+      that work in test may fail in production. All intentional
+      differences should be documented and minimized.
+    remediation: |
+      Reduce configuration drift:
+      - Use same config templates
+      - Document all differences
+      - Automate config generation
+      - Regular drift audits
+  - id: PARITY-HIGH-002
+    signal: Different data volumes
+    evidence_pattern: Test has MB, production has TB
+    explanation: |
+      Performance characteristics change dramatically with data volume.
+      Queries fast on test data may timeout on production scale.
+      Test data should approximate production scale for key tables.
+    remediation: |
+      Improve data parity:
+      - Sample production data at scale
+      - Use production-like data generators
+      - Test with realistic data volumes
+      - Performance test with production scale
+  medium:
+  - id: PARITY-MED-001
+    signal: Different hardware/resources
+    evidence_pattern: Test has less CPU/memory than production
+    remediation: Document resource differences, size critical tests appropriately
+  - id: PARITY-MED-002
+    signal: Network topology differs
+    evidence_pattern: Single-zone test, multi-zone production
+    remediation: Align network configuration where possible
+  low:
+  - id: PARITY-LOW-001
+    signal: Environment differences not documented
+    evidence_pattern: No comparison documentation
+  positive:
+  - id: PARITY-POS-001
+    signal: Infrastructure as code for all environments
+    evidence_pattern: Same templates with environment variables
+  - id: PARITY-POS-002
+    signal: Documented and justified differences
+    evidence_pattern: Parity matrix with rationale
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify environment configurations
+    description: |
+      Find configuration files for all environments.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find env files
+      command: find . -name '.env*' -o -name 'docker-compose*.yml' 2>/dev/null | head -10
+    - purpose: Find IaC files
+      command: find . -path '*terraform*' -name '*.tf' 2>/dev/null | head -10
+    expected_findings:
+    - Environment configurations
+    - IaC usage
+  - id: '2'
+    name: Compare software versions
+    description: |
+      Check version alignment across environments.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find version specs
+      command: grep -r 'version\|image:' --include='*.yml' . 2>/dev/null | head -15
+    expected_findings:
+    - Version alignment
+    - Pinning status
+  - id: '3'
+    name: Review service availability
+    description: |
+      Compare services across environments.
+    duration_estimate: 10 min
+    commands:
+    - purpose: List docker services
+      command: grep -h 'services:' -A50 docker-compose*.yml 2>/dev/null | grep -E '^  [a-z]' | head -15
+    expected_findings:
+    - Service inventory
+    - Missing services
+  - id: '4'
+    name: Document differences
+    description: |
+      Catalog environment differences.
+    duration_estimate: 15 min
+    questions:
+    - What are the intentional differences?
+    - What are the resource differences?
+    - How is drift managed?
+    expected_findings:
+    - Difference catalog
+    - Drift management
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: parity_report
+    format: table
+    sections:
+    - Version Comparison
+    - Service Comparison
+    - Configuration Differences
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Parity Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Full environment comparison with access
+    medium: Configuration file analysis
+    low: Documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: twelve-factor
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires environment analysis
+    production:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 4
+closeout_checklist:
+- id: parity-001
+  item: Environment configurations identified
+  level: CRITICAL
+  verification: find . -name '.env*' -o -name 'docker-compose*.yml' 2>/dev/null | wc -l
+  expected: Count documented
+- id: parity-002
+  item: Version alignment verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Compare versions across environments
+  expected: Versions aligned or documented
+- id: parity-003
+  item: Differences documented
+  level: WARNING
+  verification: manual
+  verification_notes: Review parity documentation
+  expected: Documentation exists
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Reliability
+  - framework: SOC2
+    controls:
+    - CC7.1
+relationships:
+  commonly_combined:
+  - testing-quality-assurance.test-environment.environment-provisioning
+  - testing-quality-assurance.test-environment.environment-stability
+  - infrastructure-iaac.infrastructure-definition.infrastructure-consistency

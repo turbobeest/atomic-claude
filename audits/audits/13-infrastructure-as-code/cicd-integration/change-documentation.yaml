@@ -1,0 +1,362 @@
+audit:
+  id: infrastructure-as-code.cicd-integration.change-documentation
+  name: Change Documentation
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: cicd-integration
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: process
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines how infrastructure changes are documented and
+    tracked for compliance and operational purposes. It evaluates:
+
+    - Commit message quality and conventions
+    - Pull request descriptions and context
+    - Automated change documentation generation
+    - Terraform plan output archival
+    - Change ticket/issue linkage
+    - Compliance audit trail requirements
+    - Post-deployment documentation updates
+
+    The focus is on maintaining a complete, searchable record of what
+    changed, why it changed, and who approved it.
+  why_it_matters: |
+    Without proper change documentation:
+
+    - Compliance audits fail due to missing evidence
+    - Troubleshooting requires archaeology through logs
+    - Knowledge is lost when team members leave
+    - Change patterns and trends are invisible
+    - Root cause analysis is difficult
+
+    Good documentation creates institutional knowledge and satisfies
+    compliance requirements for change management audit trails.
+  when_to_run:
+  - During compliance audit preparation
+  - When establishing IaC practices
+  - After incidents requiring change investigation
+  - When onboarding new team members
+prerequisites:
+  required_artifacts:
+  - type: git_history
+    description: Git commit and PR history for IaC repository
+  - type: cicd_logs
+    description: Pipeline execution logs
+  access_requirements:
+  - Read access to git history
+  - Access to PR/MR history
+  - Access to CI/CD logs and artifacts
+discovery:
+  code_patterns:
+  - pattern: conventional.*commit|commitlint
+    type: regex
+    scope: config
+    purpose: Find commit message enforcement
+  - pattern: CHANGELOG|changelog
+    type: keyword
+    scope: config
+    purpose: Find changelog automation
+  - pattern: PR_TEMPLATE|PULL_REQUEST_TEMPLATE
+    type: keyword
+    scope: config
+    purpose: Find PR template
+  - pattern: artifact.*upload|archive
+    type: regex
+    scope: config
+    purpose: Find artifact archival
+  file_patterns:
+  - glob: '**/.github/PULL_REQUEST_TEMPLATE*.md'
+    purpose: PR templates
+  - glob: '**/CHANGELOG.md'
+    purpose: Change log
+  - glob: '**/.commitlintrc*'
+    purpose: Commit lint configuration
+  - glob: '**/.github/workflows/*.yml'
+    purpose: Artifact archival in workflows
+  documents_to_review:
+  - type: Recent pull requests
+    purpose: Evaluate documentation quality
+  - type: Commit history
+    purpose: Assess commit message quality
+knowledge_sources:
+  guides:
+  - id: conventional-commits
+    name: Conventional Commits Specification
+    url: https://www.conventionalcommits.org/
+    offline_cache: true
+  - id: github-pr-templates
+    name: GitHub PR Templates
+    url: https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: commitlint
+    purpose: Enforce commit message conventions
+    offline_capable: true
+  - tool: semantic-release
+    purpose: Automated changelog generation
+    offline_capable: true
+  scripts:
+  - id: commit-quality-check
+    language: bash
+    purpose: Analyze commit message quality
+    source: inline
+    code: |
+      #!/bin/bash
+      # Analyze recent commit messages
+
+      echo "=== Recent IaC commits ==="
+      git log --oneline -20 -- '*.tf' '**/*.tf'
+
+      echo ""
+      echo "=== Commits without issue references ==="
+      git log --oneline -50 -- '*.tf' | grep -v '#[0-9]\|fixes\|closes' | head -10
+
+      echo ""
+      echo "=== Very short commit messages ==="
+      git log --oneline -50 -- '*.tf' | awk 'length < 20' | head -10
+signals:
+  critical:
+  - id: IAC-DOC-CRIT-001
+    signal: No audit trail of who approved infrastructure changes
+    evidence_pattern: Direct pushes to main without PR, or PRs merged without review
+    explanation: |
+      Compliance frameworks require evidence of who approved changes.
+      Without PR-based workflow with recorded approvals, audits fail
+      and there's no accountability for changes.
+    remediation: |
+      Enforce PR-based workflow:
+      1. Require PRs for all changes
+      2. Require at least one approval
+      3. Archive PR descriptions and approval records
+      4. Enable audit logging in GitHub/GitLab
+  high:
+  - id: IAC-DOC-HIGH-001
+    signal: Commit messages lack meaningful context
+    evidence_pattern: Commits like 'fix', 'update', 'changes'
+    explanation: |
+      Vague commit messages make it impossible to understand why
+      changes were made. This hampers troubleshooting and creates
+      knowledge gaps.
+    remediation: |
+      Enforce commit message standards:
+      - Use Conventional Commits format
+      - Configure commitlint in pre-commit hooks
+      - Require issue/ticket references
+  - id: IAC-DOC-HIGH-002
+    signal: No PR template for infrastructure changes
+    evidence_pattern: Absence of PULL_REQUEST_TEMPLATE.md
+    explanation: |
+      Without templates, PR descriptions vary wildly in quality.
+      Templates prompt authors to include necessary context like
+      what changed, why, and how to verify.
+    remediation: |
+      Create PR template:
+      ## Summary
+      <!-- What does this change? -->
+
+      ## Motivation
+      <!-- Why is this change needed? -->
+
+      ## Terraform Plan Summary
+      <!-- Paste plan output or summary -->
+
+      ## Testing Done
+      <!-- How was this tested? -->
+
+      ## Rollback Plan
+      <!-- How to rollback if issues occur? -->
+  medium:
+  - id: IAC-DOC-MED-001
+    signal: Plan output not archived with deployments
+    remediation: |
+      Archive plan output as CI artifact:
+      - name: Archive plan
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-plan
+          path: tfplan
+  - id: IAC-DOC-MED-002
+    signal: No automated changelog generation
+    remediation: |
+      Implement changelog automation:
+      - Use semantic-release or similar
+      - Generate changelog from commit messages
+      - Include in releases
+  low:
+  - id: IAC-DOC-LOW-001
+    signal: Documentation not updated alongside infrastructure changes
+    remediation: Include documentation updates in PR checklist
+  positive:
+  - id: IAC-DOC-POS-001
+    signal: Conventional commits enforced with commitlint
+  - id: IAC-DOC-POS-002
+    signal: Comprehensive PR template for infrastructure changes
+  - id: IAC-DOC-POS-003
+    signal: Plan output archived as deployment artifact
+  - id: IAC-DOC-POS-004
+    signal: Changes linked to issues/tickets
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review commit message quality
+    description: |
+      Analyze recent commit messages for quality and convention.
+    duration_estimate: 20 min
+    commands:
+    - purpose: View recent IaC commits
+      command: git log --oneline -30 -- '*.tf' '**/*.tf'
+    - purpose: Check for commitlint
+      command: cat .commitlintrc* commitlint.config.* 2>/dev/null | head -20
+    - purpose: Check for conventional commits
+      command: git log -10 -- '*.tf' | grep -E '^(feat|fix|docs|chore|refactor|test):'
+    expected_findings:
+    - Commit message patterns
+    - Convention enforcement
+  - id: '2'
+    name: Evaluate PR documentation
+    description: |
+      Check PR templates and review recent PR quality.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find PR templates
+      command: find . -name 'PULL_REQUEST_TEMPLATE*' | head -5
+    - purpose: View PR template content
+      command: cat .github/PULL_REQUEST_TEMPLATE.md 2>/dev/null
+    - purpose: List recent merged PRs
+      command: 'gh pr list --state merged --limit 10 --json number,title,body | jq ''.[] | {number, title,
+        bodyLength: (.body | length)}'''
+    expected_findings:
+    - PR template exists and is comprehensive
+    - PR descriptions include context
+  - id: '3'
+    name: Check artifact archival
+    description: |
+      Verify that plan outputs are archived with deployments.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for artifact uploads in CI
+      command: grep -r 'upload-artifact\|artifacts' .github/ --include='*.yml' | head -20
+    - purpose: Check for plan archival
+      command: grep -r 'tfplan\|terraform.*plan' .github/ --include='*.yml' -A3 | head -30
+    expected_findings:
+    - Plan output archival
+    - Artifact retention settings
+  - id: '4'
+    name: Verify issue/ticket linkage
+    description: |
+      Check if commits and PRs reference issues or tickets.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Count commits with issue refs
+      command: git log -50 -- '*.tf' | grep -c '#[0-9]\|fixes\|closes'
+    - purpose: Check PR for issue links
+      command: gh pr list --state merged --limit 10 --json number,body | jq '.[].body' | grep -c '#[0-9]\|fixes\|closes'
+        || echo 0
+    expected_findings:
+    - Issue linkage percentage
+    - Ticket reference patterns
+  - id: '5'
+    name: Review audit trail completeness
+    description: |
+      Verify that change approvals and history are retained.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check PR review history
+      command: gh pr view 1 --json reviews 2>/dev/null | jq '.reviews | length'
+    - purpose: Check for audit logging
+      command: 'gh api repos/{owner}/{repo}/events --paginate | jq ''.[0:10] | .[] | {type, actor: .actor.login,
+        created_at}'''
+    expected_findings:
+    - Approval records retained
+    - Event history available
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Commit Message Analysis
+    - PR Documentation Review
+    - Audit Trail Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Sample of recent changes reviewed in detail
+    medium: Configuration and templates reviewed
+    low: Only file presence confirmed
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: conventional-commits
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires history analysis
+    full:
+      included: true
+      priority: 3
+closeout_checklist:
+- id: change-doc-001
+  item: PR-based workflow enforces approval records
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify branch protection requires PR reviews
+  expected: Confirmed by reviewer
+- id: change-doc-002
+  item: PR template includes required context sections
+  level: BLOCKING
+  verification: test -f .github/PULL_REQUEST_TEMPLATE.md && echo PASS || echo FAIL
+  expected: PASS
+- id: change-doc-003
+  item: Commit message conventions enforced
+  level: WARNING
+  verification: test -f .commitlintrc* -o -f commitlint.config.* && echo PASS || echo FAIL
+  expected: PASS
+- id: change-doc-004
+  item: Plan output archived as artifact
+  level: WARNING
+  verification: grep -r 'upload-artifact' .github/ | wc -l
+  expected: '>0'
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.2
+    - CC8.1
+  - framework: ISO 27001
+    controls:
+    - A.12.1.2
+  - framework: PCI DSS
+    controls:
+    - 6.4.3
+    - '10.1'
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.cicd-integration.approval-workflow
+  - infrastructure-as-code.cicd-integration.iac-pipeline

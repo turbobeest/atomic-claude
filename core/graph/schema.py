@@ -25,6 +25,7 @@ class NodeLabel(str, Enum):
     AGENT = "Agent"
     MEMORY = "Memory"
     PHASE_CHECKPOINT = "PhaseCheckpoint"
+    AUDIT = "Audit"
 
 
 # ============================================================================
@@ -46,6 +47,8 @@ class RelType(str, Enum):
     TRACED_TO = "TRACED_TO"
     INFORMED_BY = "INFORMED_BY"
     SUPERSEDES = "SUPERSEDES"
+    AUDIT_COVERS = "AUDIT_COVERS"
+    COMMONLY_COMBINED = "COMMONLY_COMBINED"
 
 
 # ============================================================================
@@ -64,6 +67,7 @@ REQUIRED_PROPERTIES: Dict[str, List[str]] = {
     NodeLabel.AGENT: ["id", "name", "tier", "category", "role"],
     NodeLabel.MEMORY: ["id", "phase", "entry_type", "content"],
     NodeLabel.PHASE_CHECKPOINT: ["id", "phase", "phase_name", "summary"],
+    NodeLabel.AUDIT: ["id", "name", "category", "subcategory", "tier"],
 }
 
 # Valid values for enumerated properties
@@ -107,6 +111,12 @@ VALID_VALUES: Dict[str, Dict[str, Set[str]]] = {
     NodeLabel.PHASE_CHECKPOINT: {
         "status": {"valid", "invalidated", "superseded"},
     },
+    NodeLabel.AUDIT: {
+        "tier": {"focused", "expert", "phd"},
+        "status": {"active", "planned", "deprecated"},
+        "severity": {"critical", "high", "medium", "low"},
+        "automatable": {"yes", "partial", "no", "full", "manual", "none", "minimal"},
+    },
 }
 
 # Optional properties with defaults
@@ -125,6 +135,12 @@ PROPERTY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     NodeLabel.AGENT: {"composite_score": 0.0},
     NodeLabel.MEMORY: {"relevance_score": 0.8, "tags_csv": ""},
     NodeLabel.PHASE_CHECKPOINT: {"status": "valid"},
+    NodeLabel.AUDIT: {
+        "status": "active",
+        "severity": "medium",
+        "automatable": "no",
+        "category_number": 0,
+    },
 }
 
 # Valid relationship endpoints: {rel_type: (from_labels, to_labels)}
@@ -182,11 +198,19 @@ VALID_RELATIONSHIPS: Dict[str, tuple] = {
         {NodeLabel.SOURCE, NodeLabel.FINDING, NodeLabel.DECISION,
          NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK,
          NodeLabel.SPEC, NodeLabel.AGENT, NodeLabel.MEMORY,
-         NodeLabel.PHASE_CHECKPOINT},
+         NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT},
         {NodeLabel.SOURCE, NodeLabel.FINDING, NodeLabel.DECISION,
          NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK,
          NodeLabel.SPEC, NodeLabel.AGENT, NodeLabel.MEMORY,
-         NodeLabel.PHASE_CHECKPOINT},
+         NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT},
+    ),
+    RelType.AUDIT_COVERS: (
+        {NodeLabel.AUDIT},
+        {NodeLabel.TASK, NodeLabel.REQUIREMENT, NodeLabel.SPEC},
+    ),
+    RelType.COMMONLY_COMBINED: (
+        {NodeLabel.AUDIT},
+        {NodeLabel.AUDIT},
     ),
 }
 
@@ -233,6 +257,13 @@ INDEX_DEFINITIONS = [
     # Checkpoint lookups
     ("PhaseCheckpoint", "id"),
     ("PhaseCheckpoint", "phase"),
+    # Audit lookups
+    ("Audit", "id"),
+    ("Audit", "category"),
+    ("Audit", "subcategory"),
+    ("Audit", "tier"),
+    ("Audit", "severity"),
+    ("Audit", "category_number"),
 ]
 
 FULLTEXT_INDEX_DEFINITIONS = [
@@ -241,6 +272,7 @@ FULLTEXT_INDEX_DEFINITIONS = [
     ("Task", ["title", "description"]),
     ("Agent", ["name", "description"]),
     ("Memory", ["content", "tags_csv"]),
+    ("Audit", ["name", "description_what", "description_why"]),
 ]
 
 

@@ -1,0 +1,547 @@
+audit:
+  id: security-trust.data-protection.data-export-security
+  name: Data Export Security Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: data-protection
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: security
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the security controls protecting data export
+    functionality across the application, focusing on four critical areas:
+
+    1. Export Authorization: Verifies that proper authentication and
+       authorization controls govern who can export data, what data can
+       be exported, and under what conditions.
+
+    2. Format Security: Assesses security of export formats including
+       encryption of exported files, secure temporary storage, and
+       protection against injection attacks in export content.
+
+    3. Audit Logging: Reviews logging of export operations to ensure
+       traceability, including who exported what data and when.
+
+    4. Rate Limiting: Evaluates controls preventing bulk data exfiltration
+       through excessive export requests, including per-user limits and
+       anomaly detection.
+  why_it_matters: |
+    Data export functionality is a common vector for data exfiltration
+    attacks and insider threats. Inadequate controls can lead to:
+
+    - Mass data breaches through automated export abuse
+    - Insider theft of customer data or trade secrets
+    - Compliance violations under GDPR Article 20 (data portability)
+    - Inability to detect or investigate data theft incidents
+    - Regulatory penalties for failing to protect exported personal data
+
+    Export features designed for legitimate purposes (reporting, data
+    portability, integrations) can become attack surfaces without proper
+    security controls.
+  when_to_run:
+  - Initial security assessment of applications with export features
+  - After implementing new data export functionality
+  - Following security incidents involving data exfiltration
+  - During GDPR compliance audits (Article 20 data portability)
+  - When integrating with third-party data consumers
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with export functionality
+  - type: api_documentation
+    description: API documentation for export endpoints
+  - type: configuration
+    description: Rate limiting and security configuration files
+  access_requirements:
+  - Read access to application source code
+  - Access to API gateway or rate limiting configuration
+  - Read access to logging and monitoring configurations
+  - Access to IAM policies governing export permissions
+discovery:
+  code_patterns:
+  - pattern: (?i)(export|download|dump).*\.(csv|xlsx?|json|xml|pdf)
+    type: regex
+    scope: source
+    purpose: Identify data export endpoints and functions
+  - pattern: (?i)@(get|post)mapping.*export|/api/.*/export
+    type: regex
+    scope: source
+    purpose: Find REST endpoints handling exports
+  - pattern: (?i)content-disposition.*attachment
+    type: regex
+    scope: source
+    purpose: Locate file download response handlers
+  - pattern: (?i)(stream|write).*response.*output
+    type: regex
+    scope: source
+    purpose: Find streaming data export implementations
+  - pattern: (?i)limit\s*[=:]\s*\d{5,}|offset.*\d{5,}
+    type: regex
+    scope: source
+    purpose: Detect potentially unbounded data queries
+  - pattern: (?i)select\s+\*.*from(?!.*limit)
+    type: regex
+    scope: source
+    purpose: Find unbounded SELECT queries in exports
+  file_patterns:
+  - glob: '**/*export*.{js,ts,py,java,go,rb,php}'
+    purpose: Export handler source files
+  - glob: '**/controllers/*download*.{js,ts,py,java}'
+    purpose: Download controller implementations
+  - glob: '**/api/**/report*.{js,ts,py,java}'
+    purpose: Reporting API endpoints
+  - glob: '**/rate-limit*.{yaml,yml,json,conf}'
+    purpose: Rate limiting configuration
+knowledge_sources:
+  specifications:
+  - id: gdpr-art20
+    name: GDPR Article 20 - Right to Data Portability
+    url: https://gdpr-info.eu/art-20-gdpr/
+    offline_cache: true
+    priority: required
+  - id: nist-800-53-ac
+    name: NIST SP 800-53 Rev 5 - Access Control Family
+    url: https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-228
+    name: NIST SP 800-228 - API Security Guidelines
+    url: https://csrc.nist.gov/pubs/sp/800/228/ipd
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: owasp-api-security
+    name: OWASP API Security Top 10
+    url: https://owasp.org/www-project-api-security/
+    offline_cache: true
+  - id: owasp-export-injection
+    name: OWASP CSV Injection Prevention
+    url: https://owasp.org/www-community/attacks/CSV_Injection
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect insecure export patterns and missing authorization
+    offline_capable: true
+  - tool: grep/ripgrep
+    purpose: Pattern matching for export-related code
+    offline_capable: true
+  infrastructure_tools:
+  - tool: api-gateway-cli
+    purpose: Review rate limiting policies on export endpoints
+    command: Example varies by gateway (Kong, AWS API Gateway, etc.)
+  scripts:
+  - id: export-audit
+    language: bash
+    purpose: Find export endpoints and check for authorization
+    source: inline
+    code: |
+      # Find export-related files and check for auth decorators
+      grep -r -l -i 'export\|download' --include='*.py' --include='*.js' . | \
+      xargs -I {} sh -c 'echo "=== {} ===" && grep -n -B2 -A2 "export\|download" {}'
+signals:
+  critical:
+  - id: EXPORT-CRIT-001
+    signal: Export endpoint without authentication
+    cwe: CWE-306
+    explanation: |
+      Export endpoints accessible without authentication allow anonymous
+      users to download potentially sensitive data. This is a severe
+      vulnerability that can lead to mass data exposure.
+    remediation: |
+      Implement authentication on all export endpoints:
+      - Add authentication middleware/decorators to export routes
+      - Validate session tokens or API keys before processing exports
+      - Implement OAuth 2.0 or OpenID Connect for API exports
+      - Return 401 Unauthorized for unauthenticated requests
+    evidence_description: (?i)(export|download).*(?<!@auth|@login_required|@authenticated|IsAuthenticated)
+  - id: EXPORT-CRIT-002
+    signal: Export endpoint without authorization check
+    evidence_pattern: (?i)def\s+(export|download).*(?!permission|authorize|can_access|rbac)
+    cwe: CWE-862
+    explanation: |
+      Export functionality that doesn't verify authorization allows users
+      to export data they shouldn't have access to, including other users'
+      data or confidential business information.
+    remediation: |
+      Implement proper authorization for all exports:
+      - Check user permissions before generating exports
+      - Implement RBAC/ABAC to control what data each role can export
+      - Filter exported data based on user's data access scope
+      - Log authorization failures for security monitoring
+  - id: EXPORT-CRIT-003
+    signal: Bulk export without rate limiting
+    evidence_pattern: (?i)(export_all|bulk_export|download_all).*(?!rate_limit|throttle)
+    cwe: CWE-770
+    explanation: |
+      Bulk export endpoints without rate limiting allow attackers or
+      malicious insiders to rapidly exfiltrate entire databases.
+      This enables mass data theft before detection is possible.
+    remediation: |
+      Implement rate limiting on export endpoints:
+      - Add per-user rate limits (e.g., 10 exports per hour)
+      - Implement progressive delays for repeated export requests
+      - Set maximum records per export request
+      - Alert security team on rate limit violations
+  high:
+  - id: EXPORT-HIGH-001
+    signal: No audit logging for export operations
+    evidence_pattern: (?i)(export|download).*(?!log|audit|track|record)
+    cwe: CWE-778
+    explanation: |
+      Without logging export operations, organizations cannot detect
+      data theft, investigate incidents, or demonstrate compliance
+      with data protection regulations.
+    remediation: |
+      Implement comprehensive export audit logging:
+      - Log user ID, timestamp, export type, and data scope
+      - Include IP address and user agent for forensic purposes
+      - Send logs to centralized SIEM
+      - Configure alerts for anomalous export patterns
+  - id: EXPORT-HIGH-002
+    signal: Exported files stored without encryption
+    evidence_pattern: (?i)temp.*file.*export|export.*tmp(?!.*encrypt)
+    cwe: CWE-311
+    explanation: |
+      Temporary export files stored without encryption can be accessed
+      by other processes or users on shared systems, exposing sensitive
+      exported data.
+    remediation: |
+      Secure temporary export files:
+      - Encrypt temporary files before writing to disk
+      - Use memory-based file handling when possible
+      - Implement automatic cleanup of temporary files
+      - Set restrictive file permissions (600)
+  - id: EXPORT-HIGH-003
+    signal: CSV injection vulnerability in exports
+    evidence_pattern: (?i)csv.*write(?!.*escape|sanitize|clean)
+    cwe: CWE-1236
+    explanation: |
+      CSV exports without proper sanitization can contain formula
+      injection payloads (e.g., =cmd|...) that execute when opened
+      in spreadsheet applications, leading to code execution.
+    remediation: |
+      Sanitize all CSV export content:
+      - Prefix cells starting with =, +, -, @ with a single quote
+      - Implement allowlist validation for exported data formats
+      - Consider using XLSX format which is less susceptible
+      - Document security warnings for users handling exports
+  - id: EXPORT-HIGH-004
+    signal: Unlimited data export without pagination
+    evidence_pattern: (?i)select\s+\*|find_all|getAll(?!.*limit|.*page)
+    cwe: CWE-400
+    explanation: |
+      Export queries without limits can return entire database tables,
+      enabling mass data exfiltration and potentially causing denial
+      of service through resource exhaustion.
+    remediation: |
+      Implement export pagination and limits:
+      - Set maximum records per export request (e.g., 10,000)
+      - Require pagination for large datasets
+      - Implement background jobs for large exports with notifications
+      - Monitor and alert on unusually large export requests
+  medium:
+  - id: EXPORT-MED-001
+    signal: Export URLs with predictable identifiers
+    evidence_pattern: (?i)/export/\d+|download\?id=\d+
+    cwe: CWE-639
+    explanation: |
+      Export URLs using sequential or predictable identifiers allow
+      attackers to enumerate and download other users' exports through
+      Insecure Direct Object Reference (IDOR) attacks.
+    remediation: |
+      Use unpredictable identifiers for export URLs:
+      - Generate UUID or cryptographically random tokens for export URLs
+      - Implement authorization checks even with random URLs
+      - Set short expiration times for export download links
+      - Associate export tokens with specific user sessions
+  - id: EXPORT-MED-002
+    signal: No export request approval workflow
+    evidence_indicators:
+    - Large-scale exports processed automatically
+    - No manager approval for sensitive data exports
+    - Self-service export of high-sensitivity data
+    explanation: |
+      Allowing unrestricted self-service exports of sensitive data
+      bypasses data governance controls and makes insider threat
+      detection more difficult.
+    remediation: |
+      Implement approval workflows for sensitive exports:
+      - Require manager approval for exports exceeding thresholds
+      - Implement data classification-based export policies
+      - Add justification requirements for large exports
+      - Create audit trails for approved exports
+  - id: EXPORT-MED-003
+    signal: Export download links without expiration
+    evidence_pattern: (?i)export_url(?!.*expire|.*ttl|.*valid_until)
+    cwe: CWE-613
+    explanation: |
+      Export download links without expiration remain accessible
+      indefinitely, increasing the window for unauthorized access
+      if the link is shared or leaked.
+    remediation: |
+      Implement expiration for export download links:
+      - Set short TTL (e.g., 1 hour) for export URLs
+      - Use signed URLs with embedded expiration
+      - Invalidate export links after first download
+      - Clean up expired export files automatically
+  low:
+  - id: EXPORT-LOW-001
+    signal: Export functionality lacking progress feedback
+    evidence_indicators:
+    - Large exports block without progress indication
+    - No estimated completion time for exports
+    remediation: |
+      Implement progress feedback for exports to improve user experience
+      and enable users to cancel unintended large exports.
+  - id: EXPORT-LOW-002
+    signal: Export formats not documented
+    evidence_indicators:
+    - No documentation of available export formats
+    - Export data schema not documented for consumers
+    remediation: |
+      Document export formats, schemas, and limitations for users
+      and downstream system integrators.
+  positive:
+  - id: EXPORT-POS-001
+    signal: Comprehensive export authorization implemented
+    evidence_indicators:
+    - RBAC/ABAC controls on all export endpoints
+    - Data filtering based on user permissions
+    - Authorization failures logged and monitored
+  - id: EXPORT-POS-002
+    signal: Rate limiting configured for export endpoints
+    evidence_indicators:
+    - Per-user rate limits on export requests
+    - Anomaly detection for export patterns
+    - Alerts configured for rate limit violations
+  - id: EXPORT-POS-003
+    signal: Export audit logging fully implemented
+    evidence_indicators:
+    - All export operations logged with user context
+    - Logs sent to centralized SIEM
+    - Retention period meets compliance requirements
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Discover Export Functionality
+    description: |
+      Identify all data export endpoints, functions, and scheduled
+      export jobs across the application.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find export-related source files
+      command: find . -type f \( -name '*export*' -o -name '*download*' \) -not -path '*/node_modules/*'
+        2>/dev/null | head -50
+    - purpose: Search for export endpoints in code
+      command: grep -r -n -i 'export\|download' --include='*.py' --include='*.js' --include='*.ts' --include='*.java'
+        . 2>/dev/null | grep -i 'route\|endpoint\|api\|controller' | head -30
+    expected_findings:
+    - List of export endpoints and handlers
+    - Export job configurations
+    - File download implementations
+  - id: '2'
+    name: Verify Authorization Controls
+    description: |
+      Examine each export endpoint for proper authentication and
+      authorization checks.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check for authorization decorators/middleware
+      command: grep -r -n -B5 'def.*export\|export.*function\|export.*handler' --include='*.py' --include='*.js'
+        . 2>/dev/null | grep -i 'auth\|permission\|role\|access' | head -20
+    - purpose: Find exports without auth checks
+      command: grep -r -l -i 'export' --include='*.py' . 2>/dev/null | xargs -I {} sh -c 'grep -L "@login_required\|@authenticated\|permission"
+        {} 2>/dev/null'
+    expected_findings:
+    - Authentication status of each export endpoint
+    - Authorization mechanisms in use
+    - Gaps in authorization coverage
+  - id: '3'
+    name: Assess Rate Limiting
+    description: |
+      Review rate limiting configurations for export endpoints to
+      prevent bulk data exfiltration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find rate limiting configuration
+      command: grep -r -n -i 'rate.*limit\|throttle\|quota' --include='*.yaml' --include='*.yml' --include='*.json'
+        --include='*.conf' . 2>/dev/null | head -20
+    - purpose: Check for rate limiting in export code
+      command: grep -r -n -i 'rate_limit\|throttle\|RateLimiter' --include='*.py' --include='*.js' . 2>/dev/null
+        | head -20
+    expected_findings:
+    - Rate limiting policies for export endpoints
+    - Per-user vs global limits
+    - Export size limitations
+  - id: '4'
+    name: Review Audit Logging
+    description: |
+      Verify that export operations are properly logged with
+      sufficient detail for security monitoring and compliance.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find logging in export code
+      command: grep -r -n -i 'log\|audit\|track' --include='*export*' . 2>/dev/null | head -30
+    - purpose: Check logging configuration
+      command: grep -r -n -i 'export.*log\|download.*log' --include='*.yaml' --include='*.yml' --include='*.json'
+        . 2>/dev/null | head -20
+    expected_findings:
+    - Logging coverage for export operations
+    - Log detail level (user, timestamp, data scope)
+    - Log destination and retention
+  - id: '5'
+    name: Evaluate Format Security
+    description: |
+      Assess security of export file formats including encryption,
+      injection prevention, and secure handling.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find CSV export implementations
+      command: grep -r -n -i 'csv.*write\|to_csv\|writerow' --include='*.py' --include='*.js' . 2>/dev/null
+        | head -20
+    - purpose: Check for sanitization in exports
+      command: grep -r -n -i 'sanitize\|escape\|clean' --include='*export*' . 2>/dev/null | head -20
+    expected_findings:
+    - Export formats in use
+    - Sanitization of export content
+    - Temporary file handling practices
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Authorization Assessment
+    - Rate Limiting Evaluation
+    - Audit Logging Review
+    - Format Security Findings
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence from source code and configuration, verified through code review
+    medium: Patterns indicate practice but edge cases may exist, limited testing performed
+    low: Inference based on naming conventions or partial evidence
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: gdpr-art20
+      priority: required
+    - source_id: nist-800-53-ac
+      priority: required
+    - source_id: owasp-api-security
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Comprehensive export security review requires thorough analysis
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: export-001
+  item: All export endpoints require authentication
+  level: CRITICAL
+  verification: |
+    grep -r -l -i 'export\|download' --include='*.py' --include='*.js' . 2>/dev/null | xargs -I {} sh -c 'grep -L "@login_required\|@authenticated\|IsAuthenticated\|auth.*required" {} 2>/dev/null' | wc -l | xargs -I {} sh -c '[ {} -eq 0 ] && echo PASS || echo FAIL'
+  expected: PASS
+- id: export-002
+  item: Export endpoints have authorization checks
+  level: CRITICAL
+  verification: manual
+  verification_notes: Reviewer should verify each export endpoint checks user permissions before returning
+    data
+  expected: Confirmed by reviewer
+- id: export-003
+  item: Rate limiting configured for export endpoints
+  level: BLOCKING
+  verification: |
+    grep -r -i 'rate.*limit\|throttle' --include='*.yaml' --include='*.yml' --include='*.json' . 2>/dev/null | grep -i export | wc -l | xargs -I {} sh -c '[ {} -gt 0 ] && echo PASS || echo FAIL'
+  expected: PASS
+- id: export-004
+  item: Export operations are logged
+  level: BLOCKING
+  verification: manual
+  verification_notes: Reviewer should confirm export operations log user ID, timestamp, and data scope
+  expected: Confirmed by reviewer
+- id: export-005
+  item: CSV exports sanitize formula injection
+  level: WARNING
+  verification: |
+    grep -r -n 'to_csv\|csv.*write\|writerow' --include='*.py' --include='*.js' . 2>/dev/null | wc -l | xargs -I {} sh -c '[ {} -eq 0 ] && echo PASS || echo "REVIEW: {} CSV exports found - verify sanitization"'
+  expected: PASS
+- id: export-006
+  item: Export download links have expiration
+  level: WARNING
+  verification: manual
+  verification_notes: Reviewer should verify export download URLs expire after a reasonable time period
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - web-applications
+    - apis
+    - data-platforms
+  compliance_frameworks:
+  - framework: GDPR
+    controls:
+    - Article 20
+    - Article 25
+    - Article 32
+  - framework: NIST SP 800-53
+    controls:
+    - AC-2
+    - AC-3
+    - AC-6
+    - AU-2
+    - AU-3
+    - SC-8
+  - framework: OWASP API Security
+    controls:
+    - API1
+    - API2
+    - API4
+    - API5
+  - framework: ISO 27001:2022
+    controls:
+    - A.5.15
+    - A.8.3
+    - A.8.12
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.2
+    - CC6.3
+relationships:
+  commonly_combined:
+  - security-trust.data-protection.data-access-logging
+  - security-trust.authorization.api-authorization
+  - security-trust.application-security.api-security

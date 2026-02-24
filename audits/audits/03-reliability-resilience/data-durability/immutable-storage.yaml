@@ -1,0 +1,287 @@
+# ============================================================
+# AUDIT: Immutable Storage Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-durability.immutable-storage"
+  name: "Immutable Storage Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-durability"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the use of immutable storage for protecting critical data
+    against modification or deletion. Examines WORM (Write Once Read Many)
+    configurations, object lock policies, retention periods, and legal
+    hold capabilities. Reviews both compliance-driven and ransomware
+    protection use cases.
+
+  why_it_matters: |
+    Immutable storage protects against ransomware, accidental deletion,
+    malicious insider activity, and compliance violations. Without
+    immutability, backups can be encrypted or deleted by attackers,
+    eliminating recovery options. Regulatory requirements (SEC, FINRA)
+    often mandate immutable record retention.
+
+  when_to_run:
+    - "During ransomware protection assessment"
+    - "When implementing compliance requirements"
+    - "During backup strategy review"
+    - "After security incidents involving data tampering"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure"
+      description: "Storage configuration"
+    - type: "documentation"
+      description: "Data retention requirements"
+
+  access_requirements:
+    - "Cloud storage admin access"
+    - "Backup system configuration access"
+
+discovery:
+  code_patterns:
+    - pattern: "object.?lock|WORM|immutable|retention|legal.?hold|governance"
+      type: "regex"
+      scope: "config"
+      purpose: "Find immutability configuration"
+
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Infrastructure as code"
+    - glob: "**/backup/**/*.yaml"
+      purpose: "Backup configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "s3-object-lock"
+      name: "Amazon S3 Object Lock"
+      url: "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "azure-immutable"
+      name: "Azure Immutable Blob Storage"
+      url: "https://docs.microsoft.com/en-us/azure/storage/blobs/immutable-storage-overview"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws cli"
+      purpose: "Check S3 Object Lock configuration"
+      command: "aws s3api get-object-lock-configuration --bucket bucket-name"
+    - tool: "aws cli"
+      purpose: "Check bucket versioning"
+      command: "aws s3api get-bucket-versioning --bucket bucket-name"
+
+signals:
+  critical:
+    - id: "DD-IS-CRIT-001"
+      signal: "Backups not stored in immutable storage"
+      evidence_indicators:
+        - "No Object Lock on backup buckets"
+        - "Backup storage without WORM protection"
+      explanation: |
+        Mutable backups can be deleted or encrypted by ransomware,
+        eliminating recovery options during an attack.
+      remediation: "Enable Object Lock or WORM on backup storage"
+
+    - id: "DD-IS-CRIT-002"
+      signal: "Immutability can be disabled by same credentials"
+      evidence_indicators:
+        - "Governance mode allows deletion with permissions"
+        - "Root account can override retention"
+      explanation: |
+        If attackers gain the same credentials used to manage backups,
+        they can disable protection and delete data.
+      remediation: "Use Compliance mode with MFA delete and separate credentials"
+
+  high:
+    - id: "DD-IS-HIGH-001"
+      signal: "Retention period shorter than attack detection time"
+      explanation: "Attackers may wait out the retention period before attacking"
+      remediation: "Set retention to exceed expected attack detection time (30+ days)"
+
+    - id: "DD-IS-HIGH-002"
+      signal: "Versioning not enabled with immutability"
+      explanation: "Object Lock requires versioning to protect previous versions"
+      remediation: "Enable versioning on immutable storage buckets"
+
+  medium:
+    - id: "DD-IS-MED-001"
+      signal: "Legal hold capability not available or configured"
+      remediation: "Enable legal hold for litigation preservation requirements"
+
+    - id: "DD-IS-MED-002"
+      signal: "Immutability not tested with recovery drills"
+      remediation: "Include immutability verification in backup recovery testing"
+
+  low:
+    - id: "DD-IS-LOW-001"
+      signal: "Immutable storage costs not optimized with tiering"
+
+  positive:
+    - id: "DD-IS-POS-001"
+      signal: "Compliance mode Object Lock with appropriate retention"
+    - id: "DD-IS-POS-002"
+      signal: "Separate credentials for immutable storage management"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Critical Data for Immutability"
+      description: |
+        Determine which data requires immutable protection.
+      duration_estimate: "20 min"
+      questions:
+        - "What data would be catastrophic to lose?"
+        - "What regulatory retention requirements exist?"
+        - "What is the ransomware threat model?"
+      expected_findings:
+        - "Data requiring immutability"
+        - "Retention requirements"
+
+    - id: "2"
+      name: "Review Immutability Configuration"
+      description: |
+        Check immutability settings on storage systems.
+      duration_estimate: "40 min"
+      commands:
+        - purpose: "Check S3 Object Lock"
+          command: "aws s3api get-object-lock-configuration --bucket backup-bucket"
+        - purpose: "Check bucket policy"
+          command: "aws s3api get-bucket-policy --bucket backup-bucket"
+      expected_findings:
+        - "Object Lock mode (Governance vs Compliance)"
+        - "Retention period configuration"
+
+    - id: "3"
+      name: "Verify Protection Effectiveness"
+      description: |
+        Confirm immutability cannot be bypassed.
+      duration_estimate: "30 min"
+      questions:
+        - "Can administrative credentials delete immutable objects?"
+        - "Is MFA required for policy changes?"
+        - "Are credentials for immutable storage separate?"
+      expected_findings:
+        - "Bypass scenarios identified"
+        - "Credential separation status"
+
+    - id: "4"
+      name: "Review Recovery Procedures"
+      description: |
+        Verify immutable data can be recovered when needed.
+      duration_estimate: "30 min"
+      questions:
+        - "Has recovery from immutable storage been tested?"
+        - "Is the recovery process documented?"
+      expected_findings:
+        - "Recovery procedure documentation"
+        - "Test results"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Immutability Configuration Analysis"
+        - "Protection Effectiveness Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full configuration access with deletion testing"
+    medium: "Configuration review without testing"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "s3-object-lock"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure access"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "immutable-storage-001"
+    item: "Backup storage has immutability enabled"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify Object Lock or WORM configuration on backup storage"
+    expected: "Confirmed by reviewer"
+
+  - id: "immutable-storage-002"
+    item: "Retention period meets recovery requirements"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Compare retention period to threat detection expectations"
+    expected: "Confirmed by reviewer"
+
+  - id: "immutable-storage-003"
+    item: "Immutability cannot be bypassed by compromised credentials"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify Compliance mode or credential separation"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SEC Rule 17a-4"
+      controls: ["Electronic record retention"]
+    - framework: "SOC 2"
+      controls: ["A1.2"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-durability.backup-encryption"
+    - "reliability-resilience.disaster-recovery.ransomware-protection"

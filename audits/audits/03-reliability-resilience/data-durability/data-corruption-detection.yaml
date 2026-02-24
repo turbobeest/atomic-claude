@@ -1,0 +1,293 @@
+# ============================================================
+# AUDIT: Data Corruption Detection Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-durability.data-corruption-detection"
+  name: "Data Corruption Detection Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-durability"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates mechanisms for detecting data corruption including database
+    integrity checks, storage-level checksums, application-level validation,
+    and monitoring for data anomalies. Examines both silent corruption
+    detection (bit rot) and logical corruption detection.
+
+  why_it_matters: |
+    Data corruption can occur silently from hardware failures, software
+    bugs, or malicious activity. Without detection mechanisms, corruption
+    propagates to backups, making recovery impossible. Early detection
+    enables recovery from unaffected backups before the corruption is
+    irreversible.
+
+  when_to_run:
+    - "During data integrity architecture review"
+    - "After data corruption incidents"
+    - "When implementing new storage systems"
+    - "During security audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure"
+      description: "Database and storage configuration"
+    - type: "codebase"
+      description: "Data validation code"
+
+  access_requirements:
+    - "Database admin access"
+    - "Application source code access"
+    - "Monitoring system access"
+
+discovery:
+  code_patterns:
+    - pattern: "checksum|integrity|validate|corrupt|CRC|hash.*check"
+      type: "regex"
+      scope: "source"
+      purpose: "Find data validation code"
+    - pattern: "CHECKSUM|DBCC|pg_verify|fsck"
+      type: "regex"
+      scope: "config"
+      purpose: "Find integrity check configuration"
+
+  file_patterns:
+    - glob: "**/validation/**/*.{py,js,java,go}"
+      purpose: "Data validation modules"
+
+knowledge_sources:
+  guides:
+    - id: "zfs-scrub"
+      name: "ZFS Scrub and Data Integrity"
+      url: "https://openzfs.github.io/openzfs-docs/man/8/zpool-scrub.8.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "data-integrity"
+      title: "Data Integrity Best Practices"
+      type: "article"
+      reference: "Industry whitepapers"
+
+tooling:
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "PostgreSQL integrity check"
+      command: "SELECT * FROM pg_catalog.pg_stat_database WHERE checksum_failures > 0;"
+    - tool: "mysql"
+      purpose: "MySQL table check"
+      command: "CHECK TABLE table_name EXTENDED;"
+
+  scripts:
+    - id: "corruption-check"
+      language: "bash"
+      purpose: "Run database integrity checks"
+      source: "inline"
+      code: |
+        # PostgreSQL checksum verification
+        pg_checksums --check /var/lib/postgresql/data
+        # MySQL table check
+        mysqlcheck --check --all-databases
+
+signals:
+  critical:
+    - id: "DD-CD-CRIT-001"
+      signal: "No data integrity checking mechanism"
+      evidence_indicators:
+        - "No checksums enabled at storage level"
+        - "No database integrity checks scheduled"
+      explanation: |
+        Without integrity checking, corruption goes undetected until
+        it causes visible failures, by which point backups may be affected.
+      remediation: "Enable checksums and schedule regular integrity checks"
+
+    - id: "DD-CD-CRIT-002"
+      signal: "Corruption detected but not alerted"
+      evidence_indicators:
+        - "Checksum failures in logs but no alerts"
+        - "Integrity violations not monitored"
+      explanation: |
+        Detected but unaddressed corruption continues to spread
+        and propagate to backups.
+      remediation: "Configure alerting for all integrity check failures"
+
+  high:
+    - id: "DD-CD-HIGH-001"
+      signal: "Database checksums not enabled"
+      explanation: "Database cannot detect silent corruption of data pages"
+      remediation: "Enable data page checksums (requires restart for some databases)"
+
+    - id: "DD-CD-HIGH-002"
+      signal: "Integrity checks run infrequently"
+      explanation: "Corruption may exist for extended periods before detection"
+      remediation: "Schedule integrity checks at least weekly"
+
+  medium:
+    - id: "DD-CD-MED-001"
+      signal: "No application-level data validation"
+      remediation: "Implement business rule validation for critical data"
+
+    - id: "DD-CD-MED-002"
+      signal: "Integrity check results not reviewed"
+      remediation: "Automate review and alerting for integrity check output"
+
+  low:
+    - id: "DD-CD-LOW-001"
+      signal: "No anomaly detection for data patterns"
+
+  positive:
+    - id: "DD-CD-POS-001"
+      signal: "Multi-layer integrity checking (storage, database, application)"
+    - id: "DD-CD-POS-002"
+      signal: "Automated response to corruption detection"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Integrity Mechanisms"
+      description: |
+        Document all existing data integrity checking mechanisms.
+      duration_estimate: "30 min"
+      questions:
+        - "What storage-level checksums are enabled?"
+        - "What database integrity features are in use?"
+        - "What application-level validation exists?"
+      expected_findings:
+        - "Integrity mechanism inventory"
+        - "Coverage gaps"
+
+    - id: "2"
+      name: "Review Storage Integrity"
+      description: |
+        Check storage-level integrity features and scrub schedules.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check ZFS scrub status"
+          command: "zpool status -v"
+        - purpose: "Check S3 integrity settings"
+          command: "aws s3api get-bucket-encryption --bucket bucket-name"
+      expected_findings:
+        - "Storage integrity configuration"
+        - "Scrub/check schedules"
+
+    - id: "3"
+      name: "Review Database Integrity"
+      description: |
+        Verify database-level integrity checking configuration.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check PostgreSQL checksums"
+          command: "SHOW data_checksums;"
+      expected_findings:
+        - "Database checksum status"
+        - "Integrity check schedule"
+
+    - id: "4"
+      name: "Verify Alerting"
+      description: |
+        Confirm integrity failures trigger alerts.
+      duration_estimate: "30 min"
+      questions:
+        - "Are checksum failures alerted?"
+        - "Who receives corruption alerts?"
+        - "What is the response procedure?"
+      expected_findings:
+        - "Alert configuration"
+        - "Response procedure documentation"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Integrity Mechanism Inventory"
+        - "Detection Capability Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full infrastructure access with verification testing"
+    medium: "Configuration review without testing"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "zfs-scrub"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure access"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "corruption-detection-001"
+    item: "Storage-level checksums enabled"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify checksum configuration at storage layer"
+    expected: "Confirmed by reviewer"
+
+  - id: "corruption-detection-002"
+    item: "Database integrity checks scheduled"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review integrity check schedules"
+    expected: "Confirmed by reviewer"
+
+  - id: "corruption-detection-003"
+    item: "Alerting configured for integrity failures"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify alert rules for corruption detection"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["PI1.3"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-durability.checksum-verification"
+    - "reliability-resilience.data-durability.point-in-time-recovery"

@@ -1,0 +1,345 @@
+audit:
+  id: scalability-capacity.database-scalability.query-scalability
+  name: Query Scalability Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: database-scalability
+  tier: phd
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines query patterns for scalability characteristics
+    including query complexity analysis, index utilization, execution
+    plan review, N+1 query detection, and performance degradation
+    patterns as data volume grows. It identifies queries that will
+    become bottlenecks at scale.
+  why_it_matters: |
+    Queries that perform well with small datasets often degrade
+    exponentially as data grows. A full table scan on 1000 rows is
+    imperceptible; on 100 million rows it brings down the system.
+    Identifying and fixing non-scalable queries before they become
+    problems avoids production outages and expensive emergency fixes.
+  when_to_run:
+  - Before launching to production
+  - When query latency increases with data growth
+  - During performance optimization sprints
+  - Before major data migrations
+  - Quarterly for actively developed systems
+prerequisites:
+  required_artifacts:
+  - type: application-code
+    description: Database query code and ORM mappings
+  - type: query-logs
+    description: Slow query logs and execution statistics
+  - type: database-schema
+    description: Table schemas and index definitions
+  access_requirements:
+  - Query execution plan access (EXPLAIN ANALYZE)
+  - Slow query log access
+  - pg_stat_statements or equivalent
+  - Table size and row count statistics
+discovery:
+  code_patterns:
+  - pattern: SELECT.*FROM.*WHERE(?!.*(?:INDEX|=|IN\s*\())
+    type: regex
+    scope: source
+    purpose: Find potentially unindexed queries
+  - pattern: SELECT\s+\*|COUNT\(\*\)
+    type: regex
+    scope: source
+    purpose: Identify SELECT * and full counts
+  - pattern: LIKE\s*'%|ORDER BY.*OFFSET
+    type: regex
+    scope: source
+    purpose: Find queries with poor scaling patterns
+  file_patterns:
+  - glob: '**/*repository*.{py,java,go,ts}'
+    purpose: Repository pattern implementations
+  - glob: '**/*query*.{py,java,go,ts,sql}'
+    purpose: Query definitions
+  metrics_queries:
+  - system: pg_stat_statements
+    query: SELECT query, calls, mean_time, rows FROM pg_stat_statements ORDER BY mean_time DESC LIMIT
+      50
+    purpose: Identify slowest queries
+    threshold: mean_time < 100ms for OLTP
+  - system: pg_stat_user_tables
+    query: SELECT relname, seq_scan, idx_scan FROM pg_stat_user_tables WHERE seq_scan > idx_scan
+    purpose: Tables with more sequential scans than index scans
+    threshold: idx_scan > seq_scan for large tables
+knowledge_sources:
+  specifications:
+  - id: postgres-explain
+    name: PostgreSQL EXPLAIN Documentation
+    url: https://www.postgresql.org/docs/current/using-explain.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: use-the-index-luke
+    name: Use The Index, Luke - SQL Indexing Guide
+    url: https://use-the-index-luke.com/
+    offline_cache: true
+  - id: query-optimization
+    name: PostgreSQL Query Optimization
+    url: https://wiki.postgresql.org/wiki/Performance_Optimization
+    offline_cache: true
+  papers:
+  - id: query-optimization-survey
+    title: An Overview of Query Optimization in Relational Systems
+    url: https://web.stanford.edu/class/cs345d-01/rl/chaudhuri98.pdf
+tooling:
+  static_analysis:
+  - tool: sqlfluff
+    purpose: SQL linting and anti-pattern detection
+    offline_capable: true
+  - tool: pganalyze
+    purpose: Query performance analysis
+    offline_capable: false
+  infrastructure_tools:
+  - tool: EXPLAIN ANALYZE
+    purpose: Query execution plan analysis
+    command: EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT ...
+  - tool: pg_stat_statements
+    purpose: Query statistics aggregation
+    command: SELECT * FROM pg_stat_statements ORDER BY total_time DESC LIMIT 20
+  scripts:
+  - id: query-scalability-analyzer
+    language: python
+    purpose: Analyze query execution plans for scalability issues
+    source: inline
+    code: |
+      #!/usr/bin/env python3
+      """Analyze query plans for scalability red flags."""
+      import json
+
+      def analyze_plan(plan_json: dict) -> list:
+          issues = []
+
+          def walk_plan(node, depth=0):
+              node_type = node.get('Node Type', '')
+
+              # Check for sequential scans on large tables
+              if node_type == 'Seq Scan':
+                  rows = node.get('Plan Rows', 0)
+                  if rows > 10000:
+                      issues.append(f"Sequential scan on {rows} rows - consider index")
+
+              # Check for sorts without indexes
+              if node_type == 'Sort' and node.get('Sort Method') == 'external merge':
+                  issues.append("External sort detected - query may not scale")
+
+              # Check for nested loops with large outer rows
+              if node_type == 'Nested Loop':
+                  outer_rows = node.get('Plan Rows', 0)
+                  if outer_rows > 1000:
+                      issues.append(f"Nested loop with {outer_rows} outer rows")
+
+              for child in node.get('Plans', []):
+                  walk_plan(child, depth + 1)
+
+          walk_plan(plan_json.get('Plan', {}))
+          return issues
+signals:
+  critical:
+  - id: QUERY-CRIT-001
+    signal: Full table scan on table with >1M rows
+    evidence_pattern: Seq Scan.*rows=[0-9]{7,}
+    explanation: |
+      Sequential scans read every row in a table. While acceptable for
+      small tables, they become O(n) bottlenecks as data grows. A query
+      that takes 10ms on 10K rows takes 10 seconds on 10M rows.
+    remediation: Add appropriate index; ensure WHERE clause uses indexed columns
+  - id: QUERY-CRIT-002
+    signal: N+1 query pattern detected in ORM usage
+    evidence_indicators:
+    - Loop issuing individual SELECT for each parent row
+    - Missing eager loading configuration
+    - High query count per request in monitoring
+    explanation: |
+      N+1 queries issue 1 query to fetch a list, then N queries to fetch
+      related data. This scales linearly with data size and causes
+      severe latency issues as datasets grow.
+    remediation: Use eager loading (includes/joins), batch fetching, or DataLoader pattern
+  high:
+  - id: QUERY-HIGH-001
+    signal: OFFSET-based pagination on large datasets
+    explanation: OFFSET must scan and discard rows, O(offset) complexity
+    remediation: Use cursor-based pagination with indexed column
+  - id: QUERY-HIGH-002
+    signal: COUNT(*) on large tables without filters
+    explanation: Full table scan for exact count; does not scale
+    remediation: Use estimated counts, cached counts, or HyperLogLog
+  medium:
+  - id: QUERY-MED-001
+    signal: SELECT * retrieving unnecessary columns
+    remediation: Select only required columns; reduces I/O and memory
+  - id: QUERY-MED-002
+    signal: Leading wildcard in LIKE patterns
+    remediation: Use full-text search or reverse index for suffix matching
+  low:
+  - id: QUERY-LOW-001
+    signal: Unused indexes consuming write overhead
+  positive:
+  - id: QUERY-POS-001
+    signal: All high-frequency queries use index scans
+  - id: QUERY-POS-002
+    signal: Cursor-based pagination implemented
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory High-Frequency Queries
+    description: |
+      Identify the most frequently executed queries and those
+      consuming the most database time.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get top queries by frequency
+      command: SELECT query, calls, mean_time FROM pg_stat_statements ORDER BY calls DESC LIMIT 30
+    - purpose: Get top queries by total time
+      command: SELECT query, calls, total_time FROM pg_stat_statements ORDER BY total_time DESC LIMIT
+        30
+    expected_findings:
+    - Top 30 queries by frequency
+    - Top 30 queries by time consumption
+    - Queries to prioritize for analysis
+  - id: '2'
+    name: Analyze Execution Plans
+    description: |
+      Generate and analyze execution plans for high-impact queries
+      to identify scalability issues.
+    duration_estimate: 90 min
+    commands:
+    - purpose: Generate execution plan
+      command: EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) <query>
+    - purpose: Find sequential scans
+      command: grep -E 'Seq Scan|rows=[0-9]{6,}' explain_output.txt
+    expected_findings:
+    - Queries with sequential scans on large tables
+    - Queries with expensive sorts
+    - Queries with nested loops on large sets
+  - id: '3'
+    name: Detect N+1 Query Patterns
+    description: |
+      Analyze application code and query logs for N+1 patterns
+      and missing eager loading.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Find potential N+1 in ORM code
+      command: grep -rn '\.each\|for.*in.*:' --include='*.py' --include='*.rb' | xargs -I{} grep -l 'find\|query\|select'
+        {}
+    - purpose: Count queries per request
+      command: analyze_request_logs --group-by=request_id --count=queries
+    expected_findings:
+    - Endpoints with high query counts
+    - Missing eager loading annotations
+    - Loop-based query patterns
+  - id: '4'
+    name: Project Query Performance at Scale
+    description: |
+      Estimate how query performance will degrade as data
+      volumes increase 10x and 100x.
+    duration_estimate: 60 min
+    questions:
+    - Which queries have O(n) or worse complexity?
+    - What is the projected data growth rate?
+    - At what data volume will queries exceed SLA?
+    - Which optimizations have the highest ROI?
+    expected_findings:
+    - Query scaling projections
+    - Estimated timeline to performance issues
+    - Prioritized optimization recommendations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Query Inventory
+    - Execution Plan Analysis
+    - N+1 Pattern Assessment
+    - Scalability Projections
+    - Optimization Recommendations
+  confidence_guidance:
+    high: Direct execution plan analysis with actual data
+    medium: Analysis based on query patterns and estimated data sizes
+    low: Code review without execution plan access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: postgres-explain
+      priority: required
+    - source_id: use-the-index-luke
+      priority: recommended
+  limitations:
+  - Cannot generate execution plans without database access
+  - N+1 detection requires query log analysis
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed query analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: query-scalability-001
+  item: No sequential scans on tables >1M rows
+  level: CRITICAL
+  verification: psql -c "SELECT relname FROM pg_stat_user_tables WHERE seq_scan > 0 AND n_live_tup > 1000000"
+    | wc -l | test $(cat) -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: query-scalability-002
+  item: Top 10 queries by time have index scans
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review execution plans for top 10 queries by total_time
+  expected: Confirmed by reviewer
+- id: query-scalability-003
+  item: N+1 patterns documented and addressed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify known N+1 patterns have tracking issues or fixes
+  expected: Confirmed by reviewer
+- id: query-scalability-004
+  item: Pagination uses cursor-based approach for large datasets
+  level: WARNING
+  verification: grep -r 'OFFSET' src/ --include='*.sql' --include='*.py' | grep -v cursor | wc -l | test
+    $(cat) -lt 5 && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+relationships:
+  commonly_combined:
+  - scalability-capacity.database-scalability.data-volume-projection
+  - scalability-capacity.database-scalability.sharding-strategy
+  - performance.database-performance.query-optimization

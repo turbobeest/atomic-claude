@@ -1,0 +1,382 @@
+# ============================================================
+# AUDIT: Custom Metric Coverage
+# ============================================================
+# Category: 05 - Observability & Instrumentation
+# Subcategory: Metrics
+# ============================================================
+
+audit:
+  id: "observability-instrumentation.metrics.custom-metric-coverage"
+  name: "Custom Metric Coverage Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "observability-instrumentation"
+  category_number: 5
+  subcategory: "metrics"
+
+  tier: "expert"
+  estimated_duration: "4 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the coverage and quality of custom application metrics beyond
+    standard infrastructure metrics. This audit assesses whether services
+    expose meaningful business and operational metrics that reflect their
+    unique behavior, identifies blind spots where custom instrumentation
+    is needed, and validates that existing custom metrics provide actionable
+    insights rather than noise.
+
+  why_it_matters: |
+    Infrastructure metrics only reveal resource consumption, not application
+    behavior. Without custom metrics, teams cannot understand feature usage,
+    business transaction health, or domain-specific performance characteristics.
+    The absence of custom metrics forces reliance on logs for operational
+    visibility, which is slower and more expensive. Well-designed custom
+    metrics enable proactive alerting on business-relevant conditions.
+
+  when_to_run:
+    - "Service readiness review before production"
+    - "Post-incident review revealing observability gaps"
+    - "Feature launch with new business logic"
+    - "Annual instrumentation health check"
+
+prerequisites:
+  required_artifacts:
+    - type: "service-documentation"
+      description: "Service functionality documentation or PRDs"
+    - type: "metrics-system"
+      description: "Access to current metrics exposition"
+
+  access_requirements:
+    - "Service source code access"
+    - "Metrics platform query access"
+    - "Business stakeholder access for metric value validation"
+
+discovery:
+  code_patterns:
+    - pattern: "NewCounter|NewGauge|NewHistogram|NewSummary"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Prometheus metric definitions in Go"
+    - pattern: "prometheus_client|Counter|Gauge|Histogram"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find Python metrics instrumentation"
+    - pattern: "@Timed|@Counted|@Metered"
+      type: "regex"
+      scope: "source"
+      purpose: "Find annotation-based instrumentation"
+    - pattern: "statsd\\.increment|metrics\\.emit"
+      type: "regex"
+      scope: "source"
+      purpose: "Find StatsD or custom metrics emission"
+
+  file_patterns:
+    - glob: "**/metrics/**"
+      purpose: "Dedicated metrics packages"
+    - glob: "**/instrumentation/**"
+      purpose: "Instrumentation utilities"
+    - glob: "**/prd.md"
+      purpose: "Product requirements for business context"
+
+  interviews:
+    - role: "Service owner"
+      questions:
+        - "What are the key business transactions this service handles?"
+        - "What would you want to know during an incident?"
+        - "What metrics do you wish you had but don't?"
+      purpose: "Identify metric coverage gaps"
+
+knowledge_sources:
+  guides:
+    - id: "instrumenting-guide"
+      name: "Prometheus Instrumentation Best Practices"
+      url: "https://prometheus.io/docs/practices/instrumentation/"
+      offline_cache: true
+    - id: "use-red"
+      name: "USE and RED Methods for Metrics"
+      url: "https://www.brendangregg.com/usemethod.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "observability-book"
+      title: "Observability Engineering"
+      type: "book"
+      reference: "O'Reilly Media"
+
+tooling:
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        # List all custom metrics (non-standard prefixes)
+        count by (__name__) ({__name__!~"go_.*|process_.*|promhttp_.*|container_.*|node_.*"})
+      purpose: "Identify custom application metrics"
+    - system: "Prometheus"
+      query: |
+        # Metrics with no recent data (possibly unused)
+        count by (__name__) (last_over_time({__name__=~".+"}[24h]))
+      purpose: "Find potentially stale custom metrics"
+
+  static_analysis:
+    - tool: "custom-grep"
+      purpose: "Find metric definitions in source"
+      offline_capable: true
+
+  scripts:
+    - id: "coverage-analyzer"
+      language: "python"
+      purpose: "Analyze metric coverage against business operations"
+      source: "inline"
+      code: |
+        def analyze_metric_coverage(service_operations, defined_metrics):
+            """
+            Compare documented operations with instrumented metrics
+            """
+            coverage = {
+                'covered': [],
+                'gaps': [],
+                'orphan_metrics': []
+            }
+            for op in service_operations:
+                matching = [m for m in defined_metrics if op.lower() in m.lower()]
+                if matching:
+                    coverage['covered'].append((op, matching))
+                else:
+                    coverage['gaps'].append(op)
+            return coverage
+
+signals:
+  critical:
+    - id: "COVER-CRIT-001"
+      signal: "No custom metrics for core business transactions"
+      evidence_indicators:
+        - "Only infrastructure metrics exist"
+        - "Cannot answer 'how many orders processed?'"
+        - "No metrics for primary service function"
+      explanation: |
+        Without business transaction metrics, teams cannot monitor the
+        actual purpose of the service. Infrastructure metrics show the
+        container is running but not whether it's doing its job correctly.
+      remediation: "Instrument counters for each business transaction type"
+
+  high:
+    - id: "COVER-HIGH-001"
+      signal: "Missing error categorization metrics"
+      evidence_indicators:
+        - "Only generic error counters exist"
+        - "Cannot distinguish error types without log analysis"
+      explanation: |
+        Generic error counters hide the nature of failures. Teams need
+        error metrics broken down by category to quickly identify root
+        causes and track specific failure modes.
+      remediation: "Add error type labels or separate counters per error category"
+
+    - id: "COVER-HIGH-002"
+      signal: "No queue depth or backpressure metrics"
+      evidence_indicators:
+        - "Async processing without queue visibility"
+        - "Cannot detect processing backlogs"
+      explanation: |
+        Queue-based systems need visibility into queue depth, processing
+        rate, and age of oldest item to detect backlog conditions before
+        they impact users.
+      remediation: "Instrument queue size, processing rate, and item age metrics"
+
+  medium:
+    - id: "COVER-MED-001"
+      signal: "Feature flags not instrumented"
+      evidence_pattern: "Feature flags present but no metrics on usage"
+      remediation: "Add counters tracking requests by feature flag state"
+
+    - id: "COVER-MED-002"
+      signal: "External dependency calls not individually instrumented"
+      evidence_pattern: "Single 'external_calls' metric without breakdown"
+      remediation: "Instrument each dependency with latency and error metrics"
+
+    - id: "COVER-MED-003"
+      signal: "Cache behavior not observable"
+      evidence_pattern: "Cache present but no hit/miss metrics"
+      remediation: "Add cache hit rate, miss rate, and eviction counters"
+
+  low:
+    - id: "COVER-LOW-001"
+      signal: "Startup and initialization not instrumented"
+      remediation: "Add metrics for initialization duration and component health"
+
+  positive:
+    - id: "COVER-POS-001"
+      signal: "Comprehensive business transaction instrumentation"
+    - id: "COVER-POS-002"
+      signal: "All external dependencies individually monitored"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Document service operations"
+      description: |
+        Create an inventory of all business operations and technical
+        functions the service performs that should be observable.
+      duration_estimate: "45 min"
+      questions:
+        - "What are the primary user-facing operations?"
+        - "What background jobs or async processes exist?"
+        - "What external systems does this service call?"
+        - "What caching or state management exists?"
+      expected_findings:
+        - "Operation inventory"
+        - "Dependency map"
+
+    - id: "2"
+      name: "Inventory existing metrics"
+      description: |
+        Collect all custom metrics currently exposed by the service,
+        excluding standard infrastructure metrics.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List service metrics"
+          command: "curl -s http://service:port/metrics | grep -v '^#' | grep -v 'go_\\|process_\\|promhttp_' | cut -d'{' -f1 | sort -u"
+      expected_findings:
+        - "Complete list of custom metrics"
+        - "Metric types and purposes"
+
+    - id: "3"
+      name: "Map metrics to operations"
+      description: |
+        Match existing metrics to documented operations to identify
+        coverage and gaps.
+      duration_estimate: "45 min"
+      questions:
+        - "Which operations have corresponding metrics?"
+        - "Which operations are not instrumented?"
+        - "Are there orphan metrics with no clear purpose?"
+      expected_findings:
+        - "Coverage matrix"
+        - "Gap list"
+
+    - id: "4"
+      name: "Review metric quality"
+      description: |
+        For existing metrics, evaluate whether they provide actionable
+        information or just noise.
+      duration_estimate: "45 min"
+      questions:
+        - "Can you answer key operational questions with these metrics?"
+        - "Are labels sufficient for debugging?"
+        - "Do histograms have appropriate buckets?"
+      expected_findings:
+        - "Metric quality assessment"
+        - "Improvement recommendations"
+
+    - id: "5"
+      name: "Identify critical gaps"
+      description: |
+        Prioritize missing instrumentation based on operational
+        importance and incident history.
+      duration_estimate: "30 min"
+      questions:
+        - "What questions can't be answered during incidents?"
+        - "Which past incidents revealed metric gaps?"
+      expected_findings:
+        - "Prioritized instrumentation backlog"
+        - "Incident correlation"
+
+output:
+  deliverables:
+    - type: "coverage_matrix"
+      format: "structured"
+      description: "Operation to metric mapping with gaps highlighted"
+
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Coverage Analysis"
+        - "Critical Gaps"
+        - "Instrumentation Recommendations"
+
+  confidence_guidance:
+    high: "Full source code review and runtime verification"
+    medium: "Runtime metrics analysis without code review"
+    low: "Based on documentation and interviews only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "instrumenting-guide"
+        priority: "required"
+      - source_id: "use-red"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis of service behavior"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "coverage-001"
+    item: "All core business transactions have metrics"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm each documented operation has corresponding metrics"
+    expected: "Confirmed by reviewer"
+
+  - id: "coverage-002"
+    item: "External dependency calls individually instrumented"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify each dependency has latency and error metrics"
+    expected: "Confirmed by reviewer"
+
+  - id: "coverage-003"
+    item: "Error metrics provide categorization"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check error metrics have meaningful breakdown"
+    expected: "Confirmed by reviewer"
+
+  - id: "coverage-004"
+    item: "Coverage gaps documented with prioritization"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Ensure gap list exists with ownership assigned"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "observability-instrumentation.metrics.four-golden-signals"
+    - "observability-instrumentation.metrics.business-metric"
+    - "observability-instrumentation.distributed-tracing.span-coverage"

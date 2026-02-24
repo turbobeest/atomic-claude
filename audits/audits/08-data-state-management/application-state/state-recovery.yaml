@@ -1,0 +1,319 @@
+# ============================================================
+# AUDIT: State Recovery
+# ============================================================
+# Evaluates how application state is recovered after failures
+# including crash recovery, error boundaries, and graceful degradation.
+# ============================================================
+
+audit:
+  id: "data-state-management.application-state.state-recovery"
+
+  name: "State Recovery"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "application-state"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates state recovery mechanisms including how the
+    application recovers from crashes, errors, and corrupted state.
+    It examines error boundaries, fallback states, state reset capabilities,
+    and recovery UX. The audit ensures users can recover from failure
+    states without losing critical data.
+
+  why_it_matters: |
+    Without proper recovery mechanisms, failures leave users stranded
+    with no path forward. Corrupted state causes persistent errors that
+    users cannot escape. Crash loops make applications unusable. Well-
+    designed recovery allows graceful degradation and provides users
+    with clear paths to restore functionality.
+
+  when_to_run:
+    - "When implementing error handling"
+    - "After user-reported stuck states"
+    - "Before production launches"
+    - "When adding complex state features"
+
+prerequisites:
+  required_artifacts:
+    - type: "application-code"
+      description: "Frontend and backend recovery code"
+    - type: "error-handling"
+      description: "Error boundary and recovery implementations"
+
+  access_requirements:
+    - "Read access to application code"
+    - "Access to error handling configuration"
+
+discovery:
+  code_patterns:
+    - pattern: "ErrorBoundary|componentDidCatch|error.*boundary"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify React error boundaries"
+    - pattern: "reset|Reset|recover|fallback|degraded"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify recovery mechanisms"
+    - pattern: "try.*catch|catch\\(|onError|errorHandler"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify error handling"
+
+  file_patterns:
+    - glob: "**/error/**/*"
+      purpose: "Error handling code"
+    - glob: "**/recovery/**/*"
+      purpose: "Recovery mechanisms"
+    - glob: "**/fallback/**/*"
+      purpose: "Fallback implementations"
+
+knowledge_sources:
+  guides:
+    - id: "react-error-boundaries"
+      name: "React Error Boundaries"
+      url: "https://react.dev/reference/react/Component#catching-rendering-errors-with-an-error-boundary"
+      offline_cache: true
+
+    - id: "resilience-patterns"
+      name: "Resilience Design Patterns"
+      url: "https://docs.microsoft.com/en-us/azure/architecture/patterns/category/resiliency"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "error-boundary-linter"
+      purpose: "Verify error boundary coverage"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "RECOVER-CRIT-001"
+      signal: "No error boundaries causing full app crash"
+      evidence_pattern: "React app without error boundaries; single error crashes everything"
+      explanation: |
+        Without error boundaries, any component error crashes the entire
+        application. Users see a blank screen with no way to recover.
+        A single bug in a minor feature breaks the whole app.
+      remediation: "Implement error boundaries at strategic component tree levels; show fallback UI"
+
+    - id: "RECOVER-CRIT-002"
+      signal: "Corrupted state causes persistent crash loop"
+      evidence_pattern: "Persisted state corruption prevents app launch"
+      explanation: |
+        When corrupted state is persisted and reloaded on startup, the
+        app crashes immediately on every launch. Users cannot use the
+        app at all until they manually clear storage.
+      remediation: "Validate state on load; implement automatic state reset on corruption; provide manual reset option"
+
+  high:
+    - id: "RECOVER-HIGH-001"
+      signal: "No user-accessible state reset mechanism"
+      evidence_pattern: "Users cannot clear corrupted state without developer tools"
+      explanation: |
+        When state becomes corrupted, users need a way to reset without
+        technical knowledge. Requiring localStorage clearing or app
+        reinstall is unacceptable UX.
+      remediation: "Provide 'Clear data' or 'Reset app' option in settings or error UI"
+
+    - id: "RECOVER-HIGH-002"
+      signal: "Error recovery discards all unsaved work"
+      evidence_pattern: "Reset clears all state including user's pending changes"
+      explanation: |
+        Recovery that discards user work compounds the failure. Users
+        lose their edits when recovering from errors, causing double
+        frustration and data loss.
+      remediation: "Attempt partial recovery; save drafts before reset; offer to restore after recovery"
+
+  medium:
+    - id: "RECOVER-MED-001"
+      signal: "No graceful degradation for feature failures"
+      evidence_pattern: "Optional feature failure breaks entire view"
+      remediation: "Isolate optional features with error boundaries; hide failed features gracefully"
+
+    - id: "RECOVER-MED-002"
+      signal: "Generic error messages without recovery guidance"
+      evidence_pattern: "'Something went wrong' without actionable steps"
+      remediation: "Provide specific error messages with clear recovery actions"
+
+  low:
+    - id: "RECOVER-LOW-001"
+      signal: "Error reporting without user consent"
+
+  positive:
+    - id: "RECOVER-POS-001"
+      signal: "Comprehensive error boundaries with graceful fallbacks"
+    - id: "RECOVER-POS-002"
+      signal: "User-friendly recovery options preserving critical data"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Error Boundary Discovery"
+      description: |
+        Identify error boundaries and their coverage
+        across the application.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find React error boundaries"
+          command: "grep -riE 'ErrorBoundary|componentDidCatch|getDerivedStateFromError' --include='*.tsx' --include='*.jsx' --include='*.ts' . 2>/dev/null | head -40"
+        - purpose: "Find error boundary usage"
+          command: "grep -riE '<ErrorBoundary|<.*Boundary' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -30"
+        - purpose: "Find fallback UI components"
+          command: "grep -riE 'fallback|Fallback|FallbackComponent' --include='*.tsx' --include='*.jsx' --include='*.ts' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Error boundary implementations"
+        - "Coverage across component tree"
+
+    - id: "2"
+      name: "State Recovery Analysis"
+      description: |
+        Evaluate mechanisms for recovering from corrupted
+        or invalid state.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find state reset functions"
+          command: "grep -riE 'resetState|clearState|reset\\(\\)|RESET|initialState' --include='*.ts' --include='*.tsx' --include='*.js' . 2>/dev/null | head -40"
+        - purpose: "Find state validation"
+          command: "grep -riE 'validate.*state|isValid|state.*valid|corrupt|integrity' --include='*.ts' --include='*.tsx' --include='*.js' . 2>/dev/null | head -30"
+        - purpose: "Find storage clearing"
+          command: "grep -riE 'localStorage\\.clear|clear.*storage|reset.*persist' --include='*.ts' --include='*.tsx' --include='*.js' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "State reset capabilities"
+        - "State validation"
+
+    - id: "3"
+      name: "Recovery UX Analysis"
+      description: |
+        Evaluate the user experience for error recovery
+        including messaging and actions.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find error messages"
+          command: "grep -riE 'Something went wrong|error occurred|try again|reload' --include='*.tsx' --include='*.jsx' --include='*.ts' . 2>/dev/null | head -40"
+        - purpose: "Find retry buttons"
+          command: "grep -riE 'retry|Retry|try.*again|reload.*page' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -30"
+        - purpose: "Find reset/clear UI"
+          command: "grep -riE 'Clear data|Reset|Start over|clear.*cache' --include='*.tsx' --include='*.jsx' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Recovery UX patterns"
+        - "User-accessible reset options"
+
+    - id: "4"
+      name: "Graceful Degradation Analysis"
+      description: |
+        Evaluate whether failures are isolated to prevent
+        cascading impact.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find feature flags for degradation"
+          command: "grep -riE 'feature.*flag|isEnabled|disable.*feature|fallback.*mode' --include='*.ts' --include='*.tsx' --include='*.js' . 2>/dev/null | head -30"
+        - purpose: "Find optional feature boundaries"
+          command: "grep -riE 'optional|Optional|canFail|nonCritical' --include='*.ts' --include='*.tsx' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Feature isolation patterns"
+        - "Degradation capabilities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Error Boundary Coverage"
+        - "Recovery Mechanisms"
+        - "User Experience"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of missing error boundaries or recovery mechanisms"
+    medium: "Partial coverage exists, edge cases uncertain"
+    low: "Recovery appears adequate but failure scenario testing needed"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "react-error-boundaries"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive recovery analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "recover-001"
+    item: "Error boundaries implemented at key points"
+    level: "CRITICAL"
+    verification: "grep -riE 'ErrorBoundary|componentDidCatch' --include='*.tsx' --include='*.ts' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "recover-002"
+    item: "State corruption handled with recovery path"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify corrupted state can be recovered from"
+    expected: "Confirmed by reviewer"
+
+  - id: "recover-003"
+    item: "User can reset app state without technical knowledge"
+    level: "WARNING"
+    verification: "grep -riE 'Clear data|Reset|clear.*storage' --include='*.tsx' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "mobile-application"]
+
+  compliance_frameworks:
+    - framework: "Reliability"
+      controls: ["REL-001", "REL-002"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.application-state.state-persistence"
+    - "data-state-management.application-state.client-side-state-management"

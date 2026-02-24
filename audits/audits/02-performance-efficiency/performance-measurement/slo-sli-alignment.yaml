@@ -1,0 +1,395 @@
+# ============================================================
+# AUDIT: SLO/SLI Alignment Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.performance-measurement.slo-sli-alignment"
+  name: "SLO/SLI Alignment Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "performance-measurement"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Validates alignment between Service Level Indicators (SLIs) and Service
+    Level Objectives (SLOs) with actual business requirements. Verifies SLIs
+    are correctly measured, SLOs are appropriately set with error budgets,
+    and monitoring/alerting is configured to track SLO compliance. Reviews
+    burn rate alerts and error budget policies.
+
+  why_it_matters: |
+    Misaligned SLOs lead to either over-engineering (targeting unnecessary
+    reliability) or under-serving users (accepting too much degradation).
+    Google's SRE practice shows that properly calibrated SLOs balance
+    reliability investment with feature velocity. Teams with well-defined
+    SLOs have 50% fewer reliability incidents and spend 60% less time on
+    toil than teams without.
+
+  when_to_run:
+    - "Initial SRE setup"
+    - "Quarterly SLO reviews"
+    - "After user experience complaints"
+    - "Business requirement changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "documentation"
+      description: "SLO/SLI documentation"
+    - type: "metrics_access"
+      description: "Prometheus or metrics system access"
+
+  access_requirements:
+    - "SLO documentation"
+    - "Prometheus/Grafana access"
+    - "Error budget dashboard access"
+    - "Alerting configuration"
+
+discovery:
+  file_patterns:
+    - glob: "**/*slo*.*"
+      purpose: "SLO definition files"
+    - glob: "**/*sli*.*"
+      purpose: "SLI definition files"
+    - glob: "**/alerts/*.yaml"
+      purpose: "Alert definitions"
+
+  metrics_queries:
+    - system: "Prometheus"
+      query: |
+        sum(rate(http_request_duration_seconds_bucket{le="0.3"}[30d]))
+        / sum(rate(http_request_duration_seconds_count[30d]))
+      purpose: "30-day latency SLI"
+      threshold: "> SLO target"
+    - system: "Prometheus"
+      query: |
+        1 - (sum(rate(http_requests_total{status=~"5.."}[30d]))
+        / sum(rate(http_requests_total[30d])))
+      purpose: "30-day availability SLI"
+      threshold: "> SLO target"
+
+knowledge_sources:
+  guides:
+    - id: "sre-book-slo"
+      name: "Google SRE Book - Service Level Objectives"
+      url: "https://sre.google/sre-book/service-level-objectives/"
+      offline_cache: true
+    - id: "sre-workbook-slo"
+      name: "SRE Workbook - Implementing SLOs"
+      url: "https://sre.google/workbook/implementing-slos/"
+      offline_cache: true
+    - id: "sloth"
+      name: "Sloth - SLO Generation Tool"
+      url: "https://sloth.dev/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "art-of-slos"
+      title: "The Art of SLOs"
+      type: "course"
+      reference: "Google Cloud Training"
+
+tooling:
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        # Error budget remaining
+        1 - (
+          sum(rate(http_requests_total{status=~"5.."}[30d]))
+          / sum(rate(http_requests_total[30d]))
+        ) / (1 - 0.999)
+      purpose: "Error budget consumption"
+    - system: "Prometheus"
+      query: |
+        # Burn rate (last hour vs 30-day budget)
+        sum(rate(http_requests_total{status=~"5.."}[1h]))
+        / sum(rate(http_requests_total[1h]))
+        / (1 - 0.999)
+        * 30 * 24
+      purpose: "Current burn rate"
+
+  infrastructure_tools:
+    - tool: "sloth"
+      purpose: "Generate SLO Prometheus rules"
+      command: "sloth generate -i slo.yaml"
+
+  scripts:
+    - id: "slo-checker"
+      language: "bash"
+      purpose: "Check current SLO compliance"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        PROM_URL="${PROMETHEUS_URL:-http://localhost:9090}"
+        echo "=== SLO Compliance Check ==="
+
+        # Availability SLI
+        AVAIL=$(curl -s "$PROM_URL/api/v1/query" \
+          --data-urlencode 'query=1 - (sum(rate(http_requests_total{status=~"5.."}[30d])) / sum(rate(http_requests_total[30d])))' \
+          | jq -r '.data.result[0].value[1]')
+
+        echo "30-day Availability: $(echo "scale=4; $AVAIL * 100" | bc)%"
+        echo "SLO Target: 99.9%"
+
+        # Error budget
+        BUDGET=$(echo "scale=4; ($AVAIL - 0.999) / 0.001 * 100" | bc)
+        echo "Error Budget Remaining: ${BUDGET}%"
+
+signals:
+  critical:
+    - id: "SLO-CRIT-001"
+      signal: "No SLOs defined for customer-facing services"
+      evidence_indicators:
+        - "No SLO documentation found"
+        - "Team cannot state reliability targets"
+        - "No error budget concept"
+      explanation: |
+        Without SLOs, there's no objective definition of "reliable enough."
+        Teams either over-engineer reliability or accept arbitrary degradation.
+        SLOs provide the business-aligned foundation for all reliability
+        decisions including incident response, toil prioritization, and
+        feature velocity.
+      remediation: "Define SLOs for availability, latency, and throughput based on user expectations"
+
+    - id: "SLO-CRIT-002"
+      signal: "SLIs don't measure user experience (only infrastructure metrics)"
+      evidence_pattern: "SLIs based on CPU, memory, not request success/latency"
+      explanation: |
+        Infrastructure metrics (CPU at 80%) don't correlate with user experience.
+        A service can be "healthy" by infrastructure metrics while returning
+        errors to users. SLIs must measure what users experience: successful
+        requests, acceptable latency, correct functionality.
+      remediation: "Define SLIs that measure user-facing outcomes: availability, latency percentiles, correctness"
+
+  high:
+    - id: "SLO-HIGH-001"
+      signal: "SLO targets set without user/business input"
+      evidence_pattern: "Arbitrary 99.9% target without justification"
+      explanation: |
+        SLOs should reflect user expectations and business requirements, not
+        engineering aspirations. A 99.9% target might be unnecessary (wasting
+        engineering effort) or insufficient (harming users). The right target
+        depends on use case, competition, and user tolerance.
+      remediation: "Validate SLO targets against user research and business requirements"
+
+    - id: "SLO-HIGH-002"
+      signal: "No error budget policy documented"
+      evidence_pattern: "SLOs exist but no consequences for budget exhaustion"
+      explanation: |
+        Error budgets only drive behavior when there are consequences for
+        exhaustion. Without a policy stating what happens (feature freeze,
+        reliability sprint), teams ignore budgets until catastrophic failure.
+        The policy creates accountability.
+      remediation: "Document error budget policy with clear actions for budget exhaustion"
+
+  medium:
+    - id: "SLO-MED-001"
+      signal: "No burn rate alerts configured"
+      evidence_pattern: "Only static threshold alerts, no multi-window burn rate"
+      remediation: "Implement multi-window burn rate alerts (2% budget in 1h = page)"
+
+    - id: "SLO-MED-002"
+      signal: "SLO window doesn't match business cycle"
+      evidence_pattern: "30-day SLO for weekly usage patterns"
+      remediation: "Align SLO window with business cycles (weekly, monthly, quarterly)"
+
+  low:
+    - id: "SLO-LOW-001"
+      signal: "No SLO reporting dashboard"
+
+  positive:
+    - id: "SLO-POS-001"
+      signal: "SLOs defined with business justification"
+    - id: "SLO-POS-002"
+      signal: "Error budget policy with clear consequences"
+    - id: "SLO-POS-003"
+      signal: "Multi-window burn rate alerts"
+    - id: "SLO-POS-004"
+      signal: "Regular SLO reviews with stakeholders"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review SLO Documentation"
+      description: |
+        Locate and review SLO documentation including targets,
+        SLI definitions, and error budget policies.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find SLO/SLI documentation"
+          command: "find . -name '*slo*' -o -name '*sli*' | head -10"
+        - purpose: "Search for reliability targets"
+          command: "grep -rn 'SLO\\|SLI\\|error.budget\\|availability.*%' --include='*.md' --include='*.yaml' ."
+
+      questions:
+        - "What SLOs are defined?"
+        - "How were SLO targets determined?"
+        - "Is there an error budget policy?"
+
+      expected_findings:
+        - "SLO documentation with targets"
+        - "SLI measurement definitions"
+        - "Error budget policy"
+
+    - id: "2"
+      name: "Validate SLI Measurement"
+      description: |
+        Verify SLIs are correctly measured and aligned with
+        user experience, not just infrastructure metrics.
+      duration_estimate: "40 min"
+
+      commands:
+        - purpose: "Find SLI metric definitions"
+          command: "grep -rn 'http_request\\|latency\\|error_rate' --include='*.yaml' --include='*.rules' ."
+        - purpose: "Query current SLI values"
+          command: |
+            curl -s "$PROMETHEUS_URL/api/v1/query" \
+              --data-urlencode 'query=sum(rate(http_requests_total{status=~"2.."}[24h])) / sum(rate(http_requests_total[24h]))'
+
+      expected_findings:
+        - "SLIs measure user-facing outcomes"
+        - "SLIs have consistent measurement"
+
+    - id: "3"
+      name: "Check Alerting Configuration"
+      description: |
+        Verify burn rate alerts are configured for SLO violation
+        detection before budget exhaustion.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find burn rate alert rules"
+          command: "grep -rn 'burn.*rate\\|budget' --include='*.yaml' --include='*.rules' ."
+        - purpose: "Check multi-window alerts"
+          command: "grep -A10 'burn' --include='*.yaml' . | grep -E '\\[1h\\]|\\[6h\\]|\\[1d\\]'"
+
+      expected_findings:
+        - "Multi-window burn rate alerts"
+        - "Appropriate severity levels"
+
+    - id: "4"
+      name: "Review Error Budget Status"
+      description: |
+        Query current error budget consumption and verify
+        budget tracking is working.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Query error budget remaining"
+          command: |
+            curl -s "$PROMETHEUS_URL/api/v1/query" \
+              --data-urlencode 'query=slo:error_budget_remaining:ratio{service="api"}'
+        - purpose: "Check burn rate"
+          command: |
+            curl -s "$PROMETHEUS_URL/api/v1/query" \
+              --data-urlencode 'query=slo:burn_rate:1h{service="api"}'
+
+      expected_findings:
+        - "Error budget metrics available"
+        - "Current compliance visible"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "SLO Definition Review"
+        - "SLI Measurement Analysis"
+        - "Error Budget Status"
+        - "Alerting Configuration"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct SLO documentation and metrics review"
+    medium: "Partial documentation or metrics access"
+    low: "Interview-based assessment"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "sre-book-slo"
+        priority: "required"
+      - source_id: "sre-workbook-slo"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive SLO review"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "slo-001"
+    item: "SLOs defined for customer-facing services"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm SLO documentation exists with availability, latency, throughput targets"
+    expected: "Confirmed by reviewer"
+
+  - id: "slo-002"
+    item: "SLIs measure user experience, not infrastructure"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify SLIs are based on request success, latency, not CPU/memory"
+    expected: "Confirmed by reviewer"
+
+  - id: "slo-003"
+    item: "Error budget policy documented"
+    level: "BLOCKING"
+    verification: |
+      POLICY=$(find . -name '*budget*policy*' -o -name '*error*budget*' 2>/dev/null | wc -l)
+      if [ "$POLICY" -gt 0 ]; then echo "PASS"; else echo "FAIL: No error budget policy"; fi
+    expected: "PASS"
+
+  - id: "slo-004"
+    item: "Burn rate alerts configured"
+    level: "BLOCKING"
+    verification: |
+      BURN=$(grep -rn 'burn.*rate' --include='*.yaml' --include='*.rules' . 2>/dev/null | wc -l)
+      if [ "$BURN" -gt 0 ]; then echo "PASS"; else echo "FAIL: No burn rate alerts"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.performance-measurement.performance-baseline"
+    - "performance-efficiency.performance-measurement.production-performance-monitoring"

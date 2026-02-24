@@ -1,0 +1,382 @@
+# ============================================================
+# AUDIT: Data Ownership Clarity Assessment
+# ============================================================
+# Evaluates whether data ownership boundaries are clear, with
+# each domain having authoritative data stores.
+# ============================================================
+
+audit:
+  id: "architecture-design.system-decomposition.data-ownership-clarity"
+  name: "Data Ownership Clarity Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "system-decomposition"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "architecture"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates whether data ownership is clearly defined across
+    the system, with each bounded context or service owning its data
+    authoritatively. It identifies shared databases, unclear ownership,
+    and data synchronization issues that create coupling.
+
+  why_it_matters: |
+    Unclear data ownership causes:
+    - Shared databases coupling services together
+    - Data inconsistency when multiple systems modify same data
+    - Schema changes affecting multiple teams
+    - Difficulty determining source of truth
+    - Compliance issues with data governance
+    Clear ownership enables autonomous services and data integrity.
+
+  when_to_run:
+    - "During microservice design or migration"
+    - "When experiencing data inconsistency"
+    - "Before splitting shared databases"
+    - "During data governance assessments"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Service source code"
+    - type: "database_schemas"
+      description: "Database schema definitions"
+    - type: "architecture_documentation"
+      description: "Data ownership documentation"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Access to database configuration"
+
+discovery:
+  code_patterns:
+    - pattern: "datasource.url|DATABASE_URL|connectionString"
+      type: "regex"
+      scope: "config"
+      purpose: "Find database connections"
+
+    - pattern: "@Entity|@Table|CREATE TABLE"
+      type: "regex"
+      scope: "source"
+      purpose: "Find data model definitions"
+
+    - pattern: "JOIN.*ON|FOREIGN KEY"
+      type: "regex"
+      scope: "source"
+      purpose: "Find cross-table relationships"
+
+  file_patterns:
+    - glob: "**/application.yaml"
+      purpose: "Spring configuration"
+    - glob: "**/application.properties"
+      purpose: "Spring properties"
+    - glob: "**/*.sql"
+      purpose: "SQL schema files"
+    - glob: "**/migrations/**"
+      purpose: "Database migrations"
+
+knowledge_sources:
+  specifications:
+    - id: "database-per-service"
+      name: "Database per Service Pattern"
+      url: "https://microservices.io/patterns/data/database-per-service.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "data-mesh"
+      name: "Data Mesh Principles"
+      url: "https://martinfowler.com/articles/data-mesh-principles.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "ddd-book"
+      title: "Domain-Driven Design"
+      type: "book"
+      reference: "Eric Evans - Bounded Contexts"
+
+    - id: "data-intensive"
+      title: "Designing Data-Intensive Applications"
+      type: "book"
+      reference: "Martin Kleppmann"
+
+    - id: "building-microservices"
+      title: "Building Microservices"
+      type: "book"
+      reference: "Sam Newman - 2nd Edition"
+
+tooling:
+  static_analysis:
+    - tool: "SchemaSpy"
+      purpose: "Visualize database schemas and relationships"
+      offline_capable: true
+
+  scripts:
+    - id: "data-ownership-analyzer"
+      language: "bash"
+      purpose: "Analyze database configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Database Connection Strings ==="
+        grep -rn "datasource.url\|DATABASE_URL\|jdbc:" --include="*.yaml" --include="*.properties" | head -30
+
+        echo "=== Entity Definitions ==="
+        grep -rn "@Entity\|@Table" --include="*.java" | head -30
+
+        echo "=== Shared Schema Access ==="
+        grep -rn "schema=" --include="*.yaml" --include="*.properties" | sort | uniq -c | sort -rn | head -15
+
+signals:
+  critical:
+    - id: "DATA-CRIT-001"
+      signal: "Multiple services sharing same database schema"
+      evidence_pattern: "Same database URL in multiple service configurations"
+      explanation: |
+        Shared databases couple services together. Schema changes affect
+        multiple teams, and services can interfere with each other's data.
+        This defeats microservice independence.
+      remediation: "Extract to database-per-service; use events for data sharing"
+
+    - id: "DATA-CRIT-002"
+      signal: "No clear owner for critical data entity"
+      evidence_pattern: "Customer/Order/Product entity modified by multiple services"
+      explanation: |
+        When multiple services can modify the same entity, there's no
+        single source of truth. Data inconsistency is inevitable.
+      remediation: "Designate authoritative owner; other services request changes via API"
+
+  high:
+    - id: "DATA-HIGH-001"
+      signal: "Cross-service database joins"
+      evidence_pattern: "SQL joins spanning tables owned by different services"
+      explanation: |
+        Cross-service joins create tight coupling and prevent independent
+        schema evolution. They also create performance coupling.
+      remediation: "Use API composition or materialized views; denormalize at boundary"
+
+    - id: "DATA-HIGH-002"
+      signal: "Direct database access bypassing owning service"
+      evidence_pattern: "Service reads from another service's tables directly"
+      explanation: |
+        Bypassing APIs couples services to internal schema and prevents
+        the owning service from controlling access or evolution.
+      remediation: "Access data only through owning service's API"
+
+  medium:
+    - id: "DATA-MED-001"
+      signal: "Unclear data synchronization mechanism"
+      evidence_pattern: "Multiple copies of data without sync documentation"
+      explanation: |
+        Duplicated data without clear sync strategy leads to drift
+        and inconsistency.
+      remediation: "Document sync mechanism; use events or CDC"
+
+    - id: "DATA-MED-002"
+      signal: "Schema migrations affecting multiple services"
+      evidence_pattern: "Database migration requires coordinated service updates"
+      explanation: |
+        Coupled schema changes require coordinated deployments, reducing
+        deployment independence.
+      remediation: "Use backward-compatible changes; split schemas"
+
+  low:
+    - id: "DATA-LOW-001"
+      signal: "Data ownership not documented"
+      remediation: "Document data domains and owners"
+
+  positive:
+    - id: "DATA-POS-001"
+      signal: "Each service owns its database"
+    - id: "DATA-POS-002"
+      signal: "Clear data ownership documentation"
+    - id: "DATA-POS-003"
+      signal: "Events used for cross-service data sharing"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map database configuration"
+      description: |
+        Identify all databases and which services connect to them.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find database configurations"
+          command: "grep -rn 'datasource.url\\|DATABASE_URL\\|jdbc:' --include='*.yaml' --include='*.properties' --include='*.env' | head -40"
+        - purpose: "Group by database"
+          command: "grep -rh 'datasource.url\\|DATABASE_URL' --include='*.yaml' --include='*.properties' | sort | uniq -c | sort -rn | head -15"
+      expected_findings:
+        - "Database inventory"
+        - "Service-database mapping"
+
+    - id: "2"
+      name: "Identify shared databases"
+      description: |
+        Find databases accessed by multiple services.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find shared schemas"
+          command: "grep -rh 'jdbc:' --include='*.yaml' | cut -d/ -f4 | sort | uniq -c | sort -rn | head -10"
+      expected_findings:
+        - "Shared database instances"
+        - "Potential coupling"
+
+    - id: "3"
+      name: "Map entity ownership"
+      description: |
+        For each major data entity, identify which service(s)
+        can read and write.
+      duration_estimate: "35 min"
+      commands:
+        - purpose: "Find entity definitions"
+          command: "grep -rn '@Entity\\|@Table' --include='*.java' | head -40"
+        - purpose: "Find CRUD operations per entity"
+          command: "grep -rn 'Repository\\|DAO' --include='*.java' | cut -d: -f1 | sort | uniq | head -30"
+      expected_findings:
+        - "Entity ownership map"
+        - "Write access locations"
+
+    - id: "4"
+      name: "Check cross-service data access"
+      description: |
+        Find instances where services access data they don't own.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find cross-schema joins"
+          command: "grep -rn 'JOIN.*\\.' --include='*.sql' --include='*.java' | head -20"
+        - purpose: "Find foreign tables"
+          command: "grep -rn 'FOREIGN KEY\\|@ManyToOne' --include='*.sql' --include='*.java' | head -20"
+      expected_findings:
+        - "Cross-service data access"
+        - "Schema coupling"
+
+    - id: "5"
+      name: "Develop ownership recommendations"
+      description: |
+        For unclear ownership, recommend authoritative owners
+        and data sharing patterns.
+      duration_estimate: "30 min"
+      questions:
+        - "Who should own each major entity?"
+        - "How should non-owners access this data?"
+        - "What events would communicate changes?"
+      expected_findings:
+        - "Ownership recommendations"
+        - "Data sharing strategy"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "data_ownership_map"
+      format: "tabular"
+      sections:
+        - "Entity/Table"
+        - "Current Accessors"
+        - "Recommended Owner"
+        - "Sharing Pattern"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Ownership Analysis"
+        - "Migration Recommendations"
+
+  confidence_guidance:
+    high: "Clear shared database or multi-writer pattern"
+    medium: "Ownership unclear, needs verification"
+    low: "Potential issue based on naming"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "database-per-service"
+        priority: "required"
+      - source_id: "data-mesh"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive data analysis"
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "data-001"
+    item: "No shared databases between services"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Each service has dedicated database"
+    expected: "Confirmed or justified exception"
+
+  - id: "data-002"
+    item: "Clear owner for each data entity"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Ownership documented per entity"
+    expected: "Confirmed by reviewer"
+
+  - id: "data-003"
+    item: "No direct cross-service database access"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Data accessed through owning service API"
+    expected: "Confirmed by reviewer"
+
+  - id: "data-004"
+    item: "Data sharing patterns documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Events/APIs for cross-service data documented"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["microservices", "distributed"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Data Integrity"]
+    - framework: "GDPR"
+      controls: ["Data Governance"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.cohesion.service-cohesion"
+    - "architecture-design.system-decomposition.service-granularity"
+    - "architecture-design.coupling.tight-coupling-detection"

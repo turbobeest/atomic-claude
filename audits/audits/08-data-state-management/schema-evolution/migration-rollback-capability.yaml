@@ -1,0 +1,327 @@
+# ============================================================
+# AUDIT: Migration Rollback Capability
+# ============================================================
+# Evaluates the ability to rollback database migrations safely
+# and completely in case of deployment failures.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-evolution.migration-rollback-capability"
+
+  name: "Migration Rollback Capability"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-evolution"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: true
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates the capability to rollback database migrations
+    safely and completely. It examines whether down migrations exist,
+    are tested, and can restore the previous schema state. The audit
+    identifies migrations that are irreversible or have incomplete
+    rollback procedures.
+
+  why_it_matters: |
+    Failed deployments happen, and the ability to rollback quickly is
+    critical for minimizing downtime and data corruption. Migrations
+    without rollback capability leave systems in broken states when
+    deployments fail. Tested rollback procedures enable confident
+    deployments with quick recovery options.
+
+  when_to_run:
+    - "Before deploying migrations to production"
+    - "When establishing migration standards"
+    - "After rollback failures"
+    - "During disaster recovery planning"
+
+prerequisites:
+  required_artifacts:
+    - type: "migration-files"
+      description: "Database migrations with up and down procedures"
+    - type: "migration-framework"
+      description: "Migration framework configuration"
+
+  access_requirements:
+    - "Read access to migration files"
+    - "Access to migration execution history"
+    - "Test environment for rollback testing"
+
+discovery:
+  code_patterns:
+    - pattern: "def down|down\\(|rollback|revert"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify rollback/down migration definitions"
+    - pattern: "DROP TABLE|DROP COLUMN"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify irreversible operations"
+    - pattern: "CREATE TABLE|ADD COLUMN"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify forward migration operations"
+
+  file_patterns:
+    - glob: "**/migrations/**/*down*.sql"
+      purpose: "Down migration files"
+    - glob: "**/migrations/**/*.sql"
+      purpose: "All migration files"
+    - glob: "**/migrations/**/*.ts"
+      purpose: "TypeScript migrations (often have up/down)"
+
+knowledge_sources:
+  guides:
+    - id: "migration-best-practices"
+      name: "Database Migration Best Practices"
+      url: "https://www.prisma.io/dataguide/types/relational/migrations"
+      offline_cache: true
+
+    - id: "flyway-undo"
+      name: "Flyway Undo Migrations"
+      url: "https://flywaydb.org/documentation/concepts/migrations#undo-migrations"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "migration-analyzer"
+      purpose: "Verify rollback migration completeness"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "migration-cli"
+      purpose: "Execute migration rollbacks"
+      command: "npx prisma migrate reset --skip-seed"
+
+signals:
+  critical:
+    - id: "MGROLL-CRIT-001"
+      signal: "Migrations without any rollback/down procedure"
+      evidence_pattern: "Up migration file without corresponding down migration"
+      explanation: |
+        Migrations without rollback procedures cannot be undone if deployment
+        fails. The system gets stuck in a broken state with no automated
+        recovery path, requiring manual database intervention.
+      remediation: "Create down migration for every up migration; document manual rollback for irreversible changes"
+
+    - id: "MGROLL-CRIT-002"
+      signal: "Data-destroying forward migrations with incomplete data restoration"
+      evidence_pattern: "DROP TABLE in up migration without CREATE TABLE + data restore in down"
+      explanation: |
+        Forward migrations that destroy data cannot be properly rolled back
+        if the down migration doesn't restore the data. Schema restoration
+        without data restoration leaves the system in an inconsistent state.
+      remediation: "Backup and restore data in down migrations; consider soft-delete patterns"
+
+  high:
+    - id: "MGROLL-HIGH-001"
+      signal: "Rollback migrations that don't fully reverse forward migration"
+      evidence_pattern: "Down migration missing operations present in up migration"
+      explanation: |
+        Incomplete rollback migrations leave schema artifacts behind.
+        Subsequent re-deployment of the forward migration may fail due
+        to pre-existing objects or constraints.
+      remediation: "Ensure down migrations exactly reverse all up migration operations"
+
+    - id: "MGROLL-HIGH-002"
+      signal: "Untested rollback migrations"
+      evidence_pattern: "No evidence of down migration testing in CI/CD"
+      explanation: |
+        Untested rollback migrations may fail when actually needed.
+        A rollback that fails during a production incident makes the
+        situation significantly worse.
+      remediation: "Include rollback testing in CI/CD pipeline; test both forward and backward migrations"
+
+  medium:
+    - id: "MGROLL-MED-001"
+      signal: "Rollback migrations with potential data loss"
+      evidence_pattern: "DOWN migration uses DROP or TRUNCATE"
+      remediation: "Document data loss risk; ensure backups exist before running rollback"
+
+    - id: "MGROLL-MED-002"
+      signal: "Complex rollback procedures requiring manual steps"
+      evidence_pattern: "Comments indicating manual steps required for rollback"
+      remediation: "Automate manual steps or document procedure thoroughly"
+
+  low:
+    - id: "MGROLL-LOW-001"
+      signal: "Rollback migrations without execution time estimates"
+
+  positive:
+    - id: "MGROLL-POS-001"
+      signal: "Complete, tested rollback migrations for all changes"
+    - id: "MGROLL-POS-002"
+      signal: "Automated rollback testing in CI/CD"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Rollback Migration Inventory"
+      description: |
+        Identify all migrations and determine which have
+        corresponding rollback/down procedures.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find up/forward migrations"
+          command: "find . -path '*/migrations/*' -name '*up*' -o -name '*.up.sql' 2>/dev/null | head -30"
+        - purpose: "Find down/rollback migrations"
+          command: "find . -path '*/migrations/*' -name '*down*' -o -name '*.down.sql' 2>/dev/null | head -30"
+        - purpose: "Find migrations with up/down functions"
+          command: "grep -rlE 'def (up|down)|async (up|down)|up\\(\\)|down\\(\\)' --include='*.ts' --include='*.py' --include='*.js' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Migration rollback coverage"
+        - "Migrations without down procedures"
+
+    - id: "2"
+      name: "Rollback Completeness Analysis"
+      description: |
+        Verify that down migrations completely reverse
+        all operations in the corresponding up migrations.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find CREATE operations in up migrations"
+          command: "grep -riE 'CREATE (TABLE|INDEX|CONSTRAINT)' --include='*.sql' --include='*.ts' . 2>/dev/null | head -40"
+        - purpose: "Find DROP operations in down migrations"
+          command: "grep -riE 'DROP (TABLE|INDEX|CONSTRAINT)' --include='*.sql' --include='*.ts' . 2>/dev/null | head -40"
+        - purpose: "Find data migration operations"
+          command: "grep -riE 'INSERT|UPDATE|DELETE' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Operation parity between up and down"
+        - "Missing reverse operations"
+
+    - id: "3"
+      name: "Irreversible Operation Analysis"
+      description: |
+        Identify migrations with operations that cannot
+        be fully reversed.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find irreversible operations"
+          command: "grep -riE 'TRUNCATE|DELETE FROM(?!.*WHERE)|DROP (DATABASE|TABLE).*CASCADE' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -20"
+        - purpose: "Find data transformation operations"
+          command: "grep -riE 'UPDATE.*SET.*=.*\\(SELECT|UPDATE.*SET.*CONCAT|UPDATE.*SET.*REPLACE' --include='*.sql' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Irreversible operations inventory"
+        - "Data transformation reversibility"
+
+    - id: "4"
+      name: "Rollback Testing Analysis"
+      description: |
+        Evaluate whether rollback migrations are tested
+        as part of the CI/CD process.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find migration test files"
+          command: "find . -name '*migration*test*' -o -name '*test*migration*' 2>/dev/null | head -20"
+        - purpose: "Find rollback testing in CI"
+          command: "grep -riE 'migrate.*down|rollback|migrate:rollback' --include='*.yml' --include='*.yaml' --include='Makefile' . 2>/dev/null | head -20"
+        - purpose: "Find database reset commands (testing)"
+          command: "grep -riE 'migrate.*reset|db:reset|prisma.*reset' --include='*.yml' --include='*.yaml' --include='*.json' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Rollback testing coverage"
+        - "CI/CD integration status"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Rollback Coverage"
+        - "Completeness Analysis"
+        - "Testing Status"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of missing or incomplete rollback procedures"
+    medium: "Rollback exists but completeness uncertain"
+    low: "Rollback appears complete but testing status unknown"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "migration-best-practices"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed migration analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "mgroll-001"
+    item: "All migrations have corresponding rollback procedures"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer should verify each up migration has a corresponding down migration"
+    expected: "Confirmed by reviewer"
+
+  - id: "mgroll-002"
+    item: "Rollback migrations completely reverse forward migrations"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify operation parity between up and down"
+    expected: "Confirmed by reviewer"
+
+  - id: "mgroll-003"
+    item: "Rollback migrations are tested in CI/CD"
+    level: "WARNING"
+    verification: "grep -riE 'migrate.*down|rollback' --include='*.yml' --include='*.yaml' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Disaster Recovery"
+      controls: ["DR-001", "DR-002"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-evolution.migration-safety"
+    - "data-state-management.schema-evolution.zero-downtime-migration"

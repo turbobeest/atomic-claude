@@ -1,0 +1,385 @@
+audit:
+  id: operational-excellence.on-call-operations.pager-load-balance
+  name: Pager Load Balance Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: operational-excellence
+  category_number: 25
+  subcategory: on-call-operations
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines pager load distribution including:
+    - Alert volume per team member
+    - Weekend and holiday distribution
+    - Incident severity distribution
+    - Time of day distribution
+    - Compensation alignment with load
+    - Load balancing algorithms
+    - Historical trend analysis
+    - Load anomaly detection
+  why_it_matters: |
+    Fair load distribution is essential for team sustainability:
+    - Uneven distribution causes burnout for overloaded members
+    - Unfair weekend/holiday assignment creates resentment
+    - High-load periods without compensation reduce morale
+    - Imbalance leads to attrition of top performers
+
+    Google SRE emphasizes that on-call load should be distributed
+    evenly and should not exceed 25% of any individual's time.
+    Tracking load enables proactive adjustment before problems emerge.
+  when_to_run:
+  - Monthly operational reviews
+  - When team complaints arise
+  - After rotation changes
+  - During compensation reviews
+  - When planning hiring
+prerequisites:
+  required_artifacts:
+  - type: alert_history
+    description: Historical alert and page data
+  - type: rotation_data
+    description: On-call schedule history
+  - type: team_roster
+    description: Current team member list
+  access_requirements:
+  - Alert history access (3+ months)
+  - On-call schedule history
+  - Team roster access
+  - Incident data access
+discovery:
+  code_patterns:
+  - pattern: (load|distribution|balance|fair)
+    type: regex
+    scope: docs
+    purpose: Detect load balancing documentation
+  - pattern: (pagerduty|opsgenie).*(report|analytics|statistics)
+    type: regex
+    scope: config
+    purpose: Detect load reporting configurations
+  file_patterns:
+  - glob: '**/oncall*metrics*.{yaml,json}'
+    purpose: On-call metrics configurations
+  - glob: '**/analytics*/**/*.yaml'
+    purpose: Analytics configurations
+knowledge_sources:
+  specifications:
+  - id: google-sre-oncall
+    name: Google SRE - Being On-Call
+    url: https://sre.google/sre-book/being-on-call/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: pagerduty-analytics
+    name: PagerDuty Analytics and Reporting
+    url: https://support.pagerduty.com/docs/analytics
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: pagerduty
+    purpose: On-call analytics and load reports
+    command: pd analytics responders
+  - tool: opsgenie
+    purpose: On-call load reporting
+    command: opsgenie report oncall
+  scripts:
+  - id: load-analysis-scanner
+    language: bash
+    purpose: Find load metrics configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Pager Load Configuration Scan ==="
+      grep -rniE "(load|distribution|balance).*(report|metric|analytic)" \
+        --include="*.yaml" --include="*.json" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: PLB-CRIT-001
+    signal: Severe load imbalance across team members
+    evidence_indicators:
+    - Some members receive 3x+ more pages than others
+    - Single person handles majority of incidents
+    - Load distribution highly skewed
+    explanation: |
+      Severe imbalance indicates either rotation misconfiguration or
+      alert routing issues. Overloaded members experience burnout while
+      underloaded members lack experience. Distribution should be within
+      20% variance.
+    remediation: |
+      - Audit rotation configuration
+      - Check alert routing rules
+      - Implement load-aware scheduling
+      - Balance high-volume shifts
+      - Monitor distribution monthly
+  - id: PLB-CRIT-002
+    signal: Individual on-call load exceeds 25%
+    evidence_indicators:
+    - Team member on-call more than 25% of time
+    - Insufficient team size for coverage
+    - Single points of failure in rotation
+    explanation: |
+      Google SRE recommends no individual be on-call more than 25% of
+      the time for sustainability. Higher percentages indicate team
+      understaffing or rotation configuration issues.
+    remediation: |
+      - Expand team size if understaffed
+      - Distribute coverage more evenly
+      - Consider follow-the-sun coverage
+      - Reduce on-call scope
+      - Automate to reduce burden
+  high:
+  - id: PLB-HIGH-001
+    signal: Weekend/holiday load unfairly distributed
+    evidence_indicators:
+    - Same people always cover weekends
+    - Holiday coverage not rotated
+    - New team members avoid off-hours
+    explanation: |
+      Weekend and holiday coverage is more disruptive than weekday.
+      Fair distribution ensures no one consistently bears off-hours
+      burden while others only cover business hours.
+    remediation: |
+      - Track weekend/holiday distribution
+      - Rotate off-hours coverage evenly
+      - Include in compensation calculation
+      - Prevent opt-outs from off-hours
+      - Balance across calendar year
+  - id: PLB-HIGH-002
+    signal: High-severity incidents concentrated on few members
+    evidence_indicators:
+    - Critical incidents handled by same people
+    - Severity distribution skewed by person
+    - Experience gap in handling major incidents
+    explanation: |
+      Concentrated critical incident experience creates knowledge silos
+      and burnout for those handling severe incidents. All team members
+      should gain experience with various severity levels.
+    remediation: |
+      - Track severity distribution by person
+      - Rotate critical incident handling
+      - Pair experienced with learning responders
+      - Balance high-stress shifts
+      - Share institutional knowledge
+  medium:
+  - id: PLB-MED-001
+    signal: Load metrics not tracked
+    evidence_indicators:
+    - No load distribution data available
+    - Fairness unknown
+    - No reporting on distribution
+    explanation: |
+      Without metrics, load problems go unnoticed until they cause
+      visible issues. Tracking enables proactive rebalancing before
+      burnout or attrition occur.
+    remediation: |
+      - Implement load tracking
+      - Generate distribution reports
+      - Set balance targets
+      - Review metrics monthly
+      - Alert on imbalance thresholds
+  - id: PLB-MED-002
+    signal: No load-aware scheduling
+    evidence_indicators:
+    - Round-robin only, ignoring load
+    - No adjustment for high-volume periods
+    - Shift assignment doesn't consider past load
+    explanation: |
+      Simple round-robin scheduling ignores that some shifts have higher
+      volume than others. Load-aware scheduling balances cumulative load
+      rather than just shift count.
+    remediation: |
+      - Implement load-aware scheduling
+      - Weight shifts by historical volume
+      - Adjust for time-of-day patterns
+      - Consider incident severity weight
+      - Balance cumulative load quarterly
+  low:
+  - id: PLB-LOW-001
+    signal: Compensation not aligned with load
+    evidence_indicators:
+    - Same compensation regardless of pages
+    - High-load members not recognized
+    - No variable compensation component
+    explanation: |
+      Compensation should reflect actual burden. Members handling more
+      incidents should receive proportional recognition or compensation.
+    remediation: |
+      - Track load for compensation purposes
+      - Implement variable on-call pay
+      - Recognize high-load contributors
+      - Align comp time with actual incidents
+      - Review compensation policy
+  positive:
+  - id: PLB-POS-001
+    signal: Even load distribution with tracking
+    evidence_indicators:
+    - Load variance within 20%
+    - Weekend/holiday evenly distributed
+    - Distribution actively monitored
+  - id: PLB-POS-002
+    signal: Load-aware scheduling implemented
+    evidence_indicators:
+    - Historical load considered in scheduling
+    - High-volume shifts balanced
+    - Compensation aligned with actual load
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Load Data Collection
+    description: |
+      Gather alert and incident volume data by team member.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find load tracking configurations
+      command: |
+        grep -rniE "(load|distribution|volume).*(track|metric|report)" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | head -20
+    - purpose: Find on-call analytics
+      command: |
+        find . -type f \( -name "*analytics*" -o -name "*report*" \) \
+          -path "*oncall*" 2>/dev/null | head -20
+    expected_findings:
+    - Load tracking configuration
+    - Analytics setup
+    - Report definitions
+  - id: '2'
+    name: Distribution Analysis
+    description: |
+      Analyze load distribution across team members.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find team member configurations
+      command: |
+        grep -rniE "(user|member|responder)" \
+          --include="*schedule*.yaml" --include="*oncall*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Team member list
+    - Assignment patterns
+    - Distribution evidence
+  - id: '3'
+    name: Off-Hours Distribution Review
+    description: |
+      Assess weekend and holiday distribution fairness.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find holiday coverage configuration
+      command: |
+        grep -rniE "(weekend|holiday|off.hours|night)" \
+          --include="*.yaml" --include="*.md" . 2>/dev/null | head -20
+    - purpose: Find override patterns
+      command: |
+        grep -rniE "(override|swap|substitute)" \
+          --include="*schedule*.yaml" . 2>/dev/null | head -20
+    expected_findings:
+    - Off-hours configuration
+    - Override patterns
+    - Holiday coverage
+  - id: '4'
+    name: Compensation Alignment Review
+    description: |
+      Evaluate compensation alignment with actual load.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find compensation documentation
+      command: |
+        grep -rniE "(compensat|pay|bonus|recognition).*(oncall|load|incident)" \
+          --include="*.md" . 2>/dev/null | head -20
+    expected_findings:
+    - Compensation policy
+    - Load-based compensation
+    - Recognition programs
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Load Distribution Analysis
+    - Off-Hours Fairness Review
+    - Compensation Alignment
+    - Recommendations
+  - type: distribution_report
+    format: table
+    description: Load distribution by team member
+  confidence_guidance:
+    high: Load data and distributions fully available
+    medium: Partial data, some metrics need runtime access
+    low: Limited visibility, requires tool access
+offline:
+  capability: partial
+  runtime_required_for:
+  - Actual load measurement
+  - Distribution calculation
+  - Historical trend analysis
+  cache_manifest:
+    knowledge:
+    - source_id: google-sre-oncall
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Load analysis requires data collection
+    full:
+      included: true
+      priority: 3
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: plb-001
+  item: Load distribution is tracked
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify load metrics are collected and reported
+  expected: Confirmed by reviewer
+- id: plb-002
+  item: Individual load does not exceed 25%
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify no individual is on-call more than 25% of time
+  expected: Confirmed by reviewer
+- id: plb-003
+  item: Distribution variance is acceptable
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify load variance within 20% across team
+  expected: Confirmed by reviewer
+- id: plb-004
+  item: Weekend/holiday load is fairly distributed
+  level: WARNING
+  verification: manual
+  verification_notes: Verify off-hours coverage rotates evenly
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.4
+relationships:
+  commonly_combined:
+  - operational-excellence.on-call-operations.on-call-rotation
+  - operational-excellence.on-call-operations.alert-fatigue
+  - operational-excellence.operational-metrics.toil-measurement

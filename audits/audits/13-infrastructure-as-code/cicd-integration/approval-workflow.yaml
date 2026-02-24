@@ -1,0 +1,392 @@
+audit:
+  id: infrastructure-as-code.cicd-integration.approval-workflow
+  name: Approval Workflow
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: cicd-integration
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: process
+  default_profiles:
+  - full
+  - production
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the approval workflows that gate infrastructure
+    changes before they are applied. It evaluates:
+
+    - Required approvers and reviewer assignments
+    - Branch protection rules for IaC repositories
+    - Environment protection rules in CI/CD systems
+    - Atlantis apply requirements configuration
+    - Emergency change procedures and bypass protocols
+    - Audit trail of approvals and changes
+
+    The focus is on ensuring appropriate human oversight for infrastructure
+    modifications while maintaining operational efficiency.
+  why_it_matters: |
+    Without proper approval workflows:
+
+    - Unauthorized changes reach production
+    - Configuration errors bypass review
+    - Compliance requirements for change management are violated
+    - No accountability for who approved changes
+    - Emergency changes have no documented process
+
+    Proper approval workflows provide the change management controls
+    required by security frameworks and prevent accidental or malicious
+    infrastructure modifications.
+  when_to_run:
+  - When establishing IaC governance
+  - During compliance audit preparation
+  - After unauthorized change incidents
+  - When implementing separation of duties
+prerequisites:
+  required_artifacts:
+  - type: cicd_configuration
+    description: Pipeline configurations with approval gates
+  - type: repository_settings
+    description: Branch protection and CODEOWNERS configuration
+  access_requirements:
+  - Admin access to view repository settings
+  - Access to CI/CD environment configurations
+  - Ability to review approval history
+discovery:
+  code_patterns:
+  - pattern: apply_requirements|required_approvals
+    type: regex
+    scope: config
+    purpose: Find Atlantis approval requirements
+  - pattern: environment:\s*production|needs:\s*approval
+    type: regex
+    scope: config
+    purpose: Find GitHub Actions environment protection
+  - pattern: CODEOWNERS
+    type: keyword
+    scope: config
+    purpose: Identify required reviewers
+  - pattern: protected_branch|branch_protection
+    type: regex
+    scope: config
+    purpose: Find branch protection configuration
+  file_patterns:
+  - glob: '**/CODEOWNERS'
+    purpose: Code ownership definitions
+  - glob: '**/.github/CODEOWNERS'
+    purpose: GitHub CODEOWNERS file
+  - glob: '**/atlantis.yaml'
+    purpose: Atlantis configuration
+  - glob: '**/.github/workflows/*.yml'
+    purpose: GitHub Actions with environments
+  interviews:
+  - role: Infrastructure team lead
+    questions:
+    - What approvals are required for production infrastructure changes?
+    - Who can approve emergency changes?
+    - How are approvals tracked and audited?
+    purpose: Understand approval governance
+  - role: Security/compliance team
+    questions:
+    - What compliance requirements govern change approval?
+    - How do you verify separation of duties?
+    purpose: Verify compliance alignment
+knowledge_sources:
+  specifications:
+  - id: atlantis-apply-requirements
+    name: Atlantis Apply Requirements
+    url: https://www.runatlantis.io/docs/apply-requirements.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: github-environments
+    name: GitHub Environments and Protection Rules
+    url: https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment
+    offline_cache: true
+  - id: github-branch-protection
+    name: GitHub Branch Protection Rules
+    url: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches
+    offline_cache: true
+  - id: terraform-cloud-governance
+    name: Terraform Cloud Governance
+    url: https://developer.hashicorp.com/terraform/cloud-docs/policy-enforcement
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: gh
+    purpose: Query GitHub branch protection and environments
+    command: gh api repos/{owner}/{repo}/branches/main/protection
+  - tool: Atlantis
+    purpose: PR-based approval workflow
+    command: atlantis apply
+  scripts:
+  - id: check-branch-protection
+    language: bash
+    purpose: Verify branch protection settings
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check branch protection for main branch
+
+      PROTECTION=$(gh api repos/{owner}/{repo}/branches/main/protection 2>/dev/null)
+
+      if [ -z "$PROTECTION" ]; then
+        echo "FAIL: No branch protection on main"
+        exit 1
+      fi
+
+      REQUIRED_REVIEWS=$(echo "$PROTECTION" | jq '.required_pull_request_reviews.required_approving_review_count')
+      echo "Required approvals: $REQUIRED_REVIEWS"
+
+      DISMISS_STALE=$(echo "$PROTECTION" | jq '.required_pull_request_reviews.dismiss_stale_reviews')
+      echo "Dismiss stale reviews: $DISMISS_STALE"
+signals:
+  critical:
+  - id: IAC-APPR-CRIT-001
+    signal: No approval required for production infrastructure changes
+    evidence_pattern: terraform apply without approval gate
+    explanation: |
+      Production infrastructure changes without approval allow any
+      developer to modify critical systems, violating separation of
+      duties and creating risk of accidental or malicious changes.
+    remediation: |
+      Implement mandatory approvals:
+      1. Configure branch protection requiring reviews
+      2. Use GitHub environments with required reviewers
+      3. Configure Atlantis apply_requirements: [approved]
+      4. Implement Terraform Cloud run approvals
+  - id: IAC-APPR-CRIT-002
+    signal: Self-approval allowed for infrastructure changes
+    evidence_pattern: No dismiss_stale_reviews or author can approve
+    explanation: |
+      When authors can approve their own changes, the approval process
+      provides no meaningful oversight. This violates separation of
+      duties requirements in most compliance frameworks.
+    remediation: |
+      Prevent self-approval:
+      - Enable "Dismiss stale reviews on new commits"
+      - Configure "Require review from Code Owners"
+      - Use Atlantis --require-approval flag
+  high:
+  - id: IAC-APPR-HIGH-001
+    signal: No CODEOWNERS configured for infrastructure files
+    evidence_pattern: Missing CODEOWNERS or no IaC entries
+    explanation: |
+      Without CODEOWNERS, anyone with write access can approve
+      infrastructure changes. CODEOWNERS ensures domain experts
+      review relevant changes.
+    remediation: |
+      Add CODEOWNERS for infrastructure:
+      # .github/CODEOWNERS
+      /terraform/ @infrastructure-team
+      *.tf @infrastructure-team @security-team
+  - id: IAC-APPR-HIGH-002
+    signal: Emergency bypass procedure not documented
+    evidence_pattern: No emergency change documentation
+    explanation: |
+      Without documented emergency procedures, urgent changes either
+      bypass all controls (creating audit gaps) or are delayed
+      waiting for normal approvals during incidents.
+    remediation: |
+      Document emergency change process:
+      - Define what constitutes an emergency
+      - Specify who can authorize emergency changes
+      - Require post-incident review of emergency changes
+      - Log all emergency bypasses
+  medium:
+  - id: IAC-APPR-MED-001
+    signal: Single approver sufficient for all changes
+    remediation: |
+      Require multiple approvers for production:
+      - Configure 2+ required reviewers for production branches
+      - Use environment protection with multiple reviewers
+  - id: IAC-APPR-MED-002
+    signal: No distinction between environment approval levels
+    remediation: |
+      Implement tiered approvals:
+      - Dev: 1 peer review
+      - Staging: 1 infrastructure team member
+      - Prod: 2 approvers including infrastructure lead
+  low:
+  - id: IAC-APPR-LOW-001
+    signal: Approval audit trail not easily accessible
+    remediation: Ensure PR history captures all approvals
+  positive:
+  - id: IAC-APPR-POS-001
+    signal: Multi-level approval with CODEOWNERS enforcement
+  - id: IAC-APPR-POS-002
+    signal: Environment protection rules require team approval
+  - id: IAC-APPR-POS-003
+    signal: Documented emergency change procedure with audit trail
+  - id: IAC-APPR-POS-004
+    signal: Atlantis configured with approved + mergeable requirements
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review branch protection settings
+    description: |
+      Check the branch protection rules for IaC repository branches.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Get branch protection for main
+      command: gh api repos/{owner}/{repo}/branches/main/protection 2>/dev/null | jq '.'
+    - purpose: List protected branches
+      command: gh api repos/{owner}/{repo}/branches --jq '.[] | select(.protected) | .name'
+    expected_findings:
+    - Required approver count
+    - Stale review dismissal setting
+    - Branch restriction rules
+  - id: '2'
+    name: Analyze CODEOWNERS configuration
+    description: |
+      Review CODEOWNERS to verify infrastructure experts must approve
+      IaC changes.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Read CODEOWNERS file
+      command: cat CODEOWNERS .github/CODEOWNERS 2>/dev/null
+    - purpose: Check for Terraform patterns
+      command: grep -E '\.tf|terraform|infrastructure' CODEOWNERS .github/CODEOWNERS 2>/dev/null
+    expected_findings:
+    - Infrastructure file ownership
+    - Required review teams
+  - id: '3'
+    name: Check CI/CD environment protection
+    description: |
+      Review GitHub environments or equivalent for production protection.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List environments
+      command: gh api repos/{owner}/{repo}/environments --jq '.environments[].name'
+    - purpose: Get production environment rules
+      command: gh api repos/{owner}/{repo}/environments/production 2>/dev/null | jq '.protection_rules'
+    expected_findings:
+    - Environment configuration
+    - Required reviewers for production
+    - Wait timers configured
+  - id: '4'
+    name: Review Atlantis apply requirements
+    description: |
+      If using Atlantis, verify apply requirements are configured.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check Atlantis config
+      command: cat atlantis.yaml 2>/dev/null | grep -A10 'apply_requirements'
+    - purpose: Check for repo-level config
+      command: cat atlantis.yaml 2>/dev/null
+    expected_findings:
+    - Apply requirements (approved, mergeable)
+    - Per-project requirements
+  - id: '5'
+    name: Review approval history
+    description: |
+      Sample recent infrastructure PRs to verify approvals are being
+      obtained and recorded.
+    duration_estimate: 25 min
+    commands:
+    - purpose: List recent merged PRs
+      command: gh pr list --state merged --limit 10 --json number,title,mergedAt,reviews
+    - purpose: Check specific PR approvals
+      command: gh pr view {NUMBER} --json reviews,mergeCommit
+    expected_findings:
+    - Consistent approval patterns
+    - Audit trail quality
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Branch Protection Analysis
+    - Approval Workflow Review
+    - Emergency Procedure Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Settings verified via API and PR history reviewed
+    medium: Configuration files reviewed
+    low: Only file presence confirmed
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: atlantis-apply-requirements
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed governance review
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      reason: Critical for production safety
+    security:
+      included: true
+      reason: Access control and separation of duties
+closeout_checklist:
+- id: approval-001
+  item: Production changes require approval
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify branch protection or environment protection requires reviewers
+  expected: Confirmed by reviewer
+- id: approval-002
+  item: Self-approval prevented
+  level: CRITICAL
+  verification: gh api repos/{owner}/{repo}/branches/main/protection | jq '.required_pull_request_reviews.dismiss_stale_reviews'
+  expected: 'true'
+- id: approval-003
+  item: CODEOWNERS configured for infrastructure files
+  level: BLOCKING
+  verification: grep -E '\.tf|terraform' CODEOWNERS .github/CODEOWNERS 2>/dev/null | wc -l
+  expected: '>0'
+- id: approval-004
+  item: Emergency change procedure documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify emergency change process exists
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.2
+    - CC8.1
+  - framework: ISO 27001
+    controls:
+    - A.9.2.3
+    - A.12.1.2
+  - framework: PCI DSS
+    controls:
+    - 6.4.2
+    - 8.1.1
+  - framework: HIPAA
+    controls:
+    - 164.312(d)
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.cicd-integration.iac-pipeline
+  - infrastructure-as-code.testing-validation.plan-review-process
+  - infrastructure-as-code.cicd-integration.change-documentation

@@ -1,0 +1,366 @@
+audit:
+  id: infrastructure-as-code.state-management.state-locking
+  name: IaC State Locking
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: state-management
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the state locking configuration in Infrastructure
+    as Code to prevent concurrent modifications that could corrupt state
+    or cause infrastructure conflicts.
+
+    Key areas examined:
+    - State locking mechanism configuration
+    - DynamoDB table setup for AWS backends
+    - Lock timeout and retry settings
+    - Lock table security and access controls
+    - Stale lock detection and remediation
+    - CI/CD pipeline lock handling
+  why_it_matters: |
+    State locking prevents:
+    - Race conditions: Multiple applies running simultaneously
+    - State corruption: Conflicting writes to state file
+    - Resource conflicts: Duplicate resource creation
+    - Data loss: Overwrites from concurrent operations
+
+    Without proper locking, teams experience infrastructure outages,
+    data corruption, and difficult-to-debug inconsistencies.
+  when_to_run:
+  - During initial backend configuration
+  - When setting up team collaboration
+  - After state corruption incidents
+  - Before scaling CI/CD pipelines
+prerequisites:
+  required_artifacts:
+  - type: iac_repository
+    description: Access to infrastructure code with backend configurations
+  - type: lock_table_access
+    description: Read access to DynamoDB lock table (if applicable)
+  access_requirements:
+  - Read access to IaC repositories
+  - Access to lock mechanism configuration
+discovery:
+  code_patterns:
+  - pattern: dynamodb_table\s*=
+    type: regex
+    scope: config
+    purpose: Identify DynamoDB lock table configuration
+  - pattern: lock\s*=\s*(true|false)
+    type: regex
+    scope: config
+    purpose: Check explicit lock settings
+  - pattern: -lock=false
+    type: keyword
+    scope: config
+    purpose: Detect disabled locking in scripts
+  - pattern: force-unlock
+    type: keyword
+    scope: config
+    purpose: Find force unlock usage
+  file_patterns:
+  - glob: '**/backend.tf'
+    purpose: Backend lock configuration
+  - glob: '**/*.sh'
+    purpose: Scripts that may disable locking
+  - glob: '**/.gitlab-ci.yml'
+    purpose: CI/CD configurations
+  - glob: '**/Jenkinsfile'
+    purpose: Jenkins pipeline configurations
+knowledge_sources:
+  specifications:
+  - id: terraform-state-locking
+    name: Terraform State Locking
+    url: https://developer.hashicorp.com/terraform/language/state/locking
+    offline_cache: true
+    priority: required
+  - id: terraform-s3-backend
+    name: Terraform S3 Backend
+    url: https://developer.hashicorp.com/terraform/language/settings/backends/s3
+    offline_cache: true
+    priority: required
+  guides:
+  - id: dynamodb-security
+    name: DynamoDB Security Best Practices
+    url: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/best-practices-security.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: tflint
+    purpose: Lint for missing lock configurations
+    offline_capable: true
+  - tool: checkov
+    purpose: Check for state locking best practices
+    offline_capable: true
+  infrastructure_tools:
+  - tool: aws dynamodb
+    purpose: Inspect DynamoDB lock table
+    command: aws dynamodb describe-table --table-name terraform-locks
+  - tool: terraform force-unlock
+    purpose: Remove stale locks (use with caution)
+    command: terraform force-unlock LOCK_ID
+signals:
+  critical:
+  - id: IAC-LOCK-CRIT-001
+    signal: State locking disabled in backend configuration
+    evidence_pattern: lock\s*=\s*false
+    explanation: |
+      Disabled locking allows concurrent modifications that can corrupt
+      state files and cause infrastructure inconsistencies.
+    remediation: Remove lock = false from backend configuration; locking should always be enabled
+  - id: IAC-LOCK-CRIT-002
+    signal: CI/CD pipelines bypass state locking
+    evidence_pattern: (-lock=false|--lock=false|terraform\s+.*-lock\s*=\s*false)
+    explanation: |
+      Bypassing locks in automated pipelines is the most dangerous scenario
+      as multiple pipelines may run simultaneously without coordination.
+    remediation: Remove -lock=false flags from all CI/CD configurations
+  - id: IAC-LOCK-CRIT-003
+    signal: No lock table configured for S3 backend
+    evidence_indicators:
+    - S3 backend without dynamodb_table attribute
+    - Missing DynamoDB table reference
+    explanation: |
+      S3 backend without DynamoDB provides no locking mechanism,
+      allowing concurrent state modifications.
+    remediation: Add dynamodb_table attribute to S3 backend configuration
+  high:
+  - id: IAC-LOCK-HIGH-001
+    signal: Lock table without encryption
+    evidence_indicators:
+    - DynamoDB table without encryption enabled
+    - No KMS key for lock table
+    explanation: |
+      Lock table contains operation metadata that could reveal
+      infrastructure details if exposed.
+    remediation: Enable DynamoDB encryption with customer-managed KMS key
+  - id: IAC-LOCK-HIGH-002
+    signal: Overly permissive lock table access
+    evidence_indicators:
+    - Wide IAM permissions on DynamoDB table
+    - No condition keys restricting access
+    explanation: |
+      Broad lock table access allows unauthorized lock manipulation
+      potentially enabling state corruption.
+    remediation: Implement least-privilege IAM for lock table operations
+  - id: IAC-LOCK-HIGH-003
+    signal: Frequent use of force-unlock
+    evidence_indicators:
+    - force-unlock in scripts or documentation
+    - Automated force-unlock in pipelines
+    explanation: |
+      Frequent force-unlock indicates underlying issues and creates
+      risk of unlocking active operations.
+    remediation: Investigate root cause of stale locks; implement proper timeout handling
+  medium:
+  - id: IAC-LOCK-MED-001
+    signal: No lock table monitoring or alerting
+    evidence_indicators:
+    - No CloudWatch alarms for lock table
+    - No alerting on long-held locks
+    remediation: Implement monitoring for lock duration and failed lock acquisitions
+  - id: IAC-LOCK-MED-002
+    signal: Inconsistent lock configuration across environments
+    evidence_indicators:
+    - Some environments have locking, others don't
+    - Different lock table configurations
+    remediation: Standardize lock configuration across all environments
+  - id: IAC-LOCK-MED-003
+    signal: No documentation for lock troubleshooting
+    evidence_indicators:
+    - No runbook for stale locks
+    - No documented procedures for lock issues
+    remediation: Create runbooks for common lock scenarios including stale lock remediation
+  low:
+  - id: IAC-LOCK-LOW-001
+    signal: Lock table naming inconsistent with state bucket
+    evidence_indicators:
+    - Lock table name doesn't match state bucket naming pattern
+    remediation: 'Use consistent naming: state bucket name + ''-lock'' suffix'
+  positive:
+  - id: IAC-LOCK-POS-001
+    signal: Proper state locking configured
+    evidence_indicators:
+    - DynamoDB table configured for S3 backend
+    - No lock bypasses in CI/CD
+  - id: IAC-LOCK-POS-002
+    signal: Lock monitoring and alerting in place
+    evidence_indicators:
+    - CloudWatch alarms for lock issues
+    - Documented lock troubleshooting procedures
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Lock Configuration Analysis
+    description: |
+      Identify and analyze state locking configurations across
+      all backends.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find DynamoDB lock table configurations
+      command: grep -rn 'dynamodb_table' --include='*.tf'
+    - purpose: Check for explicit lock settings
+      command: grep -rn 'lock\s*=' --include='*.tf'
+    - purpose: Find backends without lock tables
+      command: grep -rA20 'backend\s*"s3"' --include='*.tf' | grep -v dynamodb_table
+    expected_findings:
+    - Lock table configurations
+    - Backends with and without locking
+    - Lock setting patterns
+  - id: '2'
+    name: CI/CD Lock Handling Review
+    description: |
+      Examine CI/CD configurations for proper lock handling
+      and potential bypasses.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Search for lock bypass flags
+      command: grep -rn '\-lock=false\|\-lock\s*=\s*false' --include='*.sh' --include='*.yml' --include='*.yaml'
+        --include='Jenkinsfile' --include='Makefile' 2>/dev/null
+    - purpose: Find terraform commands in CI
+      command: grep -rn 'terraform\s\+\(plan\|apply\)' --include='*.yml' --include='*.yaml' --include='Jenkinsfile'
+        2>/dev/null | head -30
+    - purpose: Check for force-unlock usage
+      command: grep -rn 'force-unlock' --include='*.sh' --include='*.yml' --include='*.md' 2>/dev/null
+    expected_findings:
+    - Lock bypass instances
+    - CI/CD terraform command patterns
+    - Force-unlock usage
+  - id: '3'
+    name: Lock Table Security Review
+    description: |
+      Assess security configuration of lock tables including
+      encryption and access controls.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find DynamoDB table definitions
+      command: grep -rA30 'aws_dynamodb_table' --include='*.tf' | head -100
+    - purpose: Check for encryption configuration
+      command: grep -rA30 'aws_dynamodb_table' --include='*.tf' | grep -E 'server_side_encryption|kms'
+    - purpose: Look for IAM policies on lock table
+      command: grep -rn 'dynamodb' --include='*.tf' | grep -i policy
+    expected_findings:
+    - DynamoDB table definitions
+    - Encryption configuration
+    - Access control policies
+  - id: '4'
+    name: Lock Monitoring Assessment
+    description: |
+      Evaluate monitoring and alerting for lock-related issues.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for CloudWatch alarms
+      command: grep -rn 'aws_cloudwatch_metric_alarm' --include='*.tf' | grep -i dynamodb
+    - purpose: Look for lock monitoring
+      command: grep -rn 'ConsumedReadCapacity\|ConsumedWriteCapacity\|ThrottledRequests' --include='*.tf'
+    expected_findings:
+    - DynamoDB monitoring
+    - Lock-related alerting
+    - Capacity monitoring
+  - id: '5'
+    name: Documentation and Procedures Review
+    description: |
+      Verify documentation exists for lock troubleshooting
+      and stale lock remediation.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Search for lock documentation
+      command: find . -name '*.md' -exec grep -l -i 'lock\|force-unlock\|state.*lock' {} \;
+    - purpose: Check for runbooks
+      command: find . -type d -name 'runbook*' -o -name '*runbook*'
+    expected_findings:
+    - Lock documentation
+    - Runbook presence
+    - Troubleshooting procedures
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Lock Configuration Status
+    - CI/CD Integration Analysis
+    - Security Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct configuration analysis
+    medium: Inferred from partial configurations
+    low: Based on documentation or naming conventions
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-state-locking
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Lock configuration requires thorough review
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: lock-001
+  item: State locking enabled for all backends
+  level: CRITICAL
+  verification: grep -rn 'lock\s*=\s*false' --include='*.tf' | wc -l | xargs -I{} test {} -eq 0 && echo
+    PASS || echo FAIL
+  expected: PASS
+- id: lock-002
+  item: DynamoDB lock table configured for S3 backends
+  level: CRITICAL
+  verification: 'for f in $(grep -rl ''backend\s*"s3"'' --include=''*.tf''); do grep -q ''dynamodb_table''
+    $f || echo "Missing lock table: $f"; done 2>/dev/null | wc -l | xargs -I{} test {} -eq 0 && echo PASS
+    || echo FAIL'
+  expected: PASS
+- id: lock-003
+  item: No lock bypass flags in CI/CD configurations
+  level: CRITICAL
+  verification: grep -rn '\-lock=false' --include='*.yml' --include='*.yaml' --include='*.sh' --include='Jenkinsfile'
+    --include='Makefile' 2>/dev/null | wc -l | xargs -I{} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: lock-004
+  item: Lock table has encryption enabled
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify DynamoDB table encryption via AWS console or terraform state
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC7.2
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.state-management.state-backend-security
+  - infrastructure-as-code.state-management.state-encryption

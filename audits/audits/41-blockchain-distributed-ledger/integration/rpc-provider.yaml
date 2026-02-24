@@ -1,0 +1,242 @@
+audit:
+  id: blockchain-distributed-ledger.integration.rpc-provider
+  name: RPC Provider Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: blockchain-distributed-ledger
+  category_number: 41
+  subcategory: integration
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: software
+  default_profiles:
+  - full
+  - blockchain
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates RPC provider integration for security
+    and reliability. It examines:
+    - Provider selection and fallback
+    - Request rate limiting
+    - Response validation
+    - API key security
+    - Error handling
+    - Provider diversity
+  why_it_matters: |
+    RPC providers are critical infrastructure:
+    - Applications depend on RPC for chain access
+    - Provider outages cause application failures
+    - Single provider creates centralization
+    - Malicious providers can manipulate data
+    - Rate limits affect functionality
+
+    Reliable RPC integration ensures application availability.
+  when_to_run:
+  - Application deployment
+  - Provider integration
+  - Reliability review
+  - Provider migration
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: RPC integration code
+  - type: configuration
+    description: Provider configuration
+  access_requirements:
+  - Application source code
+  - Provider configuration
+discovery:
+  code_patterns:
+  - pattern: (provider|rpc|alchemy|infura|quicknode)
+    type: regex
+    scope: source
+    purpose: Detect RPC providers
+  - pattern: (JsonRpcProvider|Web3Provider|ethers)
+    type: regex
+    scope: source
+    purpose: Detect provider libraries
+  - pattern: (https://.*rpc|wss://.*ws)
+    type: regex
+    scope: source
+    purpose: Detect RPC URLs
+  file_patterns:
+  - glob: '**/*.{js,ts}'
+    purpose: Application code
+  - glob: '**/.env*'
+    purpose: Environment config
+signals:
+  high:
+  - id: RPC-HIGH-001
+    signal: Single RPC provider dependency
+    evidence_indicators:
+    - One provider configured
+    - No fallback provider
+    - Application fails on outage
+    explanation: |
+      Single provider dependency causes complete application
+      failure when provider has issues.
+    remediation: |
+      - Configure multiple providers
+      - Implement automatic failover
+      - Use provider aggregators
+      - Run self-hosted backup
+  - id: RPC-HIGH-002
+    signal: RPC URL exposed in frontend
+    evidence_indicators:
+    - API key in frontend code
+    - Full RPC URL visible
+    - Key extractable from bundle
+    explanation: |
+      Exposed RPC keys can be stolen and used to consume
+      quota or access private endpoints.
+    remediation: |
+      - Use public RPC for read-only
+      - Proxy sensitive requests through backend
+      - Restrict API key permissions
+      - Rotate exposed keys
+  medium:
+  - id: RPC-MED-001
+    signal: No retry logic
+    evidence_indicators:
+    - Single request attempt
+    - No backoff strategy
+    - Transient errors not handled
+    explanation: |
+      Without retry logic, transient errors cause failures
+      even when requests would succeed on retry.
+    remediation: |
+      - Implement retry with backoff
+      - Handle transient errors
+      - Set reasonable retry limits
+      - Log retry attempts
+  - id: RPC-MED-002
+    signal: Response not validated
+    evidence_indicators:
+    - Response used without checks
+    - Malformed data not caught
+    - Provider errors ignored
+    explanation: |
+      Unvalidated responses may contain errors or unexpected
+      data that causes application issues.
+    remediation: |
+      - Validate all responses
+      - Check error fields
+      - Verify data types
+      - Handle null/undefined
+  low:
+  - id: RPC-LOW-001
+    signal: Rate limits not handled
+    evidence_indicators:
+    - 429 errors not caught
+    - No request throttling
+    - Quota exceeded frequently
+    explanation: |
+      Poor rate limit handling causes unnecessary failures
+      and poor user experience.
+    remediation: |
+      - Implement request throttling
+      - Handle 429 responses
+      - Queue requests appropriately
+      - Monitor rate limit usage
+  - id: RPC-LOW-002
+    signal: Provider selection not optimized
+    evidence_indicators:
+    - Slowest provider used
+    - No latency-based routing
+    - Regional optimization missing
+    explanation: |
+      Suboptimal provider selection affects performance and
+      user experience.
+    remediation: |
+      - Measure provider latency
+      - Route to fastest provider
+      - Consider regional providers
+      - Monitor performance
+  positive:
+  - id: RPC-POS-001
+    signal: Robust RPC integration
+    evidence_indicators:
+    - Multiple providers
+    - Automatic failover
+    - Proper error handling
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: infrastructure-engineer
+  steps:
+  - id: '1'
+    name: RPC Provider Analysis
+    description: |
+      Analyze RPC provider integration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find provider configuration
+      command: |
+        grep -rniE "(provider|rpc|alchemy|infura)" \
+          --include="*.js" --include="*.ts" --include="*.env*" . 2>/dev/null | head -30
+    - purpose: Find RPC URLs
+      command: |
+        grep -rniE "https://.*rpc|https://.*alchemy|https://.*infura" \
+          --include="*.js" --include="*.ts" --include="*.env*" . 2>/dev/null | head -20
+    expected_findings:
+    - Provider configuration
+    - Fallback setup
+    - Error handling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Provider Analysis
+    - Reliability Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 3
+    blockchain:
+      included: true
+      priority: 3
+closeout_checklist:
+- id: rpc-001
+  item: Multiple providers configured
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify fallback providers exist
+  expected: Confirmed by reviewer
+- id: rpc-002
+  item: API keys not exposed
+  level: WARNING
+  verification: |
+    grep -rniE "(alchemy|infura).*key" \
+      --include="*.js" --include="*.ts" . 2>/dev/null | \
+      grep -v "node_modules" | grep -v ".env" | \
+      wc -l | xargs -I{} test {} -eq 0 && echo "PASS" || echo "CHECK"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - blockchain
+    - dapp
+    - frontend
+    - backend
+relationships:
+  commonly_combined:
+  - blockchain.consensus-network.node-configuration
+  - blockchain.integration.indexer-reliability
+  - blockchain.smart-contract-quality.error-handling

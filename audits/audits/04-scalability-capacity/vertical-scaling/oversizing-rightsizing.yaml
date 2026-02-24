@@ -1,0 +1,303 @@
+# ============================================================
+# AUDIT: Oversizing/Rightsizing Audit
+# Category: Scalability & Capacity > Vertical Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.vertical-scaling.oversizing-rightsizing"
+  name: "Oversizing/Rightsizing Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "vertical-scaling"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether resources are appropriately sized - neither oversized
+    (wasting money) nor undersized (risking performance). Reviews CPU, memory,
+    storage, and network allocation against actual utilization, identifies
+    rightsizing opportunities, and recommends optimal resource allocation.
+
+  why_it_matters: |
+    Oversizing wastes 20-40% of cloud spend on unused capacity. Undersizing
+    causes performance issues and outages. Rightsizing achieves the balance -
+    sufficient resources for peak load with reasonable headroom, without
+    paying for resources that sit idle.
+
+  when_to_run:
+    - "Monthly cost optimization reviews"
+    - "After significant utilization changes"
+    - "Before budget planning"
+    - "Following capacity-related incidents"
+
+prerequisites:
+  required_artifacts:
+    - type: "metrics_data"
+      description: "Extended utilization metrics (7+ days)"
+    - type: "cost_data"
+      description: "Current resource costs"
+
+  access_requirements:
+    - "Metrics system access"
+    - "Cloud billing/cost data access"
+    - "Resource configuration access"
+
+discovery:
+  code_patterns:
+    - pattern: "(resources:|requests:|limits:)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect Kubernetes resource configuration"
+
+    - pattern: "(instance.*type|machine.*type)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect instance sizing"
+
+  file_patterns:
+    - glob: "**/k8s/**/*.yaml"
+      purpose: "Kubernetes deployments"
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Terraform resources"
+
+knowledge_sources:
+  guides:
+    - id: "aws-rightsizing"
+      name: "AWS Cost Optimization - Right Sizing"
+      url: "https://docs.aws.amazon.com/cost-management/latest/userguide/ce-rightsizing.html"
+      offline_cache: true
+
+    - id: "k8s-resources"
+      name: "Kubernetes Resource Management"
+      url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Compare requests/limits to actual usage"
+      command: "kubectl top pods -A"
+
+    - tool: "aws-cli"
+      purpose: "Get rightsizing recommendations"
+      command: "aws ce get-rightsizing-recommendation --service AmazonEC2"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "avg_over_time(container_memory_working_set_bytes[7d]) / container_spec_memory_limit_bytes"
+      purpose: "Memory utilization over time"
+      threshold: "40-70% indicates good sizing"
+
+    - system: "Prometheus"
+      query: "avg_over_time(rate(container_cpu_usage_seconds_total[5m])[7d:5m]) / container_spec_cpu_quota * container_spec_cpu_period"
+      purpose: "CPU utilization over time"
+      threshold: "40-70% indicates good sizing"
+
+  scripts:
+    - id: "rightsizing-analyzer"
+      language: "bash"
+      purpose: "Identify rightsizing opportunities"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Resource Requests vs Actual Usage ==="
+        kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" REQ_CPU:"}{.spec.containers[0].resources.requests.cpu}{" REQ_MEM:"}{.spec.containers[0].resources.requests.memory}{"\n"}{end}'
+        echo ""
+        echo "=== Actual Usage ==="
+        kubectl top pods -A --sort-by=memory
+        echo ""
+        echo "=== AWS Rightsizing Recommendations ==="
+        aws ce get-rightsizing-recommendation --service AmazonEC2 --configuration '{"RecommendationTarget":"SAME_INSTANCE_FAMILY","BenefitsConsidered":true}' --query 'RightsizingRecommendations[*].[CurrentInstance.ResourceDetails.EC2ResourceDetails.InstanceType,ModifyRecommendationDetail.TargetInstances[0].ResourceDetails.EC2ResourceDetails.InstanceType,EstimatedMonthlySavings.Value]' --output table
+
+signals:
+  critical:
+    - id: "RIGHT-CRIT-001"
+      signal: "Severely undersized causing regular resource exhaustion"
+      evidence_threshold: "resource_usage > 95% of limit consistently"
+      explanation: |
+        Resources at capacity limit cause throttling, OOM kills, and
+        degraded performance. No headroom for traffic spikes.
+      remediation: "Increase resource allocation immediately to at least 20% headroom"
+
+  high:
+    - id: "RIGHT-HIGH-001"
+      signal: "Significantly oversized resources wasting budget"
+      evidence_threshold: "resource_usage < 20% of allocation for > 7 days"
+      explanation: |
+        Resources consistently under 20% utilization are significantly
+        oversized, wasting 80%+ of their cost.
+      remediation: "Downsize to match actual usage plus 30-50% headroom"
+
+    - id: "RIGHT-HIGH-002"
+      signal: "No resource requests/limits defined"
+      evidence_indicators:
+        - "Kubernetes pods without resource requests"
+        - "Instances without sizing justification"
+      explanation: |
+        Without defined resources, workloads may consume more than needed
+        or be scheduled on inadequate nodes.
+      remediation: "Define resource requests based on observed usage patterns"
+
+  medium:
+    - id: "RIGHT-MED-001"
+      signal: "Moderate oversizing opportunity"
+      evidence_threshold: "resource_usage between 20-40% of allocation"
+      remediation: "Consider downsizing to achieve 50-70% target utilization"
+
+    - id: "RIGHT-MED-002"
+      signal: "Resource requests significantly below limits"
+      evidence_pattern: "requests.*cpu.*<.*limits.*cpu"
+      remediation: "Align requests closer to limits for more predictable scheduling"
+
+  positive:
+    - id: "RIGHT-POS-001"
+      signal: "Resources appropriately sized"
+      evidence_threshold: "40% < utilization < 70%"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Collect utilization metrics"
+      description: |
+        Gather extended utilization data (7+ days) to understand
+        normal and peak usage patterns.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Current resource usage"
+          command: "kubectl top pods -A --sort-by=memory"
+        - purpose: "Resource requests/limits"
+          command: "kubectl get pods -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,REQ_CPU:.spec.containers[0].resources.requests.cpu,LIM_CPU:.spec.containers[0].resources.limits.cpu,REQ_MEM:.spec.containers[0].resources.requests.memory,LIM_MEM:.spec.containers[0].resources.limits.memory'"
+      expected_findings:
+        - "Current utilization levels"
+        - "Configured resource allocations"
+
+    - id: "2"
+      name: "Identify rightsizing candidates"
+      description: |
+        Compare utilization against allocation to identify undersized
+        and oversized resources.
+      duration_estimate: "60 min"
+      questions:
+        - "Which resources are below 30% utilization?"
+        - "Which resources are above 80% utilization?"
+        - "What is the cost of oversized resources?"
+      expected_findings:
+        - "List of oversized resources"
+        - "List of undersized resources"
+        - "Estimated cost savings"
+
+    - id: "3"
+      name: "Calculate optimal sizing"
+      description: |
+        Determine optimal resource allocation based on peak usage
+        plus appropriate headroom.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "AWS rightsizing recommendations"
+          command: "aws ce get-rightsizing-recommendation --service AmazonEC2"
+      expected_findings:
+        - "Recommended resource sizes"
+        - "Expected cost impact"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Utilization Analysis"
+        - "Oversized Resources"
+        - "Undersized Resources"
+        - "Rightsizing Recommendations"
+        - "Cost Impact Summary"
+
+  confidence_guidance:
+    high: "Based on >7 days of utilization data"
+    medium: "Based on 3-7 days of data"
+    low: "Based on <3 days or point-in-time data"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-rightsizing"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires extended metrics analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "rightsizing-001"
+    item: "No severely undersized resources (<20% headroom)"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify no resources consistently above 80% utilization"
+    expected: "All resources have >20% headroom"
+
+  - id: "rightsizing-002"
+    item: "No severely oversized resources (>80% waste)"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Identify resources below 20% utilization"
+    expected: "Rightsizing plan for oversized resources"
+
+  - id: "rightsizing-003"
+    item: "Resource requests defined for all workloads"
+    level: "BLOCKING"
+    verification: "kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{.spec.containers[0].resources.requests}{\"\\n\"}{end}' | grep '{}' || echo 'PASS'"
+    expected: "PASS (all pods have requests)"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["COST-4", "COST-5", "PERF-1"]
+    - framework: "FinOps Foundation"
+      controls: ["Rightsizing"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.vertical-scaling.instance-size-optimization"
+    - "scalability-capacity.vertical-scaling.resource-ceiling"
+    - "scalability-capacity.vertical-scaling.burst-capacity"

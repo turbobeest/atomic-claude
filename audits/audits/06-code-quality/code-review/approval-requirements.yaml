@@ -1,0 +1,242 @@
+audit:
+  id: code-quality.code-review.approval-requirements
+  name: Approval Requirements Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: code-review
+  tier: expert
+  estimated_duration: 30 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: repository
+  default_profiles:
+  - full
+  - quality
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes the configured approval requirements for merging changes to
+    protected branches. Examines required reviewer counts, dismissal policies,
+    stale review handling, and bypass permissions. Verifies that approval
+    policies match organizational risk tolerance and compliance requirements.
+  why_it_matters: |
+    Proper approval requirements are the primary gate preventing unauthorized
+    or low-quality changes from reaching production. Organizations without
+    enforced approvals experience 3x more production incidents. Regulatory
+    frameworks like SOX, SOC 2, and PCI-DSS mandate separation of duties
+    enforced through approval workflows.
+  when_to_run:
+  - Initial repository setup
+  - Compliance audit preparation
+  - After security policy changes
+  - Branch protection reviews
+prerequisites:
+  required_artifacts:
+  - type: branch_protection
+    description: Branch protection rule configuration
+  - type: repository_settings
+    description: Repository security settings
+  access_requirements:
+  - Admin access to view branch protection rules
+  - Access to repository settings
+discovery:
+  code_patterns:
+  - pattern: required_approving_review_count
+    type: regex
+    scope: configuration
+    purpose: Find approval count settings
+  file_patterns:
+  - glob: .github/settings.yml
+    purpose: Probot settings configuration
+  - glob: branch-protection.json
+    purpose: Branch protection export
+knowledge_sources:
+  specifications:
+  - id: github-branch-protection
+    name: GitHub Branch Protection Documentation
+    url: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches
+    offline_cache: true
+    priority: required
+tooling:
+  scripts:
+  - id: check-branch-protection
+    language: bash
+    purpose: Query branch protection settings
+    source: inline
+    code: |
+      gh api repos/{owner}/{repo}/branches/main/protection \
+        --jq '.required_pull_request_reviews'
+signals:
+  critical:
+  - id: APR-CRIT-001
+    signal: No approval required for protected branches
+    evidence_pattern: required_approvals == 0
+    explanation: |
+      Changes can be merged without any review, eliminating the primary
+      quality and security gate. This violates separation of duties
+      principles.
+    remediation: Configure minimum 1 required approval for all protected branches
+  - id: APR-CRIT-002
+    signal: Authors can approve their own PRs
+    evidence_pattern: require_code_owner_reviews == false && no_self_review_restriction
+    explanation: |
+      Self-approval defeats peer review purpose and creates audit
+      compliance violations for separation of duties requirements.
+    remediation: Enable setting to require review from someone other than author
+  high:
+  - id: APR-HIGH-001
+    signal: Single approval sufficient for production branches
+    evidence_pattern: production_branch && required_approvals == 1
+    explanation: |
+      Single-reviewer approval for production increases risk of
+      overlooked issues and collusion. Industry best practice is 2+
+      approvals for production.
+    remediation: Require minimum 2 approvals for production branch
+  - id: APR-HIGH-002
+    signal: Stale approvals not dismissed on push
+    evidence_pattern: dismiss_stale_reviews == false
+    explanation: |
+      Approvals remain valid after code changes, allowing approval
+      of one version and merging a different, unreviewed version.
+    remediation: Enable dismiss stale reviews on new commits
+  medium:
+  - id: APR-MED-001
+    signal: Admin bypass enabled without audit
+    evidence_pattern: allow_admin_bypass && no_bypass_audit
+    remediation: Add audit logging for admin bypass usage
+  - id: APR-MED-002
+    signal: No code owner approval required
+    evidence_pattern: require_code_owner_reviews == false
+    remediation: Enable code owner approval requirement
+  low:
+  - id: APR-LOW-001
+    signal: Inconsistent approval requirements across branches
+    evidence_pattern: branch_approval_variance
+    remediation: Standardize approval requirements across environments
+  positive:
+  - id: APR-POS-001
+    signal: Multi-approver requirement for production
+    evidence_pattern: production_branch && required_approvals >= 2
+  - id: APR-POS-002
+    signal: Comprehensive branch protection enabled
+    evidence_pattern: stale_review_dismiss && code_owner_require && linear_history
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Query Branch Protection Rules
+    description: |
+      Retrieve branch protection configuration for all protected
+      branches including main, develop, and release branches.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Get main branch protection
+      command: |
+        gh api repos/{owner}/{repo}/branches/main/protection 2>/dev/null
+    - purpose: List all protected branches
+      command: |
+        gh api repos/{owner}/{repo}/branches --jq '.[] | select(.protected) | .name'
+    expected_findings:
+    - Protection rules per branch
+    - Required approval counts
+  - id: '2'
+    name: Analyze Approval Settings
+    description: |
+      Examine detailed approval requirements including reviewer
+      counts, dismissal policies, and bypass permissions.
+    duration_estimate: 10 min
+    expected_findings:
+    - Required reviewer count
+    - Stale review handling
+    - Code owner requirements
+  - id: '3'
+    name: Verify Bypass Controls
+    description: |
+      Check who can bypass approval requirements and whether
+      such bypasses are logged and auditable.
+    duration_estimate: 10 min
+    expected_findings:
+    - Bypass permissions list
+    - Bypass audit logging status
+output:
+  deliverables:
+  - type: configuration
+    format: structured
+    content:
+    - branch_protection_rules
+    - approval_requirements_per_branch
+    - bypass_permissions
+    - stale_review_policy
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Approval Configuration
+    - Compliance Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Full API access to branch protection settings
+    medium: Partial settings visible
+    low: Limited access to protection configuration
+offline:
+  capability: minimal
+  cache_manifest:
+    knowledge:
+    - source_id: github-branch-protection
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: apr-001
+  item: Approval requirements documented
+  level: BLOCKING
+  verification: Required approvals per branch listed
+  expected: All protected branches covered
+- id: apr-002
+  item: No zero-approval branches
+  level: CRITICAL
+  verification: All branches require >= 1 approval
+  expected: Minimum 1 approval everywhere
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC8.1
+  - framework: SOX
+    controls:
+    - Separation of Duties
+  - framework: PCI-DSS
+    controls:
+    - 6.3.2
+  - framework: ISO 27001
+    controls:
+    - A.14.2.2
+relationships:
+  commonly_combined:
+  - code-quality.code-review.pr-review-coverage
+  - code-quality.code-review.codeowner-coverage
+  - security-trust.authorization.privilege-escalation

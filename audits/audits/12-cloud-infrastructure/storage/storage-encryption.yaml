@@ -1,0 +1,382 @@
+audit:
+  id: cloud-infrastructure.storage.storage-encryption
+  name: Storage Encryption
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: storage
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: security
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates encryption configurations for all storage resources including
+    S3 buckets, EBS volumes, EFS file systems, RDS databases, and other
+    managed storage. Examines encryption at rest, key management practices,
+    key rotation policies, and customer-managed key usage.
+  why_it_matters: |
+    Unencrypted storage exposes sensitive data to unauthorized access if
+    storage media is compromised, improperly decommissioned, or accessed
+    by malicious insiders. Most compliance frameworks (SOC 2, HIPAA, PCI-DSS,
+    GDPR) require encryption at rest. Customer-managed keys provide better
+    control and audit capabilities than service-managed keys.
+  when_to_run:
+  - Security assessments
+  - Compliance audits
+  - After infrastructure changes
+  - Quarterly security reviews
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to storage and KMS configurations
+  - type: security_policies
+    description: Organization encryption requirements
+  access_requirements:
+  - S3/GCS/Blob storage configuration access
+  - EBS/Disk encryption settings access
+  - KMS key inventory access
+  - IAM policy review access
+discovery:
+  code_patterns:
+  - pattern: encrypted.*false|encryption.*none
+    type: regex
+    scope: config
+    purpose: Find unencrypted storage configurations in IaC
+  file_patterns:
+  - glob: '**/terraform/**/*.tf'
+    purpose: Find Terraform storage configurations
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: Find CloudFormation templates
+  - glob: '**/pulumi/**/*.ts'
+    purpose: Find Pulumi infrastructure code
+knowledge_sources:
+  specifications:
+  - id: aws-s3-encryption
+    name: AWS S3 Encryption
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucket-encryption.html
+    offline_cache: true
+    priority: required
+  - id: aws-ebs-encryption
+    name: AWS EBS Encryption
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/EBSEncryption.html
+    offline_cache: true
+    priority: required
+  - id: aws-kms-best-practices
+    name: AWS KMS Best Practices
+    url: https://docs.aws.amazon.com/kms/latest/developerguide/best-practices.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: nist-encryption
+    name: NIST Cryptographic Standards
+    url: https://csrc.nist.gov/publications/fips
+    offline_cache: true
+  - id: cis-aws-storage
+    name: CIS AWS Foundations Benchmark - Storage
+    url: https://www.cisecurity.org/benchmark/amazon_web_services
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: Check S3 bucket encryption
+    command: aws s3api get-bucket-encryption --bucket {bucket_name}
+  - tool: AWS CLI
+    purpose: Check EBS default encryption
+    command: aws ec2 get-ebs-encryption-by-default
+  - tool: AWS CLI
+    purpose: List KMS keys
+    command: aws kms list-keys
+  scripts:
+  - id: encryption-audit
+    language: bash
+    purpose: Audit storage encryption configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Storage Encryption Audit ==="
+
+      # Check S3 bucket encryption
+      echo "S3 Bucket Encryption Status:"
+      for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text); do
+        encryption=$(aws s3api get-bucket-encryption --bucket "$bucket" 2>&1)
+        if echo "$encryption" | grep -q "ServerSideEncryptionConfigurationNotFoundError"; then
+          echo "UNENCRYPTED: $bucket"
+        else
+          key_type=$(echo "$encryption" | jq -r '.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm // "unknown"')
+          echo "ENCRYPTED ($key_type): $bucket"
+        fi
+      done
+
+      # Check EBS default encryption
+      echo ""
+      echo "EBS Default Encryption:"
+      aws ec2 get-ebs-encryption-by-default --output table
+
+      # Check for unencrypted EBS volumes
+      echo ""
+      echo "Unencrypted EBS Volumes:"
+      aws ec2 describe-volumes \
+        --filters "Name=encrypted,Values=false" \
+        --query 'Volumes[].{ID:VolumeId,Size:Size,State:State}' \
+        --output table
+
+      # Check RDS encryption
+      echo ""
+      echo "RDS Instance Encryption:"
+      aws rds describe-db-instances \
+        --query 'DBInstances[].{ID:DBInstanceIdentifier,Encrypted:StorageEncrypted,KMSKey:KmsKeyId}' \
+        --output table
+signals:
+  critical:
+  - id: ENCRYPTION-CRIT-001
+    signal: S3 buckets without encryption enabled
+    evidence_pattern: ServerSideEncryptionConfigurationNotFoundError
+    explanation: |
+      Unencrypted S3 buckets expose data if bucket permissions are
+      misconfigured or credentials are compromised. This violates
+      most compliance frameworks and security best practices.
+    remediation: Enable default encryption with SSE-S3 or SSE-KMS
+  - id: ENCRYPTION-CRIT-002
+    signal: EBS volumes without encryption
+    evidence_pattern: 'encrypted: false'
+    explanation: |
+      Unencrypted EBS volumes expose data on physical disk media.
+      EBS encryption is transparent to applications and has minimal
+      performance impact.
+    remediation: Enable EBS encryption by default; migrate existing volumes
+  - id: ENCRYPTION-CRIT-003
+    signal: RDS databases without encryption at rest
+    evidence_pattern: 'StorageEncrypted: false'
+    explanation: |
+      Database storage containing sensitive data must be encrypted.
+      RDS encryption cannot be enabled after creation without migration.
+    remediation: Create encrypted snapshot and restore to new encrypted instance
+  high:
+  - id: ENCRYPTION-HIGH-001
+    signal: AWS managed keys used instead of customer-managed keys
+    evidence_pattern: aws/s3 or aws/ebs key aliases
+    explanation: |
+      AWS managed keys don't support key rotation audit, cross-account
+      access control, or key deletion. Customer-managed keys provide
+      better control and compliance evidence.
+    remediation: Migrate to customer-managed KMS keys for sensitive data
+  - id: ENCRYPTION-HIGH-002
+    signal: KMS key rotation not enabled
+    evidence_pattern: 'KeyRotationEnabled: false'
+    explanation: |
+      Regular key rotation limits the blast radius of key compromise
+      and is required by many compliance frameworks.
+    remediation: Enable automatic key rotation for customer-managed keys
+  - id: ENCRYPTION-HIGH-003
+    signal: Overly permissive KMS key policies
+    evidence_indicators:
+    - 'Principal: ''*'' in key policy'
+    - Cross-account access without conditions
+    explanation: |
+      Permissive key policies allow unauthorized decryption,
+      defeating the purpose of encryption.
+    remediation: Restrict key policies to specific principals and conditions
+  medium:
+  - id: ENCRYPTION-MED-001
+    signal: EBS default encryption not enabled at account level
+    remediation: Enable EBS encryption by default for the account
+  - id: ENCRYPTION-MED-002
+    signal: No S3 bucket policy requiring encrypted uploads
+    remediation: Add bucket policy denying unencrypted object uploads
+  - id: ENCRYPTION-MED-003
+    signal: Encryption key usage not logged to CloudTrail
+    remediation: Enable CloudTrail logging for KMS key usage
+  low:
+  - id: ENCRYPTION-LOW-001
+    signal: No encryption key inventory documentation
+    remediation: Document all encryption keys with purpose and ownership
+  positive:
+  - id: ENCRYPTION-POS-001
+    signal: All storage encrypted with customer-managed keys
+  - id: ENCRYPTION-POS-002
+    signal: Key rotation enabled and monitored
+  - id: ENCRYPTION-POS-003
+    signal: Encryption key usage audited via CloudTrail
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: S3 Encryption Assessment
+    description: |
+      Audit all S3 buckets for encryption configuration including
+      default encryption and bucket policies.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List bucket encryption status
+      command: for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text); do echo
+        "=== $bucket ==="; aws s3api get-bucket-encryption --bucket $bucket 2>&1 | head -20; done
+    - purpose: Check for encryption enforcement policies
+      command: for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text); do echo
+        "=== $bucket ==="; aws s3api get-bucket-policy --bucket $bucket 2>&1 | jq -r '.Policy' | jq 'select(.Statement[].Condition.StringNotEquals["s3:x-amz-server-side-encryption"]
+        != null)'; done
+    expected_findings:
+    - Encryption status per bucket
+    - Key types in use (SSE-S3, SSE-KMS, SSE-C)
+  - id: '2'
+    name: EBS Encryption Assessment
+    description: |
+      Audit EBS volumes and default encryption settings
+      for the account.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check EBS default encryption
+      command: aws ec2 get-ebs-encryption-by-default
+    - purpose: Find unencrypted volumes
+      command: aws ec2 describe-volumes --filters 'Name=encrypted,Values=false' --query 'Volumes[].{ID:VolumeId,Size:Size,AZ:AvailabilityZone,Attachments:Attachments[0].InstanceId}'
+        --output table
+    expected_findings:
+    - Default encryption status
+    - Unencrypted volume inventory
+  - id: '3'
+    name: Database Encryption Assessment
+    description: |
+      Audit RDS and other managed database encryption settings.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check RDS encryption
+      command: aws rds describe-db-instances --query 'DBInstances[].{ID:DBInstanceIdentifier,Engine:Engine,Encrypted:StorageEncrypted,KMSKey:KmsKeyId}'
+        --output table
+    - purpose: Check DynamoDB encryption
+      command: aws dynamodb list-tables --query 'TableNames' --output text | xargs -I{} aws dynamodb describe-table
+        --table-name {} --query 'Table.{Name:TableName,SSE:SSEDescription.SSEType}'
+    expected_findings:
+    - Database encryption status
+    - Key management approach
+  - id: '4'
+    name: KMS Key Audit
+    description: |
+      Review KMS key configurations, policies, and rotation settings.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List KMS keys
+      command: aws kms list-keys --query 'Keys[].KeyId' --output text | xargs -I{} aws kms describe-key
+        --key-id {} --query 'KeyMetadata.{ID:KeyId,Alias:Description,State:KeyState,Manager:KeyManager}'
+    - purpose: Check key rotation
+      command: 'aws kms list-keys --query ''Keys[].KeyId'' --output text | xargs -I{} sh -c ''echo "Key:
+        {}"; aws kms get-key-rotation-status --key-id {} 2>/dev/null || echo "N/A"'''
+    expected_findings:
+    - KMS key inventory
+    - Key rotation status
+  - id: '5'
+    name: Gap Analysis and Recommendations
+    description: |
+      Identify encryption gaps and develop remediation plan.
+    duration_estimate: 30 min
+    expected_findings:
+    - Unencrypted resource inventory
+    - Prioritized remediation plan
+    - Compliance gap analysis
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Encryption Coverage Analysis
+    - Key Management Review
+    - Compliance Gap Analysis
+    - Remediation Recommendations
+  confidence_guidance:
+    high: Full access to storage and KMS configurations
+    medium: Partial access to configurations
+    low: Limited access, based on sampled resources
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-s3-encryption
+      priority: required
+    - source_id: aws-kms-best-practices
+      priority: required
+  limitations:
+  - Cannot verify live encryption settings offline
+  - KMS key policies require API access
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Critical security check
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: encryption-001
+  item: All S3 buckets encryption verified
+  level: CRITICAL
+  verification: unencrypted=$(for b in $(aws s3api list-buckets --query 'Buckets[].Name' --output text);
+    do aws s3api get-bucket-encryption --bucket $b 2>&1 | grep -q ServerSideEncryptionConfigurationNotFoundError
+    && echo $b; done); [ -z "$unencrypted" ] && echo PASS || echo FAIL
+  expected: PASS
+- id: encryption-002
+  item: All EBS volumes encrypted
+  level: CRITICAL
+  verification: aws ec2 describe-volumes --filters 'Name=encrypted,Values=false' --query 'length(Volumes)'
+    | grep -q '^0$' && echo PASS || echo FAIL
+  expected: PASS
+- id: encryption-003
+  item: All RDS instances encrypted
+  level: CRITICAL
+  verification: aws rds describe-db-instances --query 'DBInstances[?StorageEncrypted==`false`]' --output
+    text | grep -q . && echo FAIL || echo PASS
+  expected: PASS
+- id: encryption-004
+  item: KMS key rotation enabled
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify key rotation for all customer-managed keys
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.7
+  - framework: HIPAA
+    controls:
+    - 164.312(a)(2)(iv)
+    - 164.312(e)(2)(ii)
+  - framework: PCI-DSS
+    controls:
+    - '3.4'
+    - '3.5'
+    - '3.6'
+  - framework: GDPR
+    controls:
+    - Article 32
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.storage.storage-replication
+  - cloud-infrastructure.networking.network-security-groups
+  - security.access-control.iam-policy-audit

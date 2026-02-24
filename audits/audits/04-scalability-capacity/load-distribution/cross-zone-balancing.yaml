@@ -1,0 +1,297 @@
+# ============================================================
+# AUDIT FILE: Cross-Zone Balancing Audit
+# ============================================================
+
+audit:
+  id: "scalability-capacity.load-distribution.cross-zone-balancing"
+  name: "Cross-Zone Balancing Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "load-distribution"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the configuration and effectiveness of cross-availability-zone
+    load balancing within a region. Analyzes how traffic is distributed
+    across zones, the impact on latency and costs, and resilience to
+    zone-level failures. Reviews load balancer settings, zone awareness
+    configurations, and actual traffic flow patterns.
+
+  why_it_matters: |
+    Cross-zone balancing directly impacts availability, latency, and costs.
+    Proper configuration ensures even distribution for resilience, while
+    considering the latency and cost implications of cross-zone traffic.
+    Misconfiguration can lead to zone overload during failures or
+    unexpected data transfer costs.
+
+  when_to_run:
+    - "After load balancer configuration changes"
+    - "When deploying to new availability zones"
+    - "During cost optimization reviews"
+    - "As part of disaster recovery validation"
+
+prerequisites:
+  required_artifacts:
+    - type: "configuration"
+      description: "Load balancer configuration with zone settings"
+    - type: "metrics"
+      description: "Per-zone traffic and latency metrics"
+
+  access_requirements:
+    - "Load balancer configuration access"
+    - "Cloud provider cost and traffic metrics"
+    - "Zone-level monitoring access"
+
+discovery:
+  code_patterns:
+    - pattern: "(cross.?zone|zone.?aware|availability.?zone)"
+      type: "regex"
+      scope: "config"
+      purpose: "Find cross-zone balancing configurations"
+    - pattern: "(topology|zone|az-)\\s*[=:]"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify zone topology settings"
+
+  file_patterns:
+    - glob: "**/elb*.tf"
+      purpose: "AWS ELB Terraform configurations"
+    - glob: "**/alb*.yaml"
+      purpose: "ALB configurations"
+    - glob: "**/service*.yaml"
+      purpose: "Kubernetes service configurations"
+
+  metrics_queries:
+    - system: "CloudWatch"
+      query: "RequestCount by AvailabilityZone"
+      purpose: "Measure traffic per zone"
+    - system: "Prometheus"
+      query: "sum(rate(http_requests_total[5m])) by (zone)"
+      purpose: "Zone-level request distribution"
+
+knowledge_sources:
+  guides:
+    - id: "aws-cross-zone-lb"
+      name: "AWS Cross-Zone Load Balancing"
+      url: "https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/how-elastic-load-balancing-works.html#cross-zone-load-balancing"
+      offline_cache: true
+    - id: "k8s-topology-aware"
+      name: "Kubernetes Topology Aware Routing"
+      url: "https://kubernetes.io/docs/concepts/services-networking/topology-aware-routing/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "aws-well-architected"
+      title: "AWS Well-Architected Framework - Reliability Pillar"
+      type: "book"
+      reference: "AWS Documentation"
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Check ELB cross-zone settings"
+      command: "aws elbv2 describe-load-balancer-attributes --load-balancer-arn ARN"
+    - tool: "kubectl"
+      purpose: "Check topology spread constraints"
+      command: "kubectl get deployment -o yaml | grep -A5 topologySpreadConstraints"
+
+  monitoring_queries:
+    - system: "CloudWatch"
+      query: "HealthyHostCount by AvailabilityZone, TargetGroup"
+      purpose: "Monitor healthy targets per zone"
+    - system: "AWS Cost Explorer"
+      query: "Data Transfer costs by AvailabilityZone"
+      purpose: "Track cross-zone data transfer costs"
+
+signals:
+  critical:
+    - id: "SCALE-CZ-CRIT-001"
+      signal: "Zone failure causes service outage"
+      evidence_indicators:
+        - "All traffic routed to single zone"
+        - "No healthy targets in other zones"
+      explanation: |
+        Single-zone dependency eliminates the resilience benefit of
+        multi-AZ deployment. A zone failure would cause complete
+        service unavailability.
+      remediation: "Enable cross-zone balancing; ensure targets in multiple zones"
+
+  high:
+    - id: "SCALE-CZ-HIGH-001"
+      signal: "Cross-zone disabled with uneven zone capacity"
+      explanation: "Zones with fewer instances overloaded during normal operation"
+      remediation: "Enable cross-zone balancing or equalize instance counts"
+    - id: "SCALE-CZ-HIGH-002"
+      signal: "Excessive cross-zone traffic costs"
+      explanation: "Data transfer charges significantly impact infrastructure costs"
+      remediation: "Implement zone-aware routing for suitable workloads"
+
+  medium:
+    - id: "SCALE-CZ-MED-001"
+      signal: "Zone preference not aligned with capacity"
+      remediation: "Adjust zone weights or enable dynamic balancing"
+    - id: "SCALE-CZ-MED-002"
+      signal: "Latency variance between zones not considered"
+      remediation: "Implement latency-aware zone selection"
+
+  low:
+    - id: "SCALE-CZ-LOW-001"
+      signal: "Cross-zone settings not documented"
+
+  positive:
+    - id: "SCALE-CZ-POS-001"
+      signal: "Even distribution across zones with automatic failover"
+    - id: "SCALE-CZ-POS-002"
+      signal: "Cost-optimized zone-aware routing for suitable traffic"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Zone Deployment"
+      description: |
+        Document the availability zone deployment pattern for all
+        services and load balancers.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List instances by zone"
+          command: "aws ec2 describe-instances --query 'Reservations[].Instances[].{ID:InstanceId,AZ:Placement.AvailabilityZone}'"
+      expected_findings:
+        - "Instance distribution across zones"
+        - "Service presence in each zone"
+
+    - id: "2"
+      name: "Review Cross-Zone Configuration"
+      description: |
+        Examine load balancer settings for cross-zone balancing
+        enablement and configuration.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Check ALB cross-zone setting"
+          command: "aws elbv2 describe-load-balancer-attributes --load-balancer-arn $ARN --query 'Attributes[?Key==`load_balancing.cross_zone.enabled`]'"
+      expected_findings:
+        - "Cross-zone balancing status per load balancer"
+        - "Configuration rationale"
+
+    - id: "3"
+      name: "Analyze Zone Traffic Distribution"
+      description: |
+        Collect and analyze traffic metrics showing distribution
+        across availability zones.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Traffic volume per zone"
+        - "Distribution balance assessment"
+
+    - id: "4"
+      name: "Assess Zone Failure Impact"
+      description: |
+        Evaluate the impact of a single zone failure on service
+        availability and performance.
+      duration_estimate: "45 min"
+      questions:
+        - "Can remaining zones handle full traffic load?"
+        - "How quickly would failover occur?"
+        - "What is the expected latency impact?"
+      expected_findings:
+        - "Zone failure impact assessment"
+        - "Capacity sufficiency analysis"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Zone Deployment Analysis"
+        - "Cross-Zone Configuration Review"
+        - "Resilience Assessment"
+        - "Cost Impact Analysis"
+
+  confidence_guidance:
+    high: "Configuration verified with traffic metrics and failure testing"
+    medium: "Configuration review with traffic metrics"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-cross-zone-lb"
+        priority: "recommended"
+      - source_id: "k8s-topology-aware"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires zone-level analysis"
+    full:
+      included: true
+      priority: 3
+
+closeout_checklist:
+  - id: "cross-zone-balancing-001"
+    item: "Zone deployment documented"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm instance distribution across zones documented"
+    expected: "Confirmed by reviewer"
+
+  - id: "cross-zone-balancing-002"
+    item: "Cross-zone configuration reviewed"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify cross-zone settings for all load balancers"
+    expected: "Confirmed by reviewer"
+
+  - id: "cross-zone-balancing-003"
+    item: "Zone failure impact assessed"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm zone failure scenarios analyzed"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["cloud-native", "high-availability", "multi-az"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1", "CC9.1"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.load-distribution.geographic-load-distribution"
+    - "scalability-capacity.load-distribution.load-balancing-algorithm"

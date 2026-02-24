@@ -1,0 +1,331 @@
+audit:
+  id: reliability-resilience.error-handling.error-budget
+  name: Error Budget Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: error-handling
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: process
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines error budget implementation as part of SRE practices including
+    SLO definitions, error budget calculation, burn rate monitoring, and
+    error budget policies. Reviews how error budgets are used to balance
+    feature velocity with reliability, and what actions are triggered when
+    budgets are exhausted or at risk.
+  why_it_matters: |
+    Error budgets provide an objective framework for balancing reliability
+    investments against feature development. Without error budgets, teams
+    either over-invest in reliability (slow velocity) or under-invest
+    (frequent outages). Error budgets enable data-driven decisions about
+    when to prioritize stability work vs. new features.
+  when_to_run:
+  - When establishing SRE practices
+  - Quarterly SLO/SLA reviews
+  - After significant incidents
+  - Before major reliability investments
+prerequisites:
+  required_artifacts:
+  - type: slo_definitions
+    description: Documented Service Level Objectives
+  - type: monitoring_config
+    description: SLI metrics and SLO tracking configuration
+  access_requirements:
+  - Access to SLO documentation
+  - Access to monitoring/observability platform
+  - Access to error budget dashboards if they exist
+  interviews:
+  - role: SRE/Platform team
+    questions:
+    - How are error budgets calculated?
+    - What happens when error budget is exhausted?
+    purpose: Understand error budget policies and processes
+discovery:
+  code_patterns:
+  - pattern: errorBudget|error_budget|ErrorBudget
+    type: keyword
+    scope: source
+    purpose: Find error budget implementations
+  - pattern: burnRate|burn_rate|BurnRate
+    type: keyword
+    scope: source
+    purpose: Find burn rate calculations
+  - pattern: slo|SLO|sli|SLI
+    type: keyword
+    scope: config
+    purpose: Find SLO/SLI definitions
+  file_patterns:
+  - glob: '**/slo/**/*.{yaml,yml,json}'
+    purpose: SLO definition files
+  - glob: '**/sloth/**/*.{yaml,yml}'
+    purpose: Sloth SLO generator configurations
+  - glob: '**/pyrra/**/*.{yaml,yml}'
+    purpose: Pyrra SLO configurations
+  documents_to_review:
+  - type: SLO documentation
+    purpose: Understand defined SLOs and their targets
+  - type: Error budget policy
+    purpose: Understand actions taken on budget exhaustion
+  metrics_queries:
+  - system: Prometheus
+    query: slo:sli_error:ratio_rate5m > 0
+    purpose: Find SLI-based error tracking
+    threshold: Should have SLO-related metrics
+  - system: Prometheus
+    query: slo_period_burn_rate
+    purpose: Find burn rate metrics
+    threshold: Should be < 1 for healthy error budget
+knowledge_sources:
+  guides:
+  - id: google-sre-slo
+    name: Google SRE Book - Service Level Objectives
+    url: https://sre.google/sre-book/service-level-objectives/
+    offline_cache: true
+  - id: google-workbook-slo
+    name: Google SRE Workbook - Implementing SLOs
+    url: https://sre.google/workbook/implementing-slos/
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  learning_resources:
+  - id: sre-book
+    title: Site Reliability Engineering
+    type: book
+    reference: 'ISBN: 978-1491929124'
+  - id: sre-workbook
+    title: The Site Reliability Workbook
+    type: book
+    reference: 'ISBN: 978-1492029502'
+tooling:
+  infrastructure_tools:
+  - tool: Sloth
+    purpose: Generate Prometheus SLO rules
+    command: sloth generate -i slo.yaml
+  - tool: Pyrra
+    purpose: SLO monitoring and dashboards
+    command: pyrra generate
+  monitoring_queries:
+  - system: Prometheus
+    query: 1 - (sum(rate(http_requests_total{status!~"5.."}[30d])) / sum(rate(http_requests_total[30d])))
+    purpose: Calculate error budget consumption
+  scripts:
+  - id: find-slo-config
+    language: bash
+    purpose: Find SLO and error budget configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== SLO Definitions ==="
+      grep -rn "slo\|SLO\|objective" --include="*.yaml" --include="*.yml" --include="*.json" . 2>/dev/null | grep -v node_modules | head -30
+      echo ""
+      echo "=== Error Budget References ==="
+      grep -rn "error.*budget\|burn.*rate" --include="*.yaml" --include="*.yml" --include="*.md" . 2>/dev/null | head -20
+      echo ""
+      echo "=== SLI Metrics ==="
+      grep -rn "sli\|SLI" --include="*.yaml" --include="*.yml" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: BUDGET-CRIT-001
+    signal: No SLOs defined for production services
+    evidence_indicators:
+    - No SLO documentation exists
+    - No SLO metrics in monitoring system
+    - Team cannot articulate reliability targets
+    explanation: |
+      Without SLOs, there's no basis for error budgets and no objective
+      measure of acceptable reliability. Teams cannot make data-driven
+      reliability decisions.
+    remediation: Define SLOs based on user expectations and business requirements
+  - id: BUDGET-CRIT-002
+    signal: No error budget tracking or visibility
+    evidence_indicators:
+    - SLOs exist but no error budget calculation
+    - No error budget dashboards
+    - Team doesn't know current error budget status
+    explanation: |
+      SLOs without error budget tracking provide no actionable signal
+      for balancing velocity and reliability.
+    remediation: Implement error budget tracking with clear visibility dashboards
+  high:
+  - id: BUDGET-HIGH-001
+    signal: No error budget policy for budget exhaustion
+    explanation: |
+      Without clear policies, teams don't know what actions to take
+      when error budget is exhausted, leading to continued velocity
+      when stability work is needed.
+    remediation: Define and document error budget policies with specific triggers and actions
+  - id: BUDGET-HIGH-002
+    signal: Error budget not factored into release decisions
+    explanation: |
+      If deploys continue regardless of error budget status, the
+      budget provides no meaningful gate for reliability.
+    remediation: Integrate error budget checks into deployment pipelines
+  medium:
+  - id: BUDGET-MED-001
+    signal: No burn rate alerting
+    remediation: Implement multi-window burn rate alerts per Google SRE guidance
+  - id: BUDGET-MED-002
+    signal: SLOs not aligned with user expectations
+    remediation: Validate SLO targets against actual user experience metrics
+  low:
+  - id: BUDGET-LOW-001
+    signal: Error budget calculations not automated
+  positive:
+  - id: BUDGET-POS-001
+    signal: Comprehensive error budget tracking with burn rate alerts
+  - id: BUDGET-POS-002
+    signal: Error budget policies actively enforced
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review SLO definitions
+    description: |
+      Identify and review all defined SLOs, their targets, and the
+      SLIs that measure them.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find SLO configurations
+      command: grep -rn 'slo\|SLO\|objective\|target' --include='*.yaml' --include='*.yml' . 2>/dev/null
+        | grep -v node_modules | head -40
+    expected_findings:
+    - SLO definitions and targets
+    - SLI metrics in use
+  - id: '2'
+    name: Assess error budget calculation
+    description: |
+      Review how error budgets are calculated from SLOs and verify
+      the calculation methodology is correct.
+    duration_estimate: 30 min
+    questions:
+    - How is the error budget calculated?
+    - What time window is used for budget calculation?
+    - Are error budgets per-service or system-wide?
+    expected_findings:
+    - Error budget calculation method
+    - Time window configuration
+  - id: '3'
+    name: Check error budget visibility
+    description: |
+      Verify error budget status is visible to teams through dashboards
+      and alerting.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find error budget dashboards
+      command: grep -rn 'budget\|Budget' --include='*.json' . 2>/dev/null | grep -i 'dashboard\|panel'
+        | head -20
+    expected_findings:
+    - Dashboard visibility status
+    - Burn rate alerting configuration
+  - id: '4'
+    name: Review error budget policies
+    description: |
+      Examine policies for what happens when error budget is exhausted
+      or at risk.
+    duration_estimate: 30 min
+    documents_to_review:
+    - type: Error budget policy documentation
+      purpose: Understand remediation actions
+    questions:
+    - What happens when error budget is exhausted?
+    - Are deploys blocked when budget is low?
+    - Who is responsible for error budget decisions?
+    expected_findings:
+    - Error budget policy existence
+    - Enforcement mechanisms
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - SLO/SLI Assessment
+    - Error Budget Maturity
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence from configuration and documentation
+    medium: Partial implementation found
+    low: Based on interviews or indirect evidence
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-sre-slo
+      priority: required
+    - source_id: google-workbook-slo
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires organizational and documentation review
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: error-budget-001
+  item: SLOs defined for critical services
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify SLO documentation exists for production services
+  expected: Confirmed by reviewer
+- id: error-budget-002
+  item: Error budget calculation implemented
+  level: CRITICAL
+  verification: grep -rni 'error.*budget\|slo.*target' --include='*.yaml' --include='*.yml' . 2>/dev/null
+    | wc -l | xargs -I{} sh -c 'if [ {} -gt 0 ]; then echo PASS; else echo FAIL; fi'
+  expected: PASS
+- id: error-budget-003
+  item: Error budget dashboard exists
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify teams can view current error budget status
+  expected: Confirmed by reviewer
+- id: error-budget-004
+  item: Error budget policy documented
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify written policy for error budget exhaustion exists
+  expected: Confirmed by reviewer
+- id: error-budget-005
+  item: Burn rate alerting configured
+  level: WARNING
+  verification: grep -rni 'burn.*rate\|burnrate' --include='*.yaml' --include='*.yml' . 2>/dev/null |
+    wc -l | xargs -I{} sh -c 'if [ {} -gt 0 ]; then echo PASS; else echo FAIL; fi'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - SLO Management
+    - Error Budgets
+relationships:
+  commonly_combined:
+  - reliability-resilience.error-handling.error-rate-monitoring

@@ -1,0 +1,307 @@
+# ============================================================
+# N+1 Query Audit
+# ============================================================
+# Identifies N+1 query patterns that cause excessive database
+# round-trips and degrade application performance.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.database-performance.n-plus-one-query"
+  name: "N+1 Query Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "database-performance"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit detects N+1 query patterns where an initial query fetches N
+    records, followed by N additional queries to fetch related data for each
+    record. It analyzes ORM usage, query logs, and application patterns to
+    identify these inefficient data access patterns.
+
+  why_it_matters: |
+    N+1 queries are one of the most common and impactful performance anti-patterns.
+    A page displaying 100 items might execute 101 queries instead of 2. This
+    causes excessive database round-trips, connection pool exhaustion, and
+    dramatically increased latency. The problem scales linearly with data volume.
+
+  when_to_run:
+    - "After implementing new data access patterns"
+    - "When investigating slow page loads"
+    - "During code review of ORM usage"
+    - "After adding new entity relationships"
+
+prerequisites:
+  required_artifacts:
+    - type: "application-code"
+      description: "Access to application source code with ORM usage"
+    - type: "query-logs"
+      description: "Database query logs or application query tracing"
+
+  access_requirements:
+    - "Read access to application source code"
+    - "Access to query logging or APM tools"
+    - "Debug logging capability for ORM"
+
+discovery:
+knowledge_sources:
+  guides:
+    - id: "rails-n-plus-one"
+      name: "Rails Eager Loading Associations"
+      url: "https://guides.rubyonrails.org/active_record_querying.html#eager-loading-associations"
+      offline_cache: true
+    - id: "hibernate-n-plus-one"
+      name: "Hibernate Performance - N+1 Select Problem"
+      url: "https://docs.jboss.org/hibernate/orm/current/userguide/html_single/Hibernate_User_Guide.html#fetching"
+      offline_cache: true
+    - id: "django-n-plus-one"
+      name: "Django select_related and prefetch_related"
+      url: "https://docs.djangoproject.com/en/stable/ref/models/querysets/#select-related"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "bullet"
+      purpose: "Rails N+1 detection gem"
+      command: "BULLET_ENABLED=true rails s"
+    - tool: "nplusone"
+      purpose: "Python/Django N+1 detection"
+      command: "pip install nplusone && python manage.py runserver"
+    - tool: "hibernate-statistics"
+      purpose: "Hibernate query counting"
+      command: "Enable hibernate.generate_statistics=true"
+
+  static_analysis:
+    - tool: "eslint-plugin-query"
+      purpose: "Detect query-in-loop patterns"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "N1-CRIT-001"
+      signal: "N+1 pattern in critical request path"
+      evidence_pattern: "Same SELECT query executed 100+ times per request"
+      explanation: |
+        N+1 queries in critical paths directly impact user experience. A page
+        that could load in 50ms instead takes 2 seconds due to hundreds of
+        unnecessary database round-trips.
+      remediation: "Implement eager loading (includes, prefetch_related, JOIN FETCH)"
+
+    - id: "N1-CRIT-002"
+      signal: "Database query inside loop processing collection"
+      evidence_pattern: "for/foreach containing .find(), .query(), or .load()"
+      explanation: |
+        Queries inside loops are the textbook cause of N+1 problems. Each
+        iteration creates a new database round-trip when a single batch
+        query would suffice.
+      remediation: "Move query outside loop, batch load all needed data upfront"
+
+  high:
+    - id: "N1-HIGH-001"
+      signal: "Lazy-loaded relationships accessed in serialization"
+      evidence_pattern: "Lazy relationship accessed during JSON/view rendering"
+      explanation: |
+        Lazy relationships loaded during serialization cause N+1 because
+        each relationship access triggers a query. This commonly happens
+        in API responses and view templates.
+      remediation: "Eager load relationships needed for serialization"
+
+    - id: "N1-HIGH-002"
+      signal: "High ratio of single-row queries to multi-row queries"
+      evidence_threshold: "Single-row SELECT calls > 10x multi-row SELECT calls"
+      explanation: |
+        A high ratio of single-row queries suggests data is being fetched
+        one record at a time instead of in batches. This pattern often
+        indicates N+1 issues.
+      remediation: "Batch queries using IN clauses or JOINs"
+
+  medium:
+    - id: "N1-MED-001"
+      signal: "Missing eager loading configuration for common access patterns"
+      evidence_pattern: "Relationships without default eager loading for common use"
+      remediation: "Configure default eager loading for frequently-accessed relationships"
+
+    - id: "N1-MED-002"
+      signal: "GraphQL resolvers fetching related data individually"
+      evidence_pattern: "Resolver performing query per parent item"
+      remediation: "Implement DataLoader pattern for batching"
+
+  low:
+    - id: "N1-LOW-001"
+      signal: "Potential N+1 in admin/back-office code"
+
+  positive:
+    - id: "N1-POS-001"
+      signal: "Consistent use of eager loading for relationships"
+    - id: "N1-POS-002"
+      signal: "DataLoader or batch loading patterns in place"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze query patterns in logs"
+      description: |
+        Enable query logging and analyze patterns to identify repeated
+        queries that suggest N+1 behavior.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Enable PostgreSQL query logging"
+          command: |
+            psql -c "ALTER SYSTEM SET log_statement = 'all'; SELECT pg_reload_conf();"
+        - purpose: "Find repeated single-row queries"
+          command: |
+            psql -c "SELECT query, calls FROM pg_stat_statements WHERE query ~ 'SELECT.*WHERE.*= \\$1' AND calls > 100 ORDER BY calls DESC LIMIT 20"
+      expected_findings:
+        - "Queries executed many times per request"
+        - "Pattern of single-record fetches"
+
+    - id: "2"
+      name: "Search code for query-in-loop patterns"
+      description: |
+        Scan application code for patterns where database queries are
+        executed inside loops iterating over collections.
+      duration_estimate: "40 min"
+      commands:
+        - purpose: "Find queries inside loops (generic)"
+          command: |
+            grep -rn "for.*in\|foreach" --include="*.java" --include="*.py" --include="*.rb" --include="*.js" -A 5 | grep -E "find|query|select|load|get"
+        - purpose: "Find lazy loading access patterns"
+          command: |
+            grep -rn "\.get[A-Z].*\(\)" --include="*.java" -B 2 | grep -E "for|while|stream"
+      expected_findings:
+        - "Code locations with potential N+1"
+        - "Lazy loading in iteration contexts"
+
+    - id: "3"
+      name: "Review ORM relationship configurations"
+      description: |
+        Examine entity relationship definitions to identify relationships
+        that may cause N+1 when accessed.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find relationship definitions (JPA)"
+          command: |
+            grep -rn "@ManyToOne\|@OneToMany\|@ManyToMany" --include="*.java" -A 2
+        - purpose: "Find relationship definitions (Django)"
+          command: |
+            grep -rn "ForeignKey\|ManyToManyField" --include="*.py" -A 1
+        - purpose: "Find relationship definitions (Rails)"
+          command: |
+            grep -rn "has_many\|belongs_to\|has_one" --include="*.rb" -A 1
+      expected_findings:
+        - "Relationship mappings"
+        - "Fetch strategy configurations"
+
+    - id: "4"
+      name: "Use N+1 detection tools"
+      description: |
+        Run framework-specific N+1 detection tools to automatically
+        identify problematic patterns.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Run Bullet in Rails"
+          command: |
+            RAILS_ENV=test BULLET_ENABLED=true bundle exec rspec
+        - purpose: "Run nplusone in Django"
+          command: |
+            NPLUSONE_RAISE=True python manage.py test
+      expected_findings:
+        - "Automated N+1 detection results"
+        - "Specific locations and fixes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "N+1 Pattern Instances"
+        - "Query Log Analysis"
+        - "Code Pattern Review"
+        - "Remediation Recommendations"
+
+  confidence_guidance:
+    high: "Query log showing N+1 pattern confirmed"
+    medium: "Code pattern identified but not runtime verified"
+    low: "Suspected based on relationship structure"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "hibernate-n-plus-one"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime query analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "n1-001"
+    item: "No queries executed > 100 times per request in critical paths"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Analyze query logs during request processing"
+    expected: "Confirmed by reviewer"
+
+  - id: "n1-002"
+    item: "No database queries inside loops processing collections"
+    level: "BLOCKING"
+    verification: |
+      grep -rn "for.*in\|foreach" --include="*.java" --include="*.py" -A 5 | grep -c "\.find\|\.query\|\.select" | xargs test 0 -eq
+    expected: "true"
+
+  - id: "n1-003"
+    item: "Eager loading configured for common access patterns"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review relationship configurations"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.database-performance.query-optimization"
+    - "performance-efficiency.database-performance.connection-pool-sizing"

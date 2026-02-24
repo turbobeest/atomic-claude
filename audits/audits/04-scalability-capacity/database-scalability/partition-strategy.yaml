@@ -1,0 +1,351 @@
+audit:
+  id: scalability-capacity.database-scalability.partition-strategy
+  name: Partition Strategy Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: database-scalability
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines table partitioning implementations including
+    partition key selection, partition scheme (range, list, hash),
+    partition granularity, partition pruning effectiveness, and
+    partition maintenance automation. It assesses whether partitioning
+    is appropriately applied to large tables.
+  why_it_matters: |
+    Partitioning enables management of very large tables by dividing
+    them into smaller, more manageable pieces. Without proper partitioning,
+    large tables become unmaintainable - vacuums take hours, backups
+    fail, and queries scan unnecessary data. Proper partitioning
+    enables efficient data archival, faster queries, and parallel
+    maintenance operations.
+  when_to_run:
+  - When tables exceed 100GB or 100M rows
+  - Before implementing time-series data storage
+  - When vacuum operations take excessive time
+  - During data retention policy implementation
+  - When query performance degrades on large tables
+prerequisites:
+  required_artifacts:
+  - type: database-schema
+    description: Table schemas and partition definitions
+  - type: query-patterns
+    description: Common query patterns by table
+  - type: monitoring-data
+    description: Table sizes and query performance metrics
+  access_requirements:
+  - Database schema inspection access
+  - Query execution plan access
+  - Table size and partition statistics
+discovery:
+  code_patterns:
+  - pattern: PARTITION BY|partition_key|partitioned
+    type: regex
+    scope: source
+    purpose: Find partition definitions
+  - pattern: CREATE TABLE.*PARTITION OF
+    type: regex
+    scope: source
+    purpose: Identify child partition tables
+  - pattern: pg_partman|partition.*manager
+    type: regex
+    scope: config
+    purpose: Detect partition management tools
+  file_patterns:
+  - glob: '**/migrations/**/*.sql'
+    purpose: Schema migrations with partition definitions
+  - glob: '**/partitions*.{yaml,yml,sql}'
+    purpose: Partition configuration files
+  metrics_queries:
+  - system: pg_catalog
+    query: SELECT relname, relkind FROM pg_class WHERE relkind = 'p'
+    purpose: List partitioned tables
+    threshold: Large tables should be partitioned
+  - system: pg_stat_user_tables
+    query: SELECT relname, n_live_tup FROM pg_stat_user_tables WHERE n_live_tup > 100000000
+    purpose: Find large unpartitioned tables
+    threshold: Tables >100M rows should be partitioned
+knowledge_sources:
+  specifications:
+  - id: postgres-partitioning
+    name: PostgreSQL Table Partitioning
+    url: https://www.postgresql.org/docs/current/ddl-partitioning.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: pg-partman
+    name: pg_partman Extension Guide
+    url: https://github.com/pgpartman/pg_partman
+    offline_cache: true
+  - id: partition-best-practices
+    name: Partitioning Best Practices
+    url: https://www.enterprisedb.com/postgres-tutorials/how-use-table-partitioning-scale-postgresql
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: pg_partman
+    purpose: Automated partition management
+    command: SELECT partman.show_partitions('schema.table_name')
+  - tool: pg_partition_info
+    purpose: View partition structure
+    command: SELECT * FROM pg_partition_tree('parent_table')
+  monitoring_queries:
+  - system: PostgreSQL
+    query: SELECT relname, pg_size_pretty(pg_relation_size(oid)) FROM pg_class WHERE relispartition
+    purpose: Size of each partition
+  - system: PostgreSQL
+    query: EXPLAIN SELECT * FROM events WHERE created_at > '2024-01-01'
+    purpose: Verify partition pruning
+  scripts:
+  - id: partition-analyzer
+    language: python
+    purpose: Analyze partition distribution and recommend improvements
+    source: inline
+    code: |
+      #!/usr/bin/env python3
+      """Analyze table partitions for balance and effectiveness."""
+
+      def analyze_partitions(partition_stats: list) -> dict:
+          """
+          Analyze partition statistics.
+
+          Args:
+              partition_stats: List of dicts with partition_name, size_bytes, row_count
+
+          Returns:
+              Analysis results with recommendations
+          """
+          if not partition_stats:
+              return {'status': 'no_partitions', 'recommendation': 'Consider partitioning'}
+
+          sizes = [p['size_bytes'] for p in partition_stats]
+          avg_size = sum(sizes) / len(sizes)
+          max_size = max(sizes)
+
+          issues = []
+
+          # Check for oversized partitions
+          for p in partition_stats:
+              if p['size_bytes'] > avg_size * 3:
+                  issues.append(f"Partition {p['partition_name']} is 3x larger than average")
+
+          # Check for too many small partitions
+          if len([s for s in sizes if s < avg_size * 0.1]) > len(sizes) * 0.3:
+              issues.append("Many small partitions detected - consider coarser granularity")
+
+          return {
+              'partition_count': len(partition_stats),
+              'total_size_gb': sum(sizes) / 1e9,
+              'avg_partition_size_gb': avg_size / 1e9,
+              'max_partition_size_gb': max_size / 1e9,
+              'balance_score': 1 - (max_size - avg_size) / max_size if max_size > 0 else 1,
+              'issues': issues
+          }
+signals:
+  critical:
+  - id: PART-CRIT-001
+    signal: Table >500GB without partitioning
+    evidence_threshold: pg_total_relation_size > 500GB AND relkind != 'p'
+    explanation: |
+      Very large unpartitioned tables cause severe operational problems:
+      vacuum operations take hours or days, index rebuilds lock the table,
+      and queries cannot benefit from partition pruning. This is a
+      ticking time bomb for production stability.
+    remediation: Implement partitioning; for existing data, plan online migration with pg_partman
+  - id: PART-CRIT-002
+    signal: Partition pruning not occurring on time-range queries
+    evidence_indicators:
+    - EXPLAIN shows scans of all partitions
+    - Query includes partition key but still scans all
+    - Performance not improving despite partitioning
+    explanation: |
+      If partition pruning fails, queries scan all partitions defeating
+      the purpose. Common causes: implicit casts, function calls on
+      partition key, or planner statistics issues.
+    remediation: Ensure WHERE clause uses partition key directly without functions; update statistics
+  high:
+  - id: PART-HIGH-001
+    signal: No automated partition maintenance
+    explanation: Manual partition creation leads to failures when partitions run out
+    remediation: Implement pg_partman or equivalent for automatic partition management
+  - id: PART-HIGH-002
+    signal: Partition key misaligned with query patterns
+    explanation: Partitioning provides no benefit if queries don't filter on partition key
+    remediation: Re-evaluate partition key based on actual query patterns
+  medium:
+  - id: PART-MED-001
+    signal: Partition granularity too fine (>1000 partitions)
+    remediation: Consolidate partitions; use coarser time ranges
+  - id: PART-MED-002
+    signal: Old partitions not being archived or dropped
+    remediation: Implement partition lifecycle management
+  low:
+  - id: PART-LOW-001
+    signal: Inconsistent partition naming convention
+  positive:
+  - id: PART-POS-001
+    signal: Automated partition creation and archival in place
+  - id: PART-POS-002
+    signal: Partition pruning verified for common queries
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Partitioning Candidates
+    description: |
+      Identify large tables that would benefit from partitioning
+      and assess current partition implementations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find large unpartitioned tables
+      command: SELECT relname, pg_size_pretty(pg_total_relation_size(oid)) FROM pg_class WHERE relkind
+        = 'r' AND pg_total_relation_size(oid) > 10737418240 ORDER BY pg_total_relation_size(oid) DESC
+    - purpose: List partitioned tables
+      command: SELECT relname FROM pg_class WHERE relkind = 'p'
+    expected_findings:
+    - Large tables requiring partitioning
+    - Currently partitioned tables
+  - id: '2'
+    name: Analyze Partition Schemes
+    description: |
+      For partitioned tables, examine the partition scheme,
+      key selection, and partition distribution.
+    duration_estimate: 45 min
+    commands:
+    - purpose: View partition structure
+      command: SELECT * FROM pg_partition_tree('parent_table') ORDER BY relname
+    - purpose: Check partition sizes
+      command: SELECT relname, pg_size_pretty(pg_relation_size(oid)) FROM pg_class WHERE relispartition
+        ORDER BY pg_relation_size(oid) DESC
+    expected_findings:
+    - Partition key for each partitioned table
+    - Partition size distribution
+    - Number of partitions per table
+  - id: '3'
+    name: Verify Partition Pruning
+    description: |
+      Test that common queries benefit from partition pruning
+      by analyzing execution plans.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Test partition pruning
+      command: EXPLAIN (ANALYZE, COSTS OFF) SELECT * FROM events WHERE created_at BETWEEN '2024-01-01'
+        AND '2024-01-31'
+    - purpose: Count partitions scanned
+      command: grep -c 'Seq Scan\|Index Scan' explain_output.txt
+    expected_findings:
+    - Partition pruning effectiveness
+    - Queries that scan more partitions than expected
+    - Partition key usage in WHERE clauses
+  - id: '4'
+    name: Assess Partition Maintenance
+    description: |
+      Evaluate automation for partition creation, archival,
+      and deletion.
+    duration_estimate: 45 min
+    questions:
+    - How are new partitions created?
+    - What happens when queries exceed partition range?
+    - How are old partitions archived or dropped?
+    - Is there monitoring for partition-related issues?
+    expected_findings:
+    - Partition maintenance automation status
+    - Gaps in partition lifecycle management
+    - Monitoring and alerting coverage
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Partitioning Status Assessment
+    - Partition Scheme Analysis
+    - Pruning Effectiveness
+    - Maintenance Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct analysis of partition structure and execution plans
+    medium: Analysis based on configuration with limited query testing
+    low: Assessment based on schema review without runtime validation
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: postgres-partitioning
+      priority: required
+    - source_id: pg-partman
+      priority: recommended
+  limitations:
+  - Cannot verify partition pruning without query execution
+  - Partition size analysis requires database access
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed partition analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: partition-strategy-001
+  item: No unpartitioned tables >100GB
+  level: CRITICAL
+  verification: psql -tAc "SELECT count(*) FROM pg_class WHERE relkind = 'r' AND pg_total_relation_size(oid)
+    > 107374182400" | test $(cat) -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: partition-strategy-002
+  item: Partition pruning verified for time-range queries
+  level: BLOCKING
+  verification: manual
+  verification_notes: Run EXPLAIN on representative time-range queries and verify partition pruning
+  expected: Confirmed by reviewer
+- id: partition-strategy-003
+  item: Automated partition maintenance configured
+  level: BLOCKING
+  verification: psql -tAc "SELECT count(*) FROM pg_extension WHERE extname = 'pg_partman'" | test $(cat)
+    -gt 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: partition-strategy-004
+  item: Partition lifecycle policy documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify documentation exists for partition creation, retention, and archival
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - high-scale-saas
+    - data-platform
+    - analytics
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+relationships:
+  commonly_combined:
+  - scalability-capacity.database-scalability.data-volume-projection
+  - scalability-capacity.database-scalability.query-scalability
+  - scalability-capacity.database-scalability.sharding-strategy

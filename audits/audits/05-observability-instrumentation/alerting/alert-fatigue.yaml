@@ -1,0 +1,249 @@
+audit:
+  id: observability-instrumentation.alerting.alert-fatigue
+  name: Alert Fatigue Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: alerting
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: operations
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes alert volume, frequency, actionability, and resolution patterns
+    to identify alert fatigue risks. Examines repeated alerts, auto-resolving
+    alerts, ignored alerts, and overall on-call burden.
+  why_it_matters: |
+    Alert fatigue causes responders to ignore or delay response to alerts,
+    including critical ones. High alert volume desensitizes teams, increases
+    burnout, and ultimately leads to longer incident resolution times
+    and missed critical events.
+  when_to_run:
+  - On-call team feedback indicates fatigue
+  - Quarterly on-call health review
+  - After major alerting changes
+  - When MTTR is increasing
+prerequisites:
+  required_artifacts:
+  - type: alert_history
+    description: Historical alert data
+  - type: incident_data
+    description: Incident records for correlation
+  access_requirements:
+  - AlertManager API access
+  - Incident management system
+  - On-call schedule data
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: sum(increase(alertmanager_alerts_received_total[7d]))
+    purpose: Total alerts received in past week
+    threshold: < 100 alerts per on-call shift
+  - system: Prometheus
+    query: sum by (alertname) (increase(alertmanager_alerts_received_total[30d])) > 50
+    purpose: Frequently firing alerts
+    threshold: No single alert > 50/month
+  code_patterns:
+  - pattern: silence|inhibit|group
+    type: regex
+    scope: alertmanager_config
+    purpose: Identify alert suppression
+  file_patterns:
+  - glob: '**/alertmanager*.yaml'
+    purpose: AlertManager configuration
+  - glob: '**/oncall*.yaml'
+    purpose: On-call configuration
+knowledge_sources:
+  specifications:
+  - id: alertmanager-config
+    name: AlertManager Configuration
+    url: https://prometheus.io/docs/alerting/latest/configuration/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: alert-fatigue
+    name: Reducing Alert Fatigue
+    url: https://sre.google/workbook/alerting-on-slos/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: amtool
+    purpose: Query alert history
+    command: amtool alert query --alertmanager.url=http://alertmanager:9093
+  - tool: curl
+    purpose: Get alert statistics
+    command: curl -s 'http://alertmanager:9093/api/v2/alerts' | jq 'length'
+  monitoring_queries:
+  - system: Prometheus
+    query: sum by (alertname) (rate(alertmanager_alerts_received_total[24h])) * 86400
+    purpose: Daily alert count by name
+signals:
+  critical:
+  - id: ALERT-FAT-CRIT-001
+    signal: More than 20 alerts per on-call shift
+    evidence_threshold: alerts_per_shift > 20
+    explanation: |
+      High alert volume makes it impossible to properly investigate
+      each alert. Responders resort to bulk acknowledgment and may
+      miss critical alerts among the noise.
+    remediation: Reduce alert volume through consolidation and threshold tuning
+  - id: ALERT-FAT-CRIT-002
+    signal: Same alert firing more than 10 times daily
+    evidence_threshold: single_alert_count > 10/day
+    explanation: |
+      Repetitive alerts indicate a persistent problem not being
+      addressed or an alert that should be suppressed until fixed.
+      This creates significant noise and responder fatigue.
+    remediation: Fix underlying issue or implement alert deduplication
+  high:
+  - id: ALERT-FAT-HIGH-001
+    signal: More than 50% alerts auto-resolve without action
+    evidence_threshold: auto_resolve_rate > 0.50
+    explanation: |
+      Alerts that auto-resolve were likely not actionable. These
+      interrupt responders without providing value and should be
+      tuned to require sustained conditions.
+    remediation: Increase alert 'for' duration or adjust thresholds
+  - id: ALERT-FAT-HIGH-002
+    signal: Alert response time increasing
+    evidence_pattern: MTTA trending upward
+    explanation: |
+      Increasing time to acknowledge indicates responder desensitization.
+      This is a leading indicator of alert fatigue impact.
+    remediation: Reduce alert volume and improve signal-to-noise ratio
+  medium:
+  - id: ALERT-FAT-MED-001
+    signal: Alerts consistently ignored for specific services
+    evidence_pattern: Low acknowledgment rate for service alerts
+    remediation: Review and tune or remove ignored alerts
+  - id: ALERT-FAT-MED-002
+    signal: Night-time alerts for non-critical issues
+    evidence_pattern: Non-page-worthy alerts during quiet hours
+    remediation: Implement time-based alert routing
+  low:
+  - id: ALERT-FAT-LOW-001
+    signal: No alert fatigue metrics tracked
+    remediation: Implement on-call health metrics
+  positive:
+  - id: ALERT-FAT-POS-001
+    signal: Low alert volume with high actionability
+    evidence_threshold: < 5 alerts/shift, > 90% actioned
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Analyze alert volume
+    description: |
+      Calculate alert volumes per shift, per day, per week
+      and identify volume trends.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get daily alert counts
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=sum(increase(alertmanager_alerts_received_total[24h]))'
+    - purpose: Get per-alert counts
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=sort_desc(sum%20by%20(alertname)%20(increase(alertmanager_alerts_received_total[7d])))'
+        | jq '.data.result[:20]'
+    expected_findings:
+    - Total alert volume
+    - Top noisy alerts
+  - id: '2'
+    name: Assess alert actionability
+    description: |
+      Review alert outcomes to determine what percentage of
+      alerts resulted in meaningful action vs auto-resolution.
+    duration_estimate: 40 min
+    commands:
+    - purpose: Get resolved vs actioned ratio
+      command: curl -s 'http://alertmanager:9093/api/v2/alerts?state=resolved' | jq '[.[] | select(.status.state=="suppressed")]
+        | length'
+    expected_findings:
+    - Action rate
+    - Auto-resolve rate
+  - id: '3'
+    name: Review on-call feedback
+    description: |
+      Gather qualitative feedback from on-call responders about
+      alert quality and fatigue levels.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check MTTA metrics
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=avg(alert_response_time_seconds)'
+    expected_findings:
+    - On-call satisfaction
+    - Pain points
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Volume Analysis
+    - Actionability Assessment
+    - Fatigue Risk Score
+  confidence_guidance:
+    high: Historical analysis with on-call feedback
+    medium: Metrics analysis only
+    low: Configuration review
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: alertmanager-config
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires historical analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: alert-fat-001
+  item: Alert volume calculated
+  level: CRITICAL
+  verification: manual
+  expected: Alerts per shift documented
+- id: alert-fat-002
+  item: Top noisy alerts identified
+  level: BLOCKING
+  verification: manual
+  expected: Top 10 noisy alerts listed
+- id: alert-fat-003
+  item: Fatigue risk assessed
+  level: WARNING
+  verification: manual
+  expected: Risk score assigned
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - On-Call Health
+relationships:
+  commonly_combined:
+  - observability-instrumentation.alerting.alert-threshold
+  - observability-instrumentation.alerting.alert-routing
+  - observability-instrumentation.alerting.alert-silence

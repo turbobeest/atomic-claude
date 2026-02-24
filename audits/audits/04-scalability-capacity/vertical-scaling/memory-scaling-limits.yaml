@@ -1,0 +1,304 @@
+# ============================================================
+# AUDIT: Memory Scaling Limits Audit
+# Category: Scalability & Capacity > Vertical Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.vertical-scaling.memory-scaling-limits"
+  name: "Memory Scaling Limits Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "vertical-scaling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates memory scaling constraints and optimization opportunities.
+    Reviews JVM heap settings, container memory limits, garbage collection
+    behavior, memory-bound application patterns, and memory efficiency.
+    Identifies when memory scaling reaches diminishing returns.
+
+  why_it_matters: |
+    Memory is often the primary vertical scaling lever but has complex
+    behaviors. JVM heap limits, GC pause times at large heap sizes,
+    NUMA effects, and memory bandwidth all create non-linear scaling.
+    Understanding these limits prevents over-provisioning and identifies
+    when horizontal scaling becomes more efficient.
+
+  when_to_run:
+    - "During capacity planning"
+    - "After OOM incidents"
+    - "When optimizing memory-intensive workloads"
+    - "Before increasing instance memory allocation"
+
+prerequisites:
+  required_artifacts:
+    - type: "application_config"
+      description: "JVM/runtime memory configuration"
+    - type: "infrastructure_config"
+      description: "Container/instance memory limits"
+
+  access_requirements:
+    - "Application configuration access"
+    - "Container/Kubernetes configuration access"
+    - "Metrics system access for memory monitoring"
+
+discovery:
+  code_patterns:
+    - pattern: "(-Xmx|-Xms|MaxHeapSize|InitialHeapSize)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect JVM heap settings"
+
+    - pattern: "(memory:|resources.*memory)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect container memory limits"
+
+    - pattern: "(GC|G1|ZGC|Shenandoah|CMS)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect garbage collector configuration"
+
+  file_patterns:
+    - glob: "**/jvm*.options"
+      purpose: "JVM configuration files"
+    - glob: "**/k8s/**/*.yaml"
+      purpose: "Kubernetes deployment files"
+    - glob: "**/*JAVA_OPTS*"
+      purpose: "Java options configuration"
+
+knowledge_sources:
+  guides:
+    - id: "jvm-tuning"
+      name: "JVM Tuning Guide"
+      url: "https://docs.oracle.com/en/java/javase/17/gctuning/"
+      offline_cache: true
+
+    - id: "k8s-memory"
+      name: "Kubernetes Memory Management"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/assign-memory-resource/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Check memory allocation"
+      command: "kubectl top pods --sort-by=memory"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "container_memory_working_set_bytes / container_spec_memory_limit_bytes"
+      purpose: "Memory utilization vs limits"
+      threshold: "< 0.85 to avoid OOM"
+
+    - system: "Prometheus"
+      query: "jvm_gc_pause_seconds_sum / jvm_gc_pause_seconds_count"
+      purpose: "Average GC pause time"
+      threshold: "< 200ms for interactive applications"
+
+  scripts:
+    - id: "memory-analyzer"
+      language: "bash"
+      purpose: "Analyze memory configuration and usage"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Container Memory Limits ==="
+        kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.containers[0].resources.limits.memory}{"\n"}{end}'
+        echo "=== JVM Heap Settings ==="
+        rg '\-Xm[xs]|\-XX:MaxHeapSize' --type yaml --type properties
+        echo "=== Current Memory Usage ==="
+        kubectl top pods --sort-by=memory
+
+signals:
+  critical:
+    - id: "MEM-CRIT-001"
+      signal: "Container memory limit equals JVM heap"
+      evidence_pattern: "memory.*limit.*=.*-Xmx"
+      explanation: |
+        When container limit equals JVM max heap, there's no room for
+        native memory, metaspace, or stack - causing OOM kills.
+      remediation: "Set container memory 25-50% higher than JVM max heap"
+
+    - id: "MEM-CRIT-002"
+      signal: "No memory limits configured"
+      evidence_indicators:
+        - "Container without memory limit"
+        - "No -Xmx specified for JVM"
+      explanation: |
+        Without limits, applications can consume all available memory,
+        affecting other workloads and causing system instability.
+      remediation: "Configure explicit memory limits for all containers and JVMs"
+
+  high:
+    - id: "MEM-HIGH-001"
+      signal: "GC pause times exceeding SLA at current heap size"
+      evidence_threshold: "gc_pause_p99 > 500ms"
+      explanation: |
+        Large heaps increase GC pause times, creating latency spikes
+        that may violate SLAs even with sufficient memory.
+      remediation: "Consider switching to low-pause GC (G1, ZGC) or horizontal scaling"
+
+    - id: "MEM-HIGH-002"
+      signal: "Memory near limit causing frequent OOM pressure"
+      evidence_threshold: "memory_usage > 95% of limit"
+      explanation: |
+        Operating near memory limits causes throttling and OOM risk,
+        even before actual OOM kills occur.
+      remediation: "Increase memory allocation or optimize memory usage"
+
+  medium:
+    - id: "MEM-MED-001"
+      signal: "Heap sized for worst case causing waste"
+      evidence_threshold: "average_heap_usage < 40% of max_heap"
+      remediation: "Right-size heap based on actual usage patterns"
+
+  positive:
+    - id: "MEM-POS-001"
+      signal: "Modern low-pause GC with appropriate configuration"
+      evidence_pattern: "UseG1GC|UseZGC|UseShenandoahGC"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review memory configuration"
+      description: |
+        Collect all memory configuration including container limits,
+        JVM heap settings, and runtime parameters.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find JVM memory settings"
+          command: "rg '(-Xmx|-Xms|MaxHeapSize)' --type yaml --type properties"
+        - purpose: "Find container memory limits"
+          command: "rg 'memory:' --type yaml -A 2 -B 2"
+      expected_findings:
+        - "Complete memory configuration inventory"
+        - "Identification of missing limits"
+
+    - id: "2"
+      name: "Analyze memory utilization"
+      description: |
+        Review actual memory utilization patterns and compare to
+        configured limits.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Current memory usage"
+          command: "kubectl top pods --sort-by=memory"
+      expected_findings:
+        - "Memory utilization vs limits"
+        - "Identification of over/under-provisioned services"
+
+    - id: "3"
+      name: "Evaluate GC behavior"
+      description: |
+        Analyze garbage collection behavior and its impact on
+        application performance at current and projected memory sizes.
+      duration_estimate: "30 min"
+      questions:
+        - "What is the GC pause time distribution?"
+        - "How does GC behavior change with heap size?"
+        - "Is the current GC appropriate for the workload?"
+      expected_findings:
+        - "GC impact on latency"
+        - "Memory scaling limits due to GC behavior"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Memory Configuration Analysis"
+        - "Utilization Patterns"
+        - "GC Behavior Assessment"
+        - "Scaling Recommendations"
+
+  confidence_guidance:
+    high: "Direct measurement of memory usage and GC behavior"
+    medium: "Configuration analysis with limited runtime data"
+    low: "Configuration review without runtime verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "jvm-tuning"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "memory-limits-001"
+    item: "All containers have memory limits"
+    level: "CRITICAL"
+    verification: "kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{.spec.containers[0].resources.limits.memory}{\"\\n\"}{end}' | grep -v '[0-9]' || echo 'PASS'"
+    expected: "PASS (all pods have limits)"
+
+  - id: "memory-limits-002"
+    item: "Container memory > JVM heap for Java applications"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify container limit is 25-50% higher than -Xmx"
+    expected: "Container memory >= JVM heap * 1.25"
+
+  - id: "memory-limits-003"
+    item: "Memory utilization healthy (50-80%)"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review memory utilization metrics"
+    expected: "50-80% utilization under normal load"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["PERF-1", "COST-4"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.vertical-scaling.resource-ceiling"
+    - "scalability-capacity.vertical-scaling.cpu-scaling-limits"
+    - "scalability-capacity.vertical-scaling.oversizing-rightsizing"

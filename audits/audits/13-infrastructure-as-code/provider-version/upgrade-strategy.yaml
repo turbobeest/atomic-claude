@@ -1,0 +1,366 @@
+audit:
+  id: infrastructure-as-code.provider-version.upgrade-strategy
+  name: Upgrade Strategy
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: provider-version
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: process
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the strategy and processes for upgrading Terraform
+    tooling, providers, and modules. It evaluates:
+
+    - Upgrade frequency and scheduling
+    - Testing process for upgrades
+    - Deprecation handling
+    - Major vs minor version upgrade procedures
+    - Rollback capability for failed upgrades
+    - Communication and documentation of upgrades
+    - Dependency scanning and update automation
+
+    The focus is on maintaining current versions while minimizing
+    upgrade risk.
+  why_it_matters: |
+    Terraform, providers, and modules all evolve continuously. Without
+    an upgrade strategy:
+
+    - Security vulnerabilities remain unpatched
+    - Deprecations become breaking changes suddenly
+    - New features and improvements are missed
+    - Technical debt accumulates
+    - Emergency upgrades become high-risk events
+
+    A systematic upgrade strategy keeps infrastructure current while
+    managing risk through testing and gradual rollout.
+  when_to_run:
+  - When establishing IaC maintenance practices
+  - Before major version upgrades
+  - During DevOps maturity assessment
+  - After upgrade-related incidents
+prerequisites:
+  required_artifacts:
+  - type: documentation
+    description: Upgrade procedures and policies
+  - type: cicd_configuration
+    description: Automated dependency checking configuration
+  access_requirements:
+  - Access to maintenance documentation
+  - Access to upgrade history
+  - Access to CI/CD configuration
+discovery:
+  code_patterns:
+  - pattern: dependabot|renovate
+    type: keyword
+    scope: config
+    purpose: Find dependency update automation
+  - pattern: terraform.*upgrade|upgrade.*terraform
+    type: regex
+    scope: config
+    purpose: Find upgrade documentation
+  - pattern: deprecated|deprecation
+    type: keyword
+    scope: source
+    purpose: Find deprecation warnings
+  file_patterns:
+  - glob: '**/.github/dependabot.yml'
+    purpose: Dependabot configuration
+  - glob: '**/renovate.json'
+    purpose: Renovate configuration
+  - glob: '**/UPGRADE*.md'
+    purpose: Upgrade documentation
+  - glob: '**/CHANGELOG.md'
+    purpose: Change history
+  documents_to_review:
+  - type: Upgrade runbooks
+    purpose: Understand upgrade procedures
+  - type: Past upgrade PRs
+    purpose: Review upgrade patterns
+  interviews:
+  - role: Infrastructure team
+    questions:
+    - How often do you upgrade Terraform/providers?
+    - What testing do you do before upgrading?
+    - Describe your last major version upgrade
+    purpose: Understand actual practices
+knowledge_sources:
+  specifications:
+  - id: terraform-upgrade-guide
+    name: Terraform Upgrade Guides
+    url: https://developer.hashicorp.com/terraform/language/upgrade-guides
+    offline_cache: true
+    priority: required
+  guides:
+  - id: provider-upgrade-practices
+    name: AWS Provider Upgrade Best Practices
+    url: https://docs.aws.amazon.com/prescriptive-guidance/latest/terraform-aws-provider-best-practices/version.html
+    offline_cache: true
+  - id: dependabot-terraform
+    name: Dependabot for Terraform
+    url: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file#package-ecosystem
+    offline_cache: true
+  - id: renovate-terraform
+    name: Renovate Terraform Support
+    url: https://docs.renovatebot.com/modules/manager/terraform/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: terraform providers
+    purpose: Show provider versions and requirements
+    command: terraform providers
+  - tool: terraform init -upgrade
+    purpose: Upgrade providers within constraints
+    command: terraform init -upgrade
+  - tool: tflint
+    purpose: Check for deprecated syntax
+    command: tflint --enable-rule=terraform_deprecated_*
+  scripts:
+  - id: version-check
+    language: bash
+    purpose: Check for available updates
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check current versions against latest
+
+      echo "=== Current Terraform Version ==="
+      terraform version
+
+      echo ""
+      echo "=== Provider Versions ==="
+      terraform providers
+
+      echo ""
+      echo "=== Checking for deprecations ==="
+      tflint --enable-rule=terraform_deprecated_index 2>/dev/null || echo "Run tflint for deprecation checks"
+signals:
+  critical:
+  - id: IAC-UPG-CRIT-001
+    signal: Using deprecated Terraform version with security issues
+    evidence_pattern: Terraform version < 1.0 or known vulnerable version
+    explanation: |
+      Deprecated Terraform versions may have unpatched security
+      vulnerabilities and will stop receiving updates. Continuing
+      to use them exposes infrastructure to known risks.
+    remediation: |
+      Plan immediate upgrade:
+      1. Review upgrade guide for your version jump
+      2. Test in development environment
+      3. Update required_version constraint
+      4. Run terraform plan to identify issues
+      5. Resolve deprecations before applying
+  high:
+  - id: IAC-UPG-HIGH-001
+    signal: No automated dependency update monitoring
+    evidence_pattern: No Dependabot or Renovate configuration
+    explanation: |
+      Without automated monitoring, version updates require manual
+      tracking. Security patches and important updates may be missed
+      for extended periods.
+    remediation: |
+      Configure dependency update automation:
+      # .github/dependabot.yml
+      version: 2
+      updates:
+        - package-ecosystem: "terraform"
+          directory: "/"
+          schedule:
+            interval: "weekly"
+  - id: IAC-UPG-HIGH-002
+    signal: No upgrade testing procedure
+    evidence_pattern: Upgrades applied directly to production
+    explanation: |
+      Upgrades can introduce breaking changes, deprecations, or
+      incompatibilities. Without testing, these issues surface in
+      production.
+    remediation: |
+      Implement upgrade testing:
+      1. Test in development/sandbox first
+      2. Run full terraform plan
+      3. Check for deprecation warnings
+      4. Verify no unexpected changes
+      5. Promote to staging, then production
+  medium:
+  - id: IAC-UPG-MED-001
+    signal: Deprecation warnings not addressed
+    evidence_pattern: terraform plan shows deprecation warnings
+    remediation: |
+      Address deprecations proactively:
+      - Track deprecation warnings
+      - Plan remediation before they become errors
+      - Allocate time in sprints for maintenance
+  - id: IAC-UPG-MED-002
+    signal: Upgrade history not documented
+    remediation: |
+      Document upgrades in CHANGELOG or ADRs:
+      - What was upgraded
+      - Why the upgrade was needed
+      - Any issues encountered
+      - Testing performed
+  low:
+  - id: IAC-UPG-LOW-001
+    signal: No regular upgrade schedule
+    remediation: Establish quarterly or monthly upgrade reviews
+  positive:
+  - id: IAC-UPG-POS-001
+    signal: Dependabot or Renovate configured for Terraform
+  - id: IAC-UPG-POS-002
+    signal: Documented upgrade procedure with testing requirements
+  - id: IAC-UPG-POS-003
+    signal: No deprecation warnings in current configuration
+  - id: IAC-UPG-POS-004
+    signal: Regular upgrade schedule maintained
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Check current version status
+    description: |
+      Determine current Terraform, provider, and module versions.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check Terraform version
+      command: terraform version
+    - purpose: List provider versions
+      command: terraform providers
+    - purpose: Check for outdated versions
+      command: terraform init -upgrade -backend=false 2>&1 | head -20
+    expected_findings:
+    - Current version inventory
+    - Available updates
+  - id: '2'
+    name: Check for dependency automation
+    description: |
+      Verify automated dependency update tools are configured.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find Dependabot config
+      command: cat .github/dependabot.yml 2>/dev/null
+    - purpose: Find Renovate config
+      command: cat renovate.json .renovaterc* 2>/dev/null
+    expected_findings:
+    - Dependency automation status
+    - Update schedule
+  - id: '3'
+    name: Review deprecation warnings
+    description: |
+      Check for deprecation warnings in current configuration.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Run terraform plan for warnings
+      command: terraform plan -no-color 2>&1 | grep -i 'deprecat\|warning' | head -20
+    - purpose: Run tflint for deprecations
+      command: tflint --enable-rule=terraform_deprecated_index 2>&1 | head -20
+    expected_findings:
+    - Deprecation warnings
+    - Required remediation
+  - id: '4'
+    name: Review upgrade documentation
+    description: |
+      Check for upgrade procedures and history.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find upgrade docs
+      command: find . -iname '*upgrade*' -type f | head -10
+    - purpose: Check CHANGELOG
+      command: head -50 CHANGELOG.md 2>/dev/null
+    - purpose: Review recent upgrade PRs
+      command: gh pr list --state merged --search 'upgrade terraform provider' --limit 5 --json title,mergedAt
+        2>/dev/null
+    expected_findings:
+    - Upgrade documentation
+    - Upgrade history
+  - id: '5'
+    name: Interview team about practices
+    description: |
+      Understand actual upgrade practices through team discussion.
+    duration_estimate: 25 min
+    questions:
+    - When was the last Terraform/provider upgrade?
+    - What testing was performed?
+    - Have you had issues from upgrades?
+    - How do you track available updates?
+    expected_findings:
+    - Actual vs documented practices
+    - Team confidence in upgrades
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Version Currency Assessment
+    - Automation Review
+    - Process Evaluation
+    - Recommendations
+  confidence_guidance:
+    high: Process verified through interview and history review
+    medium: Documentation and configuration reviewed
+    low: Only file presence confirmed
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-upgrade-guide
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires process evaluation
+    full:
+      included: true
+      priority: 3
+closeout_checklist:
+- id: upgrade-001
+  item: Terraform version is current (within 2 minor versions)
+  level: BLOCKING
+  verification: terraform version | head -1
+  expected: Recent version
+- id: upgrade-002
+  item: Dependency update automation configured
+  level: BLOCKING
+  verification: test -f .github/dependabot.yml -o -f renovate.json && echo PASS || echo FAIL
+  expected: PASS
+- id: upgrade-003
+  item: No critical deprecation warnings
+  level: WARNING
+  verification: terraform plan -no-color 2>&1 | grep -ci 'deprecat'
+  expected: 0 or documented exceptions
+- id: upgrade-004
+  item: Upgrade procedure documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify upgrade runbook exists
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.provider-version.provider-version-pinning
+  - infrastructure-as-code.provider-version.module-version-pinning
+  - infrastructure-as-code.provider-version.terraform-tool-version

@@ -1,0 +1,345 @@
+# ============================================================
+# ASYNC/AWAIT EFFICIENCY AUDIT
+# ============================================================
+# Evaluates the correct and efficient use of async/await patterns
+# across languages to prevent performance degradation.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.concurrency-parallelism.async-await-efficiency"
+  name: "Async/Await Efficiency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "concurrency-parallelism"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines async/await usage patterns to identify inefficiencies such as
+    unnecessary sequential awaits, blocking calls in async contexts, async
+    overhead for synchronous operations, and improper error handling in
+    async flows. Covers JavaScript/TypeScript, Python, C#, and Rust async patterns.
+
+  why_it_matters: |
+    Misused async/await can be worse than synchronous code. Sequential awaits
+    that could be parallel waste time. Blocking calls in async contexts defeat
+    the purpose and can exhaust thread pools. Async overhead on sync operations
+    adds latency without benefit.
+
+  when_to_run:
+    - "When introducing async/await to a codebase"
+    - "When async operations perform worse than expected"
+    - "During code review of async code"
+    - "When experiencing thread pool exhaustion"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code using async/await patterns"
+
+  access_requirements:
+    - "Read access to source code repository"
+
+discovery:
+  code_patterns:
+    - pattern: "async\\s+function|async\\s*\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find async functions in JavaScript/TypeScript"
+
+    - pattern: "async\\s+def"
+      type: "regex"
+      scope: "source"
+      purpose: "Find async functions in Python"
+
+    - pattern: "await\\s+\\w+\\(\\)\\s*;\\s*await"
+      type: "regex"
+      scope: "source"
+      purpose: "Find sequential awaits that might be parallelizable"
+
+    - pattern: "\\.Result|\\.Wait\\(\\)|task\\.GetAwaiter"
+      type: "regex"
+      scope: "source"
+      purpose: "Find blocking on async in C#"
+
+    - pattern: "time\\.sleep|Thread\\.sleep|sleep\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find blocking sleep in async code"
+
+  file_patterns:
+    - glob: "**/*.ts"
+      purpose: "TypeScript source files"
+    - glob: "**/*.js"
+      purpose: "JavaScript source files"
+    - glob: "**/*.py"
+      purpose: "Python source files"
+    - glob: "**/*.cs"
+      purpose: "C# source files"
+    - glob: "**/*.rs"
+      purpose: "Rust source files"
+
+knowledge_sources:
+  guides:
+    - id: "js-async-best"
+      name: "JavaScript Async/Await Best Practices"
+      url: "https://developer.mozilla.org/en-US/docs/Learn/JavaScript/Asynchronous"
+      offline_cache: true
+
+    - id: "python-asyncio"
+      name: "Python asyncio Documentation"
+      url: "https://docs.python.org/3/library/asyncio.html"
+      offline_cache: true
+
+    - id: "csharp-async"
+      name: "Async/Await Best Practices in C#"
+      url: "https://docs.microsoft.com/en-us/dotnet/csharp/async"
+      offline_cache: true
+
+  learning_resources:
+    - id: "async-patterns"
+      title: "Asynchronous Programming Patterns"
+      type: "article"
+      reference: "https://docs.microsoft.com/en-us/dotnet/standard/asynchronous-programming-patterns/"
+
+tooling:
+  static_analysis:
+    - tool: "ESLint (no-await-in-loop)"
+      purpose: "Detect await in loops in JavaScript"
+      offline_capable: true
+
+    - tool: "Ruff"
+      purpose: "Python async linting"
+      offline_capable: true
+
+    - tool: "Clippy"
+      purpose: "Rust async analysis"
+      offline_capable: true
+
+  scripts:
+    - id: "find-sequential-awaits"
+      language: "bash"
+      purpose: "Find potentially parallelizable sequential awaits"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find consecutive await statements
+        grep -rn -A1 "await " --include="*.ts" --include="*.js" . | grep -B1 "await "
+
+signals:
+  critical:
+    - id: "ASYNC-CRIT-001"
+      signal: "Blocking synchronous call in async context"
+      evidence_pattern: "async.*\\{[^}]*(sleep\\(|time\\.sleep|Thread\\.sleep|\\.Result|\\.Wait\\()"
+      explanation: |
+        Synchronous blocking calls in async functions block the entire thread,
+        defeating the purpose of async programming. This can exhaust thread
+        pools and cause deadlocks in single-threaded async runtimes.
+      remediation: "Use async equivalents: asyncio.sleep, Task.Delay, async I/O"
+
+    - id: "ASYNC-CRIT-002"
+      signal: "Sync-over-async blocking pattern"
+      evidence_pattern: "\\.Result|\\.Wait\\(\\)|GetAwaiter\\(\\)\\.GetResult\\(\\)"
+      explanation: |
+        Calling .Result or .Wait() on an async task from a synchronous context
+        blocks the calling thread and can cause deadlocks, especially in UI
+        or ASP.NET contexts with synchronization contexts.
+      remediation: "Propagate async up the call stack; use async all the way"
+
+  high:
+    - id: "ASYNC-HIGH-001"
+      signal: "Sequential awaits that could be parallel"
+      evidence_pattern: "await\\s+\\w+;\\s*\\n\\s*await\\s+\\w+"
+      explanation: |
+        Multiple independent async operations awaited sequentially take the
+        sum of their times. If parallelized with Promise.all or similar,
+        they take only the maximum time.
+      remediation: "Use Promise.all(), asyncio.gather(), or Task.WhenAll() for independent operations"
+
+    - id: "ASYNC-HIGH-002"
+      signal: "Await in tight loop"
+      evidence_pattern: "for.*\\{[^}]*await|while.*\\{[^}]*await"
+      explanation: |
+        Awaiting inside loops processes items sequentially. For independent
+        operations, this is much slower than parallel processing.
+      remediation: "Batch with Promise.all or use async iterators with concurrency control"
+
+    - id: "ASYNC-HIGH-003"
+      signal: "Async function without any await"
+      evidence_pattern: "async.*function.*\\{[^}]*\\}(?!.*await)"
+      explanation: |
+        An async function that never awaits adds the overhead of creating a
+        promise/task without any benefit. It should be synchronous.
+      remediation: "Remove async keyword if function is synchronous"
+
+  medium:
+    - id: "ASYNC-MED-001"
+      signal: "Missing error handling in async chains"
+      evidence_pattern: "await.*(?!\\.catch|try)"
+      remediation: "Add try/catch or .catch() for proper error handling"
+
+    - id: "ASYNC-MED-002"
+      signal: "Async IIFE without error handling"
+      evidence_pattern: "\\(async\\s*\\(\\)\\s*=>\\s*\\{[^}]*\\}\\)\\(\\)(?!.*catch)"
+      remediation: "Add .catch() to handle unhandled promise rejections"
+
+  low:
+    - id: "ASYNC-LOW-001"
+      signal: "Redundant await on non-promise"
+      evidence_pattern: "await\\s+['\"]|await\\s+\\d+|await\\s+true"
+      remediation: "Remove await from non-async values"
+
+  positive:
+    - id: "ASYNC-POS-001"
+      signal: "Proper use of Promise.all for parallelization"
+      evidence_pattern: "Promise\\.all\\(|asyncio\\.gather\\(|Task\\.WhenAll\\("
+
+    - id: "ASYNC-POS-002"
+      signal: "Async all the way pattern"
+      evidence_pattern: "async.*async.*async"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory async functions"
+      description: |
+        Find all async functions and categorize by their async operations.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find async functions in TypeScript/JavaScript"
+          command: "grep -rn 'async function\\|async (' --include='*.ts' --include='*.js' ."
+        - purpose: "Find async functions in Python"
+          command: "grep -rn 'async def' --include='*.py' ."
+      expected_findings:
+        - "List of all async functions"
+        - "Initial complexity assessment"
+
+    - id: "2"
+      name: "Check for blocking calls"
+      description: |
+        Look for synchronous blocking operations inside async functions.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find blocking sleep in async code"
+          command: "grep -rn -B5 'time.sleep\\|Thread.sleep' --include='*.py' --include='*.java' . | grep -A5 'async'"
+        - purpose: "Find sync-over-async in C#"
+          command: "grep -rn '\\.Result\\|\\.Wait()' --include='*.cs' ."
+      expected_findings:
+        - "Blocking calls in async contexts"
+        - "Sync-over-async patterns"
+
+    - id: "3"
+      name: "Identify parallelization opportunities"
+      description: |
+        Find sequential awaits that could be parallelized.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find sequential awaits"
+          command: "grep -rn -A1 'await ' --include='*.ts' --include='*.js' --include='*.py' . | grep -B1 'await '"
+      expected_findings:
+        - "Sequential awaits on independent operations"
+        - "Await loops without batching"
+
+    - id: "4"
+      name: "Validate error handling"
+      description: |
+        Ensure async operations have proper error handling.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find unhandled async operations"
+          command: "grep -rn 'await ' --include='*.ts' --include='*.js' . | grep -v 'try\\|catch'"
+      expected_findings:
+        - "Unhandled promise rejections"
+        - "Missing catch blocks"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Blocking Calls in Async"
+        - "Parallelization Opportunities"
+        - "Error Handling Gaps"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear pattern match with obvious inefficiency"
+    medium: "Pattern suggests issue but context needed"
+    low: "Potential improvement opportunity"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "js-async-best"
+        priority: "recommended"
+      - source_id: "python-asyncio"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed code analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "async-await-001"
+    item: "No blocking calls in async functions"
+    level: "CRITICAL"
+    verification: "grep -rn 'time.sleep\\|Thread.sleep\\|\\.Result\\|\\.Wait()' --include='*.py' --include='*.cs' . | wc -l"
+    expected: "0 (or documented exceptions)"
+
+  - id: "async-await-002"
+    item: "Sequential awaits reviewed for parallelization"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms sequential awaits are intentionally sequential"
+    expected: "Confirmed by reviewer"
+
+  - id: "async-await-003"
+    item: "Async functions contain await statements"
+    level: "WARNING"
+    verification: "grep -rn 'async.*{' --include='*.ts' --include='*.js' . | head -20"
+    expected: "All async functions have awaits"
+
+governance:
+  applicable_to:
+    archetypes: ["api", "service", "webapp"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.concurrency-parallelism.parallel-processing-efficiency"
+    - "performance-efficiency.concurrency-parallelism.backpressure-handling"

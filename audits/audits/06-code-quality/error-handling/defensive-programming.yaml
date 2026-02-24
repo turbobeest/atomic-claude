@@ -1,0 +1,305 @@
+audit:
+  id: code-quality.error-handling.defensive-programming
+  name: Defensive Programming Assessment Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: error-handling
+  tier: expert
+  estimated_duration: 45 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the presence and consistency of defensive programming practices
+    including input validation, null checks, boundary validation, type guards,
+    and assertions. Identifies code that makes unsafe assumptions about inputs
+    or system state.
+  why_it_matters: |
+    Defensive programming prevents bugs from propagating, makes code more
+    robust against unexpected inputs, and reduces security vulnerabilities.
+    Without defensive checks, invalid data can corrupt state, cause crashes,
+    or enable exploits. It's especially critical at trust boundaries.
+  when_to_run:
+  - During code reviews
+  - Security audits
+  - After security incidents
+  - API boundary reviews
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: if\s*\(\s*\w+\s*==\s*(null|undefined|nil)\s*\)
+    type: regex
+    scope: source
+    purpose: Identify null checks
+  - pattern: assert\s*\(|Assert\.|require\s*\(
+    type: regex
+    scope: source
+    purpose: Identify assertions
+  - pattern: typeof\s+\w+\s*===|instanceof\s+
+    type: regex
+    scope: source
+    purpose: Identify type guards
+  - pattern: \.length\s*[><=]|\bsize\(\)\s*[><=]
+    type: regex
+    scope: source
+    purpose: Identify boundary checks
+  file_patterns:
+  - glob: '**/*.{java,cs,ts,js,py,rb,go}'
+    purpose: Source code files
+knowledge_sources:
+  specifications:
+  - id: cwe-20
+    name: 'CWE-20: Improper Input Validation'
+    url: https://cwe.mitre.org/data/definitions/20.html
+    offline_cache: true
+    priority: required
+  - id: cwe-476
+    name: 'CWE-476: NULL Pointer Dereference'
+    url: https://cwe.mitre.org/data/definitions/476.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: defensive-programming
+    name: CERT - Defensive Programming
+    url: https://wiki.sei.cmu.edu/confluence/display/seccode/Top+10+Secure+Coding+Practices
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: typescript
+    purpose: TypeScript strict null checks
+    offline_capable: true
+  - tool: spotbugs
+    purpose: Java null analysis
+    offline_capable: true
+  - tool: mypy
+    purpose: Python type checking
+    offline_capable: true
+  - tool: eslint
+    purpose: JavaScript defensive checks
+    offline_capable: true
+  scripts:
+  - id: defensive-scan
+    language: bash
+    purpose: Detect defensive programming patterns
+    source: inline
+    code: |
+      # Find null checks
+      grep -rn --include="*.{ts,java}" -E "if\s*\(\s*\w+\s*(==|===|!=|!==)\s*(null|undefined)\s*\)" . 2>/dev/null | wc -l
+signals:
+  critical:
+  - id: EH-DEF-CRIT-001
+    signal: Public API method without input validation
+    evidence_pattern: public.*\(.*\).*\{(?![^}]*validate|check|assert)
+    cwe: CWE-20
+    explanation: |
+      Public API methods are trust boundaries that must validate all
+      inputs. Missing validation enables injection and corruption attacks.
+    remediation: Add input validation at API entry points
+  - id: EH-DEF-CRIT-002
+    signal: Pointer/reference used without null check
+    cwe: CWE-476
+    explanation: |
+      Dereferencing without null checks causes crashes and potential
+      security vulnerabilities.
+    remediation: Add null checks or use optional chaining
+    evidence_description: \w+\.\w+(?<!\?).*(?<!if.*null.*\{)
+  high:
+  - id: EH-DEF-HIGH-001
+    signal: Array access without bounds checking
+    evidence_pattern: \[\w+\](?<!\.length)
+    cwe: CWE-129
+    explanation: |
+      Array access without bounds checking can cause out-of-bounds
+      errors or be exploited for buffer overflow attacks.
+    remediation: Validate index before array access
+  - id: EH-DEF-HIGH-002
+    signal: User input used directly without sanitization
+    evidence_pattern: (request|req|input)\.[^}]*(?!sanitize|validate|escape)
+    cwe: CWE-20
+    explanation: |
+      Direct use of user input without sanitization enables injection
+      attacks.
+    remediation: Sanitize and validate all user inputs
+  medium:
+  - id: EH-DEF-MED-001
+    signal: Optional parameters without default values
+    evidence_pattern: \w+\?:\s*\w+(?!\s*=)
+    remediation: Provide sensible default values
+  - id: EH-DEF-MED-002
+    signal: Type assertions without validation
+    evidence_pattern: as\s+\w+|<\w+>
+    remediation: Validate types before casting
+  low:
+  - id: EH-DEF-LOW-001
+    signal: Missing assertions for invariants
+    evidence_pattern: invariant.*(?!assert)
+    remediation: Add assertions for important invariants
+  positive:
+  - id: EH-DEF-POS-001
+    signal: Strict TypeScript mode enabled
+    evidence_pattern: strict.*true
+  - id: EH-DEF-POS-002
+    signal: Input validation library used
+    evidence_pattern: import.*(zod|yup|joi|validator)
+  - id: EH-DEF-POS-003
+    signal: Assertion libraries in use
+    evidence_pattern: import.*(assert|invariant)
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Analyze Trust Boundaries
+    description: |
+      Identify API entry points and check for input validation at
+      each boundary.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find public API methods
+      command: |
+        grep -rn --include="*.{ts,java}" -E "(export|public)\s+(async\s+)?\w+\s*\(" . 2>/dev/null | head -50
+    - purpose: Find controller/handler methods
+      command: |
+        grep -rn --include="*.{ts,java}" -E "(Controller|Handler|Route).*\(" . 2>/dev/null | head -30
+    expected_findings:
+    - API entry points
+    - Input validation coverage
+  - id: '2'
+    name: Check Null Safety
+    description: |
+      Analyze code for null/undefined handling patterns and
+      potential null pointer dereferences.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find null checks
+      command: |
+        grep -rn --include="*.{ts,java}" -E "if\s*\(\s*\w+\s*(==|===|!=|!==)\s*(null|undefined)\s*\)" . 2>/dev/null | wc -l
+    - purpose: Find optional chaining
+      command: |
+        grep -rn --include="*.ts" -E "\?\." . 2>/dev/null | wc -l
+    expected_findings:
+    - Null check coverage
+    - Optional chaining usage
+  - id: '3'
+    name: Evaluate Assertions
+    description: |
+      Check for use of assertions and invariant checks throughout
+      the codebase.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find assertions
+      command: |
+        grep -rn --include="*.{ts,java,py}" -E "(assert|Assert|require|invariant)\s*\(" . 2>/dev/null | wc -l
+    expected_findings:
+    - Assertion usage
+    - Invariant documentation
+  - id: '4'
+    name: Generate Assessment
+    description: |
+      Compile findings into defensive programming assessment.
+    duration_estimate: 10 min
+    expected_findings:
+    - Coverage assessment
+    - Gap analysis
+    - Recommendations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - location
+    - missing_check_type
+    - severity
+    - recommendation
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Trust Boundary Analysis
+    - Null Safety Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Clear missing validation detected
+    medium: Potential gap, review recommended
+    low: May be validated elsewhere
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-20
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: defensive-001
+  item: Trust boundary analysis completed
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{ts,java}" -E "(export|public)\s+(async\s+)?\w+\s*\(" . 2>/dev/null | wc -l
+  expected: APIs identified and reviewed
+- id: defensive-002
+  item: All public APIs have input validation
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review API entry points for validation
+  expected: 100% coverage
+- id: defensive-003
+  item: Null safety assessed
+  level: WARNING
+  verification: manual
+  verification_notes: Review null handling patterns
+  expected: Assessment complete
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-20
+    - CWE-476
+    - CWE-129
+  - framework: OWASP
+    controls:
+    - Input Validation
+  - framework: ISO 25010
+    controls:
+    - Reliability
+    - Security
+relationships:
+  commonly_combined:
+  - code-quality.error-handling.fail-fast-pattern
+  - security.input-validation.injection-prevention
+  - code-quality.error-handling.exception-granularity

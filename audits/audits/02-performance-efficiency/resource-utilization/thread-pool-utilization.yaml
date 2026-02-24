@@ -1,0 +1,331 @@
+# ============================================================
+# Thread Pool Utilization Audit
+# ============================================================
+# Evaluates thread pool configurations, utilization patterns,
+# and identifies threading bottlenecks across applications.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.resource-utilization.thread-pool-utilization"
+  name: "Thread Pool Utilization Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "resource-utilization"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines thread pool configurations and utilization across
+    application workloads. It analyzes HTTP server thread pools, async task
+    executors, database connection thread pools, and custom worker pools
+    to identify bottlenecks and misconfigurations.
+
+  why_it_matters: |
+    Thread pool exhaustion is a common cause of application hangs and
+    cascading failures. When thread pools are saturated, new requests queue
+    indefinitely, timeouts occur, and the application appears unresponsive.
+    Under-provisioned pools cause bottlenecks while over-provisioned pools
+    waste memory and can cause context-switching overhead.
+
+  when_to_run:
+    - "After deploying new applications or major updates"
+    - "When investigating latency spikes or timeouts"
+    - "During capacity planning"
+    - "After changing concurrency configurations"
+
+prerequisites:
+  required_artifacts:
+    - type: "application-metrics"
+      description: "Access to JVM, Node.js, or application-specific metrics"
+    - type: "runtime-access"
+      description: "Ability to query thread pool metrics from applications"
+
+  access_requirements:
+    - "Read access to application metrics endpoints"
+    - "Access to JMX, actuator, or equivalent"
+    - "Read access to application configurations"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus (JVM)"
+      query: "jvm_threads_live_threads / jvm_threads_daemon_threads"
+      purpose: "Active thread count"
+      threshold: "Within configured pool limits"
+    - system: "Prometheus (Tomcat)"
+      query: "tomcat_threads_busy_threads / tomcat_threads_config_max_threads"
+      purpose: "Tomcat thread pool utilization"
+      threshold: "< 80% for healthy operation"
+    - system: "Prometheus (HikariCP)"
+      query: "hikaricp_connections_active / hikaricp_connections_max"
+      purpose: "Connection pool thread utilization"
+      threshold: "< 80% normally"
+    - system: "Prometheus (Node.js)"
+      query: "nodejs_active_handles_total"
+      purpose: "Node.js event loop active handles"
+      threshold: "Should not grow unbounded"
+
+  code_patterns:
+    - pattern: "new\\s+ThreadPoolExecutor|Executors\\."
+      type: "regex"
+      scope: "source"
+      purpose: "Custom thread pool definitions"
+    - pattern: "server\\.tomcat\\.max-threads|server\\.jetty\\.threads"
+      type: "regex"
+      scope: "config"
+      purpose: "Web server thread configurations"
+
+knowledge_sources:
+  specifications:
+    - id: "java-concurrency"
+      name: "Java Concurrency in Practice"
+      url: "https://jcip.net/"
+      offline_cache: false
+      priority: "recommended"
+
+  guides:
+    - id: "spring-thread-pools"
+      name: "Spring Thread Pool Configuration"
+      url: "https://docs.spring.io/spring-boot/docs/current/reference/html/application-properties.html"
+      offline_cache: true
+    - id: "tomcat-threading"
+      name: "Apache Tomcat Threading"
+      url: "https://tomcat.apache.org/tomcat-10.0-doc/config/executor.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "jstack"
+      purpose: "Java thread dump analysis"
+      command: "jstack <pid>"
+    - tool: "async-profiler"
+      purpose: "Low-overhead thread profiling"
+      command: "profiler.sh -e wall -d 30 -f profile.html <pid>"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        (tomcat_threads_busy_threads / tomcat_threads_config_max_threads) * 100
+      purpose: "Percentage of busy HTTP threads"
+
+signals:
+  critical:
+    - id: "THREAD-CRIT-001"
+      signal: "Thread pool exhaustion causing request rejection"
+      evidence_threshold: "active_threads == max_threads AND queue_size > 0"
+      explanation: |
+        When thread pools are fully exhausted with work queued, the application
+        cannot process new requests. This manifests as timeouts, connection
+        refused errors, and cascading failures to dependent services.
+      remediation: "Increase pool size, reduce per-request processing time, or add horizontal scaling"
+
+    - id: "THREAD-CRIT-002"
+      signal: "Thread deadlock detected"
+      evidence_pattern: "Thread dump shows BLOCKED threads in circular wait"
+      explanation: |
+        Thread deadlocks cause portions of the application to hang permanently.
+        Unlike pool exhaustion, deadlocks don't recover without restart and
+        can progressively consume more threads.
+      remediation: "Analyze thread dump, fix lock ordering, implement timeout-based acquisition"
+
+  high:
+    - id: "THREAD-HIGH-001"
+      signal: "Thread pool utilization consistently above 80%"
+      evidence_threshold: "busy_threads / max_threads > 0.8 for extended period"
+      explanation: |
+        High thread pool utilization indicates the pool is near saturation.
+        Traffic spikes may push it over the limit, and there's no headroom
+        for burst capacity.
+      remediation: "Increase pool size or optimize request processing time"
+
+    - id: "THREAD-HIGH-002"
+      signal: "Unbounded thread pool with growing thread count"
+      evidence_threshold: "live_threads increasing over time without bound"
+      explanation: |
+        Unbounded pools can create threads without limit, eventually exhausting
+        system resources. Memory grows with thread count, and excessive threads
+        cause context-switching overhead.
+      remediation: "Configure bounded thread pool with appropriate max size"
+
+  medium:
+    - id: "THREAD-MED-001"
+      signal: "Thread pool significantly oversized for workload"
+      evidence_threshold: "avg(busy_threads) < 20% of max_threads"
+      remediation: "Right-size pool to reduce memory overhead"
+
+    - id: "THREAD-MED-002"
+      signal: "Blocking operations on async thread pools"
+      evidence_pattern: "Long thread wait times on I/O in async executor"
+      remediation: "Use dedicated blocking pool for I/O operations"
+
+  low:
+    - id: "THREAD-LOW-001"
+      signal: "Thread naming not configured for debugging"
+
+  positive:
+    - id: "THREAD-POS-001"
+      signal: "Thread pools appropriately sized with headroom"
+    - id: "THREAD-POS-002"
+      signal: "Clear separation between CPU-bound and I/O-bound pools"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory thread pool configurations"
+      description: |
+        Collect thread pool configurations from application properties,
+        code, and runtime settings.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check Spring/Tomcat thread configurations"
+          command: |
+            grep -r "server.tomcat.threads\|server.jetty.threads\|spring.task.execution" --include="*.yaml" --include="*.properties"
+        - purpose: "Find custom thread pool definitions"
+          command: |
+            grep -r "ThreadPoolExecutor\|Executors.newFixedThreadPool\|Executors.newCachedThreadPool" --include="*.java"
+      expected_findings:
+        - "Thread pool configurations"
+        - "Custom executor definitions"
+
+    - id: "2"
+      name: "Analyze current utilization"
+      description: |
+        Query metrics to understand thread pool utilization patterns
+        across application workloads.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Tomcat thread pool utilization"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=tomcat_threads_busy_threads/tomcat_threads_config_max_threads' | jq '.data.result'
+        - purpose: "JVM thread count"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=jvm_threads_live_threads' | jq '.data.result'
+      expected_findings:
+        - "Thread utilization percentages"
+        - "Active thread counts"
+
+    - id: "3"
+      name: "Capture and analyze thread dumps"
+      description: |
+        Generate thread dumps from running applications to identify
+        bottlenecks, blocked threads, and deadlocks.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Generate thread dump (requires pod exec access)"
+          command: |
+            kubectl exec -it <pod-name> -- jstack $(pgrep java) > /tmp/thread-dump.txt
+        - purpose: "Analyze for blocked threads"
+          command: |
+            grep -c "BLOCKED\|WAITING" /tmp/thread-dump.txt
+      expected_findings:
+        - "Thread state distribution"
+        - "Potential deadlocks or contention"
+
+    - id: "4"
+      name: "Review historical patterns"
+      description: |
+        Analyze thread utilization over time to identify patterns,
+        correlations with load, and capacity needs.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Thread utilization over time"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query_range?query=tomcat_threads_busy_threads&start=-24h&end=now&step=5m'
+      expected_findings:
+        - "Peak utilization periods"
+        - "Correlation with traffic patterns"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Thread Pool Configuration Review"
+        - "Utilization Analysis"
+        - "Bottleneck Identification"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct metrics and thread dump analysis"
+    medium: "Metrics available but limited thread dumps"
+    low: "Configuration analysis without runtime verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "tomcat-threading"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime thread analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "thread-001"
+    item: "No thread pools at >90% utilization"
+    level: "CRITICAL"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=max(tomcat_threads_busy_threads/tomcat_threads_config_max_threads)' | jq '.data.result[0].value[1] | tonumber < 0.9'
+    expected: "true"
+
+  - id: "thread-002"
+    item: "No deadlocks detected in thread dumps"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Analyze thread dumps for circular waits"
+    expected: "Confirmed by reviewer"
+
+  - id: "thread-003"
+    item: "All thread pools have bounded max size"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review configurations for unbounded pools"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.resource-utilization.connection-pool-utilization"
+    - "performance-efficiency.resource-utilization.cpu-utilization"

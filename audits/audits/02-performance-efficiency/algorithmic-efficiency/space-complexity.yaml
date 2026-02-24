@@ -1,0 +1,326 @@
+# ============================================================
+# SPACE COMPLEXITY AUDIT
+# ============================================================
+# Identifies algorithms and patterns with excessive memory usage
+# that may cause OOM errors or performance degradation.
+
+audit:
+  id: "performance-efficiency.algorithmic-efficiency.space-complexity"
+  name: "Space Complexity Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "algorithmic-efficiency"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes code for patterns that consume excessive memory, including
+    loading entire datasets into memory, unbounded collection growth,
+    memory leaks from unreleased references, and inefficient data
+    representation.
+
+  why_it_matters: |
+    Memory exhaustion causes application crashes, GC pauses, and system
+    instability. Unlike CPU issues that cause slowdowns, memory issues
+    cause hard failures. OOM kills can take down entire services and
+    often occur suddenly without gradual degradation warning.
+
+  when_to_run:
+    - "Memory-related incidents"
+    - "Processing large datasets"
+    - "Long-running process review"
+    - "Before scaling data volumes"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+
+  access_requirements:
+    - "Source code repository access"
+
+discovery:
+  code_patterns:
+    - pattern: "readFile.*toString|read_all|load\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find full file loading into memory"
+
+    - pattern: "\\.fetchAll\\(|\\.find\\(\\)|SELECT \\*(?!.*LIMIT)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find unbounded database fetches"
+
+    - pattern: "results\\.append|results\\.push|list\\.add"
+      type: "regex"
+      scope: "source"
+      purpose: "Find unbounded collection growth"
+
+    - pattern: "global\\s+|static\\s+.*=.*\\[|static.*List|static.*Map"
+      type: "regex"
+      scope: "source"
+      purpose: "Find potentially leaking global/static collections"
+
+    - pattern: "cache\\[|memo\\[|_cache\\["
+      type: "regex"
+      scope: "source"
+      purpose: "Find unbounded caching"
+
+  file_patterns:
+    - glob: "**/*.{py,js,ts,java,go,rb}"
+      purpose: "Source code files"
+
+knowledge_sources:
+  guides:
+    - id: "memory-management"
+      name: "Memory Management Best Practices"
+      url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Memory_Management"
+      offline_cache: true
+
+  learning_resources:
+    - id: "space-complexity"
+      title: "Understanding Space Complexity"
+      type: "article"
+      reference: "https://www.geeksforgeeks.org/g-fact-86/"
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Find memory-intensive patterns"
+      offline_capable: true
+
+    - tool: "memory-profiler (Python)"
+      purpose: "Python memory profiling"
+      offline_capable: true
+
+    - tool: "heapdump (Node.js)"
+      purpose: "Node.js heap analysis"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "SPACE-CRIT-001"
+      signal: "Loading unbounded data into memory"
+      evidence_pattern: "SELECT * without LIMIT or streaming, readFile() for large files"
+      explanation: |
+        Loading entire datasets into memory works for small data but causes
+        OOM when data grows. A 1GB file loaded into memory with processing
+        overhead can require 4GB+ RAM.
+      remediation: "Use streaming, pagination, or generators to process data incrementally"
+
+    - id: "SPACE-CRIT-002"
+      signal: "Unbounded cache without eviction"
+      evidence_pattern: "cache[key] = value without size limit or TTL"
+      explanation: |
+        Caches that grow indefinitely will eventually consume all available
+        memory. This is a slow memory leak that may take days or weeks to
+        manifest, then suddenly crash the application.
+      remediation: "Implement LRU eviction or size limits with TTL"
+
+  high:
+    - id: "SPACE-HIGH-001"
+      signal: "Large object duplication"
+      evidence_pattern: "Deep copy or spread of large objects: {...largeObj}, JSON.parse(JSON.stringify(obj))"
+      explanation: |
+        Unnecessary duplication of large objects doubles memory usage.
+        Combined with loops, this can cause rapid memory exhaustion.
+      remediation: "Use references where safe, implement copy-on-write, or use immutable libraries"
+
+    - id: "SPACE-HIGH-002"
+      signal: "Accumulating results in memory"
+      evidence_pattern: "Building large result arrays instead of streaming"
+      explanation: |
+        Collecting all results before returning prevents garbage collection
+        and requires memory proportional to result set size.
+      remediation: "Use generators, streams, or iterators to yield results incrementally"
+
+  medium:
+    - id: "SPACE-MED-001"
+      signal: "Inefficient string building"
+      evidence_pattern: "str += ... in loops creating many intermediate strings"
+      explanation: |
+        String concatenation creates intermediate objects that increase
+        memory pressure and GC overhead.
+      remediation: "Use StringBuilder, array.join(), or template strings"
+
+    - id: "SPACE-MED-002"
+      signal: "Retained references preventing GC"
+      evidence_pattern: "Event listeners or callbacks holding references to large objects"
+      explanation: |
+        References from long-lived objects to short-lived data prevent
+        garbage collection, causing gradual memory growth.
+      remediation: "Remove listeners, use weak references, or scope data appropriately"
+
+  low:
+    - id: "SPACE-LOW-001"
+      signal: "Suboptimal data representation"
+      evidence_pattern: "Storing data in less memory-efficient format"
+      remediation: "Consider more compact representations or lazy loading"
+
+  positive:
+    - id: "SPACE-POS-001"
+      signal: "Streaming used for large data processing"
+
+    - id: "SPACE-POS-002"
+      signal: "Bounded caches with proper eviction"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify data loading patterns"
+      description: |
+        Find all locations where external data (files, databases, APIs)
+        is loaded and assess memory implications.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find file reading"
+          command: "rg -n 'readFile|read_file|open\\(|File\\(' --type py --type js --type java"
+        - purpose: "Find database queries"
+          command: "rg -n 'SELECT|find\\(|findAll|fetchAll' --type py --type js --type java"
+
+      expected_findings:
+        - "Data loading locations identified"
+        - "Boundedness assessment"
+
+    - id: "2"
+      name: "Analyze collection growth"
+      description: |
+        Find collections that grow during processing and verify they
+        have appropriate bounds or are cleared.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find collection growth"
+          command: "rg -n '\\.push\\(|\\.append\\(|\\.add\\(' --type py --type js --type java"
+        - purpose: "Find static/global collections"
+          command: "rg -n 'static.*=.*\\[|global.*=.*\\[|const.*=.*\\{\\}' --type py --type js --type java"
+
+      expected_findings:
+        - "Unbounded growth patterns"
+        - "Static collection risks"
+
+    - id: "3"
+      name: "Review caching implementations"
+      description: |
+        Examine all caching code for proper size limits, eviction policies,
+        and TTL configuration.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find caching patterns"
+          command: "rg -n 'cache\\[|_cache|memoize|@cache' --type py --type js"
+
+      expected_findings:
+        - "Cache implementations catalog"
+        - "Eviction policy assessment"
+
+    - id: "4"
+      name: "Check for streaming alternatives"
+      description: |
+        Verify that streaming patterns are used where appropriate instead
+        of bulk loading.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find streaming patterns"
+          command: "rg -n 'createReadStream|iter|generator|yield|Stream' --type py --type js --type java"
+
+      expected_findings:
+        - "Streaming usage assessment"
+        - "Opportunities for streaming"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Memory Risk Assessment"
+        - "Unbounded Growth Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct code analysis with data volume verification"
+    medium: "Pattern matching with estimated memory impact"
+    low: "Surface-level pattern detection"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "memory-management"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed memory pattern analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "space-complexity-001"
+    item: "No unbounded data loading without streaming"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Large file/database reads use streaming or pagination"
+    expected: "Confirmed by reviewer"
+
+  - id: "space-complexity-002"
+    item: "All caches have size limits"
+    level: "CRITICAL"
+    verification: "rg -l 'cache\\[' --type py --type js | xargs -I {} echo 'Review cache bounds in: {}'"
+    expected: "Manual review required"
+
+  - id: "space-complexity-003"
+    item: "No unbounded collection growth"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Collections in loops have bounds or are cleared"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Code Quality"
+      controls: ["Memory Management"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.algorithmic-efficiency.time-complexity"
+    - "performance-efficiency.resource-utilization.memory-usage"
+    - "performance-efficiency.algorithmic-efficiency.lazy-loading"

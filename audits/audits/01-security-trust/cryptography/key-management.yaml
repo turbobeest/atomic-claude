@@ -1,0 +1,385 @@
+audit:
+  id: security-trust.cryptography.key-management
+  name: Key Management Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: cryptography
+  tier: phd
+  estimated_duration: 2.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    Examines the entire lifecycle of cryptographic key management including
+    key generation, storage, distribution, rotation, revocation, and destruction.
+    Verifies compliance with NIST SP 800-57 guidelines, proper use of HSMs or
+    KMS, and protection against key compromise.
+  why_it_matters: |
+    Cryptographic security depends entirely on key security. NIST SP 800-57
+    states "the security of information protected by cryptography directly
+    depends on the strength of the keys." Poor key management negates even
+    strong algorithms. Hardcoded keys, weak key generation, and lack of
+    rotation are critical vulnerabilities.
+  when_to_run:
+  - Initial security assessment
+  - After cryptographic implementation changes
+  - During key rotation planning
+  - Compliance audits (FIPS 140-2/3)
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application with cryptographic operations
+  - type: configuration
+    description: Key management configuration
+  - type: infrastructure
+    description: KMS/HSM configuration
+  access_requirements:
+  - Read access to source code
+  - Access to key management configuration
+  - Access to KMS/HSM documentation
+discovery:
+  code_patterns:
+  - pattern: (key|KEY|Key).*(generate|create|derive|produce)
+    type: regex
+    scope: source
+    purpose: Find key generation patterns
+  - pattern: (KMS|HSM|Vault|KeyVault|keystore|KeyStore)
+    type: regex
+    scope: source
+    purpose: Locate key management service usage
+  - pattern: (rotate|rotation|keyVersion|keyId)
+    type: regex
+    scope: source
+    purpose: Find key rotation patterns
+  - pattern: (key|KEY)\s*[=:]\s*['"][A-Za-z0-9+/=]{16,}['"]
+    type: regex
+    scope: source
+    purpose: Detect hardcoded keys
+  - pattern: (SecureRandom|randomBytes|crypto\.getRandomValues)
+    type: regex
+    scope: source
+    purpose: Find cryptographic random generation
+  file_patterns:
+  - glob: '**/keys/**'
+    purpose: Key storage directories
+  - glob: '**/keystore/**'
+    purpose: Key store files
+  - glob: '**/*.pem'
+    purpose: PEM key files
+  - glob: '**/*.key'
+    purpose: Key files
+knowledge_sources:
+  specifications:
+  - id: nist-sp-800-57
+    name: 'NIST SP 800-57: Key Management Recommendations'
+    url: https://csrc.nist.gov/pubs/sp/800/57/pt1/r5/final
+    offline_cache: true
+    priority: required
+  - id: fips-140-3
+    name: 'FIPS 140-3: Cryptographic Module Standards'
+    url: https://csrc.nist.gov/publications/detail/fips/140/3/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-key
+    name: OWASP Key Management Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Key_Management_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect hardcoded keys and weak generation
+    offline_capable: true
+  - tool: truffleHog
+    purpose: Find secrets in code
+    offline_capable: true
+  scripts:
+  - id: key-management-search
+    language: bash
+    purpose: Find key management patterns
+    source: inline
+    code: |
+      # Search for key-related patterns
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs}" \
+        -E "(key|Key|KEY).*(generate|create|store|rotate)" .
+signals:
+  critical:
+  - id: KEY-CRIT-001
+    signal: Hardcoded cryptographic key
+    evidence_pattern: (key|KEY|Key|secret|SECRET)\s*[=:]\s*['"][A-Za-z0-9+/=]{16,}['"]
+    cwe: CWE-321
+    explanation: |
+      Cryptographic keys are hardcoded in source code. This makes keys
+      accessible to anyone with code access and impossible to rotate
+      without redeployment.
+    remediation: Store keys in KMS, HSM, or secure secrets manager (Vault, AWS Secrets Manager)
+  - id: KEY-CRIT-002
+    signal: Weak key generation (non-cryptographic random)
+    evidence_pattern: Math\.random\(\)|random\(\)|rand\(\)(?!.*crypto|secure)
+    cwe: CWE-330
+    explanation: |
+      Keys are generated using non-cryptographic random number generators.
+      These are predictable and can be reproduced by attackers.
+    remediation: 'Use cryptographically secure random: crypto.randomBytes, SecureRandom'
+  - id: KEY-CRIT-003
+    signal: Encryption key in source control
+    evidence_pattern: (BEGIN.*PRIVATE KEY|BEGIN.*RSA|BEGIN.*EC)
+    cwe: CWE-312
+    explanation: |
+      Private keys are committed to source control, exposing them to
+      anyone with repository access.
+    remediation: Remove keys from repository; use .gitignore and secrets manager
+  high:
+  - id: KEY-HIGH-001
+    signal: Key stored in plaintext file
+    evidence_pattern: file\.(read|write).*key|key.*file\.(read|write)
+    cwe: CWE-312
+    explanation: |
+      Keys are stored in plaintext files on disk, vulnerable to
+      file system access.
+    remediation: Store keys in encrypted keystore or HSM
+  - id: KEY-HIGH-002
+    signal: No key rotation mechanism
+    evidence_pattern: key(?!.*rotate|.*version|.*expir|.*renew)
+    cwe: CWE-324
+    explanation: |
+      No key rotation mechanism exists. Compromised keys remain in use
+      indefinitely, and cryptographic wear is not addressed.
+    remediation: Implement key rotation with versioning; support multiple active keys
+  - id: KEY-HIGH-003
+    signal: Key derivation without salt
+    evidence_pattern: (PBKDF2|scrypt|argon2|deriveKey)(?!.*salt)
+    cwe: CWE-916
+    explanation: |
+      Key derivation functions are used without salt, making the
+      derived keys vulnerable to rainbow table attacks.
+    remediation: Use unique random salt for each key derivation
+  medium:
+  - id: KEY-MED-001
+    signal: Keys stored in environment variables
+    evidence_pattern: (process\.env|os\.environ|ENV).*key
+    cwe: CWE-260
+    remediation: Use dedicated secrets manager instead of environment variables
+  - id: KEY-MED-002
+    signal: Key logging
+    evidence_pattern: (log|console|print).*(key|secret|password)
+    cwe: CWE-532
+    remediation: Never log keys; implement key masking in logs
+  low:
+  - id: KEY-LOW-001
+    signal: Missing key inventory documentation
+    evidence_pattern: key(?!.*doc|.*inventory|.*manifest)
+    remediation: Maintain documented inventory of all cryptographic keys
+  positive:
+  - id: KEY-POS-001
+    signal: HSM/KMS integration
+    evidence_pattern: (HSM|KMS|KeyVault|Vault|CloudKMS)\.(get|generate|sign)
+  - id: KEY-POS-002
+    signal: Cryptographic random generation
+    evidence_pattern: (SecureRandom|crypto\.randomBytes|getRandomValues)
+  - id: KEY-POS-003
+    signal: Key rotation implemented
+    evidence_pattern: (rotateKey|keyRotation|keyVersion)
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Key Generation
+    description: |
+      Locate all key generation code and verify use of
+      cryptographically secure random number generators.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find key generation patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(generateKey|createKey|deriveKey|KeyGenerator)" .
+    - purpose: Find random generation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(random|Random|SecureRandom|crypto\\.random)" .
+    expected_findings:
+    - Cryptographically secure random used
+    - Appropriate key sizes
+  - id: '2'
+    name: Analyze Key Storage
+    description: |
+      Review how keys are stored and verify use of secure
+      storage mechanisms.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find key storage patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(storeKey|saveKey|KeyStore|keystore)" .
+    - purpose: Check for KMS/HSM usage
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(KMS|HSM|Vault|KeyVault|secrets)" .
+    expected_findings:
+    - Keys in secure storage (KMS, HSM)
+    - No plaintext key files
+  - id: '3'
+    name: Check for Hardcoded Keys
+    description: |
+      Search for hardcoded keys in source code and
+      configuration files.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find potential hardcoded keys
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs,json,yaml,env}" -E \
+          "(key|KEY|secret)\\s*[=:]\\s*['\"][A-Za-z0-9+/=]{16,}['\"]" .
+    - purpose: Find private keys in code
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs,pem}" \
+          "BEGIN.*PRIVATE" .
+    expected_findings:
+    - No hardcoded keys
+    - No private keys in repository
+  - id: '4'
+    name: Verify Key Rotation
+    description: |
+      Ensure key rotation mechanisms exist and are
+      properly implemented.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find key rotation patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(rotate|rotation|renew|version).*(key|Key)" .
+    - purpose: Check key versioning
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(keyId|keyVersion|version.*key)" .
+    expected_findings:
+    - Key rotation mechanism exists
+    - Key versioning for graceful rotation
+  - id: '5'
+    name: Audit Key Lifecycle Management
+    description: |
+      Review complete key lifecycle including creation,
+      distribution, and destruction.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find key destruction
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(destroy|delete|revoke|expire).*key" .
+    - purpose: Find key audit logging
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(audit|log).*(key|crypto)" .
+    expected_findings:
+    - Key destruction procedures
+    - Key usage audit logging
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Key Generation Analysis
+    - Key Storage Assessment
+    - Rotation Readiness
+    - Recommendations
+  confidence_guidance:
+    high: KMS/HSM with proper generation and rotation
+    medium: Secure storage present but rotation concerns
+    low: Key patterns found but management unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: nist-sp-800-57
+      priority: required
+    - source_id: owasp-key
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Key management audit requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: key-001
+  item: No hardcoded cryptographic keys
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "key\\s*[=:]\\s*['\"][A-Za-z0-9+/=]{24,}['\"]" . | wc -l
+  expected: '0'
+- id: key-002
+  item: Cryptographic random used for key generation
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(SecureRandom\|crypto\\.random\|getRandomValues)" . | wc -l
+  expected: Greater than 0 if key generation exists
+- id: key-003
+  item: KMS or HSM used for key storage
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(KMS\|HSM\|Vault\|KeyVault)" . | wc -l
+  expected: Greater than 0
+- id: key-004
+  item: Key rotation mechanism exists
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(rotate\|rotation\|keyVersion)" . | wc -l
+  expected: Greater than 0
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST SP 800-57
+    controls:
+    - Key Management
+  - framework: FIPS 140-3
+    controls:
+    - Key Management Security
+  - framework: PCI-DSS
+    controls:
+    - '3.5'
+    - '3.6'
+  - framework: CWE
+    controls:
+    - CWE-321
+    - CWE-330
+    - CWE-324
+relationships:
+  commonly_combined:
+  - security-trust.cryptography.encryption-at-rest
+  - security-trust.secrets-management.secrets-storage
+  - security-trust.cryptography.certificate-management

@@ -1,0 +1,398 @@
+audit:
+  id: observability-instrumentation.metrics.sli-definition
+  name: SLI Definition Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: metrics
+  tier: phd
+  estimated_duration: 4 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the definition, implementation, and accuracy of Service Level
+    Indicators (SLIs) that underpin Service Level Objectives (SLOs). This
+    audit examines whether SLIs accurately reflect user experience, are
+    measurable with available metrics, have clear specifications, and
+    produce reliable calculations. It validates alignment between what
+    SLIs measure and what users actually experience.
+  why_it_matters: |
+    SLIs are the foundation of SLO-based reliability management. Poorly
+    defined SLIs lead to incorrect error budgets, false confidence in
+    reliability, and misaligned engineering priorities. If an SLI doesn't
+    reflect user experience, the team may burn error budget on issues users
+    don't notice while ignoring problems users do experience. SLI definition
+    quality directly determines SLO program effectiveness.
+  when_to_run:
+  - SLO program implementation
+  - Service reliability review
+  - After incidents revealing SLI gaps
+  - Quarterly SLO accuracy validation
+prerequisites:
+  required_artifacts:
+  - type: slo-documentation
+    description: Current SLO definitions and targets
+  - type: metrics-system
+    description: Access to SLI metric data
+  access_requirements:
+  - SLI metric query access
+  - User traffic data for validation
+  - Service architecture documentation
+discovery:
+  code_patterns:
+  - pattern: sli|slo|error_budget|availability
+    type: keyword
+    scope: source
+    purpose: Find SLI-related code
+  - pattern: good_events|total_events|valid_events
+    type: keyword
+    scope: source
+    purpose: Find event-based SLI definitions
+  - pattern: success_rate|error_rate|latency_.*_sli
+    type: regex
+    scope: source
+    purpose: Find SLI metric definitions
+  file_patterns:
+  - glob: '**/slo*.yaml'
+    purpose: SLO configuration files
+  - glob: '**/recording_rules.yaml'
+    purpose: SLI recording rules
+  - glob: '**/alerts/slo*.yaml'
+    purpose: SLO-based alerting
+  metrics_queries:
+  - system: Prometheus
+    query: sli_specification{}
+    purpose: Find SLI definitions
+    threshold: All critical services have SLIs
+  - system: Prometheus
+    query: slo_compliance{}
+    purpose: Check SLO compliance tracking
+    threshold: Compliance within targets
+knowledge_sources:
+  specifications:
+  - id: google-slo
+    name: Google SRE Book - Service Level Objectives
+    url: https://sre.google/sre-book/service-level-objectives/
+    offline_cache: true
+    priority: required
+  - id: slo-workbook
+    name: The Site Reliability Workbook - SLOs
+    url: https://sre.google/workbook/implementing-slos/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: sli-guide
+    name: Defining SLIs
+    url: https://sre.google/workbook/slo-engineering/
+    offline_cache: true
+  - id: opencensus-sli
+    name: OpenSLO Specification
+    url: https://openslo.com/
+    offline_cache: true
+  learning_resources:
+  - id: slo-book
+    title: Implementing Service Level Objectives
+    type: book
+    reference: Alex Hidalgo, O'Reilly Media
+tooling:
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      # Availability SLI calculation
+      sum(rate(http_requests_total{status!~"5.."}[30d]))
+      /
+      sum(rate(http_requests_total[30d]))
+    purpose: Calculate 30-day availability
+  - system: Prometheus
+    query: |
+      # Latency SLI - requests within threshold
+      sum(rate(http_request_duration_seconds_bucket{le="0.3"}[30d]))
+      /
+      sum(rate(http_request_duration_seconds_count[30d]))
+    purpose: Calculate latency SLI
+  - system: Prometheus
+    query: |
+      # Error budget remaining
+      1 - (1 - slo_target) - (1 - sli_value)
+    purpose: Calculate error budget
+  infrastructure_tools:
+  - tool: sloth
+    purpose: SLO generator for Prometheus
+    command: sloth generate -i slo.yaml
+  - tool: pyrra
+    purpose: SLO management and dashboards
+    command: pyrra api generate
+  scripts:
+  - id: sli-validator
+    language: python
+    purpose: Validate SLI definition quality
+    source: inline
+    code: |
+      def validate_sli(sli_definition):
+          """
+          Check SLI definition completeness and correctness
+          """
+          required_fields = [
+              'name',
+              'description',
+              'good_event_definition',
+              'valid_event_definition',
+              'measurement_method'
+          ]
+          issues = []
+
+          for field in required_fields:
+              if field not in sli_definition:
+                  issues.append(f"Missing required field: {field}")
+
+          # Check for user experience alignment
+          if 'user_journey' not in sli_definition:
+              issues.append("SLI should reference user journey")
+
+          # Check for measurability
+          if 'metric_query' not in sli_definition:
+              issues.append("SLI must have measurable metric query")
+
+          return issues
+signals:
+  critical:
+  - id: SLI-CRIT-001
+    signal: SLI does not reflect user experience
+    evidence_indicators:
+    - SLI measures infrastructure health not user success
+    - Users report issues while SLI shows green
+    - SLI excludes significant user traffic
+    explanation: |
+      If the SLI doesn't measure what users experience, the entire SLO
+      program becomes theater. Error budget consumption won't correlate
+      with user impact, and engineering will optimize for the wrong things.
+    remediation: Redefine SLI based on user journey success criteria
+  - id: SLI-CRIT-002
+    signal: SLI calculation is mathematically incorrect
+    evidence_indicators:
+    - Percentile averaging
+    - Rate-then-sum vs sum-then-rate errors
+    - Division by zero handling missing
+    explanation: |
+      Incorrect SLI calculations produce wrong error budgets. Teams may
+      believe they have budget when they don't, or vice versa. All
+      reliability decisions become unreliable.
+    remediation: Review and correct SLI calculation methodology
+  high:
+  - id: SLI-HIGH-001
+    signal: SLI definition lacks precision
+    evidence_indicators:
+    - Good event criteria ambiguous
+    - Valid event scope unclear
+    - Edge cases not specified
+    explanation: |
+      Ambiguous SLIs lead to inconsistent interpretation and measurement.
+      Different teams may calculate the same SLI differently, breaking
+      cross-service reliability comparisons.
+    remediation: Document precise good/valid event definitions with examples
+  - id: SLI-HIGH-002
+    signal: SLI excludes significant traffic
+    evidence_indicators:
+    - Internal traffic excluded but represents real users
+    - Certain error codes excluded without justification
+    - Batch jobs not covered despite user impact
+    explanation: |
+      Excluding traffic from SLIs creates blind spots. Issues affecting
+      excluded traffic won't impact error budget even if they affect users.
+    remediation: Audit exclusions and justify each one
+  medium:
+  - id: SLI-MED-001
+    signal: SLI window does not match business needs
+    evidence_pattern: 30-day window but weekly business reviews
+    remediation: Align SLI window with business reporting cadence
+  - id: SLI-MED-002
+    signal: Multiple SLIs with conflicting signals
+    evidence_pattern: Availability SLI green, latency SLI red, unclear priority
+    remediation: Define clear SLI prioritization and composite SLI rules
+  - id: SLI-MED-003
+    signal: SLI thresholds not validated with users
+    evidence_pattern: Latency threshold arbitrary rather than user-tested
+    remediation: Validate thresholds with user research or experimentation
+  low:
+  - id: SLI-LOW-001
+    signal: SLI documentation incomplete
+    remediation: Document all SLIs with full specification
+  positive:
+  - id: SLI-POS-001
+    signal: SLIs validated against user experience research
+  - id: SLI-POS-002
+    signal: SLI specification follows standard format
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory existing SLIs
+    description: |
+      Document all defined SLIs, their specifications, and current
+      implementations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find SLI definitions
+      command: find /path/to/config -name '*slo*' -o -name '*sli*' | xargs cat
+    expected_findings:
+    - SLI inventory
+    - Current specifications
+  - id: '2'
+    name: Validate user experience alignment
+    description: |
+      For each SLI, verify that it measures what users actually
+      experience when interacting with the service.
+    duration_estimate: 60 min
+    questions:
+    - What user action does this SLI represent?
+    - If this SLI is red, does it mean users are impacted?
+    - If this SLI is green, can users still have problems?
+    expected_findings:
+    - Alignment gaps
+    - User journey mapping
+  - id: '3'
+    name: Review calculation methodology
+    description: |
+      Examine the actual metric queries and calculations to ensure
+      mathematical correctness.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get SLI recording rules
+      command: grep -A10 'sli\|error_budget' /etc/prometheus/rules/*.yaml
+    expected_findings:
+    - Calculation correctness
+    - Aggregation issues
+  - id: '4'
+    name: Validate good/valid event definitions
+    description: |
+      Ensure good event and valid event definitions are clear,
+      complete, and handle edge cases.
+    duration_estimate: 30 min
+    questions:
+    - What exactly constitutes a good event?
+    - What traffic is excluded from valid events and why?
+    - How are edge cases handled?
+    expected_findings:
+    - Definition completeness
+    - Edge case coverage
+  - id: '5'
+    name: Test SLI accuracy
+    description: |
+      Compare SLI values against other data sources to validate
+      accuracy.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Query current SLI value
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=sli_availability' | jq '.data.result'
+    expected_findings:
+    - SLI accuracy validation
+    - Discrepancy identification
+  - id: '6'
+    name: Review threshold selection
+    description: |
+      Validate that SLI thresholds are appropriate for user
+      experience requirements.
+    duration_estimate: 30 min
+    questions:
+    - How was the latency threshold chosen?
+    - Is there user research supporting the threshold?
+    - How do thresholds compare to competitor benchmarks?
+    expected_findings:
+    - Threshold justification
+    - Recommendations for adjustment
+output:
+  deliverables:
+  - type: sli_specification_review
+    format: structured
+    description: Detailed SLI specification analysis
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - SLI Coverage Analysis
+    - Calculation Accuracy Review
+    - Recommendations
+  confidence_guidance:
+    high: Validated against user traffic and multiple data sources
+    medium: Query review and specification analysis
+    low: Documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-slo
+      priority: required
+    - source_id: slo-workbook
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed SLI analysis and validation
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: sli-001
+  item: All SLIs reflect user experience
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm each SLI maps to user journey success
+  expected: Confirmed by reviewer
+- id: sli-002
+  item: SLI calculations are mathematically correct
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review aggregation and calculation methodology
+  expected: Confirmed by reviewer
+- id: sli-003
+  item: Good/valid event definitions are precise
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify clear specification with edge cases
+  expected: Confirmed by reviewer
+- id: sli-004
+  item: SLI thresholds have justification
+  level: BLOCKING
+  verification: manual
+  verification_notes: Check thresholds have documented rationale
+  expected: Confirmed by reviewer
+- id: sli-005
+  item: SLI accuracy validated against other sources
+  level: WARNING
+  verification: manual
+  verification_notes: Compare SLI values with alternative measurements
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+relationships:
+  commonly_combined:
+  - observability-instrumentation.metrics.four-golden-signals
+  - observability-instrumentation.metrics.histogram-vs-summary
+  - observability-instrumentation.alerting.error-budget-alerting

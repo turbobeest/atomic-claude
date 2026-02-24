@@ -1,0 +1,278 @@
+audit:
+  id: code-quality.error-handling.fail-fast-pattern
+  name: Fail-Fast Pattern Assessment Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: error-handling
+  tier: expert
+  estimated_duration: 35 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates whether the codebase follows fail-fast principles, where errors
+    are detected and reported as early as possible rather than being allowed
+    to propagate. This includes checking for early validation, guard clauses,
+    precondition checks, and immediate error reporting.
+  why_it_matters: |
+    Fail-fast code catches bugs closer to their source, making debugging easier.
+    Allowing errors to propagate creates cascading failures that are hard to
+    trace. Early failure prevents invalid state from spreading through the
+    system, reducing the blast radius of bugs.
+  when_to_run:
+  - During code reviews
+  - Architecture assessments
+  - After debugging difficult bugs
+  - Error handling strategy reviews
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: ^\s*if\s*\([^)]+\)\s*(throw|return|throw)
+    type: regex
+    scope: source
+    purpose: Identify guard clauses
+  - pattern: assert|require|precondition|checkNotNull
+    type: regex
+    scope: source
+    purpose: Identify precondition checks
+  - pattern: \w+\s*=\s*[^;]+;[^\n]*\n[^\n]*\w+\.\w+
+    type: regex
+    scope: source
+    purpose: Identify deferred null checks
+  file_patterns:
+  - glob: '**/*.{java,cs,ts,js,py,rb,go}'
+    purpose: Source code files
+knowledge_sources:
+  guides:
+  - id: fowler-fail-fast
+    name: Martin Fowler - Fail Fast
+    url: https://martinfowler.com/ieeeSoftware/failFast.pdf
+    offline_cache: true
+  - id: clean-code-guards
+    name: Robert C. Martin - Guard Clauses
+    url: https://www.oreilly.com/library/view/clean-code-a/9780136083238/
+    offline_cache: false
+  - id: effective-java
+    name: Effective Java - Fail Fast
+    url: https://www.oreilly.com/library/view/effective-java/9780134686097/
+    offline_cache: false
+tooling:
+  static_analysis:
+  - tool: checkstyle
+    purpose: Java parameter validation
+    offline_capable: true
+  - tool: eslint
+    purpose: JavaScript early return rules
+    offline_capable: true
+  - tool: sonarqube
+    purpose: Error handling patterns
+    offline_capable: false
+  scripts:
+  - id: fail-fast-scan
+    language: bash
+    purpose: Find guard clauses and preconditions
+    source: inline
+    code: |
+      # Count guard clauses
+      grep -rn --include="*.{ts,java}" -E "^\s*if\s*\([^)]+\)\s*(throw|return)" . 2>/dev/null | wc -l
+signals:
+  critical:
+  - id: EH-FAILFAST-CRIT-001
+    signal: Invalid state propagated through multiple layers
+    evidence_pattern: null.*passed.*through.*layers
+    explanation: |
+      When invalid state propagates through multiple layers before
+      failing, root cause analysis becomes extremely difficult.
+    remediation: Add validation at entry points to fail immediately
+  - id: EH-FAILFAST-CRIT-002
+    signal: Security validation deferred until deep in call stack
+    evidence_pattern: security.*check.*deep.*stack
+    explanation: |
+      Deferring security checks allows potentially malicious input to
+      travel through the system before detection.
+    remediation: Validate security concerns at API boundary
+  high:
+  - id: EH-FAILFAST-HIGH-001
+    signal: Methods without guard clauses for required parameters
+    evidence_pattern: function.*\(.*\w+:\s*\w+.*\)\{(?![^}]*if.*null|throw)
+    explanation: |
+      Methods that don't validate required parameters may fail deep
+      in their logic with confusing error messages.
+    remediation: Add guard clauses at method entry
+  - id: EH-FAILFAST-HIGH-002
+    signal: Null checks performed after potential dereference
+    explanation: |
+      Checking for null after already using the value is too late -
+      the crash has already happened.
+    remediation: Check for null before first use
+    evidence_description: \w+\.\w+.*\n.*if.*\1.*null
+  medium:
+  - id: EH-FAILFAST-MED-001
+    signal: Validation scattered throughout method
+    evidence_pattern: method.*validate.*middle.*method
+    remediation: Move validation to method entry
+  - id: EH-FAILFAST-MED-002
+    signal: Optional chaining used instead of explicit validation
+    evidence_pattern: \?\.
+    remediation: Consider explicit checks with clear errors
+  low:
+  - id: EH-FAILFAST-LOW-001
+    signal: Assertions disabled in production
+    evidence_pattern: assert.*disabled.*prod
+    remediation: Use runtime checks instead of assertions
+  positive:
+  - id: EH-FAILFAST-POS-001
+    signal: Guard clauses at method entry
+    evidence_pattern: ^\s*if\s*\(.*\)\s*(throw|return)
+  - id: EH-FAILFAST-POS-002
+    signal: Precondition library used
+    evidence_pattern: Preconditions\.check|Objects\.requireNonNull
+  - id: EH-FAILFAST-POS-003
+    signal: Early return pattern used
+    evidence_pattern: early.*return
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Guard Clauses
+    description: |
+      Count and analyze the use of guard clauses at method entry
+      points.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Count guard clauses
+      command: |
+        grep -rn --include="*.{ts,java}" -E "^\s*if\s*\([^)]+\)\s*(throw|return)" . 2>/dev/null | wc -l
+    - purpose: Find precondition checks
+      command: |
+        grep -rn --include="*.{ts,java}" -E "(checkNotNull|requireNonNull|require\(|assert)" . 2>/dev/null | wc -l
+    expected_findings:
+    - Guard clause count
+    - Precondition check usage
+  - id: '2'
+    name: Find Deferred Validation
+    description: |
+      Identify validation that happens later than it should,
+      allowing errors to propagate.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find mid-method validation
+      command: |
+        grep -rn --include="*.{ts,java}" -B10 "throw new.*Invalid" . 2>/dev/null | head -50
+    expected_findings:
+    - Deferred validation patterns
+    - Late null checks
+  - id: '3'
+    name: Analyze Entry Points
+    description: |
+      Check that public API entry points validate inputs immediately.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find public methods
+      command: |
+        grep -rn --include="*.{ts,java}" -A5 "public\s+\w+\s*\(" . 2>/dev/null | grep -E "(public|if|throw)" | head -50
+    expected_findings:
+    - Entry point validation
+    - Missing guards
+  - id: '4'
+    name: Generate Recommendations
+    description: |
+      Compile findings into fail-fast pattern recommendations.
+    duration_estimate: 5 min
+    expected_findings:
+    - Pattern assessment
+    - Improvement recommendations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - location
+    - pattern_type
+    - issue
+    - recommendation
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Fail-Fast Assessment
+    - Guard Clause Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Clear fail-fast violation detected
+    medium: Potential issue, review needed
+    low: May be acceptable design choice
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: fowler-fail-fast
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive analysis
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: failfast-001
+  item: Guard clause analysis completed
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{ts,java}" -E "^\s*if\s*\([^)]+\)\s*(throw|return)" . 2>/dev/null | wc -l
+  expected: Count documented
+- id: failfast-002
+  item: Public APIs validate inputs early
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review public method entry validation
+  expected: All APIs validate inputs
+- id: failfast-003
+  item: Deferred validation documented
+  level: WARNING
+  verification: manual
+  verification_notes: Review late validation patterns
+  expected: Issues documented
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Reliability
+    - Maintainability
+  - framework: CERT
+    controls:
+    - ERR00-CPP
+    - ERR01-J
+relationships:
+  commonly_combined:
+  - code-quality.error-handling.defensive-programming
+  - code-quality.error-handling.exception-granularity
+  - code-quality.maintainability.code-readability

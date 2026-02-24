@@ -1,0 +1,268 @@
+audit:
+  id: api-integration.error-handling.error-documentation
+  name: Error Documentation Assessment
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: error-handling
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: documentation
+  default_profiles:
+  - full
+  - quick
+  parallelizable: true
+description:
+  what: |
+    Evaluates API error documentation including error code catalogs,
+    troubleshooting guides, error response examples, and guidance on
+    handling specific error conditions. Examines whether consumers have
+    adequate documentation to handle all error scenarios.
+  why_it_matters: |
+    Well-documented errors reduce support burden, enable faster integration,
+    and improve developer experience. Without documentation, consumers must
+    discover errors through trial and error, leading to frustration and
+    improper error handling.
+  when_to_run:
+  - Before API releases
+  - During documentation reviews
+  - When error-related support requests increase
+prerequisites:
+  required_artifacts:
+  - type: api-spec
+    description: OpenAPI specifications
+  - type: api-docs
+    description: API documentation
+  access_requirements:
+  - Read access to API documentation
+  - Access to OpenAPI specifications
+discovery:
+  code_patterns:
+  - pattern: error.*code|error_code|errorCode
+    type: regex
+    scope: documentation
+    purpose: Error code documentation
+  - pattern: troubleshoot|handling.*error|error.*handling
+    type: regex
+    scope: documentation
+    purpose: Troubleshooting guides
+  file_patterns:
+  - glob: '**/*openapi*.{yaml,yml,json}'
+    purpose: OpenAPI specifications
+  - glob: '**/docs/**/*.md'
+    purpose: Documentation files
+  - glob: '**/errors/**/*.md'
+    purpose: Error documentation
+knowledge_sources:
+  specifications:
+  - id: owasp-api-security
+    name: OWASP API Security Top 10
+    url: https://owasp.org/API-Security/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: api-documentation
+    name: API Documentation Best Practices
+    url: https://swagger.io/blog/api-documentation/best-practices-in-api-documentation/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: spectral
+    purpose: Check OpenAPI for error documentation
+    offline_capable: true
+signals:
+  critical:
+  - id: ERRDOC-CRIT-001
+    signal: No error responses documented in API spec
+    evidence_indicators:
+    - Only 200 responses in OpenAPI
+    - No 4xx/5xx response definitions
+    explanation: |
+      Without documented errors, consumers cannot prepare proper error
+      handling. They discover errors only in production.
+    remediation: Document all possible error responses with schemas and examples
+  - id: ERRDOC-CRIT-002
+    signal: Error codes exist but are not documented
+    evidence_pattern: errorCode.*(?!documented|description)
+    explanation: |
+      Error codes without documentation are meaningless to consumers.
+      They cannot understand what the code means or how to respond.
+    remediation: Create error code catalog with descriptions and remediation
+  high:
+  - id: ERRDOC-HIGH-001
+    signal: No error response examples
+    evidence_indicators:
+    - Error responses without example property
+    - No sample error payloads
+    explanation: |
+      Without examples, consumers must guess error response format.
+      This leads to incorrect error handling and parsing failures.
+    remediation: Add examples for all error response types
+  - id: ERRDOC-HIGH-002
+    signal: No troubleshooting guide for common errors
+    evidence_indicators:
+    - No troubleshooting documentation
+    - No FAQ for error resolution
+    explanation: |
+      Common errors without troubleshooting guidance generate support
+      tickets that could be self-served with proper documentation.
+    remediation: Create troubleshooting guide for frequent errors
+  medium:
+  - id: ERRDOC-MED-001
+    signal: Error documentation not linked from main docs
+    evidence_indicators:
+    - Error docs exist but hidden
+    - No navigation to error section
+    remediation: Prominently link error documentation from main API docs
+  - id: ERRDOC-MED-002
+    signal: Missing rate limit error documentation
+    evidence_pattern: 429(?!.*documentation|description)
+    remediation: Document rate limiting behavior, headers, and retry guidance
+  low:
+  - id: ERRDOC-LOW-001
+    signal: Error docs not kept in sync with code
+    remediation: Automate error documentation generation from code
+  positive:
+  - id: ERRDOC-POS-001
+    signal: Comprehensive error code catalog
+  - id: ERRDOC-POS-002
+    signal: Troubleshooting guides for common errors
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review OpenAPI Error Definitions
+    description: |
+      Check error documentation in OpenAPI specs.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Count error responses
+      command: grep -cE "'4[0-9]{2}':|'5[0-9]{2}':" $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null
+        || echo '0'
+    - purpose: Check error schema definitions
+      command: grep -A10 'Error:\|ErrorResponse:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null
+    - purpose: Find error examples
+      command: grep -B5 -A10 "'4[0-9]{2}':" $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null | grep
+        -c 'example:' || echo '0'
+    expected_findings:
+    - Error response coverage
+    - Schema completeness
+  - id: '2'
+    name: Find Error Documentation
+    description: |
+      Locate error-specific documentation.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find error docs
+      command: find . -name '*error*' -type f 2>/dev/null | grep -E '\.(md|html|rst)$' | head -10
+    - purpose: Find troubleshooting docs
+      command: find . -name '*troubleshoot*' -o -name '*faq*' 2>/dev/null | head -10
+    - purpose: Search for error catalog
+      command: grep -rn 'error.*code\|error.*catalog\|error.*list' --include='*.md' . | head -20
+    expected_findings:
+    - Error documentation files
+    - Troubleshooting resources
+  - id: '3'
+    name: Evaluate Documentation Quality
+    description: |
+      Assess completeness of error documentation.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for error descriptions
+      command: grep -rn 'description.*error\|error.*description' --include='*.yaml' --include='*.md' .
+        | head -20
+    - purpose: Find remediation guidance
+      command: grep -rn 'resolve\|fix\|solution\|remedy' --include='*.md' . | grep -i error | head -20
+    - purpose: Check rate limit docs
+      command: grep -rn 'rate.*limit\|429\|throttl' --include='*.md' --include='*.yaml' . | head -10
+    expected_findings:
+    - Description coverage
+    - Remediation guidance
+  - id: '4'
+    name: Check Code-Doc Alignment
+    description: |
+      Verify documentation matches actual errors.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find error codes in code
+      command: grep -rEo 'errorCode.*"[A-Z_]+"\|error_code.*"[A-Z_]+"' --include='*.java' --include='*.ts'
+        . | head -20
+    - purpose: Find error codes in docs
+      command: grep -rEo '[A-Z]{2,}_[A-Z_]+' --include='*.md' . | grep -i err | sort -u | head -20
+    expected_findings:
+    - Code error codes
+    - Documented error codes
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Documentation Coverage
+    - Recommendations
+  confidence_guidance:
+    high: Documentation thoroughly reviewed
+    medium: Partial documentation coverage
+    low: Limited documentation found
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: api-documentation
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: errdoc-001
+  item: Error responses documented in OpenAPI
+  level: CRITICAL
+  verification: |
+    errors=$(grep -cE "'4[0-9]{2}':|'5[0-9]{2}':" $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null || echo '0'); if [ "$errors" -gt 0 ]; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+- id: errdoc-002
+  item: Error response examples provided
+  level: BLOCKING
+  verification: |
+    if grep -B5 -A10 "'4[0-9]{2}':" $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null | grep -q 'example:'; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+- id: errdoc-003
+  item: Error code catalog exists
+  level: WARNING
+  verification: |
+    if grep -rq 'error.*code\|error.*catalog' --include='*.md' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+- id: errdoc-004
+  item: Troubleshooting guide available
+  level: WARNING
+  verification: |
+    if find . -name '*troubleshoot*' -o -name '*faq*' 2>/dev/null | grep -q .; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - api-service
+    - platform
+    - developer-portal
+relationships:
+  commonly_combined:
+  - api-integration.api-contracts.openapi-swagger-completeness
+  - api-integration.api-contracts.example-coverage
+  - api-integration.error-handling.error-response-format

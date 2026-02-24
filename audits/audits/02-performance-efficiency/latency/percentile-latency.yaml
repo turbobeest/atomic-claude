@@ -1,0 +1,297 @@
+audit:
+  id: performance-efficiency.latency.percentile-latency
+  name: Percentile Latency Audit (P50/P95/P99)
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: latency
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines latency percentile distributions (P50, P95, P99,
+    P99.9) to understand the full spectrum of user experience. While
+    averages mask problems, percentiles reveal the true performance
+    characteristics. The audit analyzes histogram data, identifies
+    tail latency causes, and evaluates the consistency of performance
+    across the request population.
+  why_it_matters: |
+    As Jeff Dean noted in "The Tail at Scale," at large scale even rare
+    events happen constantly. If 1% of requests take 10x longer, and a
+    page load requires 100 backend calls, 63% of page loads will include
+    at least one slow request. Understanding and controlling tail latency
+    is essential for providing consistent user experience at scale.
+  when_to_run:
+  - When defining or reviewing SLOs
+  - After changes that could affect latency distribution
+  - When investigating inconsistent user experience reports
+  - During capacity planning and scaling decisions
+prerequisites:
+  required_artifacts:
+  - type: histogram_metrics
+    description: Latency histogram metrics (not just averages)
+  - type: sufficient_data
+    description: Enough traffic to calculate meaningful percentiles
+  access_requirements:
+  - Access to Prometheus/metrics system with histogram data
+  - Ability to query percentile calculations
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+    purpose: Calculate P50 (median) latency
+    threshold: < 100ms
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+    purpose: Calculate P95 latency
+    threshold: < 500ms
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+    purpose: Calculate P99 latency
+    threshold: < 1s
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.999, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+    purpose: Calculate P99.9 latency
+    threshold: < 5s
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  papers:
+  - id: tail-at-scale
+    title: The Tail at Scale - Jeff Dean, Luiz Barroso
+    url: https://research.google/pubs/pub40801/
+  guides:
+  - id: google-sre-latency
+    name: Google SRE - Latency SLIs
+    url: https://sre.google/sre-book/service-level-objectives/
+    offline_cache: true
+  - id: percentile-histograms
+    name: Prometheus Histograms and Summaries
+    url: https://prometheus.io/docs/practices/histograms/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: hey
+    purpose: Load test with percentile output
+    command: hey -n 10000 -c 100 https://api.example.com/endpoint
+  - tool: wrk
+    purpose: High-performance load testing
+    command: wrk -t4 -c100 -d60s --latency https://api.example.com/endpoint
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      # Compare P99 to P50 ratio
+      histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+      /
+      histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+    purpose: Calculate P99/P50 ratio to measure tail severity
+  - system: Prometheus
+    query: |
+      # Percentage of requests under SLO threshold
+      sum(rate(http_request_duration_seconds_bucket{le="0.5"}[5m]))
+      /
+      sum(rate(http_request_duration_seconds_count[5m])) * 100
+    purpose: Calculate percentage of requests meeting 500ms SLO
+signals:
+  critical:
+  - id: PCTL-CRIT-001
+    signal: P99 latency more than 100x P50 latency
+    evidence_threshold: P99/P50 > 100
+    explanation: |
+      Extreme tail latency variance indicates severe performance
+      outliers that create an inconsistent user experience. Some
+      users experience sub-second responses while others wait
+      minutes. This often indicates resource exhaustion, deadlocks,
+      or pathological cases.
+    remediation: Investigate outlier traces; implement request hedging; add circuit breakers
+  - id: PCTL-CRIT-002
+    signal: No histogram metrics configured, only averages
+    evidence_indicators:
+    - Only _sum and _count metrics present
+    - No _bucket metrics for latency
+    explanation: |
+      Average latency hides tail behavior. A system with 50% of
+      requests at 10ms and 50% at 1000ms has an "acceptable" 505ms
+      average but terrible user experience for half the users.
+    remediation: Implement histogram metrics for all latency measurements
+  high:
+  - id: PCTL-HIGH-001
+    signal: P99 latency exceeds SLO while P50 is healthy
+    evidence_threshold: P99 > SLO AND P50 < SLO/10
+    explanation: |
+      This pattern indicates that most requests are fast, but a
+      significant minority experiences severe delays. This is the
+      classic tail latency problem.
+    remediation: Profile slow request traces; implement caching or request hedging
+  - id: PCTL-HIGH-002
+    signal: P95 to P99 latency increase exceeds 5x
+    evidence_threshold: P99/P95 > 5
+    explanation: |
+      A sharp increase between P95 and P99 indicates that the worst
+      5% of requests encounter severe issues, likely resource
+      contention or external dependency failures.
+    remediation: Investigate causes of worst-case latency; consider timeout tuning
+  medium:
+  - id: PCTL-MED-001
+    signal: Histogram bucket boundaries not optimized for actual latency range
+    remediation: Adjust histogram buckets to provide better resolution in the expected range
+  - id: PCTL-MED-002
+    signal: No P99.9 monitoring for high-traffic services
+    remediation: Add P99.9 tracking for services with >1000 requests/minute
+  low:
+  - id: PCTL-LOW-001
+    signal: Percentile dashboards not configured
+  positive:
+  - id: PCTL-POS-001
+    signal: P99/P50 ratio consistently under 5x
+  - id: PCTL-POS-002
+    signal: Percentile-based SLOs defined and tracked
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Verify Histogram Configuration
+    description: |
+      Confirm that latency metrics are captured as histograms with
+      appropriate bucket boundaries.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for histogram metrics
+      command: |
+        curl -s http://prometheus:9090/api/v1/label/__name__/values | \
+          jq '.data[] | select(contains("bucket") and contains("duration"))'
+    - purpose: Verify bucket boundaries
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=http_request_duration_seconds_bucket' | \
+          jq '.data.result[0].metric.le' | sort -n | uniq
+    expected_findings:
+    - Histogram metrics present
+    - Bucket boundaries appropriate for workload
+  - id: '2'
+    name: Calculate Percentile Distribution
+    description: |
+      Query all relevant percentiles (P50, P90, P95, P99, P99.9) to
+      understand the full latency distribution.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Calculate P50
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.50,sum(rate(http_request_duration_seconds_bucket[5m]))by(le))'
+    - purpose: Calculate P99
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(http_request_duration_seconds_bucket[5m]))by(le))'
+    expected_findings:
+    - P50, P95, P99, P99.9 values
+    - Ratios between percentiles
+  - id: '3'
+    name: Analyze Tail Latency Causes
+    description: |
+      Investigate the causes of tail latency by examining slow traces
+      and correlating with system events.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find slowest traces
+      command: |
+        curl -s 'http://jaeger:16686/api/traces?service=api&limit=50&minDuration=1s' | \
+          jq '.data[].spans[] | {operation: .operationName, duration: .duration}'
+    expected_findings:
+    - Common patterns in slow requests
+    - Root causes of tail latency
+  - id: '4'
+    name: Compare Against SLOs
+    description: |
+      Evaluate percentile-based SLOs and calculate the percentage of
+      requests meeting each threshold.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Calculate SLO compliance
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(http_request_duration_seconds_bucket{le="0.5"}[5m]))/sum(rate(http_request_duration_seconds_count[5m]))*100'
+    expected_findings:
+    - Percentage meeting each SLO threshold
+    - Error budget status
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Percentile Distribution Analysis
+    - Tail Latency Investigation
+    - SLO Compliance
+    - Recommendations
+  confidence_guidance:
+    high: Analysis based on >10,000 requests
+    medium: Analysis based on 1,000-10,000 requests
+    low: Analysis based on <1,000 requests
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: tail-at-scale
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime metrics and sufficient traffic
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: percentile-001
+  item: Histogram metrics configured for latency
+  level: CRITICAL
+  verification: |
+    curl -s http://prometheus:9090/api/v1/label/__name__/values | \
+      grep -q 'duration.*bucket' && echo PASS || echo FAIL
+  expected: PASS
+- id: percentile-002
+  item: P99/P50 ratio under 10x
+  level: BLOCKING
+  verification: |
+    P99=$(curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(http_request_duration_seconds_bucket[5m]))by(le))' | jq -r '.data.result[0].value[1]')
+    P50=$(curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.50,sum(rate(http_request_duration_seconds_bucket[5m]))by(le))' | jq -r '.data.result[0].value[1]')
+    echo "scale=2; $P99 / $P50 < 10" | bc
+  threshold: < 10
+- id: percentile-003
+  item: Percentile-based SLOs documented
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm SLOs specify percentile targets (e.g., P99 < 500ms)
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+relationships:
+  commonly_combined:
+  - performance-efficiency.latency.end-to-end-latency
+  - performance-efficiency.latency.api-response-time

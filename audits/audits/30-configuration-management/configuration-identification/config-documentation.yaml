@@ -1,0 +1,439 @@
+audit:
+  id: configuration-management.configuration-identification.config-documentation
+  name: Configuration Documentation Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: configuration-management
+  category_number: 30
+  subcategory: configuration-identification
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the documentation completeness and quality for
+    configuration items across the system. It evaluates:
+    - Configuration parameter descriptions and purpose
+    - Valid value ranges and defaults
+    - Dependencies between configurations
+    - Usage examples and common patterns
+    - Environment-specific documentation
+    - Schema documentation for complex configurations
+    - Changelog and version history documentation
+  why_it_matters: |
+    Configuration documentation is essential for safe operation:
+    - 12-factor app principles require clear configuration boundaries,
+      which documentation supports
+    - Undocumented configurations lead to misconfiguration incidents
+    - New team members cannot safely modify unknown configurations
+    - Incident response requires understanding configuration impact
+    - Compliance audits need documented configuration purposes
+    - Self-documenting configurations reduce operational burden
+    - Documentation enables automated validation and tooling
+  when_to_run:
+  - During onboarding or team transitions
+  - When adding new configurations
+  - During documentation reviews
+  - After configuration incidents
+  - Before major releases
+prerequisites:
+  required_artifacts:
+  - type: configuration_files
+    description: All configuration files
+  - type: documentation
+    description: Existing configuration documentation
+  - type: schemas
+    description: Configuration schemas if available
+  access_requirements:
+  - Read access to configuration repositories
+  - Access to documentation systems
+discovery:
+  code_patterns:
+  - pattern: '#\s*@description|#\s*Description:'
+    type: regex
+    scope: config
+    purpose: Detect inline documentation
+  - pattern: description:\s*['"]|desc:\s*['"]
+    type: regex
+    scope: config
+    purpose: Detect description fields in configs
+  - pattern: '(example|default|range|valid|required):'
+    type: regex
+    scope: config
+    purpose: Detect metadata documentation
+  - pattern: '\$schema|jsonschema|schema:'
+    type: regex
+    scope: config
+    purpose: Detect schema references
+  - pattern: '(type|enum|minimum|maximum|pattern):'
+    type: regex
+    scope: config
+    purpose: Detect schema validation rules
+  file_patterns:
+  - glob: '**/config*.md'
+    purpose: Configuration documentation files
+  - glob: '**/*.schema.json'
+    purpose: JSON schema files
+  - glob: '**/schemas/**'
+    purpose: Schema directories
+  - glob: '**/*.env.example'
+    purpose: Example environment files
+  - glob: '**/config.example.*'
+    purpose: Example configuration files
+knowledge_sources:
+  specifications:
+  - id: 12factor-config
+    name: '12-Factor App: Factor III - Config'
+    url: https://12factor.net/config
+    offline_cache: true
+    priority: required
+  - id: json-schema
+    name: JSON Schema
+    url: https://json-schema.org/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: openapi-spec
+    name: OpenAPI Specification
+    url: https://spec.openapis.org/oas/latest.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: ajv
+    purpose: JSON schema validation
+    offline_capable: true
+  - tool: yamllint
+    purpose: YAML validation with comments
+    offline_capable: true
+  scripts:
+  - id: config-doc-audit
+    language: bash
+    purpose: Audit configuration documentation
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Configuration Documentation Audit ==="
+      echo ""
+      echo "=== Documented Configurations ==="
+      grep -rl "description:" --include="*.yaml" --include="*.json" . 2>/dev/null | wc -l
+      echo ""
+      echo "=== Schema Files ==="
+      find . -name "*.schema.json" -o -name "*schema*.yaml" 2>/dev/null | head -20
+      echo ""
+      echo "=== Example Files ==="
+      find . -name "*.example*" -o -name "*example.*" 2>/dev/null | head -20
+      echo ""
+      echo "=== Undocumented Config Keys ==="
+      grep -rhoE "^[a-zA-Z_][a-zA-Z0-9_]*:" --include="*.yaml" . 2>/dev/null | \
+        sort | uniq | head -50
+signals:
+  critical:
+  - id: CDOC-CRIT-001
+    signal: Critical configurations completely undocumented
+    evidence_indicators:
+    - Production configs without descriptions
+    - Security settings undocumented
+    - No inline or external documentation
+    explanation: |
+      Critical configurations require documentation for safe operation.
+      Undocumented critical configs are prone to misconfiguration,
+      incorrect values, and incident-causing changes.
+    remediation: |
+      - Document all critical configuration parameters
+      - Add descriptions to production configurations
+      - Create runbooks for configuration changes
+      - Include documentation in config review checklist
+    cwe: CWE-1059
+  high:
+  - id: CDOC-HIGH-001
+    signal: No example configurations provided
+    evidence_indicators:
+    - No .env.example or config.example files
+    - No sample configuration in documentation
+    - New users must guess at valid values
+    explanation: |
+      Example configurations demonstrate proper usage and provide
+      starting points for new environments. Without examples,
+      users make assumptions that may be incorrect.
+    remediation: |
+      - Create example files for all configuration types
+      - Maintain .env.example with documented variables
+      - Include examples in configuration documentation
+      - Keep examples updated with configuration changes
+  - id: CDOC-HIGH-002
+    signal: Valid value ranges not documented
+    evidence_indicators:
+    - Numeric configs without min/max
+    - Enum configs without valid options
+    - No format specification for strings
+    explanation: |
+      Value constraints prevent misconfiguration. Without documented
+      ranges, invalid values may be set causing runtime failures
+      or security vulnerabilities.
+    remediation: |
+      - Document valid ranges for all numeric configs
+      - List valid options for enum-style configs
+      - Specify format requirements for strings
+      - Implement schema validation
+  - id: CDOC-HIGH-003
+    signal: Configuration dependencies undocumented
+    evidence_indicators:
+    - No relationship documentation between configs
+    - Dependent configurations not cross-referenced
+    - Configuration order requirements unknown
+    explanation: |
+      Configuration dependencies affect change impact and proper
+      sequencing. Undocumented dependencies lead to partial changes
+      that leave systems in inconsistent states.
+    remediation: |
+      - Document configuration dependencies
+      - Cross-reference related configurations
+      - Specify required configuration order
+      - Include dependency diagram if complex
+  medium:
+  - id: CDOC-MED-001
+    signal: No configuration schemas defined
+    evidence_indicators:
+    - No JSON Schema or equivalent
+    - Configuration validation is manual
+    - No type information for config values
+    explanation: |
+      Schemas enable automated validation and documentation generation.
+      Without schemas, validation depends on runtime discovery of
+      invalid values, often causing incidents.
+    remediation: |
+      - Define JSON Schema for configuration files
+      - Implement schema validation in CI/CD
+      - Generate documentation from schemas
+      - Include schema references in config files
+  - id: CDOC-MED-002
+    signal: Default values not documented
+    evidence_indicators:
+    - Defaults embedded in code only
+    - No default column in config docs
+    - Behavior when unset unclear
+    explanation: |
+      Default value documentation helps understand behavior when
+      configurations are omitted. Without it, users may over-specify
+      or make incorrect assumptions about defaults.
+    remediation: |
+      - Document default values for all configs
+      - Indicate required vs optional settings
+      - Describe behavior when value is unset
+      - Keep defaults documented near definitions
+  - id: CDOC-MED-003
+    signal: Configuration changelog missing
+    evidence_indicators:
+    - No history of configuration changes
+    - Breaking changes not documented
+    - Version-specific configs not noted
+    explanation: |
+      Configuration changelogs help track changes across versions
+      and assist with upgrades. Without them, users don't know
+      when configurations were added, changed, or deprecated.
+    remediation: |
+      - Maintain configuration changelog
+      - Document breaking configuration changes
+      - Note version when configs added/changed
+      - Include migration guides for changes
+  low:
+  - id: CDOC-LOW-001
+    signal: Documentation format inconsistent
+    evidence_indicators:
+    - Mix of inline and external documentation
+    - Different description formats
+    - Inconsistent metadata structure
+    explanation: |
+      Consistent documentation format improves readability and
+      enables automated processing. Inconsistency increases
+      cognitive load and maintenance burden.
+    remediation: |
+      - Establish documentation format standard
+      - Migrate existing docs to standard
+      - Add documentation templates
+      - Validate format in CI/CD
+  positive:
+  - id: CDOC-POS-001
+    signal: Comprehensive configuration documentation
+    evidence_indicators:
+    - All configs have descriptions
+    - Examples and defaults documented
+    - Schema validation implemented
+  - id: CDOC-POS-002
+    signal: Self-documenting configuration format
+    evidence_indicators:
+    - Inline documentation in config files
+    - Schema references present
+    - IDE support enabled
+procedure:
+  context:
+    cognitive_mode: methodical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Documentation Coverage Assessment
+    description: |
+      Assess documentation coverage across configuration files.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Count configs with descriptions
+      command: |
+        grep -rl "description:" --include="*.yaml" --include="*.json" \
+          . 2>/dev/null | wc -l
+    - purpose: Find configs without descriptions
+      command: |
+        find . -name "*.yaml" -path "*config*" -not -path "*/node_modules/*" \
+          -exec grep -L "description" {} \; 2>/dev/null | head -30
+    - purpose: Count environment variables
+      command: |
+        grep -rhoE "^[A-Z_]+=" .env* 2>/dev/null | wc -l
+    expected_findings:
+    - Documentation coverage percentage
+    - Undocumented configurations
+    - Environment variable count
+  - id: '2'
+    name: Example and Schema Review
+    description: |
+      Review example configurations and schema definitions.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find example files
+      command: |
+        find . \( -name "*.example*" -o -name "*example.*" -o -name "*.sample*" \) \
+          -not -path "*/node_modules/*" 2>/dev/null | head -30
+    - purpose: Find schema files
+      command: |
+        find . \( -name "*.schema.json" -o -name "*schema*.yaml" \) \
+          -not -path "*/node_modules/*" 2>/dev/null | head -20
+    - purpose: Check for JSON Schema references
+      command: |
+        grep -rn "\\$schema" --include="*.json" --include="*.yaml" \
+          . 2>/dev/null | head -20
+    expected_findings:
+    - Example file inventory
+    - Schema coverage
+    - Schema reference usage
+  - id: '3'
+    name: Value Documentation Analysis
+    description: |
+      Analyze documentation of valid values, defaults, and constraints.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find default value documentation
+      command: |
+        grep -rn "default:" --include="*.yaml" --include="*.json" \
+          . 2>/dev/null | head -30
+    - purpose: Find constraint documentation
+      command: |
+        grep -rn "(minimum|maximum|enum|pattern|required):" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | head -30
+    expected_findings:
+    - Default documentation coverage
+    - Constraint definitions
+    - Validation rules
+  - id: '4'
+    name: External Documentation Review
+    description: |
+      Review external configuration documentation files.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find configuration documentation
+      command: |
+        find . -name "*config*.md" -o -name "*configuration*.md" \
+          -not -path "*/node_modules/*" 2>/dev/null | head -20
+    - purpose: Search for config sections in READMEs
+      command: |
+        grep -l -i "configuration\|environment variable" README* \
+          2>/dev/null | head -10
+    expected_findings:
+    - External documentation files
+    - README configuration sections
+    - Documentation completeness
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Documentation Coverage
+    - Schema and Validation
+    - Recommendations
+  - type: documentation_gaps
+    format: table
+    description: Undocumented configurations requiring documentation
+  confidence_guidance:
+    high: Documentation directly observed and assessed
+    medium: Documentation presence detected but quality not assessed
+    low: Documentation status requires manual review
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: 12factor-config
+      priority: required
+    - source_id: json-schema
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: cdoc-001
+  item: Critical configurations documented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify all production configs have descriptions
+  expected: Confirmed by reviewer
+- id: cdoc-002
+  item: Example configurations exist
+  level: BLOCKING
+  verification: |
+    find . \( -name "*.example*" -o -name ".env.example" \) 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cdoc-003
+  item: Configuration schema defined
+  level: WARNING
+  verification: |
+    find . -name "*.schema.json" 2>/dev/null | wc -l | \
+      xargs -I{} test {} -gt 0 && echo "PASS" || echo "WARN"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: 12-Factor App
+    controls:
+    - Factor III
+  - framework: CMMI
+    controls:
+    - CM SP 1.1
+  - framework: ISO 27001
+    controls:
+    - A.8.9
+relationships:
+  commonly_combined:
+  - configuration-management.configuration-identification.config-discovery
+  - configuration-management.configuration-verification.config-validation

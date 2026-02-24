@@ -1,0 +1,389 @@
+# ============================================================
+# AUDIT: Read-Write Separation
+# ============================================================
+
+audit:
+  id: "data-state-management.data-access-patterns.read-write-separation"
+  name: "Read-Write Separation Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-access-patterns"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "requires_discovery"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "architecture"
+
+  default_profiles:
+    - "full"
+    - "scalability"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the implementation of read-write separation patterns including
+    CQRS (Command Query Responsibility Segregation), read replicas usage,
+    and query routing. Analyzes whether reads and writes are appropriately
+    directed to optimize for their different characteristics.
+
+  why_it_matters: |
+    Read and write operations have fundamentally different characteristics.
+    Reads can be scaled horizontally, cached, and served from replicas.
+    Writes must go to primary and ensure consistency. Mixing them on
+    the same path limits scalability and can cause read operations to
+    impact write performance.
+
+  when_to_run:
+    - "Scalability assessments"
+    - "Architecture reviews"
+    - "Before high-read-volume features"
+    - "Performance optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with data access patterns"
+    - type: "architecture_docs"
+      description: "Database topology documentation"
+
+  access_requirements:
+    - "Read access to application source code"
+    - "Understanding of database topology"
+
+discovery:
+  code_patterns:
+    - pattern: "readReplica|replica|secondary|slave"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect read replica configuration"
+
+    - pattern: "Command|Query|Handler|ReadModel|WriteModel"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect CQRS patterns"
+
+    - pattern: "useReadConnection|routeToReplica|readOnly"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect read routing"
+
+  file_patterns:
+    - glob: "**/commands/**"
+      purpose: "CQRS command handlers"
+    - glob: "**/queries/**"
+      purpose: "CQRS query handlers"
+    - glob: "**/read-models/**"
+      purpose: "Read model definitions"
+
+knowledge_sources:
+  guides:
+    - id: "cqrs-pattern"
+      name: "CQRS Pattern"
+      url: "https://docs.microsoft.com/en-us/azure/architecture/patterns/cqrs"
+      offline_cache: true
+
+    - id: "read-replicas"
+      name: "PostgreSQL Read Replicas"
+      url: "https://www.postgresql.org/docs/current/warm-standby.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "cqrs-journey"
+      title: "CQRS Journey"
+      type: "book"
+      reference: "Microsoft Patterns & Practices"
+
+tooling:
+  static_analysis:
+    - tool: "cqrs-analyzer"
+      purpose: "Detect CQRS pattern implementation"
+      offline_capable: true
+
+  scripts:
+    - id: "read-write-scan"
+      language: "bash"
+      purpose: "Analyze read-write separation"
+      source: "inline"
+      code: |
+        echo "=== Read-Write Separation Analysis ==="
+        echo "--- CQRS patterns ---"
+        grep -rn "Command\|Query\|Handler" \
+          --include="*.ts" --include="*.java" . 2>/dev/null | \
+          grep -v node_modules | head -30
+
+        echo "--- Read replica configuration ---"
+        grep -rn "replica\|secondary\|slave\|readOnly" \
+          --include="*.yaml" --include="*.json" --include="*.ts" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+        echo "--- Read routing ---"
+        grep -rn "useRead\|readConnection\|routeToReplica" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+signals:
+  critical:
+    - id: "RWS-CRIT-001"
+      signal: "Heavy reads blocking write operations"
+      evidence_pattern: "Analytical queries on OLTP primary database"
+      explanation: |
+        Long-running read queries (reports, analytics) can lock rows and
+        block write transactions on the primary database. This causes
+        write latency spikes and potential timeouts.
+      remediation: "Route heavy reads to read replicas or dedicated analytics database"
+
+    - id: "RWS-CRIT-002"
+      signal: "Writes to read replica"
+      evidence_pattern: "INSERT/UPDATE operations sent to replica connection"
+      explanation: |
+        Read replicas cannot accept writes. Attempting to write to a
+        replica causes errors. Connection routing must ensure writes
+        always go to primary.
+      remediation: "Implement proper routing ensuring writes only go to primary"
+
+  high:
+    - id: "RWS-HIGH-001"
+      signal: "No read replica utilization"
+      evidence_pattern: "All queries go to primary despite replicas existing"
+      explanation: |
+        Read replicas provide read scaling capacity. Not using them
+        wastes infrastructure and overloads the primary with reads
+        that could be offloaded.
+      remediation: "Route appropriate reads to replicas"
+
+    - id: "RWS-HIGH-002"
+      signal: "Replication lag not considered in reads"
+      evidence_pattern: "Reading from replica immediately after write"
+      explanation: |
+        Read replicas have replication lag. Reading from replica
+        immediately after writing to primary may return stale data.
+        Critical reads after writes should go to primary.
+      remediation: "Use primary for read-after-write consistency; accept lag for other reads"
+
+    - id: "RWS-HIGH-003"
+      signal: "Complex read models not separated from write models"
+      evidence_pattern: "Expensive joins in transaction-heavy endpoints"
+      explanation: |
+        Complex read patterns (multiple joins, aggregations) mixed with
+        write operations create contention. CQRS separates these concerns
+        with optimized read models.
+      remediation: "Create denormalized read models for complex queries"
+
+  medium:
+    - id: "RWS-MED-001"
+      signal: "No explicit read/write transaction modes"
+      evidence_pattern: "All transactions default to read-write"
+      remediation: "Use read-only transactions for queries (enables replica routing)"
+
+    - id: "RWS-MED-002"
+      signal: "Inconsistent routing across application"
+      evidence_pattern: "Some reads to replica, similar reads to primary"
+      remediation: "Establish consistent read routing patterns"
+
+    - id: "RWS-MED-003"
+      signal: "No monitoring of replica lag"
+      evidence_pattern: "Replication lag not visible in monitoring"
+      remediation: "Monitor and alert on replication lag"
+
+  low:
+    - id: "RWS-LOW-001"
+      signal: "Read-write separation not documented"
+      evidence_pattern: "No documentation of routing decisions"
+      remediation: "Document read-write routing strategy"
+
+    - id: "RWS-LOW-002"
+      signal: "No ability to redirect reads in emergencies"
+      evidence_pattern: "Hardcoded connection routing"
+      remediation: "Make routing configurable for operational flexibility"
+
+  positive:
+    - id: "RWS-POS-001"
+      signal: "CQRS implemented with separate read/write models"
+      evidence_pattern: "Command and Query handlers with distinct models"
+
+    - id: "RWS-POS-002"
+      signal: "Read replica routing implemented"
+      evidence_pattern: "Reads automatically routed to replicas"
+
+    - id: "RWS-POS-003"
+      signal: "Read-after-write consistency handled"
+      evidence_pattern: "Primary used for reads immediately after writes"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Database Topology"
+      description: |
+        Map the read/write database configuration.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find database connections"
+          command: |
+            grep -rn "DATABASE_URL\|DB_HOST\|primary\|replica" \
+              --include="*.env*" --include="*.yaml" --include="*.json" . 2>/dev/null | head -30
+        - purpose: "Find connection configuration"
+          command: |
+            grep -rn "host.*=\|replication\|cluster" \
+              --include="*.yaml" --include="*.json" --include="*.ts" . 2>/dev/null | \
+              grep -i "db\|database\|postgres\|mysql" | head -20
+
+      expected_findings:
+        - "Database topology"
+        - "Replica configuration"
+
+    - id: "2"
+      name: "Analyze CQRS Implementation"
+      description: |
+        Review command/query separation patterns.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find command handlers"
+          command: |
+            grep -rn "CommandHandler\|@Command\|execute.*command" \
+              --include="*.ts" --include="*.java" . 2>/dev/null | \
+              grep -v node_modules | head -20
+        - purpose: "Find query handlers"
+          command: |
+            grep -rn "QueryHandler\|@Query\|execute.*query" \
+              --include="*.ts" --include="*.java" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "CQRS implementation status"
+        - "Handler patterns"
+
+    - id: "3"
+      name: "Review Read Routing"
+      description: |
+        Check how reads are routed to replicas.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find read routing"
+          command: |
+            grep -rn "readOnly\|useRead\|replica\|secondary" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+        - purpose: "Find transaction modes"
+          command: |
+            grep -rn "transaction.*readOnly\|@Transactional.*readOnly" \
+              --include="*.ts" --include="*.java" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "Read routing implementation"
+        - "Transaction mode usage"
+
+    - id: "4"
+      name: "Assess Consistency Handling"
+      description: |
+        Review how read-after-write consistency is handled.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find write-then-read patterns"
+          command: |
+            grep -rn "await.*save.*\n.*await.*find\|.save().*\n.*\.find(" \
+              --include="*.ts" --include="*.java" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "Read-after-write patterns"
+        - "Consistency handling"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "topology_analysis"
+        - "cqrs_assessment"
+        - "routing_analysis"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Database Topology"
+        - "CQRS Implementation"
+        - "Routing Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of missing separation with replicas available"
+    medium: "Some separation but inconsistent"
+    low: "Requires workload analysis to determine benefit"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "cqrs-pattern"
+        priority: "required"
+      - source_id: "read-replicas"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires architectural analysis"
+    full:
+      included: true
+      priority: 1
+    scalability:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "rws-001"
+    item: "Read replicas utilized if available"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "replica\|secondary\|readOnly" --include="*.ts" --include="*.yaml" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "REVIEW"
+    expected: "PASS"
+
+  - id: "rws-002"
+    item: "Heavy reads routed to replicas"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify analytical/reporting queries use read replicas"
+    expected: "Confirmed by reviewer"
+
+  - id: "rws-003"
+    item: "Read-after-write consistency handled"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify critical reads after writes go to primary"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["scalable", "data-intensive"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Scalability", "Performance Efficiency"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-access-patterns.caching-strategy"
+    - "data-state-management.storage-strategy.database-technology-choice"
+    - "scalability-capacity.horizontal-scaling.database-scaling"

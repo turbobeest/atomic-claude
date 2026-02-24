@@ -1,0 +1,326 @@
+audit:
+  id: testing-quality-assurance.integration-testing.database-integration-test
+  name: Database Integration Test
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: testing-quality-assurance
+  category_number: 26
+  subcategory: integration-testing
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: testing
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates integration testing of database operations including
+    ORM mappings, raw queries, transactions, migrations, and data
+    integrity constraints. Verifies tests run against real database
+    instances to catch issues that mocked repositories miss.
+  why_it_matters: |
+    Database bugs are among the most expensive to fix in production.
+    ORM mappings, query performance, transaction isolation, and
+    constraint violations behave differently with real databases than
+    mocks. Without database integration tests, data corruption and
+    integrity issues go undetected until production.
+  when_to_run:
+  - After schema changes
+  - Migration deployment
+  - ORM/query modifications
+  - Pre-release validation
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Data layer code with tests
+  - type: database_schema
+    description: Database schema and migrations
+  access_requirements:
+  - Source code repository access
+  - Test database instance
+  - Migration scripts access
+discovery:
+  file_patterns:
+  - glob: '**/db/**/*.test.*'
+    purpose: Database test files
+  - glob: '**/repository/**/*.test.*'
+    purpose: Repository tests
+  - glob: '**/migrations/**'
+    purpose: Migration files
+  code_patterns:
+  - pattern: 'testcontainers|pg-mem|sqlite|:memory:'
+    type: regex
+    scope: test
+    purpose: Test database infrastructure
+  - pattern: beforeAll.*connect|beforeEach.*truncate
+    type: regex
+    scope: test
+    purpose: Database test setup
+  - pattern: transaction|commit|rollback
+    type: regex
+    scope: test
+    purpose: Transaction testing
+knowledge_sources:
+  guides:
+  - id: db-testing
+    name: Database Testing Best Practices
+    url: https://www.testcontainers.org/test_framework_integration/
+    offline_cache: true
+  - id: db-integration
+    name: Database Integration Testing
+    url: https://www.baeldung.com/spring-boot-testcontainers-integration-test
+    offline_cache: true
+  learning_resources:
+  - id: testcontainers
+    title: Testcontainers Documentation
+    type: documentation
+    reference: https://www.testcontainers.org/
+tooling:
+  infrastructure_tools:
+  - tool: Testcontainers
+    purpose: Docker-based test databases
+    offline_capable: false
+  - tool: pg-mem
+    purpose: In-memory PostgreSQL
+    offline_capable: true
+  - tool: 'sqlite :memory:'
+    purpose: In-memory SQLite
+    offline_capable: true
+  scripts:
+  - id: db-test-check
+    language: bash
+    purpose: Analyze database integration tests
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Database Integration Test Analysis ==="
+
+      echo "Database test files:"
+      find . \\( -path '*db*' -o -path '*repository*' -o -path '*model*' \\) -name '*.test.*' 2>/dev/null | wc -l
+
+      echo ""
+      echo "Testcontainers usage:"
+      grep -r 'testcontainers\\|GenericContainer\\|PostgreSQLContainer' --include='*.js' --include='*.ts' --include='*.java' . 2>/dev/null | wc -l
+
+      echo ""
+      echo "Transaction tests:"
+      grep -r -c 'transaction\\|commit\\|rollback' --include='*.test.*' . 2>/dev/null | awk -F: '{sum+=$2} END {print sum}'
+
+      echo ""
+      echo "Migration files:"
+      find . -path '*migration*' -name '*.{sql,js,ts,py}' 2>/dev/null | wc -l
+signals:
+  critical:
+  - id: DBTEST-CRIT-001
+    signal: No database integration tests exist
+    evidence_pattern: Only mocked repository tests, no real DB tests
+    explanation: |
+      Without real database tests, ORM mappings, query behavior,
+      and constraint enforcement are untested. Production issues
+      like incorrect joins, missing indexes, and constraint violations
+      will only be discovered with live data.
+    remediation: |
+      Add database integration tests:
+      1. Set up test database (Testcontainers recommended)
+      2. Test CRUD operations against real DB
+      3. Verify constraint enforcement
+      4. Test complex queries with real data
+      5. Verify migration scripts work
+  - id: DBTEST-CRIT-002
+    signal: Migration scripts not tested
+    evidence_pattern: Migrations exist but no migration tests
+    explanation: |
+      Untested migrations can corrupt production data. Rollback
+      scripts may not work when needed. Data transformations may
+      lose information or violate constraints.
+    remediation: |
+      Test migrations:
+      - Verify forward migration succeeds
+      - Verify rollback restores state
+      - Test with production-like data volumes
+      - Validate data transformations
+  high:
+  - id: DBTEST-HIGH-001
+    signal: Transaction behavior untested
+    evidence_pattern: No tests for transaction isolation or rollback
+    explanation: |
+      Transaction bugs cause data inconsistencies: partial updates,
+      race conditions, and orphaned records. These are particularly
+      hard to diagnose in production.
+    remediation: |
+      Test transaction scenarios:
+      - Successful commit
+      - Rollback on error
+      - Nested transactions (if used)
+      - Concurrent transaction isolation
+  - id: DBTEST-HIGH-002
+    signal: Complex queries untested
+    evidence_pattern: JOIN queries or aggregations without tests
+    explanation: |
+      Complex queries fail in subtle ways: wrong join types,
+      missing GROUP BY, incorrect aggregation. These produce
+      wrong data rather than errors, making bugs hard to detect.
+    remediation: |
+      Test complex queries with known data:
+      - Verify JOIN results match expected
+      - Test aggregation calculations
+      - Test pagination correctness
+      - Verify NULL handling
+  medium:
+  - id: DBTEST-MED-001
+    signal: Test database not production-like
+    evidence_pattern: Using SQLite when production is PostgreSQL
+    remediation: Use same database engine as production (Testcontainers)
+  - id: DBTEST-MED-002
+    signal: Test data setup is fragile
+    evidence_pattern: Hard-coded test data without factories
+    remediation: Use factories or builders for test data generation
+  low:
+  - id: DBTEST-LOW-001
+    signal: Database tests slow due to setup
+    evidence_pattern: Test suite takes >5 min due to DB setup
+  positive:
+  - id: DBTEST-POS-001
+    signal: Comprehensive database integration coverage
+    evidence_pattern: All repositories tested against real DB
+  - id: DBTEST-POS-002
+    signal: Using Testcontainers for production parity
+    evidence_pattern: Test DB matches production engine
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify data layer components
+    description: |
+      Map repositories, models, and database access patterns.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find repositories
+      command: find . -name '*repository*' -o -name '*Repository*' 2>/dev/null | head -20
+    - purpose: Find ORM models
+      command: grep -r -l '@Entity\|Model\|Schema' --include='*.{js,ts,java,py}' . 2>/dev/null | head
+        -20
+    expected_findings:
+    - Data layer inventory
+    - Database access patterns
+  - id: '2'
+    name: Inventory database tests
+    description: |
+      Count and analyze existing database integration tests.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find DB tests
+      command: find . -path '*db*' -name '*.test.*' -o -path '*repository*' -name '*.test.*' 2>/dev/null
+        | wc -l
+    - purpose: Check for real DB usage
+      command: grep -r 'testcontainers\|createConnection\|connect' --include='*.test.*' . 2>/dev/null
+        | head -20
+    expected_findings:
+    - DB test count
+    - Real DB vs mock usage
+  - id: '3'
+    name: Verify migration testing
+    description: |
+      Check if migration scripts are tested.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find migration tests
+      command: find . -path '*migration*' -name '*.test.*' 2>/dev/null
+    - purpose: Count migrations
+      command: find . -path '*migration*' -name '*.sql' 2>/dev/null | wc -l
+    expected_findings:
+    - Migration test presence
+    - Migration count
+  - id: '4'
+    name: Assess test infrastructure
+    description: |
+      Evaluate database test setup and production parity.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check test DB setup
+      command: grep -r -E '(beforeAll|setUp).*database\|(PostgreSQL|MySQL|Mongo)Container' --include='*.test.*'
+        . 2>/dev/null | head -10
+    expected_findings:
+    - Test DB infrastructure
+    - Production parity status
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: db_test_matrix
+    format: table
+    sections:
+    - Repository Coverage
+    - Migration Testing
+    - Transaction Testing
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Database Test Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Full analysis with test execution
+    medium: Static analysis of test files
+    low: Pattern matching only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: db-testing
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis
+    production:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 6
+closeout_checklist:
+- id: dbtest-001
+  item: Data layer components mapped
+  level: CRITICAL
+  verification: manual
+  verification_notes: Document all repositories and models
+  expected: Confirmed by reviewer
+- id: dbtest-002
+  item: Database tests inventoried
+  level: BLOCKING
+  verification: manual
+  verification_notes: Count real DB tests vs mocked
+  expected: Confirmed by reviewer
+- id: dbtest-003
+  item: Migration testing verified
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm migrations are tested
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC7.2
+relationships:
+  commonly_combined:
+  - testing-quality-assurance.integration-testing.integration-test-coverage
+  - testing-quality-assurance.test-data-management.test-data-strategy
+  - data-integrity-management.data-validation.data-integrity

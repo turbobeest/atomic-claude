@@ -1,0 +1,383 @@
+audit:
+  id: security-trust.secrets-management.environment-variable-security
+  name: Environment Variable Security Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: secrets-management
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the security of environment variable usage for storing
+    and passing secrets. While commonly used, environment variables have significant
+    security limitations including visibility in process listings, logging exposure,
+    container dumps, and child process inheritance. This audit evaluates whether
+    environment variables are used appropriately and identifies migration paths to
+    more secure alternatives.
+  why_it_matters: |
+    OWASP explicitly warns that "environment variables are generally accessible to
+    all processes and may be included in logs or system dumps. Using environment
+    variables is therefore not recommended unless other methods are not possible."
+    CWE-526 classifies cleartext storage in environment variables as a vulnerability.
+    The Codecov breach demonstrated real-world exploitation where secrets in
+    environment variables were exfiltrated from thousands of build pipelines.
+  when_to_run:
+  - During container security reviews
+  - When auditing CI/CD pipelines
+  - During secrets management assessments
+  - Before deploying to production environments
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application code and deployment configurations
+  - type: container_config
+    description: Dockerfiles, docker-compose, Kubernetes manifests
+  access_requirements:
+  - Read access to source code
+  - Access to container configurations
+  - View CI/CD pipeline definitions
+discovery:
+  code_patterns:
+  - pattern: process\.env\.|os\.environ|ENV\[|getenv\(
+    type: regex
+    scope: source
+    purpose: Environment variable access in code
+  - pattern: (?i)(password|secret|key|token|credential).*process\.env
+    type: regex
+    scope: source
+    purpose: Secrets accessed via environment variables
+  - pattern: 'envFrom:|env:|\-\s*name:.*value:'
+    type: regex
+    scope: config
+    purpose: Kubernetes environment configuration
+  - pattern: ARG.*SECRET|ENV.*PASSWORD|ENV.*KEY
+    type: regex
+    scope: config
+    purpose: Docker ARG/ENV with secrets
+  file_patterns:
+  - glob: '**/*.{js,ts,py,go,java,rb}'
+    purpose: Source code files
+  - glob: '**/Dockerfile*'
+    purpose: Docker build files
+  - glob: '**/docker-compose*.{yaml,yml}'
+    purpose: Docker Compose files
+  - glob: '**/*.yaml'
+    purpose: Kubernetes and general YAML config
+knowledge_sources:
+  specifications:
+  - id: cwe-526
+    name: 'CWE-526: Cleartext Storage in Environment Variable'
+    url: https://cwe.mitre.org/data/definitions/526.html
+    offline_cache: true
+    priority: required
+  - id: owasp-secrets-management
+    name: OWASP Secrets Management Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: cyberark-env-vars
+    name: CyberArk - Environment Variables Don't Keep Secrets
+    url: https://developer.cyberark.com/blog/environment-variables-dont-keep-secrets-best-practices/
+    offline_cache: true
+  - id: k8s-secrets-cheatsheet
+    name: OWASP Kubernetes Security Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Kubernetes_Security_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect environment variable patterns with secrets
+    offline_capable: true
+  - tool: trivy
+    purpose: Container security scanning
+    offline_capable: true
+  scripts:
+  - id: env-var-scan
+    language: bash
+    purpose: Scan for sensitive environment variable usage
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Scanning for Environment Variable Security Issues ==="
+
+      # Find secrets in env vars
+      grep -rn --include="*.js" --include="*.ts" 'process\.env\.(.*PASSWORD|.*SECRET|.*KEY|.*TOKEN)' . 2>/dev/null
+
+      # Check Dockerfiles for ENV secrets
+      grep -rn 'ENV.*PASSWORD\|ENV.*SECRET\|ENV.*KEY' Dockerfile* 2>/dev/null
+
+      # Check Kubernetes env configuration
+      grep -rn -A2 'name:.*PASSWORD\|name:.*SECRET\|name:.*KEY' . 2>/dev/null | grep -v secretKeyRef
+signals:
+  critical:
+  - id: ENV-CRIT-001
+    signal: Secrets passed as Docker build ARG
+    evidence_pattern: ARG.*SECRET|ARG.*PASSWORD|ARG.*KEY
+    explanation: |
+      Docker build ARGs are stored in image layers and can be extracted.
+      Anyone with image access can retrieve the secrets. The secret
+      persists in the image even if ARG is later unset. CWE-526.
+    remediation: Use multi-stage builds, BuildKit secrets, or post-build injection
+    cwe: CWE-526
+  - id: ENV-CRIT-002
+    signal: Secrets hardcoded in docker-compose environment
+    evidence_pattern: environment:.*PASSWORD.*=|environment:.*SECRET.*=
+    explanation: |
+      Secrets defined directly in docker-compose files are stored in
+      version control and visible to anyone with file access. CWE-526.
+    remediation: Use docker-compose secrets, external .env file, or secrets manager
+    cwe: CWE-526
+  high:
+  - id: ENV-HIGH-001
+    signal: Environment variables for high-sensitivity secrets
+    evidence_pattern: process\.env\.(.*PASSWORD|.*PRIVATE_KEY|.*SECRET_KEY)
+    explanation: |
+      High-sensitivity secrets like database passwords and private keys
+      should use more secure mechanisms than environment variables.
+      Environment variables are visible in /proc, logs, and dumps. CWE-526.
+    remediation: Use secrets manager with sidecar injection or mounted files
+    cwe: CWE-526
+  - id: ENV-HIGH-002
+    signal: Environment variables logged or printed
+    evidence_pattern: console\.log.*process\.env|print.*os\.environ|log.*getenv
+    explanation: |
+      Logging environment variables exposes secrets in log files which
+      are often stored insecurely and widely accessible. CWE-532.
+    remediation: Never log environment variables; implement secret masking
+    cwe: CWE-532
+  - id: ENV-HIGH-003
+    signal: Kubernetes env values without secretKeyRef
+    evidence_pattern: env:.*name:.*value:.*(?!secretKeyRef)
+    explanation: |
+      Using plain 'value:' for secrets in Kubernetes exposes them in
+      pod specs, kubectl describe output, and etcd. CWE-526.
+    remediation: Use secretKeyRef to reference Kubernetes Secrets
+    cwe: CWE-526
+  medium:
+  - id: ENV-MED-001
+    signal: Child process inherits sensitive environment
+    evidence_pattern: spawn\(|exec\(|fork\(
+    explanation: |
+      Child processes inherit parent environment variables. Secrets
+      in the parent environment become accessible to all child
+      processes, expanding the attack surface.
+    remediation: Filter environment when spawning child processes
+  - id: ENV-MED-002
+    signal: phpinfo() or debug endpoints can expose environment
+    evidence_pattern: phpinfo\(\)|debug.*env|/debug|__debug__
+    explanation: |
+      Debug endpoints and functions like phpinfo() display all
+      environment variables, exposing secrets. CWE-526.
+    remediation: Disable debug endpoints in production
+    cwe: CWE-526
+  - id: ENV-MED-003
+    signal: Environment variables in container orchestration logs
+    explanation: |
+      Container orchestration systems may log environment variables
+      during pod creation, failures, or debugging. This creates
+      unintended secret exposure paths.
+    remediation: Use mounted secrets or sidecar patterns instead of environment injection
+  positive:
+  - id: ENV-POS-001
+    signal: Secrets injected via mounted volumes instead of env
+  - id: ENV-POS-002
+    signal: secretKeyRef used for Kubernetes secrets
+  - id: ENV-POS-003
+    signal: Docker BuildKit secrets for build-time secrets
+  - id: ENV-POS-004
+    signal: Secrets manager sidecar pattern implemented
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify environment variable usage
+    description: |
+      Locate all environment variable access patterns in application
+      code and configuration files.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find env var access in JavaScript/TypeScript
+      command: grep -rn --include='*.js' --include='*.ts' 'process\.env\.' . 2>/dev/null | grep -v node_modules
+        | head -30
+    - purpose: Find env var access in Python
+      command: grep -rn --include='*.py' 'os\.environ\|os\.getenv' . 2>/dev/null | head -30
+    - purpose: Find Kubernetes env configuration
+      command: grep -rn -B2 -A5 'env:' . 2>/dev/null | grep -E 'name:|value:|secretKeyRef' | head -40
+    expected_findings:
+    - Environment variable access patterns
+    - Secrets in environment variables
+  - id: '2'
+    name: Analyze Docker configurations
+    description: |
+      Review Dockerfiles and docker-compose for secret handling
+      through environment variables.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check Dockerfile ARG/ENV
+      command: grep -rn 'ARG\|ENV' Dockerfile* 2>/dev/null
+    - purpose: Check docker-compose environment
+      command: grep -rn -A10 'environment:' docker-compose* 2>/dev/null
+    - purpose: Find docker-compose secrets
+      command: grep -rn 'secrets:' docker-compose* 2>/dev/null
+    expected_findings:
+    - Build-time secret handling
+    - Runtime environment configuration
+  - id: '3'
+    name: Check for env var logging
+    description: |
+      Identify code that logs or prints environment variables
+      which would expose secrets.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find env var logging
+      command: grep -rn 'console\.log.*env\|print.*environ\|log.*getenv' . 2>/dev/null | grep -v node_modules
+        | head -20
+    - purpose: Check for debug endpoints
+      command: grep -rn 'phpinfo\|__debug__\|/debug' . 2>/dev/null | head -20
+    - purpose: Find process.env dump
+      command: grep -rn 'JSON\.stringify.*process\.env' . 2>/dev/null | grep -v node_modules
+    expected_findings:
+    - Environment variable logging patterns
+    - Debug endpoints exposing environment
+  - id: '4'
+    name: Evaluate Kubernetes secret handling
+    description: |
+      Review Kubernetes configurations for proper secret
+      injection patterns.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find plain value secrets (bad)
+      command: grep -rn -B5 -A1 'value:' . 2>/dev/null | grep -iE 'password|secret|key' | head -20
+    - purpose: Find secretKeyRef usage (good)
+      command: grep -rn 'secretKeyRef' . 2>/dev/null | head -20
+    - purpose: Find volume-mounted secrets
+      command: grep -rn -B2 -A5 'secret:' . 2>/dev/null | grep -E 'secretName:|mountPath:' | head -20
+    expected_findings:
+    - Plain text vs secretKeyRef usage
+    - Volume-mounted secret patterns
+  - id: '5'
+    name: Assess alternative secret injection
+    description: |
+      Check for more secure secret injection patterns such as
+      mounted files or sidecar patterns.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find vault sidecar usage
+      command: grep -rn 'vault-agent\|vault\.hashicorp\|inject.*secret' . 2>/dev/null | head -20
+    - purpose: Find external-secrets operator
+      command: grep -rn 'external-secrets\|ExternalSecret' . 2>/dev/null | head -20
+    - purpose: Find tmpfs/emptyDir for secrets
+      command: 'grep -rn ''medium: Memory\|emptyDir'' . 2>/dev/null | head -20'
+    expected_findings:
+    - Sidecar injection patterns
+    - Secure secret injection alternatives
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Environment Variable Risks
+    - Migration Recommendations
+    - Secure Alternative Patterns
+  confidence_guidance:
+    high: Direct evidence of secrets in environment variables with exposure risk
+    medium: Environment variable usage that could expose secrets under certain conditions
+    low: Environment variable patterns requiring runtime verification
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-526
+      priority: required
+    - source_id: owasp-secrets-management
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough configuration analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: env-var-security-001
+  item: No secrets in Docker ARG
+  level: CRITICAL
+  verification: grep -rn 'ARG.*SECRET\|ARG.*PASSWORD\|ARG.*KEY' Dockerfile* 2>/dev/null | wc -l | xargs
+    -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: env-var-security-002
+  item: No hardcoded secrets in docker-compose
+  level: CRITICAL
+  verification: grep -rn 'environment:' docker-compose* 2>/dev/null | grep -iE 'password.*=|secret.*='
+    | wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: env-var-security-003
+  item: Kubernetes uses secretKeyRef
+  level: BLOCKING
+  verification: grep -rn 'secretKeyRef' . 2>/dev/null | head -1 | grep -q . && echo PASS || echo FAIL
+  expected: PASS
+- id: env-var-security-004
+  item: No environment variable logging
+  level: WARNING
+  verification: grep -rn 'console\.log.*process\.env\|print.*environ' . 2>/dev/null | grep -v node_modules
+    | wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - container-application
+    - kubernetes-deployment
+    - serverless
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-526
+    - CWE-532
+    - CWE-200
+  - framework: OWASP
+    controls:
+    - Secrets Management
+  - framework: CIS Kubernetes
+    controls:
+    - 5.4.1
+    - 5.4.2
+relationships:
+  commonly_combined:
+  - security-trust.secrets-management.hardcoded-secrets
+  - security-trust.secrets-management.secret-storage
+  - security-trust.secrets-management.log-sanitization

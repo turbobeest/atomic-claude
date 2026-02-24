@@ -1,0 +1,355 @@
+audit:
+  id: cloud-infrastructure.serverless.event-source-integration
+  name: Event Source Integration
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: serverless
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates Lambda event source mappings and trigger configurations
+    including SQS, Kinesis, DynamoDB Streams, Kafka, and API Gateway
+    integrations. Examines batch settings, error handling, retry
+    policies, and dead letter queue configurations.
+  why_it_matters: |
+    Event source integrations determine how Lambda processes messages
+    and handles failures. Misconfigured batch sizes cause throttling
+    or underutilization. Missing DLQs lose failed messages. Improper
+    retry settings cause duplicate processing or message loss. Proper
+    configuration ensures reliable event processing.
+  when_to_run:
+  - Event-driven architecture reviews
+  - Reliability assessments
+  - After adding new event sources
+  - When troubleshooting message processing
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to Lambda and event source configurations
+  - type: architecture_docs
+    description: Event-driven architecture documentation
+  access_requirements:
+  - Lambda event source mapping access
+  - SQS, Kinesis, DynamoDB Streams access
+  - API Gateway configuration access
+discovery:
+  file_patterns:
+  - glob: '**/serverless.yml'
+    purpose: Find Serverless Framework event configurations
+  - glob: '**/terraform/**/*lambda*.tf'
+    purpose: Find Terraform event source mappings
+  - glob: '**/sam.yaml'
+    purpose: Find SAM event configurations
+knowledge_sources:
+  specifications:
+  - id: aws-lambda-events
+    name: AWS Lambda Event Sources
+    url: https://docs.aws.amazon.com/lambda/latest/dg/invocation-eventsourcemapping.html
+    offline_cache: true
+    priority: required
+  - id: aws-sqs-lambda
+    name: Lambda with SQS
+    url: https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: lambda-error-handling
+    name: Lambda Error Handling
+    url: https://docs.aws.amazon.com/lambda/latest/dg/invocation-retries.html
+    offline_cache: true
+  - id: event-driven-best-practices
+    name: Event-Driven Architecture Best Practices
+    url: https://docs.aws.amazon.com/lambda/latest/operatorguide/event-driven.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: List event source mappings
+    command: aws lambda list-event-source-mappings
+  - tool: AWS CLI
+    purpose: Check SQS redrive policy
+    command: aws sqs get-queue-attributes --queue-url {url} --attribute-names RedrivePolicy
+  - tool: AWS CLI
+    purpose: List API Gateway integrations
+    command: aws apigateway get-resources --rest-api-id {api_id}
+  scripts:
+  - id: event-source-analyzer
+    language: bash
+    purpose: Analyze event source configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Event Source Integration Analysis ==="
+
+      # List all event source mappings
+      echo "Event Source Mappings:"
+      aws lambda list-event-source-mappings \
+        --query 'EventSourceMappings[].{Function:FunctionArn,Source:EventSourceArn,BatchSize:BatchSize,State:State}' \
+        --output table
+
+      # Check for mappings without DLQ
+      echo ""
+      echo "Event Source Mappings without On-Failure Destination:"
+      aws lambda list-event-source-mappings \
+        --query 'EventSourceMappings[?DestinationConfig.OnFailure.Destination==`null`].{Function:FunctionArn,Source:EventSourceArn}' \
+        --output table
+
+      # SQS queues without DLQ
+      echo ""
+      echo "SQS Queues without Dead Letter Queue:"
+      for queue in $(aws sqs list-queues --query 'QueueUrls[]' --output text 2>/dev/null); do
+        redrive=$(aws sqs get-queue-attributes --queue-url "$queue" --attribute-names RedrivePolicy --query 'Attributes.RedrivePolicy' --output text 2>/dev/null)
+        if [ "$redrive" == "None" ] || [ -z "$redrive" ]; then
+          echo "NO DLQ: $queue"
+        fi
+      done
+
+      # Kinesis streams Lambda integration
+      echo ""
+      echo "Kinesis Event Source Mappings:"
+      aws lambda list-event-source-mappings \
+        --query 'EventSourceMappings[?contains(EventSourceArn,`:kinesis:`)].{Function:FunctionArn,Stream:EventSourceArn,BatchSize:BatchSize,Parallelization:ParallelizationFactor}' \
+        --output table
+
+      # DynamoDB Streams
+      echo ""
+      echo "DynamoDB Streams Event Source Mappings:"
+      aws lambda list-event-source-mappings \
+        --query 'EventSourceMappings[?contains(EventSourceArn,`:dynamodb:`)].{Function:FunctionArn,Table:EventSourceArn,BatchSize:BatchSize}' \
+        --output table
+signals:
+  critical:
+  - id: EVENTSOURCE-CRIT-001
+    signal: Event source mapping without error destination
+    evidence_pattern: 'OnFailure.Destination: null for polling sources'
+    explanation: |
+      Without failure destinations, failed messages are lost or
+      endlessly retried. For stream sources, this blocks the
+      entire shard until timeout.
+    remediation: Configure on-failure destination (DLQ or SNS) for event mappings
+  - id: EVENTSOURCE-CRIT-002
+    signal: SQS queue without dead letter queue
+    evidence_pattern: No RedrivePolicy on SQS queue
+    explanation: |
+      Without DLQ, messages that fail processing are lost after
+      maximum receives. Failed messages cannot be analyzed or
+      reprocessed.
+    remediation: Configure DLQ with appropriate maxReceiveCount
+  - id: EVENTSOURCE-CRIT-003
+    signal: Kinesis/DynamoDB mapping without bisect on error
+    evidence_pattern: 'BisectBatchOnFunctionError: false'
+    explanation: |
+      Without bisect, entire batches fail repeatedly when one
+      record causes errors, blocking stream processing.
+    remediation: Enable BisectBatchOnFunctionError for stream sources
+  high:
+  - id: EVENTSOURCE-HIGH-001
+    signal: Batch size not optimized for workload
+    evidence_indicators:
+    - Batch size 1 for high-throughput stream
+    - Batch size 10000 for memory-constrained function
+    explanation: |
+      Small batch sizes cause high Lambda invocation costs.
+      Large batch sizes may cause memory issues or timeouts.
+    remediation: Tune batch size based on message size and function capacity
+  - id: EVENTSOURCE-HIGH-002
+    signal: Maximum retry attempts too low or disabled
+    evidence_threshold: MaximumRetryAttempts < 2
+    explanation: |
+      Low retry attempts cause message loss on transient failures.
+      Retries should handle temporary issues before DLQ.
+    remediation: Configure appropriate retry attempts (typically 2-5)
+  - id: EVENTSOURCE-HIGH-003
+    signal: Event source mapping disabled
+    evidence_pattern: 'State: Disabled'
+    explanation: |
+      Disabled mappings stop all message processing, which may
+      be intentional or an oversight.
+    remediation: Verify disabled state is intentional; document reason
+  medium:
+  - id: EVENTSOURCE-MED-001
+    signal: No parallelization factor for Kinesis
+    remediation: Consider ParallelizationFactor for high-throughput streams
+  - id: EVENTSOURCE-MED-002
+    signal: Tumbling window not used for aggregations
+    remediation: Use tumbling windows for time-based aggregations
+  - id: EVENTSOURCE-MED-003
+    signal: Event filtering not configured
+    remediation: Use event filtering to reduce unnecessary invocations
+  low:
+  - id: EVENTSOURCE-LOW-001
+    signal: Event source configuration not documented
+    remediation: Document event flow and error handling
+  positive:
+  - id: EVENTSOURCE-POS-001
+    signal: Proper DLQ configuration for all event sources
+  - id: EVENTSOURCE-POS-002
+    signal: Event filtering reducing unnecessary invocations
+  - id: EVENTSOURCE-POS-003
+    signal: Batch size optimized for function capacity
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Event Source Inventory
+    description: |
+      Collect inventory of all event source mappings and
+      their configurations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all event source mappings
+      command: aws lambda list-event-source-mappings --query 'EventSourceMappings[].{UUID:UUID,Function:FunctionArn,Source:EventSourceArn,BatchSize:BatchSize,State:State,LastModified:LastModified}'
+        --output table
+    expected_findings:
+    - Complete event source inventory
+    - Current configurations
+  - id: '2'
+    name: Error Handling Review
+    description: |
+      Review error handling configurations including DLQs,
+      retry settings, and bisect configuration.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check failure destinations
+      command: aws lambda list-event-source-mappings --query 'EventSourceMappings[].{Function:FunctionArn,OnFailure:DestinationConfig.OnFailure,MaxRetry:MaximumRetryAttempts,Bisect:BisectBatchOnFunctionError}'
+        --output yaml
+    - purpose: Check SQS DLQ configuration
+      command: for queue in $(aws sqs list-queues --query 'QueueUrls[]' --output text 2>/dev/null | head
+        -10); do echo "=== $queue ==="; aws sqs get-queue-attributes --queue-url $queue --attribute-names
+        RedrivePolicy --output yaml 2>/dev/null; done
+    expected_findings:
+    - DLQ coverage
+    - Retry configurations
+  - id: '3'
+    name: Batch Configuration Analysis
+    description: |
+      Analyze batch sizes and parallelization settings
+      for optimization opportunities.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get batch configurations
+      command: aws lambda list-event-source-mappings --query 'EventSourceMappings[].{Source:EventSourceArn,BatchSize:BatchSize,BatchWindow:MaximumBatchingWindowInSeconds,Parallelization:ParallelizationFactor}'
+        --output table
+    expected_findings:
+    - Batch size appropriateness
+    - Parallelization settings
+  - id: '4'
+    name: API Gateway Integration Review
+    description: |
+      Review API Gateway Lambda integrations for proper
+      configuration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List APIs
+      command: aws apigateway get-rest-apis --query 'items[].{ID:id,Name:name}' --output table
+    - purpose: Check HTTP APIs
+      command: aws apigatewayv2 get-apis --query 'Items[].{ID:ApiId,Name:Name,Protocol:ProtocolType}'
+        --output table 2>/dev/null || echo 'No HTTP APIs'
+    expected_findings:
+    - API Gateway integrations
+    - Integration configurations
+  - id: '5'
+    name: Recommendations Development
+    description: |
+      Generate specific recommendations for improving
+      event source configurations.
+    duration_estimate: 30 min
+    expected_findings:
+    - Error handling improvements
+    - Performance optimizations
+    - Reliability enhancements
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Event Source Inventory
+    - Error Handling Analysis
+    - Performance Review
+    - Recommendations
+  confidence_guidance:
+    high: Full access to all event source configurations
+    medium: Partial access to configurations
+    low: Limited access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-lambda-events
+      priority: required
+    - source_id: lambda-error-handling
+      priority: required
+  limitations:
+  - Cannot access live configurations offline
+  - Event source mapping status requires runtime
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed configuration analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: eventsource-001
+  item: All event source mappings inventoried
+  level: CRITICAL
+  verification: aws lambda list-event-source-mappings --query 'length(EventSourceMappings)' | grep -qE
+    '[0-9]+' && echo PASS || echo FAIL
+  expected: PASS
+- id: eventsource-002
+  item: DLQ/failure destination configured
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify all event sources have failure handling
+  expected: Confirmed by reviewer
+- id: eventsource-003
+  item: Batch sizes appropriate
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify batch sizes match function capacity
+  expected: Confirmed by reviewer
+- id: eventsource-004
+  item: Error handling documented
+  level: WARNING
+  verification: manual
+  verification_notes: Document retry and DLQ behavior
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE
+    controls:
+    - Reliability
+    - Error Handling
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.serverless.serverless-monitoring
+  - cloud-infrastructure.serverless.serverless-security
+  - messaging.queue-configuration

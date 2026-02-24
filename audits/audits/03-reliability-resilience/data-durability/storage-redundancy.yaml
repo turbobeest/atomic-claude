@@ -1,0 +1,285 @@
+# ============================================================
+# AUDIT: Storage Redundancy Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-durability.storage-redundancy"
+  name: "Storage Redundancy Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-durability"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates storage redundancy mechanisms including RAID configurations,
+    cloud storage classes (S3 Standard vs One Zone), EBS volume types
+    and replication, and underlying infrastructure redundancy. Examines
+    whether storage systems protect against disk, node, and facility
+    failures.
+
+  why_it_matters: |
+    Storage redundancy is the foundation of data durability. Even with
+    application-level replication, underlying storage failures can
+    cause data loss if not properly configured. Understanding storage
+    durability characteristics (11 nines for S3 Standard vs single AZ
+    risk) is essential for architecting systems that meet durability
+    requirements.
+
+  when_to_run:
+    - "During infrastructure architecture review"
+    - "When evaluating storage costs vs durability trade-offs"
+    - "After storage-related data loss"
+    - "Before production deployment"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure"
+      description: "Storage configuration (cloud or on-premise)"
+    - type: "documentation"
+      description: "Data classification and durability requirements"
+
+  access_requirements:
+    - "Cloud console or CLI access"
+    - "Infrastructure as code access"
+    - "Storage system admin access"
+
+discovery:
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Infrastructure as code"
+    - glob: "**/cloudformation/**/*.yaml"
+      purpose: "CloudFormation templates"
+
+  code_patterns:
+    - pattern: "storage.?class|STANDARD|ONE_ZONE|gp2|gp3|io1|RAID"
+      type: "regex"
+      scope: "config"
+      purpose: "Find storage configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "s3-durability"
+      name: "Amazon S3 Storage Classes"
+      url: "https://aws.amazon.com/s3/storage-classes/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "ebs-volume-types"
+      name: "Amazon EBS Volume Types"
+      url: "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws cli"
+      purpose: "Check S3 bucket storage class"
+      command: "aws s3api get-bucket-lifecycle-configuration --bucket bucket-name"
+    - tool: "aws cli"
+      purpose: "Check EBS volume configuration"
+      command: "aws ec2 describe-volumes --query 'Volumes[*].[VolumeId,VolumeType,AvailabilityZone,MultiAttachEnabled]'"
+
+  monitoring_queries:
+    - system: "CloudWatch"
+      query: "VolumeReadOps, VolumeWriteOps for EBS health"
+      purpose: "Monitor storage health"
+
+signals:
+  critical:
+    - id: "DD-SR-CRIT-001"
+      signal: "Critical data stored in single-AZ storage class"
+      evidence_indicators:
+        - "S3 One Zone-IA used for critical data"
+        - "EBS volumes without snapshots in single AZ"
+      explanation: |
+        Single-AZ storage provides no protection against AZ failures.
+        An AZ outage could result in permanent data loss.
+      remediation: "Use multi-AZ storage classes (S3 Standard, cross-AZ replication)"
+
+    - id: "DD-SR-CRIT-002"
+      signal: "No RAID or redundancy for local storage"
+      evidence_indicators:
+        - "Single disk without RAID"
+        - "Instance store as primary storage"
+      explanation: |
+        Single disk storage means a disk failure causes immediate data loss.
+      remediation: "Use RAID 1/5/6/10 or replicated cloud storage"
+
+  high:
+    - id: "DD-SR-HIGH-001"
+      signal: "EBS volumes not backed by snapshots"
+      explanation: "EBS volumes can fail; snapshots provide point-in-time recovery"
+      remediation: "Enable automated EBS snapshots with appropriate retention"
+
+    - id: "DD-SR-HIGH-002"
+      signal: "Storage encryption not enabled"
+      explanation: "Unencrypted storage risks data exposure during decommissioning"
+      remediation: "Enable encryption at rest for all storage"
+
+  medium:
+    - id: "DD-SR-MED-001"
+      signal: "Storage class not matched to access patterns"
+      remediation: "Use lifecycle policies to move data to appropriate storage classes"
+
+    - id: "DD-SR-MED-002"
+      signal: "No cross-region replication for critical data"
+      remediation: "Enable CRR for disaster recovery requirements"
+
+  low:
+    - id: "DD-SR-LOW-001"
+      signal: "Storage costs not optimized"
+
+  positive:
+    - id: "DD-SR-POS-001"
+      signal: "Multi-AZ storage with automated failover"
+    - id: "DD-SR-POS-002"
+      signal: "Cross-region replication enabled for critical data"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Storage Systems"
+      description: |
+        Create a complete inventory of storage systems and their purposes.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List S3 buckets"
+          command: "aws s3 ls"
+        - purpose: "List EBS volumes"
+          command: "aws ec2 describe-volumes --query 'Volumes[*].[VolumeId,Size,VolumeType]'"
+      expected_findings:
+        - "Complete storage inventory"
+        - "Data classification per storage system"
+
+    - id: "2"
+      name: "Analyze Storage Configuration"
+      description: |
+        Review storage class and redundancy settings for each system.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Check S3 bucket versioning and replication"
+          command: "aws s3api get-bucket-versioning --bucket bucket-name"
+      expected_findings:
+        - "Storage class per bucket"
+        - "Replication configuration"
+
+    - id: "3"
+      name: "Verify Redundancy Mechanisms"
+      description: |
+        Confirm that redundancy mechanisms are working as expected.
+      duration_estimate: "30 min"
+      questions:
+        - "What is the durability SLA for each storage type?"
+        - "How many simultaneous failures can each system survive?"
+      expected_findings:
+        - "Durability characteristics"
+        - "Failure tolerance analysis"
+
+    - id: "4"
+      name: "Review Backup Integration"
+      description: |
+        Verify storage systems are integrated with backup processes.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check EBS snapshot schedules"
+          command: "aws dlm get-lifecycle-policies"
+      expected_findings:
+        - "Backup coverage"
+        - "Snapshot retention policies"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Storage Inventory"
+        - "Redundancy Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full infrastructure access with configuration verification"
+    medium: "IaC review with limited runtime verification"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "s3-durability"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure access"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "storage-redundancy-001"
+    item: "Critical data uses multi-AZ storage"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify storage class for critical data buckets/volumes"
+    expected: "Confirmed by reviewer"
+
+  - id: "storage-redundancy-002"
+    item: "EBS volumes have snapshot backup enabled"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check snapshot policies for EBS volumes"
+    expected: "Confirmed by reviewer"
+
+  - id: "storage-redundancy-003"
+    item: "Storage encryption enabled at rest"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify encryption configuration for all storage"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["A1.2", "CC6.1"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-durability.replication-factor"
+    - "reliability-resilience.data-durability.snapshot-strategy"

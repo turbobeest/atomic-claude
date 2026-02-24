@@ -1,0 +1,276 @@
+audit:
+  id: api-integration.api-contracts.openapi-swagger-completeness
+  name: OpenAPI/Swagger Completeness Assessment
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: api-contracts
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: documentation
+  default_profiles:
+  - full
+  - quick
+  parallelizable: true
+description:
+  what: |
+    Evaluates OpenAPI/Swagger specification completeness including endpoint
+    coverage, request/response schema definitions, parameter documentation,
+    example values, authentication documentation, and error response definitions.
+  why_it_matters: |
+    Incomplete API specifications lead to poor developer experience, integration
+    errors, and wasted support time. Complete specs enable code generation,
+    automated testing, and self-service API consumption. They serve as the
+    contract between API providers and consumers.
+  when_to_run:
+  - Before API releases
+  - During API documentation reviews
+  - When onboarding new API consumers
+  - Before generating client SDKs
+prerequisites:
+  required_artifacts:
+  - type: openapi-spec
+    description: OpenAPI/Swagger specification files
+  access_requirements:
+  - Read access to API specification files
+  - Read access to API source code for verification
+discovery:
+  file_patterns:
+  - glob: '**/*openapi*.{yaml,yml,json}'
+    purpose: OpenAPI specification files
+  - glob: '**/*swagger*.{yaml,yml,json}'
+    purpose: Swagger specification files
+  - glob: '**/api-docs/**/*.{yaml,yml,json}'
+    purpose: API documentation files
+  code_patterns:
+  - pattern: openapi:\s*["']?3\.
+    type: regex
+    scope: config
+    purpose: OpenAPI 3.x specifications
+  - pattern: swagger:\s*["']?2\.
+    type: regex
+    scope: config
+    purpose: Swagger 2.0 specifications
+knowledge_sources:
+  specifications:
+  - id: openapi-spec
+    name: OpenAPI Specification
+    url: https://spec.openapis.org/oas/latest.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: openapi-best-practices
+    name: OpenAPI Initiative Best Practices
+    url: https://oai.github.io/Documentation/best-practices.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: spectral
+    purpose: Lint OpenAPI specifications
+    offline_capable: true
+  - tool: swagger-cli
+    purpose: Validate OpenAPI specifications
+    offline_capable: true
+  - tool: openapi-generator
+    purpose: Test spec completeness via code generation
+    offline_capable: true
+signals:
+  critical:
+  - id: OAS-CRIT-001
+    signal: API endpoints exist in code but not in specification
+    evidence_indicators:
+    - Routes defined in code without spec coverage
+    - Missing paths in OpenAPI document
+    explanation: |
+      Undocumented endpoints create shadow APIs that clients discover through
+      trial and error. This leads to unstable integrations and prevents proper
+      API governance.
+    remediation: Document all endpoints in OpenAPI specification
+  - id: OAS-CRIT-002
+    signal: Missing authentication/security schemes
+    evidence_pattern: securityDefinitions|securitySchemes
+    explanation: |
+      Without documented security schemes, consumers don't know how to
+      authenticate. This leads to integration failures and insecure
+      implementations.
+    remediation: Document all authentication methods in securitySchemes
+  high:
+  - id: OAS-HIGH-001
+    signal: Endpoints missing response schema definitions
+    evidence_pattern: responses:\s*\n\s+['"]?\d{3}['"]?:\s*\n\s+description
+    explanation: |
+      Response schemas without content definitions prevent client code
+      generation and type safety. Consumers must guess response structure.
+    remediation: Add content/schema definitions for all responses
+  - id: OAS-HIGH-002
+    signal: Missing error response documentation
+    evidence_indicators:
+    - Only 200/201 responses documented
+    - No 4xx/5xx response definitions
+    explanation: |
+      Undocumented error responses leave consumers unprepared for failures.
+      Error handling becomes guesswork leading to poor user experiences.
+    remediation: Document all possible error responses with schemas
+  medium:
+  - id: OAS-MED-001
+    signal: Parameters missing descriptions
+    evidence_pattern: parameters:.*name:.*(?!description)
+    remediation: Add descriptions to all parameters explaining purpose and constraints
+  - id: OAS-MED-002
+    signal: Missing example values for schemas
+    evidence_indicators:
+    - Schemas without example property
+    - No examples in media type objects
+    remediation: Add realistic example values for all schemas
+  low:
+  - id: OAS-LOW-001
+    signal: Missing operationId on endpoints
+    remediation: Add unique operationId to enable better code generation
+  positive:
+  - id: OAS-POS-001
+    signal: All endpoints have complete request/response documentation
+  - id: OAS-POS-002
+    signal: Examples provided for all schemas
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Locate OpenAPI Specifications
+    description: |
+      Find all OpenAPI/Swagger specification files.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find OpenAPI files
+      command: find . -name '*openapi*' -o -name '*swagger*' | grep -E '\.(yaml|yml|json)$' | head -20
+    - purpose: Verify OpenAPI version
+      command: grep -rn 'openapi:\|swagger:' --include='*.yaml' --include='*.yml' --include='*.json' .
+    expected_findings:
+    - OpenAPI specification file locations
+    - OpenAPI version in use
+  - id: '2'
+    name: Validate Specification Structure
+    description: |
+      Run validation tools on the specification.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Validate with spectral (if available)
+      command: which spectral && spectral lint $(find . -name '*openapi*.yaml' | head -1) || echo 'spectral
+        not installed'
+    - purpose: Check basic structure
+      command: grep -c 'paths:\|components:\|info:\|servers:' $(find . -name '*openapi*.yaml' | head -1)
+        2>/dev/null || echo 'No spec found'
+    expected_findings:
+    - Validation errors and warnings
+    - Structural completeness
+  - id: '3'
+    name: Check Endpoint Coverage
+    description: |
+      Compare specification endpoints with actual code routes.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Extract spec endpoints
+      command: grep -E '^\s+/(\w|\{|\})' --include='*.yaml' --include='*.yml' . | head -50
+    - purpose: Extract code endpoints
+      command: grep -rn '@\(Get\|Post\|Put\|Delete\)Mapping\|app\.\(get\|post\|put\|delete\)' --include='*.java'
+        --include='*.ts' . | head -50
+    expected_findings:
+    - Documented endpoints
+    - Potentially undocumented routes
+  - id: '4'
+    name: Evaluate Documentation Quality
+    description: |
+      Check for descriptions, examples, and completeness.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for missing descriptions
+      command: grep -c 'description:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null || echo '0'
+    - purpose: Check for examples
+      command: grep -c 'example:\|examples:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null ||
+        echo '0'
+    - purpose: Check security definitions
+      command: grep -c 'securitySchemes:\|securityDefinitions:' $(find . -name '*openapi*.yaml' | head
+        -1) 2>/dev/null || echo '0'
+    expected_findings:
+    - Description coverage
+    - Example coverage
+    - Security documentation
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coverage Analysis
+    - Documentation Quality
+    - Recommendations
+  confidence_guidance:
+    high: Complete spec analysis with validation tools
+    medium: Manual review without tooling
+    low: Partial spec or limited access
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: openapi-spec
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: openapi-001
+  item: OpenAPI specification file exists
+  level: CRITICAL
+  verification: |
+    if find . -name '*openapi*' -o -name '*swagger*' 2>/dev/null | grep -qE '\.(yaml|yml|json)$'; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+- id: openapi-002
+  item: Security schemes are documented
+  level: CRITICAL
+  verification: |
+    if grep -rq 'securitySchemes:\|securityDefinitions:' --include='*.yaml' --include='*.yml' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+- id: openapi-003
+  item: All endpoints have response schemas
+  level: BLOCKING
+  verification: manual
+  verification_notes: Reviewer confirms all endpoints have response schema definitions
+  expected: Confirmed by reviewer
+- id: openapi-004
+  item: Error responses (4xx/5xx) are documented
+  level: WARNING
+  verification: |
+    if grep -rq "'4[0-9][0-9]':\|\"4[0-9][0-9]\":\|'5[0-9][0-9]':\|\"5[0-9][0-9]\":" --include='*.yaml' --include='*.yml' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - api-service
+    - microservice
+    - backend
+  compliance_frameworks:
+  - framework: API Governance
+    controls:
+    - DOC-001
+    - DOC-002
+relationships:
+  commonly_combined:
+  - api-integration.api-contracts.schema-validation
+  - api-integration.api-contracts.example-coverage
+  - api-integration.api-design.rest-maturity-level

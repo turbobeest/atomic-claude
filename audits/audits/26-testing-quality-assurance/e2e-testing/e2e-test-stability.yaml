@@ -1,0 +1,359 @@
+# ============================================================
+# AUDIT: E2E Test Stability
+# ============================================================
+# Evaluates the reliability and consistency of E2E tests.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.e2e-testing.e2e-test-stability"
+  name: "E2E Test Stability"
+  version: "1.0.0"
+  last_updated: "2026-01-22"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 26
+  subcategory: "e2e-testing"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "yes"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the stability and reliability of E2E tests by analyzing
+    flakiness rates, timing dependencies, race conditions, and test
+    isolation issues. Identifies patterns that cause intermittent
+    failures and assesses retry/resilience mechanisms.
+
+  why_it_matters: |
+    Flaky E2E tests destroy test suite value. When tests fail randomly,
+    developers ignore failures, assuming they're flaky. Real bugs slip
+    through. Flaky tests also slow CI pipelines with retries and block
+    deployments unnecessarily. Stable tests are essential for CI/CD.
+
+  when_to_run:
+    - "Test suite maintenance"
+    - "CI pipeline optimization"
+    - "After flaky test reports"
+    - "Quarterly quality review"
+
+prerequisites:
+  required_artifacts:
+    - type: "e2e_tests"
+      description: "E2E test suite"
+    - type: "test_history"
+      description: "Historical test results"
+
+  access_requirements:
+    - "Source code repository access"
+    - "CI/CD test history"
+    - "Test execution capability"
+
+discovery:
+  file_patterns:
+    - glob: "**/e2e/**/*.{test,spec}.*"
+      purpose: "E2E test files"
+
+  code_patterns:
+    - pattern: "wait\\(|sleep\\(|setTimeout"
+      type: "regex"
+      scope: "test"
+      purpose: "Fixed waits (flakiness indicator)"
+    - pattern: "retry|flaky|skip"
+      type: "regex"
+      scope: "test"
+      purpose: "Flakiness markers"
+    - pattern: "waitFor|waitUntil|expect\\.poll"
+      type: "regex"
+      scope: "test"
+      purpose: "Dynamic waits (good practice)"
+
+  metrics_queries:
+    - system: "CI/CD"
+      query: "test_flakiness_rate"
+      purpose: "Test reliability metrics"
+      threshold: "< 1%"
+
+knowledge_sources:
+  guides:
+    - id: "flaky-tests"
+      name: "Dealing with Flaky Tests"
+      url: "https://testing.googleblog.com/2020/12/test-flakiness-one-of-main-challenges.html"
+      offline_cache: true
+    - id: "e2e-stability"
+      name: "Making E2E Tests Reliable"
+      url: "https://playwright.dev/docs/best-practices"
+      offline_cache: true
+
+  learning_resources:
+    - id: "stable-testing"
+      title: "Writing Stable E2E Tests"
+      type: "article"
+      reference: "https://docs.cypress.io/guides/references/best-practices"
+
+tooling:
+  static_analysis:
+    - tool: "Cypress"
+      purpose: "Auto-waiting and retry built-in"
+      offline_capable: false
+    - tool: "Playwright"
+      purpose: "Auto-waiting and test retry"
+      offline_capable: false
+
+  scripts:
+    - id: "stability-check"
+      language: "bash"
+      purpose: "Check for stability anti-patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== E2E Test Stability Analysis ==="
+
+        echo "Fixed waits (anti-pattern):"
+        grep -r -c 'sleep\|wait([0-9]\|setTimeout' --include='*.cy.*' --include='*.spec.*' . 2>/dev/null | awk -F: '{sum+=$2} END {print sum}'
+
+        echo ""
+        echo "Dynamic waits (good):"
+        grep -r -c 'waitFor\|waitUntil\|toBeVisible\|toHaveText' --include='*.cy.*' --include='*.spec.*' . 2>/dev/null | awk -F: '{sum+=$2} END {print sum}'
+
+        echo ""
+        echo "Skipped/flaky markers:"
+        grep -r -c 'skip\|flaky\|\.only' --include='*.cy.*' --include='*.spec.*' . 2>/dev/null | awk -F: '{sum+=$2} END {print sum}'
+
+        echo ""
+        echo "Retry configurations:"
+        grep -r 'retries\|retry' --include='*.config.*' . 2>/dev/null | head -5
+
+signals:
+  critical:
+    - id: "E2ESTAB-CRIT-001"
+      signal: "High test flakiness rate"
+      evidence_threshold: "Test failure rate > 5% without code changes"
+      explanation: |
+        Highly flaky tests provide negative value. Developers learn to
+        ignore failures, real bugs are masked, and CI becomes unreliable.
+        This erodes trust in the entire test suite.
+      remediation: |
+        Address flakiness systematically:
+        1. Track flaky tests with quarantine mechanism
+        2. Analyze failure patterns (timing, data, ordering)
+        3. Fix root causes (use auto-waiting, better selectors)
+        4. Disable tests that can't be fixed
+        5. Set acceptable flakiness threshold
+
+    - id: "E2ESTAB-CRIT-002"
+      signal: "Extensive use of fixed waits"
+      evidence_pattern: "Multiple sleep() or wait(1000) calls"
+      explanation: |
+        Fixed waits are the #1 cause of flaky tests. They either wait
+        too long (slow tests) or not long enough (flaky tests). They're
+        a code smell indicating missing proper synchronization.
+      remediation: |
+        Replace fixed waits with dynamic waits:
+        - Wait for elements to appear
+        - Wait for network requests to complete
+        - Wait for specific conditions
+        - Use framework built-in auto-waiting
+
+  high:
+    - id: "E2ESTAB-HIGH-001"
+      signal: "Tests depend on specific data state"
+      evidence_pattern: "Tests assume pre-existing data"
+      explanation: |
+        Data-dependent tests fail when data changes. Each test should
+        set up its required state or use fresh test data.
+      remediation: |
+        Ensure test data independence:
+        - Create fresh data in test setup
+        - Use unique identifiers per test run
+        - Clean up after tests
+        - Don't depend on production-like data
+
+    - id: "E2ESTAB-HIGH-002"
+      signal: "Tests use brittle selectors"
+      evidence_pattern: "CSS selectors based on styling or structure"
+      explanation: |
+        Selectors tied to visual styling break when CSS changes.
+        Selectors using element indices break when page structure changes.
+      remediation: |
+        Use stable selectors:
+        - data-testid attributes (recommended)
+        - aria-label for accessibility
+        - Unique IDs
+        - Avoid class names or element indices
+
+  medium:
+    - id: "E2ESTAB-MED-001"
+      signal: "No retry mechanism configured"
+      evidence_pattern: "Single attempt for flaky-prone tests"
+      remediation: "Configure automatic retries for E2E tests (2-3 attempts)"
+
+    - id: "E2ESTAB-MED-002"
+      signal: "Tests not isolated from each other"
+      evidence_pattern: "Test order dependency or shared state"
+      remediation: "Ensure tests can run independently in any order"
+
+  low:
+    - id: "E2ESTAB-LOW-001"
+      signal: "No flaky test tracking"
+      evidence_pattern: "No mechanism to identify recurring flaky tests"
+
+  positive:
+    - id: "E2ESTAB-POS-001"
+      signal: "Low flakiness rate"
+      evidence_threshold: "< 1% flaky test rate"
+
+    - id: "E2ESTAB-POS-002"
+      signal: "All tests use dynamic waits"
+      evidence_pattern: "No fixed sleep/wait calls"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze flakiness patterns"
+      description: |
+        Search for code patterns that indicate flaky tests.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find fixed waits"
+          command: "grep -r -n 'sleep\\|wait([0-9]' --include='*.cy.*' --include='*.spec.*' . 2>/dev/null | head -20"
+        - purpose: "Find skipped tests"
+          command: "grep -r -n '\\.skip\\|xit\\|xtest' --include='*.cy.*' --include='*.spec.*' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Fixed wait locations"
+        - "Skipped test count"
+
+    - id: "2"
+      name: "Review selector strategies"
+      description: |
+        Analyze selectors used in tests for brittleness.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find test selectors"
+          command: "grep -r 'cy\\.get\\|page\\.$\\|findBy' --include='*.cy.*' --include='*.spec.*' . 2>/dev/null | head -30"
+      expected_findings:
+        - "Selector patterns"
+        - "Brittle selector usage"
+
+    - id: "3"
+      name: "Check retry configuration"
+      description: |
+        Verify retry mechanisms are configured.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Check Cypress config"
+          command: "cat cypress.config.* 2>/dev/null | grep -E 'retries|retry'"
+        - purpose: "Check Playwright config"
+          command: "cat playwright.config.* 2>/dev/null | grep -E 'retries|retry'"
+      expected_findings:
+        - "Retry configuration"
+        - "Retry count settings"
+
+    - id: "4"
+      name: "Review test history"
+      description: |
+        Analyze historical test results for flakiness patterns.
+      duration_estimate: "25 min"
+      questions:
+        - "What is the flakiness rate over past month?"
+        - "Which tests fail most often?"
+        - "Are failures correlated with specific times/conditions?"
+      expected_findings:
+        - "Flakiness rate"
+        - "Most flaky tests"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "stability_report"
+      format: "table"
+      sections:
+        - "Flakiness Metrics"
+        - "Anti-Pattern Occurrences"
+        - "Retry Configuration"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Stability Analysis"
+        - "Improvement Plan"
+
+  confidence_guidance:
+    high: "Historical analysis with pattern matching"
+    medium: "Code analysis only"
+    low: "Estimated from patterns"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "flaky-tests"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 6
+
+closeout_checklist:
+  - id: "e2estab-001"
+    item: "Flakiness patterns analyzed"
+    level: "CRITICAL"
+    verification: "grep -r 'sleep\\|wait([0-9]' --include='*.cy.*' --include='*.spec.*' . 2>/dev/null | wc -l"
+    expected: "Count documented"
+
+  - id: "e2estab-002"
+    item: "Retry configuration verified"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Document retry settings"
+    expected: "Confirmed by reviewer"
+
+  - id: "e2estab-003"
+    item: "Historical flakiness reviewed"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Document flakiness rate from CI history"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Reliability"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.e2e-testing.e2e-test-coverage"
+    - "testing-quality-assurance.test-effectiveness.test-flakiness"
+    - "testing-quality-assurance.e2e-testing.e2e-test-speed"

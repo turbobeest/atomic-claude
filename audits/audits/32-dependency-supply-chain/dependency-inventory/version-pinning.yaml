@@ -1,0 +1,233 @@
+audit:
+  id: dependency-supply-chain.dependency-inventory.version-pinning
+  name: Version Pinning Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: dependency-inventory
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: dependencies
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates whether dependencies are properly pinned to specific
+    versions, ensuring reproducible builds and protecting against supply chain
+    attacks that exploit version resolution. It examines version specifications
+    in manifests, lock file presence, and pinning strategy consistency.
+  why_it_matters: |
+    Unpinned or loosely pinned dependencies can lead to "it works on my machine"
+    problems, build reproducibility issues, and supply chain attacks where
+    malicious versions are automatically pulled. The left-pad incident and
+    ua-parser-js compromise demonstrated real-world impacts of poor pinning.
+  when_to_run:
+  - During security reviews
+  - Before production deployments
+  - After dependency updates
+  - When onboarding new projects
+prerequisites:
+  required_artifacts:
+  - type: dependency_manifest
+    description: package.json, requirements.txt, go.mod, etc.
+  - type: lock_file
+    description: package-lock.json, poetry.lock, etc.
+  access_requirements:
+  - Read access to dependency configuration files
+discovery:
+  file_patterns:
+  - glob: '**/package.json'
+    purpose: Check npm version specifications
+  - glob: '**/package-lock.json'
+    purpose: Verify npm lock file exists
+  - glob: '**/requirements.txt'
+    purpose: Check Python version pinning
+  - glob: '**/requirements*.txt'
+    purpose: Find all requirements files
+  - glob: '**/Pipfile.lock'
+    purpose: Verify Pipfile lock exists
+  - glob: '**/poetry.lock'
+    purpose: Verify Poetry lock exists
+  - glob: '**/go.sum'
+    purpose: Verify Go checksum file exists
+  - glob: '**/Cargo.lock'
+    purpose: Verify Cargo lock exists
+  - glob: '**/yarn.lock'
+    purpose: Verify Yarn lock exists
+  - glob: '**/pnpm-lock.yaml'
+    purpose: Verify pnpm lock exists
+knowledge_sources:
+  guides:
+  - id: npm-semver
+    name: npm Semantic Versioning
+    url: https://docs.npmjs.com/about-semantic-versioning
+  - id: pip-requirements
+    name: pip Requirements File Format
+    url: https://pip.pypa.io/en/stable/reference/requirements-file-format/
+  standards:
+  - id: slsa-hermetic
+    name: SLSA Hermetic Build Requirements
+    relevance: Build reproducibility requirements
+tooling:
+  analysis_tools:
+  - tool: npm-check
+    purpose: Analyze version specifications
+  - tool: pip-tools
+    purpose: Pin Python dependencies precisely
+  - tool: depcheck
+    purpose: Analyze dependency configurations
+signals:
+  critical:
+  - id: DEP-PIN-CRIT-001
+    signal: Dependencies using 'latest' tag or wildcard versions
+    evidence_indicators:
+    - Version specified as 'latest', '*', or 'x'
+    - No version constraint at all
+    explanation: |
+      Using 'latest' or wildcard versions means builds can pull any version,
+      including potentially malicious releases. This provides no protection
+      against supply chain attacks and breaks reproducibility.
+    remediation: Pin all dependencies to specific versions or tight ranges
+  - id: DEP-PIN-CRIT-002
+    signal: Lock file missing for production dependencies
+    evidence_indicators:
+    - No package-lock.json with package.json
+    - No Pipfile.lock with Pipfile
+    remediation: Generate and commit lock files immediately
+  high:
+  - id: DEP-PIN-HIGH-001
+    signal: Wide version ranges allowing major version changes
+    evidence_indicators:
+    - Version ranges like '>= 1.0.0' without upper bound
+    - Caret ranges on pre-1.0 packages (^0.x)
+    remediation: Tighten version ranges to prevent unexpected breaking changes
+  - id: DEP-PIN-HIGH-002
+    signal: Lock file not committed to version control
+    evidence_indicators:
+    - Lock file in .gitignore
+    - Lock file missing from repository
+    remediation: Remove lock file from .gitignore and commit it
+  medium:
+  - id: DEP-PIN-MED-001
+    signal: Inconsistent pinning strategy across dependencies
+    evidence_indicators:
+    - Mix of exact pins, ranges, and loose constraints
+    - Different pinning approaches in same file
+    remediation: Establish and enforce consistent pinning policy
+  - id: DEP-PIN-MED-002
+    signal: Dev dependencies unpinned while prod dependencies pinned
+    evidence_indicators:
+    - devDependencies using loose ranges
+    - Test dependencies without version constraints
+    remediation: Pin dev dependencies for build reproducibility
+  low:
+  - id: DEP-PIN-LOW-001
+    signal: Using tilde (~) instead of exact versions
+    evidence_indicators:
+    - Tilde ranges allowing patch updates
+    remediation: Consider exact pinning for critical dependencies
+  positive:
+  - id: DEP-PIN-POS-001
+    signal: All dependencies pinned to exact versions with lock files
+  - id: DEP-PIN-POS-002
+    signal: Lock file integrity verified in CI pipeline
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Check for Lock Files
+    description: Verify lock files exist for all package managers
+    commands:
+    - purpose: Find lock files
+      command: find . -name '*.lock' -o -name 'package-lock.json' -o -name 'yarn.lock' -o -name 'go.sum'
+        | head -50
+  - id: '2'
+    name: Analyze Version Specifications
+    description: Examine version pinning in manifest files
+    commands:
+    - purpose: Check for loose npm versions
+      command: grep -E '"[*x]"|"\*"' package.json 2>/dev/null || echo 'No wildcards found'
+    - purpose: Check for unpinned pip requirements
+      command: grep -vE '==|@' requirements.txt 2>/dev/null | grep -v '^#' | grep -v '^$' || echo 'All
+        pinned or not applicable'
+  - id: '3'
+    name: Verify Lock File Completeness
+    description: Ensure lock files are up to date
+    commands:
+    - purpose: Check npm lock file status
+      command: npm ci --dry-run 2>&1 | head -20 || echo 'npm not applicable'
+  - id: '4'
+    name: Check Version Control Status
+    description: Verify lock files are tracked in git
+    commands:
+    - purpose: Check if lock files are ignored
+      command: git check-ignore package-lock.json yarn.lock poetry.lock Cargo.lock go.sum 2>/dev/null
+        || echo 'Lock files not ignored'
+  - id: '5'
+    name: Analyze Pinning Consistency
+    description: Review pinning strategy across all dependencies
+    commands:
+    - purpose: Count version specification types in package.json
+      command: cat package.json 2>/dev/null | grep -oE '"[~^>=<]?[0-9]' | sort | uniq -c || echo 'package.json
+        not found'
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    description: List of unpinned or loosely pinned dependencies
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Lock File Analysis
+    - Version Specification Review
+    - Pinning Strategy Assessment
+    - Recommendations
+closeout_checklist:
+- id: dep-pin-001
+  item: All production dependencies have lock files
+  level: CRITICAL
+  verification: Lock file exists and is current
+- id: dep-pin-002
+  item: No wildcard or 'latest' version specifications
+  level: CRITICAL
+  verification: grep for '*', 'x', 'latest' returns empty
+- id: dep-pin-003
+  item: Lock files committed to version control
+  level: REQUIRED
+  verification: git ls-files includes lock files
+- id: dep-pin-004
+  item: Consistent pinning strategy documented
+  level: RECOMMENDED
+  verification: Review pinning policy documentation
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SLSA
+    control: Build L2
+    description: Hermetic builds require pinned dependencies
+  - framework: SOC 2
+    control: CC8.1
+    description: Change management controls
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.supply-chain-security.dependency-pinning
+  depends_on:
+  - dependency-supply-chain.dependency-inventory.dependency-enumeration
+  feeds_into:
+  - dependency-supply-chain.supply-chain-security.artifact-integrity

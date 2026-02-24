@@ -1,0 +1,347 @@
+audit:
+  id: architecture-design.coupling.interface-coupling
+  name: Interface Coupling Analysis
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: architecture-design
+  category_number: 7
+  subcategory: coupling
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - architecture
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit analyzes interface-based coupling patterns to ensure
+    modules depend on well-defined abstractions rather than concrete
+    implementations. It evaluates interface design quality, identifies
+    fat interfaces, assesses proper use of protocols/traits/interfaces,
+    and checks that contracts are honored across module boundaries.
+  why_it_matters: |
+    Interface coupling is the desired coupling type because:
+    - Dependencies are explicit and visible in type system
+    - Implementations can be substituted (testability, flexibility)
+    - Contracts can evolve independently from implementations
+    - Clear boundaries enable parallel development
+    Poor interface design defeats these benefits, creating hidden coupling.
+  when_to_run:
+  - During API design reviews
+  - When creating new module boundaries
+  - Before publishing libraries or SDKs
+  - When evaluating dependency injection design
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code with interface definitions
+  - type: architecture_documentation
+    description: Documentation of intended module contracts
+  access_requirements:
+  - Read access to source code
+  - Understanding of intended architectural boundaries
+discovery:
+  code_patterns:
+  - pattern: interface\s+[A-Z]\w+|protocol\s+[A-Z]\w+|trait\s+[A-Z]\w+
+    type: regex
+    scope: source
+    purpose: Find interface/protocol/trait definitions
+  - pattern: implements\s+[A-Z]|:\s*[A-Z]\w+Protocol|impl\s+\w+\s+for
+    type: regex
+    scope: source
+    purpose: Find interface implementations
+  - pattern: '@Injectable|@Service|@Component'
+    type: regex
+    scope: source
+    purpose: Find dependency injection targets
+  - pattern: class\s+\w+\s*<.*>\s*implements
+    type: regex
+    scope: source
+    purpose: Generic interface implementations
+  file_patterns:
+  - glob: '**/*Interface.{java,ts}'
+    purpose: Explicit interface files
+  - glob: '**/*Protocol.swift'
+    purpose: Swift protocols
+  - glob: '**/interfaces/**'
+    purpose: Interface directories
+  - glob: '**/contracts/**'
+    purpose: Contract directories
+knowledge_sources:
+  specifications:
+  - id: design-by-contract
+    name: Design by Contract - Bertrand Meyer
+    url: https://www.eiffel.com/values/design-by-contract/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: interface-segregation
+    name: Interface Segregation Principle
+    url: https://blog.cleancoder.com/uncle-bob/2020/10/18/Solid-Relevance.html
+    offline_cache: true
+  - id: ddd-evans
+    name: Domain-Driven Design Reference
+    url: https://www.domainlanguage.com/ddd/reference/
+    offline_cache: true
+  - id: clean-architecture
+    name: Clean Architecture
+    url: https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html
+    offline_cache: true
+  - id: pragmatic-programmer
+    name: Pragmatic Programmer Tips
+    url: https://pragprog.com/tips/
+    offline_cache: true
+  learning_resources:
+  - id: agile-ppp
+    title: 'Agile Software Development: Principles, Patterns, and Practices'
+    type: book
+    reference: 'Robert C. Martin - Chapter 12: Interface Segregation'
+  - id: head-first-design
+    title: Head First Design Patterns
+    type: book
+    reference: Freeman & Robson - Program to Interfaces
+tooling:
+  static_analysis:
+  - tool: SonarQube
+    purpose: Detect interface design issues
+    offline_capable: false
+  - tool: NDepend
+    purpose: Analyze interface dependencies in .NET
+    offline_capable: true
+  - tool: TSLint/ESLint
+    purpose: Enforce interface-based dependencies in TypeScript
+    offline_capable: true
+  - tool: ArchUnit
+    purpose: Enforce architectural rules about interfaces
+    offline_capable: true
+  scripts:
+  - id: interface-analyzer
+    language: bash
+    purpose: Analyze interface patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Interface Definitions ==="
+      grep -rn "interface [A-Z]\|protocol [A-Z]\|trait [A-Z]" --include="*.java" --include="*.ts" --include="*.swift" --include="*.rs"
+
+      echo "=== Interface Method Counts ==="
+      grep -rn "interface [A-Z]" --include="*.java" -A 50 | grep -c "void\|String\|int\|boolean" | head -20
+signals:
+  critical:
+  - id: INTERFACE-CRIT-001
+    signal: Fat interface with more than 10 methods
+    evidence_pattern: Interface has >10 abstract methods
+    explanation: |
+      Large interfaces violate Interface Segregation Principle. Implementers
+      are forced to implement methods they don't need, creating unnecessary
+      coupling and violating single responsibility.
+    remediation: Split into role-specific interfaces; use composition
+  - id: INTERFACE-CRIT-002
+    signal: Interface exposes implementation details
+    evidence_pattern: Interface methods mention specific technologies or internal types
+    explanation: |
+      Interfaces that leak implementation (e.g., SQLResult in a repository
+      interface) defeat the purpose of abstraction and lock consumers
+      to specific implementations.
+    remediation: Return domain types from interfaces; hide implementation types
+  high:
+  - id: INTERFACE-HIGH-001
+    signal: Marker interface with no methods
+    evidence_pattern: Interface declares no methods, used only for instanceof
+    explanation: |
+      Marker interfaces create type coupling without behavioral contracts.
+      Modern alternatives (annotations, type classes) are usually better.
+    remediation: Consider annotations or traits; if needed, document clearly
+  - id: INTERFACE-HIGH-002
+    signal: Single implementation interface
+    evidence_pattern: Interface has exactly one implementation
+    explanation: |
+      Interfaces with only one implementation may be unnecessary abstraction.
+      However, they're valid for testing or anticipated extensibility.
+    remediation: Remove if no test doubles exist; keep if intentional extension point
+  medium:
+  - id: INTERFACE-MED-001
+    signal: Interface method returns concrete type
+    evidence_pattern: Interface method has ArrayList/HashMap return type
+    remediation: Return interface types (List/Map) from interface methods
+  - id: INTERFACE-MED-002
+    signal: Interface has default implementations for most methods
+    evidence_pattern: '>50% of interface methods have default implementations'
+    remediation: Consider abstract class if most methods have implementation
+  low:
+  - id: INTERFACE-LOW-001
+    signal: Inconsistent interface naming conventions
+    remediation: Standardize naming (IRepository vs Repository vs RepositoryInterface)
+  positive:
+  - id: INTERFACE-POS-001
+    signal: Small, focused interfaces following ISP
+  - id: INTERFACE-POS-002
+    signal: Clear contract documentation on all interfaces
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory interface definitions
+    description: |
+      Catalog all interfaces, protocols, traits, and abstract
+      contracts in the codebase.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find Java interfaces
+      command: grep -rn '^public interface\|^interface ' --include='*.java' | head -40
+    - purpose: Find TypeScript interfaces
+      command: grep -rn 'export interface' --include='*.ts' | head -40
+    - purpose: Find Rust traits
+      command: grep -rn '^pub trait\|^trait ' --include='*.rs' | head -20
+    expected_findings:
+    - Complete interface catalog
+    - Interface naming patterns
+  - id: '2'
+    name: Analyze interface size and complexity
+    description: |
+      Measure the number of methods per interface to identify
+      fat interfaces violating ISP.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Count methods in Java interfaces
+      command: 'for f in $(find . -name ''*.java'' -exec grep -l ''^public interface'' {} \;); do echo
+        "$f: $(grep -c ''^\s*\(void\|[A-Z]\)'' $f)"; done 2>/dev/null | sort -t: -k2 -rn | head -20'
+    expected_findings:
+    - Interface size distribution
+    - Potential fat interfaces
+  - id: '3'
+    name: Check implementation coverage
+    description: |
+      For each interface, find implementations and assess
+      if abstraction is justified.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find interface implementations
+      command: 'grep -rn ''implements [A-Z]\w*'' --include=''*.java'' | cut -d: -f3 | sort | uniq -c |
+        sort -rn | head -20'
+    - purpose: Find single-implementation interfaces
+      command: 'grep -rn ''implements [A-Z]\w*'' --include=''*.java'' | cut -d: -f3 | sort | uniq -c |
+        grep ''^ *1 '' | head -20'
+    expected_findings:
+    - Implementation count per interface
+    - Single-implementation interfaces
+  - id: '4'
+    name: Verify contract quality
+    description: |
+      Check interfaces for documentation, parameter types,
+      and return type abstraction.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find undocumented interfaces
+      command: grep -rn '^public interface' --include='*.java' -B5 | grep -v '\*\|//' | head -30
+    - purpose: Find concrete return types
+      command: grep -rn 'ArrayList\|HashMap\|HashSet' --include='*Interface.java' --include='*Repository.java'
+        | head -20
+    expected_findings:
+    - Documentation coverage
+    - Concrete type leakage
+  - id: '5'
+    name: Assess dependency injection patterns
+    description: |
+      Verify that dependency injection properly uses interfaces
+      for injected dependencies.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find constructor injection patterns
+      command: grep -rn 'private final [A-Z]' --include='*.java' -A1 | grep constructor | head -20
+    - purpose: Find field injection of concrete types
+      command: grep -rn '@Inject\|@Autowired' --include='*.java' -A1 | grep 'class\|Impl' | head -20
+    expected_findings:
+    - DI interface usage
+    - Concrete injection violations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: interface_catalog
+    format: tabular
+    sections:
+    - Interface Name
+    - Method Count
+    - Implementation Count
+    - Assessment
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Interface Quality Assessment
+    - ISP Violations
+    - Recommendations
+  confidence_guidance:
+    high: Interface analyzed directly, metrics computed
+    medium: Pattern suggests issue, needs detailed review
+    low: Potential interface concern, context-dependent
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: design-by-contract
+      priority: required
+    - source_id: interface-segregation
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive interface analysis
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: interface-coupling-001
+  item: No fat interfaces (>10 methods)
+  level: CRITICAL
+  verification: manual
+  verification_notes: All interfaces have fewer than 10 methods or documented exception
+  expected: Confirmed by reviewer
+- id: interface-coupling-002
+  item: Interfaces do not leak implementation types
+  level: CRITICAL
+  verification: grep -rn 'ArrayList\|HashMap' --include='*Interface.java' | wc -l
+  expected: '0'
+- id: interface-coupling-003
+  item: Single-implementation interfaces are justified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Interfaces with one impl have test doubles or documented extensibility
+  expected: Confirmed by reviewer
+- id: interface-coupling-004
+  item: All public interfaces are documented
+  level: WARNING
+  verification: manual
+  verification_notes: Interfaces have Javadoc/JSDoc explaining contract
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+    - Modularity
+    - Reusability
+relationships:
+  commonly_combined:
+  - architecture-design.design-principles.interface-segregation
+  - architecture-design.design-principles.dependency-inversion
+  - architecture-design.coupling.tight-coupling-detection

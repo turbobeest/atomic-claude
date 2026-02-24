@@ -1,0 +1,400 @@
+# ============================================================
+# AUDIT: Edge Cache Scalability Audit
+# ============================================================
+# Category 4: Scalability & Capacity
+# Subcategory 4.7: Serverless & Edge Scaling
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "scalability-capacity.serverless-edge-scaling.edge-cache-scalability"
+
+  name: "Edge Cache Scalability Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "serverless-edge-scaling"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "high"
+
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates edge caching infrastructure scalability including CDN
+    configurations, cache hit ratios, cache invalidation strategies,
+    and the ability to handle traffic spikes at the edge. Analyzes
+    geographic distribution, cache warming strategies, and the
+    relationship between cache capacity and origin protection.
+
+  why_it_matters: |
+    Edge caches are the first line of defense against traffic spikes,
+    protecting origin servers and reducing latency. Poor cache hit
+    ratios increase origin load and costs while degrading performance.
+    Cache invalidation issues can serve stale content or cause cache
+    stampedes. Proper edge cache configuration is critical for both
+    scalability and user experience.
+
+  when_to_run:
+    - "Before major traffic events or product launches"
+    - "When experiencing high origin load despite CDN usage"
+    - "During performance optimization initiatives"
+    - "After significant changes to caching policies"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "cdn_configuration"
+      description: "CDN and edge cache configurations"
+    - type: "cache_metrics"
+      description: "Cache hit/miss ratios and performance metrics"
+    - type: "origin_metrics"
+      description: "Origin server load and request metrics"
+
+  access_requirements:
+    - "Access to CDN configuration (CloudFront, Fastly, Cloudflare, etc.)"
+    - "Access to cache analytics and metrics"
+    - "Access to origin server metrics"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "Cache-Control|max-age|s-maxage"
+      type: "regex"
+      scope: "config"
+      purpose: "Find cache control header configurations"
+    - pattern: "CacheBehavior|CachePolicy|TTL"
+      type: "regex"
+      scope: "config"
+      purpose: "Find CDN cache behavior settings"
+    - pattern: "invalidation|purge|cache.*clear"
+      type: "regex"
+      scope: "source"
+      purpose: "Find cache invalidation logic"
+
+  file_patterns:
+    - glob: "**/cloudfront*.{json,yaml,tf}"
+      purpose: "CloudFront configurations"
+    - glob: "**/cdn*.{json,yaml,tf}"
+      purpose: "Generic CDN configurations"
+    - glob: "**/vcl/*.vcl"
+      purpose: "Varnish/Fastly VCL files"
+
+  metrics_queries:
+    - system: "CloudFront"
+      query: "CacheHitRate"
+      purpose: "Overall cache hit ratio"
+      threshold: "Should be > 80% for static content"
+    - system: "CloudFront"
+      query: "OriginLatency"
+      purpose: "Origin response time"
+      threshold: "Should be stable during traffic spikes"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "cloudfront-caching"
+      name: "CloudFront Caching Best Practices"
+      url: "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/ConfiguringCaching.html"
+      offline_cache: true
+    - id: "http-caching"
+      name: "HTTP Caching - MDN"
+      url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching"
+      offline_cache: true
+
+  specifications:
+    - id: "rfc7234"
+      name: "RFC 7234 - HTTP/1.1 Caching"
+      url: "https://datatracker.ietf.org/doc/html/rfc7234"
+      offline_cache: true
+      priority: "recommended"
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws cloudfront get-distribution-config"
+      purpose: "Review CloudFront distribution settings"
+      command: "aws cloudfront get-distribution-config --id <dist-id>"
+    - tool: "curl"
+      purpose: "Test cache headers"
+      command: "curl -I https://example.com/path | grep -i cache"
+
+  monitoring_queries:
+    - system: "CloudFront"
+      query: "Requests - CacheHits"
+      purpose: "Cache misses reaching origin"
+    - system: "Prometheus"
+      query: "sum(rate(cdn_requests_total{status='HIT'}[5m])) / sum(rate(cdn_requests_total[5m]))"
+      purpose: "Real-time cache hit ratio"
+
+  scripts:
+    - id: "cache-header-checker"
+      language: "bash"
+      purpose: "Check cache headers for URLs"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check cache headers for a list of URLs
+        echo "Checking cache headers..."
+        curl -sI "$1" | grep -iE "cache-control|age|x-cache|cf-cache"
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "EDGECACHE-CRIT-001"
+      signal: "Cache hit ratio below 50% for static content"
+      evidence_threshold: "CacheHitRate < 50%"
+      explanation: |
+        Low cache hit ratio for static content means the CDN is not
+        protecting the origin effectively. Most requests hit origin,
+        eliminating the benefits of edge caching and risking origin
+        overload during traffic spikes.
+      remediation: "Review cache headers and CDN configuration for cacheable content"
+    - id: "EDGECACHE-CRIT-002"
+      signal: "Cache stampede on invalidation"
+      evidence_pattern: "Origin load spike correlated with cache invalidation"
+      explanation: |
+        Mass cache invalidation causes all edge locations to simultaneously
+        request fresh content, creating a thundering herd that can
+        overwhelm the origin.
+      remediation: "Implement staggered invalidation or cache warming"
+
+  high:
+    - id: "EDGECACHE-HIGH-001"
+      signal: "No cache-control headers on cacheable responses"
+      explanation: "CDN cannot cache content without explicit directives"
+      remediation: "Add appropriate Cache-Control headers to responses"
+    - id: "EDGECACHE-HIGH-002"
+      signal: "TTLs too short for content change frequency"
+      explanation: "Frequent cache expiration increases origin load"
+      remediation: "Increase TTLs and use explicit invalidation for changes"
+
+  medium:
+    - id: "EDGECACHE-MED-001"
+      signal: "No cache warming strategy for predictable traffic"
+      remediation: "Implement cache warming before high-traffic events"
+    - id: "EDGECACHE-MED-002"
+      signal: "Query string variations reducing cache efficiency"
+      remediation: "Configure query string whitelist in cache key"
+
+  low:
+    - id: "EDGECACHE-LOW-001"
+      signal: "Cache metrics not monitored by content type"
+
+  positive:
+    - id: "EDGECACHE-POS-001"
+      signal: "Cache hit ratio above 90% with appropriate TTLs"
+    - id: "EDGECACHE-POS-002"
+      signal: "Cache warming implemented for predictable traffic patterns"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Edge Cache Infrastructure"
+      description: |
+        Identify all CDN distributions, their origins, and
+        the content types being cached.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List CloudFront distributions"
+          command: "aws cloudfront list-distributions --query 'DistributionList.Items[*].[Id,DomainName]'"
+      expected_findings:
+        - "Complete CDN inventory"
+        - "Origin mappings"
+
+    - id: "2"
+      name: "Analyze Cache Hit Ratios"
+      description: |
+        Review cache hit ratios by content type and identify
+        content with poor cache performance.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Hit ratios by content type"
+        - "Low-performing cache behaviors"
+
+    - id: "3"
+      name: "Review Cache Configurations"
+      description: |
+        Examine cache behaviors, TTL settings, and cache key
+        configurations for optimization opportunities.
+      duration_estimate: "45 min"
+      questions:
+        - "Are TTLs appropriate for content change frequency?"
+        - "Is the cache key optimized (query strings, headers)?"
+        - "Are cache policies consistent across behaviors?"
+      expected_findings:
+        - "Configuration gaps"
+        - "Optimization opportunities"
+
+    - id: "4"
+      name: "Evaluate Invalidation Strategy"
+      description: |
+        Review cache invalidation patterns and their impact
+        on origin load.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Invalidation frequency"
+        - "Origin impact during invalidations"
+
+    - id: "5"
+      name: "Assess Origin Protection"
+      description: |
+        Evaluate how well the cache protects the origin
+        during traffic spikes.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Origin load during spikes"
+        - "Cache effectiveness under load"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "CDN Inventory"
+        - "Cache Performance Analysis"
+        - "Configuration Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Complete metrics and configuration reviewed"
+    medium: "Configuration reviewed with limited metrics history"
+    low: "Configuration review only"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "cloudfront-caching"
+        priority: "required"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires metrics analysis and configuration review"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "edge-cache-001"
+    item: "Cache hit ratio above 80% for static content"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify CacheHitRate > 80% in CDN metrics"
+    expected: "Confirmed by reviewer"
+
+  - id: "edge-cache-002"
+    item: "Cache-Control headers configured for all cacheable content"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "All static content responses include Cache-Control"
+    expected: "Confirmed by reviewer"
+
+  - id: "edge-cache-003"
+    item: "Cache metrics monitored and alerted"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Dashboards and alerts for cache hit ratio exist"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "api-gateway", "content-delivery"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.serverless-edge-scaling.function-timeout"
+    - "scalability-capacity.serverless-edge-scaling.concurrency-limits"

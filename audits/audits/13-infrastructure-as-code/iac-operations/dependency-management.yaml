@@ -1,0 +1,372 @@
+# ============================================================
+# AUDIT: Dependency Management
+# ============================================================
+# Evaluates how Terraform resource dependencies are managed
+# for reliable, predictable infrastructure deployments.
+
+audit:
+  id: "infrastructure-as-code.iac-operations.dependency-management"
+  name: "Dependency Management"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "infrastructure-as-code"
+  category_number: 13
+  subcategory: "iac-operations"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines how resource dependencies are managed in Terraform
+    configurations, including:
+
+    - Implicit dependencies through resource references
+    - Explicit dependencies via depends_on
+    - Data source dependencies and timing
+    - Module inter-dependencies
+    - Circular dependency detection
+    - Resource creation ordering
+    - Lifecycle rules for complex dependencies
+
+    The focus is on ensuring reliable, predictable resource creation
+    and update ordering.
+
+  why_it_matters: |
+    Improper dependency management causes deployment failures:
+
+    - Resources created before their dependencies exist
+    - Race conditions in parallel resource creation
+    - Circular dependencies blocking all deployments
+    - Data sources reading stale or non-existent data
+    - Update ordering causing service disruptions
+
+    Correct dependency management ensures infrastructure is created
+    in the right order every time.
+
+  when_to_run:
+    - "When debugging deployment ordering issues"
+    - "During module design review"
+    - "After deployment failures from timing issues"
+    - "When implementing complex infrastructure"
+
+prerequisites:
+  required_artifacts:
+    - type: "terraform_configuration"
+      description: "Terraform configurations with resources"
+
+  access_requirements:
+    - "Read access to Terraform configuration repository"
+
+discovery:
+  code_patterns:
+    - pattern: "depends_on\\s*="
+      type: "regex"
+      scope: "source"
+      purpose: "Find explicit dependencies"
+    - pattern: "\\$\\{[^}]+\\.[^}]+\\}"
+      type: "regex"
+      scope: "source"
+      purpose: "Find resource references"
+    - pattern: "data\\s+\"[^\"]+\""
+      type: "regex"
+      scope: "source"
+      purpose: "Find data sources"
+    - pattern: "create_before_destroy|prevent_destroy"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find lifecycle rules"
+
+  file_patterns:
+    - glob: "**/*.tf"
+      purpose: "All Terraform files"
+    - glob: "**/data.tf"
+      purpose: "Data source definitions"
+
+knowledge_sources:
+  specifications:
+    - id: "terraform-dependencies"
+      name: "Terraform Resource Dependencies"
+      url: "https://developer.hashicorp.com/terraform/language/resources/behavior#resource-dependencies"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "terraform-depends-on"
+      name: "Terraform depends_on Meta-Argument"
+      url: "https://developer.hashicorp.com/terraform/language/meta-arguments/depends_on"
+      offline_cache: true
+    - id: "terraform-lifecycle"
+      name: "Terraform Lifecycle Meta-Argument"
+      url: "https://developer.hashicorp.com/terraform/language/meta-arguments/lifecycle"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "terraform graph"
+      purpose: "Visualize dependency graph"
+      command: "terraform graph | dot -Tpng > graph.png"
+    - tool: "terraform plan"
+      purpose: "Shows resource ordering"
+      command: "terraform plan"
+
+  scripts:
+    - id: "dependency-analysis"
+      language: "bash"
+      purpose: "Analyze dependency patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Analyze Terraform dependencies
+
+        echo "=== Explicit depends_on usage ==="
+        grep -r 'depends_on' --include='*.tf' . | head -20
+
+        echo ""
+        echo "=== Resource references ==="
+        grep -r '\.\(id\|arn\|name\)' --include='*.tf' . | grep -v '#' | head -20
+
+        echo ""
+        echo "=== Data sources ==="
+        grep -r 'data\s*"' --include='*.tf' . | head -20
+
+        echo ""
+        echo "=== Lifecycle rules ==="
+        grep -r -A5 'lifecycle\s*{' --include='*.tf' . | head -30
+
+signals:
+  critical:
+    - id: "IAC-DEP-CRIT-001"
+      signal: "Circular dependency detected"
+      evidence_pattern: "terraform plan fails with cycle error"
+      explanation: |
+        Circular dependencies prevent Terraform from determining
+        resource creation order, blocking all deployments. This
+        requires restructuring resources or breaking the cycle.
+      remediation: |
+        Break circular dependencies:
+        1. Identify the cycle (terraform graph)
+        2. Consider splitting into separate applies
+        3. Use depends_on strategically
+        4. Restructure modules to avoid cycles
+
+  high:
+    - id: "IAC-DEP-HIGH-001"
+      signal: "Data source without depends_on may read stale data"
+      evidence_pattern: "data source referencing resource without depends_on"
+      explanation: |
+        Data sources run during planning. If a data source reads from
+        a resource created in the same configuration, it may read
+        stale or non-existent data without explicit depends_on.
+      remediation: |
+        Add depends_on for data source dependencies:
+        data "aws_instance" "existing" {
+          filter { ... }
+          depends_on = [aws_instance.prerequisite]
+        }
+
+    - id: "IAC-DEP-HIGH-002"
+      signal: "Implicit dependency may not be sufficient"
+      evidence_pattern: "Resource depends on side effect not captured by reference"
+      explanation: |
+        Terraform only tracks dependencies through direct references.
+        If a resource depends on a side effect (e.g., DNS propagation,
+        IAM propagation), explicit depends_on may be needed.
+      remediation: |
+        Use depends_on for non-referenced dependencies:
+        resource "aws_ecs_service" "app" {
+          # No direct reference to IAM role
+          depends_on = [aws_iam_role_policy_attachment.ecs_task]
+        }
+
+  medium:
+    - id: "IAC-DEP-MED-001"
+      signal: "Overuse of depends_on"
+      evidence_pattern: "Many depends_on where references would suffice"
+      remediation: |
+        Prefer implicit dependencies:
+        - Use resource references instead of depends_on
+        - depends_on should be last resort
+        - Review each depends_on for necessity
+
+    - id: "IAC-DEP-MED-002"
+      signal: "Missing create_before_destroy for zero-downtime updates"
+      remediation: |
+        Add lifecycle rules for critical resources:
+        lifecycle {
+          create_before_destroy = true
+        }
+
+  low:
+    - id: "IAC-DEP-LOW-001"
+      signal: "Dependency graph is complex but manageable"
+      remediation: "Consider documenting complex dependencies"
+
+  positive:
+    - id: "IAC-DEP-POS-001"
+      signal: "Dependencies primarily through resource references"
+    - id: "IAC-DEP-POS-002"
+      signal: "Lifecycle rules on critical resources"
+    - id: "IAC-DEP-POS-003"
+      signal: "Data sources have appropriate depends_on"
+    - id: "IAC-DEP-POS-004"
+      signal: "No circular dependencies"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Generate dependency graph"
+      description: |
+        Generate and analyze the Terraform dependency graph.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Generate graph"
+          command: "terraform graph 2>/dev/null | head -50"
+        - purpose: "Check for cycles"
+          command: "terraform validate 2>&1 | grep -i 'cycle\\|circular'"
+
+      expected_findings:
+        - "Dependency graph structure"
+        - "Any cycle errors"
+
+    - id: "2"
+      name: "Review explicit dependencies"
+      description: |
+        Find and analyze all depends_on usage.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find depends_on"
+          command: "grep -r -B5 -A2 'depends_on' --include='*.tf' . | head -50"
+        - purpose: "Count depends_on usage"
+          command: "grep -r -c 'depends_on' --include='*.tf' . | grep -v ':0'"
+
+      expected_findings:
+        - "depends_on usage patterns"
+        - "Potential overuse"
+
+    - id: "3"
+      name: "Analyze data source dependencies"
+      description: |
+        Check that data sources have appropriate dependencies.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find data sources"
+          command: "grep -r -A10 'data\\s*\"' --include='*.tf' . | head -50"
+        - purpose: "Check data source depends_on"
+          command: "grep -r -B10 'data\\s*\"' --include='*.tf' . | grep -A15 'data' | grep 'depends_on' | head -10"
+
+      expected_findings:
+        - "Data sources with dependencies"
+        - "Data sources potentially missing depends_on"
+
+    - id: "4"
+      name: "Review lifecycle rules"
+      description: |
+        Check lifecycle rules for dependency management.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find lifecycle blocks"
+          command: "grep -r -A10 'lifecycle\\s*{' --include='*.tf' . | head -40"
+        - purpose: "Find create_before_destroy"
+          command: "grep -r 'create_before_destroy' --include='*.tf' . | head -10"
+
+      expected_findings:
+        - "Lifecycle rules usage"
+        - "Create before destroy patterns"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Dependency Graph Analysis"
+        - "Explicit Dependencies Review"
+        - "Data Source Dependencies"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Dependency graph generated and analyzed"
+    medium: "Code reviewed but graph not generated"
+    low: "Only pattern matching performed"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "terraform-dependencies"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires graph analysis"
+    full:
+      included: true
+      priority: 3
+
+closeout_checklist:
+  - id: "dep-001"
+    item: "No circular dependencies"
+    level: "CRITICAL"
+    verification: "terraform validate 2>&1 | grep -c 'cycle'"
+    expected: "0"
+
+  - id: "dep-002"
+    item: "Data sources have appropriate depends_on"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify data sources depending on same-config resources have depends_on"
+    expected: "Confirmed by reviewer"
+
+  - id: "dep-003"
+    item: "Implicit dependencies preferred over depends_on"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review depends_on usage for necessity"
+    expected: "Confirmed by reviewer"
+
+  - id: "dep-004"
+    item: "Lifecycle rules on critical resources"
+    level: "WARNING"
+    verification: "grep -r 'lifecycle' --include='*.tf' . | wc -l"
+    expected: ">0"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "infrastructure-as-code.iac-operations.output-management"
+    - "infrastructure-as-code.cicd-integration.iac-pipeline"

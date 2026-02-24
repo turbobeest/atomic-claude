@@ -1,0 +1,268 @@
+audit:
+  id: signal-processing-data-acquisition.data-integrity.buffer-management
+  name: Buffer Management Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: data-integrity
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates buffer management for signal data acquisition.
+    It examines:
+    - Buffer sizing for data rate and latency
+    - Double/circular buffer implementation
+    - Overflow and underflow handling
+    - Memory allocation strategy
+    - DMA buffer management
+    - Thread safety for producer/consumer
+  why_it_matters: |
+    Buffer management prevents data loss:
+    - Too small: overflow and data loss
+    - Too large: excessive latency and memory use
+    - Poor synchronization: race conditions and corruption
+    - DMA mismanagement: data corruption
+    - Overflow without detection: silent data loss
+
+    Proper buffer management ensures continuous acquisition
+    without loss or corruption.
+  when_to_run:
+  - Data acquisition system design
+  - Performance optimization
+  - Data loss investigation
+  - Real-time system review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Buffer management code
+  - type: requirements
+    description: Data rate and latency requirements
+  access_requirements:
+  - Access to buffer code
+  - Data rate specifications
+  - Latency requirements
+discovery:
+  code_patterns:
+  - pattern: (buffer|fifo|ring|circular)_(size|alloc|init)
+    type: regex
+    scope: source
+    purpose: Detect buffer configuration
+  - pattern: (overflow|underflow|overrun)
+    type: regex
+    scope: source
+    purpose: Detect overflow handling
+  - pattern: (dma|DMA)_(buffer|transfer)
+    type: regex
+    scope: source
+    purpose: Detect DMA usage
+  - pattern: (mutex|semaphore|lock).*buffer
+    type: regex
+    scope: source
+    purpose: Detect synchronization
+  file_patterns:
+  - glob: '**/buffer*.{c,h,cpp,py}'
+    purpose: Buffer management files
+  - glob: '**/fifo*.{c,h,cpp}'
+    purpose: FIFO implementation
+  - glob: '**/ring*.{c,h,cpp}'
+    purpose: Ring buffer files
+  - glob: '**/dma*.{c,h,cpp}'
+    purpose: DMA management files
+signals:
+  critical:
+  - id: BUF-CRIT-001
+    signal: Buffer overflow causing data loss
+    evidence_indicators:
+    - Buffer full condition reached
+    - Data overwritten before consumption
+    - Gaps in acquired data
+    explanation: |
+      Buffer overflow means new data arrives before old data
+      is consumed. The resulting data loss is often silent
+      and corrupts the data stream.
+    remediation: |
+      - Increase buffer size
+      - Improve consumption rate
+      - Implement overflow detection
+      - Add flow control
+    cwe: CWE-120
+  - id: BUF-CRIT-002
+    signal: Buffer synchronization causing race conditions
+    evidence_indicators:
+    - Data corruption under load
+    - No synchronization between producer/consumer
+    - Intermittent data errors
+    explanation: |
+      Without proper synchronization, producer and consumer
+      can access the buffer simultaneously, causing data
+      corruption or partial reads.
+    remediation: |
+      - Implement proper locking
+      - Use lock-free circular buffer
+      - Separate read/write pointers correctly
+      - Test under load
+    cwe: CWE-362
+  high:
+  - id: BUF-HIGH-001
+    signal: Buffer size inadequate for data rate
+    evidence_indicators:
+    - Buffer frequently near full
+    - Latency spikes cause overflow
+    - Size not matched to worst-case latency
+    explanation: |
+      Buffer must accommodate worst-case producer/consumer
+      rate mismatch. Sizing only for average rate fails
+      during system load variations.
+    remediation: |
+      - Calculate based on worst-case latency
+      - Add margin for safety
+      - Monitor fill level
+      - Document sizing rationale
+  - id: BUF-HIGH-002
+    signal: DMA buffer not cache-coherent
+    evidence_indicators:
+    - Stale data read from DMA buffer
+    - No cache invalidation after DMA
+    - Intermittent data errors with DMA
+    explanation: |
+      CPU cache and DMA controller can have different views
+      of memory. Without cache management, CPU may read
+      stale cached data instead of new DMA data.
+    remediation: |
+      - Invalidate cache before reading DMA data
+      - Use uncached memory region
+      - Flush cache before DMA write
+      - Use cache-coherent DMA if available
+  medium:
+  - id: BUF-MED-001
+    signal: Overflow not detected or reported
+    evidence_indicators:
+    - No overflow counter or flag
+    - Data loss silent
+    - No indication of lost data
+    explanation: |
+      Without overflow detection, data loss goes unnoticed.
+      Users cannot know if data is complete or corrupted.
+    remediation: |
+      - Implement overflow counter
+      - Report overflow condition
+      - Include in data metadata
+      - Alert on overflow
+  low:
+  - id: BUF-LOW-001
+    signal: Buffer configuration not documented
+    evidence_indicators:
+    - Size selection not justified
+    - Requirements not recorded
+    - No sizing analysis
+    explanation: |
+      Undocumented buffer configuration makes optimization
+      and troubleshooting difficult.
+    remediation: |
+      - Document buffer sizing rationale
+      - Record requirements
+      - Include in system documentation
+      - Note margins and assumptions
+  positive:
+  - id: BUF-POS-001
+    signal: Well-designed buffer management
+    evidence_indicators:
+    - Adequate size with margin
+    - Proper synchronization
+    - Overflow detection and reporting
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: systems-programmer
+  steps:
+  - id: '1'
+    name: Buffer Implementation Review
+    description: |
+      Review buffer management implementation.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find buffer implementation
+      command: |
+        grep -rniE "(buffer|fifo|ring|circular)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    - purpose: Find overflow handling
+      command: |
+        grep -rniE "(overflow|overrun)" \
+          --include="*.c" --include="*.h" . 2>/dev/null | head -20
+    expected_findings:
+    - Buffer structure
+    - Size configuration
+    - Overflow handling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Buffer Analysis
+    - Synchronization Review
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 1
+    signal-processing:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: buf-001
+  item: Buffer size adequate for data rate
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify sizing includes worst-case latency
+  expected: Confirmed by reviewer
+- id: buf-002
+  item: Overflow detection implemented
+  level: BLOCKING
+  verification: |
+    grep -rniE "(overflow|overrun)" \
+      --include="*.c" --include="*.h" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: buf-003
+  item: Thread safety verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify proper synchronization for concurrent access
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - data-acquisition
+    - embedded-systems
+    - real-time-systems
+relationships:
+  commonly_combined:
+  - signal-processing.data-integrity.data-loss-detection
+  - signal-processing.data-integrity.checksum-crc
+  - code-quality.memory-management.buffer-handling
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

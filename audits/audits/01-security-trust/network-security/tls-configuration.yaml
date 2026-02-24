@@ -1,0 +1,445 @@
+audit:
+  id: security-trust.network-security.tls-configuration
+  name: TLS Configuration Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: network-security
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines TLS/SSL configuration across all services to ensure
+    secure transport layer protection. It validates protocol versions, cipher
+    suites, certificate configurations, and TLS-related security headers.
+    The audit covers web servers, APIs, databases, and any network service
+    using encrypted transport.
+  why_it_matters: |
+    Weak TLS configurations expose organizations to man-in-the-middle attacks,
+    eavesdropping, and data interception. Vulnerabilities like BEAST, POODLE,
+    and CRIME exploit weak protocol versions and cipher suites. Proper TLS
+    configuration is fundamental to maintaining data confidentiality and
+    integrity in transit. Non-compliance may violate PCI-DSS, HIPAA, and
+    other regulatory requirements.
+  when_to_run:
+  - Initial security assessment
+  - After infrastructure changes
+  - Before production deployment
+  - Quarterly security reviews
+  - After certificate renewals
+prerequisites:
+  required_artifacts:
+  - type: endpoint_list
+    description: List of all TLS-enabled endpoints (domains, IPs, ports)
+  - type: network_access
+    description: Network access to test TLS endpoints
+  access_requirements:
+  - Network access to all TLS endpoints
+  - Access to server configuration files (nginx, Apache, etc.)
+  - Certificate management system access
+discovery:
+  code_patterns:
+  - pattern: ssl_protocols?|tls_version|SSLProtocol
+    type: regex
+    scope: config
+    purpose: Identify TLS protocol version configurations
+  - pattern: ssl_ciphers?|SSLCipherSuite|ciphersuites
+    type: regex
+    scope: config
+    purpose: Identify cipher suite configurations
+  - pattern: ssl_prefer_server_ciphers|SSLHonorCipherOrder
+    type: regex
+    scope: config
+    purpose: Check cipher order preference settings
+  file_patterns:
+  - glob: '**/nginx.conf'
+    purpose: Nginx TLS configuration
+  - glob: '**/ssl.conf'
+    purpose: SSL/TLS configuration files
+  - glob: '**/httpd.conf'
+    purpose: Apache TLS configuration
+  - glob: '**/*.pem'
+    purpose: Certificate files
+  - glob: '**/server.xml'
+    purpose: Tomcat connector configuration
+knowledge_sources:
+  specifications:
+  - id: nist-sp-800-52r2
+    name: NIST SP 800-52 Rev. 2 - TLS Implementation Guidelines
+    url: https://csrc.nist.gov/pubs/sp/800/52/r2/final
+    offline_cache: true
+    priority: required
+  - id: rfc-8446
+    name: RFC 8446 - The Transport Layer Security (TLS) Protocol Version 1.3
+    url: https://datatracker.ietf.org/doc/html/rfc8446
+    offline_cache: true
+    priority: required
+  - id: nsa-network-infrastructure
+    name: NSA Network Infrastructure Security Guide
+    url: https://media.defense.gov/2022/Jun/15/2003018261/-1/-1/0/CTR_NSA_NETWORK_INFRASTRUCTURE_SECURITY_GUIDE_20220615.PDF
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-tls-cheatsheet
+    name: OWASP Transport Layer Security Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
+    offline_cache: true
+  - id: mozilla-tls-config
+    name: Mozilla SSL Configuration Generator
+    url: https://ssl-config.mozilla.org/
+    offline_cache: true
+  - id: owasp-testing-tls
+    name: OWASP Testing for Weak TLS
+    url: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/09-Testing_for_Weak_Cryptography/01-Testing_for_Weak_Transport_Layer_Security
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: openssl
+    purpose: Test TLS connections and cipher suites
+    command: openssl s_client -connect host:443 -tls1_3
+  - tool: nmap
+    purpose: Enumerate supported TLS versions and ciphers
+    command: nmap --script ssl-enum-ciphers -p 443 host
+  - tool: testssl.sh
+    purpose: Comprehensive TLS testing
+    command: testssl.sh --severity HIGH host:443
+  - tool: sslyze
+    purpose: Fast TLS scanner
+    command: sslyze --regular host:443
+signals:
+  critical:
+  - id: TLS-CRIT-001
+    signal: SSLv2 or SSLv3 protocol enabled
+    cwe_id: CWE-326
+    evidence_pattern: SSLv2|SSLv3|ssl_protocols.*SSLv
+    explanation: |
+      SSLv2 and SSLv3 have known cryptographic weaknesses including
+      POODLE and DROWN attacks. These protocols are completely broken
+      and must never be used for any purpose.
+    remediation: Disable SSLv2 and SSLv3 entirely. Use TLS 1.2 minimum, prefer TLS 1.3
+  - id: TLS-CRIT-002
+    signal: TLS 1.0 or TLS 1.1 enabled
+    cwe_id: CWE-326
+    evidence_pattern: TLSv1(?:\.0|\.1)?[^.2-9]|ssl_protocols.*TLSv1[^.2-9]
+    explanation: |
+      TLS 1.0 and 1.1 are deprecated and vulnerable to attacks like BEAST.
+      PCI-DSS and most security standards mandate TLS 1.2 minimum.
+      These protocols were officially deprecated in RFC 8996.
+    remediation: Disable TLS 1.0 and 1.1. Configure TLS 1.2 and TLS 1.3 only
+  - id: TLS-CRIT-003
+    signal: Weak or export cipher suites enabled
+    cwe_id: CWE-327
+    evidence_pattern: RC4|DES|EXPORT|NULL|MD5|anon
+    explanation: |
+      Export ciphers, NULL ciphers, RC4, DES, and anonymous cipher suites
+      provide no effective security. These enable trivial decryption of
+      traffic by attackers.
+    remediation: Remove all weak ciphers. Use only AEAD ciphers (AES-GCM, ChaCha20-Poly1305)
+  high:
+  - id: TLS-HIGH-001
+    signal: Missing HSTS header
+    cwe_id: CWE-319
+    evidence_pattern: Strict-Transport-Security header not found
+    explanation: |
+      Without HSTS, browsers may attempt insecure HTTP connections first,
+      enabling SSL stripping attacks. HSTS ensures browsers always use HTTPS.
+    remediation: Add Strict-Transport-Security header with max-age of at least 31536000
+  - id: TLS-HIGH-002
+    signal: Certificate uses SHA-1 signature
+    cwe_id: CWE-328
+    evidence_pattern: SHA1|sha1WithRSAEncryption
+    explanation: |
+      SHA-1 is cryptographically broken with practical collision attacks.
+      Certificates signed with SHA-1 are not trusted by modern browsers.
+    remediation: Reissue certificates with SHA-256 or stronger signature algorithm
+  - id: TLS-HIGH-003
+    signal: RSA key size less than 2048 bits
+    cwe_id: CWE-326
+    evidence_pattern: RSA.*(?:512|768|1024)\s*bits
+    explanation: |
+      RSA keys smaller than 2048 bits can be factored with current computing
+      resources. NIST requires minimum 2048-bit keys.
+    remediation: Generate new certificates with RSA 2048-bit minimum or ECDSA P-256+
+  - id: TLS-HIGH-004
+    signal: No forward secrecy support
+    cwe_id: CWE-326
+    evidence_pattern: No.*ECDHE|No.*DHE|forward.secrecy.*not
+    explanation: |
+      Without forward secrecy, compromise of the server's private key
+      allows decryption of all past recorded traffic.
+    remediation: Enable ECDHE or DHE cipher suites and prioritize them in configuration
+  medium:
+  - id: TLS-MED-001
+    signal: TLS compression enabled
+    cwe_id: CWE-310
+    evidence_pattern: ssl_comp|SSLCompression|compression.*enabled
+    explanation: |
+      TLS compression enables the CRIME attack, allowing attackers to
+      recover sensitive data like session cookies.
+    remediation: Disable TLS compression (ssl_comp off in nginx)
+  - id: TLS-MED-002
+    signal: Missing certificate transparency
+    evidence_pattern: CT.*not.*found|certificate.transparency.*missing
+    explanation: |
+      Certificate Transparency helps detect mis-issued certificates and
+      provides audit trail for certificate issuance.
+    remediation: Use certificates from CAs that support Certificate Transparency
+  - id: TLS-MED-003
+    signal: OCSP stapling not configured
+    evidence_pattern: OCSP.*stapling.*disabled|ssl_stapling.*off
+    explanation: |
+      Without OCSP stapling, clients must contact the CA to verify certificate
+      revocation, impacting privacy and performance.
+    remediation: Enable OCSP stapling in server configuration
+  low:
+  - id: TLS-LOW-001
+    signal: Server cipher order not enforced
+    evidence_pattern: ssl_prefer_server_ciphers.*off|SSLHonorCipherOrder.*off
+    explanation: |
+      Allowing client cipher preference may result in weaker ciphers being
+      selected even when stronger options are available.
+    remediation: Enable server cipher preference and order ciphers by strength
+  positive:
+  - id: TLS-POS-001
+    signal: TLS 1.3 enabled and preferred
+    explanation: TLS 1.3 provides the strongest security with improved performance
+  - id: TLS-POS-002
+    signal: HSTS with preload enabled
+    explanation: HSTS preload provides maximum protection against downgrade attacks
+  - id: TLS-POS-003
+    signal: Only AEAD cipher suites enabled
+    explanation: AEAD ciphers provide authenticated encryption without known weaknesses
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Enumerate TLS Endpoints
+    description: |
+      Identify all TLS-enabled endpoints in the environment including
+      web servers, APIs, load balancers, databases, and internal services.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Scan for TLS services on common ports
+      command: nmap -sV --script ssl-enum-ciphers -p 443,8443,465,993,995 target_network
+    expected_findings:
+    - Complete list of TLS-enabled endpoints
+    - Initial assessment of TLS versions supported
+  - id: '2'
+    name: Test TLS Protocol Versions
+    description: |
+      Verify each endpoint only supports TLS 1.2 and TLS 1.3.
+      Check for deprecated SSLv2, SSLv3, TLS 1.0, and TLS 1.1.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Test for SSLv3 support
+      command: openssl s_client -connect host:443 -ssl3 2>&1 | grep -i 'alert\|error\|handshake'
+    - purpose: Test for TLS 1.0 support
+      command: openssl s_client -connect host:443 -tls1 2>&1 | grep -i 'alert\|error\|handshake'
+    - purpose: Test for TLS 1.2 support
+      command: openssl s_client -connect host:443 -tls1_2 2>&1 | grep -i 'Protocol\|Cipher'
+    - purpose: Test for TLS 1.3 support
+      command: openssl s_client -connect host:443 -tls1_3 2>&1 | grep -i 'Protocol\|Cipher'
+    expected_findings:
+    - SSLv3, TLS 1.0, TLS 1.1 should fail or be rejected
+    - TLS 1.2 and TLS 1.3 should succeed
+  - id: '3'
+    name: Analyze Cipher Suites
+    description: |
+      Enumerate supported cipher suites and verify only strong,
+      modern ciphers are enabled with proper priority ordering.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List all supported cipher suites
+      command: nmap --script ssl-enum-ciphers -p 443 host | grep -E 'TLS|cipher|strength'
+    - purpose: Check for weak ciphers with testssl
+      command: testssl.sh --cipher-per-proto host:443
+    - purpose: Verify cipher order
+      command: sslyze --scan-commands regular host:443
+    expected_findings:
+    - Only AEAD ciphers (AES-GCM, ChaCha20-Poly1305) present
+    - No RC4, DES, 3DES, NULL, EXPORT, or anonymous ciphers
+    - Forward secrecy ciphers prioritized
+  - id: '4'
+    name: Validate Certificates
+    description: |
+      Check certificate validity, chain of trust, key strength,
+      signature algorithm, and proper hostname matching.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Retrieve and analyze certificate
+      command: echo | openssl s_client -connect host:443 2>/dev/null | openssl x509 -noout -text
+    - purpose: Check certificate chain
+      command: openssl s_client -connect host:443 -showcerts 2>/dev/null | grep -E 'subject|issuer|depth'
+    - purpose: Verify certificate expiration
+      command: echo | openssl s_client -connect host:443 2>/dev/null | openssl x509 -noout -dates
+    expected_findings:
+    - RSA 2048+ bits or ECDSA P-256+ key
+    - SHA-256 or stronger signature
+    - Valid certificate chain to trusted root
+    - Certificate not expired or expiring soon
+  - id: '5'
+    name: Check Security Headers
+    description: |
+      Verify HSTS and other TLS-related security headers are properly
+      configured on all HTTPS endpoints.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check HSTS header
+      command: curl -sI https://host | grep -i 'strict-transport-security'
+    - purpose: Full header analysis
+      command: curl -sI https://host | grep -iE 'strict-transport|content-security|x-frame|x-content'
+    expected_findings:
+    - HSTS header present with max-age >= 31536000
+    - HSTS includeSubDomains directive if applicable
+    - HSTS preload directive for critical services
+  - id: '6'
+    name: Review Configuration Files
+    description: |
+      Examine server configuration files for TLS settings to ensure
+      they match best practices and are consistently applied.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Search for TLS configuration in nginx
+      command: grep -rn 'ssl_protocols\|ssl_ciphers\|ssl_prefer' /etc/nginx/
+    - purpose: Search for TLS configuration in Apache
+      command: grep -rn 'SSLProtocol\|SSLCipherSuite\|SSLHonorCipherOrder' /etc/apache2/ /etc/httpd/
+    expected_findings:
+    - Consistent TLS configuration across all virtual hosts
+    - TLS 1.2 and 1.3 only in protocol lists
+    - Modern cipher suite configuration
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - TLS Version Analysis
+    - Cipher Suite Assessment
+    - Certificate Review
+    - Recommendations
+  confidence_guidance:
+    high: Direct testing confirms TLS configuration, multiple tools corroborate
+    medium: Configuration files reviewed but runtime testing limited
+    low: Configuration inferred from partial information
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-tls-cheatsheet
+      priority: required
+    - source_id: nist-sp-800-52r2
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: TLS testing requires runtime access and thorough verification
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: tls-config-001
+  item: No SSLv2/SSLv3 enabled on any endpoint
+  level: CRITICAL
+  verification: nmap --script ssl-enum-ciphers -p 443 $HOST 2>/dev/null | grep -q 'SSLv[23]' && echo 'FAIL'
+    || echo 'PASS'
+  expected: PASS
+- id: tls-config-002
+  item: No TLS 1.0/1.1 enabled on any endpoint
+  level: CRITICAL
+  verification: openssl s_client -connect $HOST:443 -tls1 2>&1 | grep -q 'handshake failure\|wrong version\|no
+    protocols' && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: tls-config-003
+  item: TLS 1.2 or 1.3 supported
+  level: CRITICAL
+  verification: openssl s_client -connect $HOST:443 -tls1_2 2>&1 | grep -q 'Protocol.*TLSv1.2' && echo
+    'PASS' || echo 'FAIL'
+  expected: PASS
+- id: tls-config-004
+  item: No weak cipher suites enabled
+  level: CRITICAL
+  verification: nmap --script ssl-enum-ciphers -p 443 $HOST 2>/dev/null | grep -qE 'RC4|DES|NULL|EXPORT|MD5'
+    && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: tls-config-005
+  item: HSTS header present
+  level: BLOCKING
+  verification: curl -sI https://$HOST 2>/dev/null | grep -qi 'strict-transport-security' && echo 'PASS'
+    || echo 'FAIL'
+  expected: PASS
+- id: tls-config-006
+  item: Certificate uses SHA-256 or stronger
+  level: BLOCKING
+  verification: echo | openssl s_client -connect $HOST:443 2>/dev/null | openssl x509 -noout -text 2>/dev/null
+    | grep -q 'sha256\|sha384\|sha512' && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: tls-config-007
+  item: RSA key size at least 2048 bits
+  level: BLOCKING
+  verification: echo | openssl s_client -connect $HOST:443 2>/dev/null | openssl x509 -noout -text 2>/dev/null
+    | grep -E 'RSA.*[0-9]{4}' | grep -qE '(2048|3072|4096|8192)' && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: tls-config-008
+  item: Forward secrecy supported
+  level: WARNING
+  verification: nmap --script ssl-enum-ciphers -p 443 $HOST 2>/dev/null | grep -qE 'ECDHE|DHE' && echo
+    'PASS' || echo 'FAIL'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: PCI-DSS
+    controls:
+    - '4.1'
+    - '4.2'
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-2
+    - PR.DS-5
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.7
+relationships:
+  commonly_combined:
+  - security-trust.network-security.mtls-implementation
+  - security-trust.cryptography.certificate-management
+  - security-trust.application-security.security-headers

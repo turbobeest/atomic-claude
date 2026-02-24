@@ -1,0 +1,382 @@
+audit:
+  id: observability-instrumentation.visualization-dashboards.service-health-dashboard
+  name: Service Health Dashboard Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: visualization-dashboards
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses service health dashboards for completeness and effectiveness
+    in representing real-time operational status. Evaluates coverage of
+    RED metrics (Rate, Errors, Duration), USE metrics (Utilization,
+    Saturation, Errors), SLO tracking, dependency health, and the
+    ability to quickly identify service issues.
+  why_it_matters: |
+    Inadequate service health dashboards cause:
+    - Delayed incident detection and response
+    - Incomplete understanding of service state during outages
+    - Missed dependency issues affecting service health
+    - Inability to correlate symptoms across services
+    - Poor capacity planning from incomplete metrics
+    - Extended MTTR due to troubleshooting blind spots
+  when_to_run:
+  - After deploying new services
+  - During incident retrospectives
+  - Quarterly service observability reviews
+  - Before production launches
+prerequisites:
+  required_artifacts:
+  - type: service_dashboards
+    description: Access to service health dashboards
+  - type: service_catalog
+    description: List of services and their dependencies
+  optional_artifacts:
+  - type: slo_definitions
+    description: Service Level Objectives for each service
+  - type: architecture_diagrams
+    description: Service dependency maps
+  access_requirements:
+  - Dashboard viewer access
+  - Service catalog access
+discovery:
+  documents_to_review:
+  - type: Service dashboards
+    purpose: Evaluate health indicator coverage
+  - type: RED/USE methodology docs
+    purpose: Reference for required metrics
+  metrics_queries:
+  - system: Prometheus
+    query: up{job='$SERVICE'}
+    purpose: Basic service availability
+    threshold: Should be 1
+  - system: Prometheus
+    query: rate(http_requests_total{service='$SERVICE'}[5m])
+    purpose: Request rate metric presence
+  - system: Prometheus
+    query: rate(http_request_duration_seconds_bucket{service='$SERVICE'}[5m])
+    purpose: Latency histogram presence
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: google-four-signals
+    name: Google SRE - The Four Golden Signals
+    url: https://sre.google/sre-book/monitoring-distributed-systems/#xref_monitoring_golden-signals
+    offline_cache: true
+    priority: required
+  - id: use-method
+    name: The USE Method
+    url: https://www.brendangregg.com/usemethod.html
+    offline_cache: true
+    priority: required
+  - id: red-method
+    name: The RED Method
+    url: https://grafana.com/blog/2018/08/02/the-red-method-how-to-instrument-your-services/
+    offline_cache: true
+    priority: required
+  learning_resources:
+  - id: sre-workbook
+    title: The Site Reliability Workbook
+    type: book
+    reference: Google SRE Team, ISBN 978-1492029502
+tooling:
+  infrastructure_tools:
+  - tool: grafana-cli
+    purpose: Analyze dashboard panel configurations
+    command: 'curl -H ''Authorization: Bearer $TOKEN'' $GRAFANA_URL/api/dashboards/uid/$UID'
+  scripts:
+  - id: service-health-checker
+    language: bash
+    purpose: Verify service health dashboard completeness
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check service health dashboard for required panels
+
+      DASHBOARD_UID=$1
+
+      dashboard=$(curl -s -H "Authorization: Bearer $TOKEN" \
+        "$GRAFANA_URL/api/dashboards/uid/$DASHBOARD_UID")
+
+      echo "=== Service Health Dashboard Analysis ==="
+
+      # Check for RED metrics
+      echo "RED Metrics Coverage:"
+
+      # Rate
+      if echo "$dashboard" | grep -qiE 'rate|rps|requests.*second|throughput'; then
+        echo "  [OK] Rate metrics present"
+      else
+        echo "  [MISSING] Rate metrics"
+      fi
+
+      # Errors
+      if echo "$dashboard" | grep -qiE 'error|5xx|4xx|failure'; then
+        echo "  [OK] Error metrics present"
+      else
+        echo "  [MISSING] Error metrics"
+      fi
+
+      # Duration
+      if echo "$dashboard" | grep -qiE 'latency|duration|response.*time|p50|p95|p99'; then
+        echo "  [OK] Duration/latency metrics present"
+      else
+        echo "  [MISSING] Duration/latency metrics"
+      fi
+
+      echo ""
+      echo "Additional Health Indicators:"
+
+      # Saturation
+      if echo "$dashboard" | grep -qiE 'saturation|queue|pending|backlog'; then
+        echo "  [OK] Saturation metrics present"
+      else
+        echo "  [MISSING] Saturation metrics"
+      fi
+
+      # Dependencies
+      if echo "$dashboard" | grep -qiE 'dependency|upstream|downstream|external'; then
+        echo "  [OK] Dependency health present"
+      else
+        echo "  [MISSING] Dependency health"
+      fi
+signals:
+  critical:
+  - id: SVCHEALTH-CRIT-001
+    signal: Missing error rate visualization
+    evidence_indicators:
+    - No error rate or error percentage panel
+    - Error metrics not collected
+    explanation: |
+      Error rates are fundamental to understanding service health.
+      Without error visualization, teams cannot detect degraded
+      service states or measure reliability.
+    remediation: |
+      Add error rate panels showing:
+      - Error rate percentage over time
+      - Error breakdown by type/code
+      - Error rate vs SLO threshold
+  - id: SVCHEALTH-CRIT-002
+    signal: Missing latency percentiles
+    evidence_indicators:
+    - Only average latency shown
+    - No p50/p95/p99 percentiles
+    explanation: |
+      Averages hide tail latency issues. A service may have acceptable
+      average latency while p99 users experience severe delays.
+    remediation: |
+      Show p50, p95, and p99 latency percentiles.
+      Include latency histograms for distribution analysis.
+  high:
+  - id: SVCHEALTH-HIGH-001
+    signal: No dependency health visibility
+    explanation: |
+      Service health depends on dependencies. Without dependency
+      status, root cause analysis is difficult and may lead to
+      incorrect remediation attempts.
+    remediation: |
+      Add panels showing upstream and downstream dependency health,
+      error rates, and latencies.
+  - id: SVCHEALTH-HIGH-002
+    signal: Missing resource utilization metrics
+    explanation: |
+      CPU, memory, and disk utilization indicate capacity issues
+      before they impact service health.
+    remediation: |
+      Add USE metrics for all relevant resources:
+      CPU, memory, disk, network, and service-specific resources.
+  medium:
+  - id: SVCHEALTH-MED-001
+    signal: No SLO/SLI tracking on dashboard
+    remediation: |
+      Add SLO panels showing current state, error budget,
+      and burn rate for defined SLIs.
+  - id: SVCHEALTH-MED-002
+    signal: Missing request rate visualization
+    remediation: |
+      Add throughput/RPS panels to understand traffic patterns
+      and detect anomalies.
+  - id: SVCHEALTH-MED-003
+    signal: No saturation metrics
+    remediation: |
+      Add queue depths, connection pool usage, and other
+      saturation indicators.
+  low:
+  - id: SVCHEALTH-LOW-001
+    signal: Missing deployment markers/annotations
+    remediation: |
+      Add deployment annotations to correlate changes with
+      metric variations.
+  positive:
+  - id: SVCHEALTH-POS-001
+    signal: Complete RED metrics coverage
+  - id: SVCHEALTH-POS-002
+    signal: SLO tracking integrated into dashboard
+  - id: SVCHEALTH-POS-003
+    signal: Dependency health clearly visible
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: RED Metrics Assessment
+    description: |
+      Evaluate coverage of Rate, Errors, and Duration metrics
+      for each service health dashboard.
+    duration_estimate: 30 min
+    questions:
+    - Is request rate/throughput visualized?
+    - Are error rates and types shown?
+    - Are latency percentiles (not just averages) displayed?
+    expected_findings:
+    - RED metrics coverage per service
+    - Missing RED components
+  - id: '2'
+    name: USE Metrics Assessment
+    description: |
+      Evaluate coverage of Utilization, Saturation, and Error
+      metrics for resources.
+    duration_estimate: 30 min
+    questions:
+    - Is CPU/memory utilization shown?
+    - Are queue depths and saturation visible?
+    - Are resource errors tracked?
+    expected_findings:
+    - USE metrics coverage
+    - Resource blind spots
+  - id: '3'
+    name: Dependency Health Review
+    description: |
+      Check whether dashboards show health of service dependencies.
+    duration_estimate: 30 min
+    questions:
+    - Are upstream dependencies visible?
+    - Are downstream dependency issues trackable?
+    - Can dependency latency impact be measured?
+    expected_findings:
+    - Dependency visibility gaps
+    - Missing correlation capabilities
+  - id: '4'
+    name: SLO Integration Check
+    description: |
+      Verify SLO tracking is integrated into health dashboards.
+    duration_estimate: 30 min
+    questions:
+    - Are SLIs visualized?
+    - Is error budget visible?
+    - Are SLO thresholds marked on graphs?
+    expected_findings:
+    - SLO integration status
+    - Error budget visibility
+output:
+  deliverables:
+  - type: health_dashboard_scorecard
+    format: table
+    description: Service-by-service health dashboard completeness
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - RED Metrics Coverage
+    - USE Metrics Coverage
+    - Dependency Visibility
+    - SLO Integration
+    - Recommendations
+  confidence_guidance:
+    high: Direct panel-by-panel analysis
+    medium: Keyword-based detection of metrics
+    low: Inferred from panel titles
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-four-signals
+      priority: required
+    - source_id: red-method
+      priority: required
+    - source_id: use-method
+      priority: required
+  degradation:
+  - feature: Live dashboard analysis
+    impact: Cannot inspect current dashboards
+    mitigation: Export dashboard JSON before going offline
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed per-service analysis
+    full:
+      included: true
+      priority: 8
+    production:
+      included: true
+      priority: 6
+closeout_checklist:
+- id: svchealth-001
+  item: All services have RED metrics on dashboards
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify Rate, Errors, Duration for each service dashboard
+  expected: Confirmed by reviewer
+- id: svchealth-002
+  item: Latency shows percentiles, not just averages
+  level: CRITICAL
+  verification: manual
+  verification_notes: Check for p50/p95/p99 in latency panels
+  expected: Confirmed by reviewer
+- id: svchealth-003
+  item: Dependency health visible on service dashboards
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify upstream/downstream health panels exist
+  expected: Confirmed by reviewer
+- id: svchealth-004
+  item: SLO/error budget tracking present
+  level: WARNING
+  verification: manual
+  verification_notes: Check for SLO-related panels
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    - serverless
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.1
+  - framework: Internal SLO
+    controls:
+    - Service Reliability Standards
+relationships:
+  commonly_combined:
+  - observability-instrumentation.visualization-dashboards.dashboard-coverage
+  - observability-instrumentation.metrics.red-metrics
+  - observability-instrumentation.metrics.use-metrics
+  - observability-instrumentation.alerting.slo-based-alerting

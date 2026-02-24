@@ -1,0 +1,223 @@
+audit:
+  id: code-quality.maintainability.code-churn
+  name: Code Churn Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: maintainability
+  tier: expert
+  estimated_duration: 30 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: medium
+  scope: repository
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Measures code churn - the rate at which code is added, modified, and deleted.
+    Analyzes the ratio of changed lines to total lines, identifies files with
+    high churn rates, and tracks churn trends over time. Distinguishes between
+    healthy evolution and problematic instability.
+  why_it_matters: |
+    High code churn is strongly correlated with defect density. Microsoft research
+    found that files with high relative churn (churn/size) are 8x more likely to
+    have post-release defects. Understanding churn helps predict which code needs
+    extra review and testing attention.
+  when_to_run:
+  - Release quality gates
+  - Sprint retrospectives
+  - Risk assessment
+  - Test prioritization
+prerequisites:
+  required_artifacts:
+  - type: git_history
+    description: Git repository with commit history
+  access_requirements:
+  - Read access to git repository
+discovery:
+  file_patterns:
+  - glob: '**/*.{js,ts,py,java,go,rb,cs}'
+    purpose: Source code files
+knowledge_sources:
+  specifications:
+  - id: nagappan-churn
+    name: Microsoft Research - Code Churn and Defects
+    url: https://www.microsoft.com/en-us/research/publication/use-of-relative-code-churn-measures-to-predict-system-defect-density/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: clean-code
+    name: Robert C. Martin - Clean Code
+    url: https://www.oreilly.com/library/view/clean-code-a/9780136083238/
+    offline_cache: false
+  - id: pragmatic-programmer
+    name: The Pragmatic Programmer
+    url: https://pragprog.com/titles/tpp20/the-pragmatic-programmer-20th-anniversary-edition/
+    offline_cache: false
+tooling:
+  scripts:
+  - id: code-churn
+    language: bash
+    purpose: Calculate code churn metrics
+    source: inline
+    code: |
+      git log --numstat --since="30 days ago" --format="" | \
+        awk '{added+=$1; deleted+=$2} END {print "Added:", added, "Deleted:", deleted, "Churn:", added+deleted}'
+signals:
+  critical:
+  - id: CCH-CRIT-001
+    signal: Relative churn > 100% (more churn than code)
+    evidence_pattern: churn / loc > 1
+    explanation: |
+      When churn exceeds total code size, the entire codebase is
+      effectively being rewritten. This indicates severe instability
+      and almost guarantees defects.
+    remediation: Stabilize requirements and design before continuing
+  high:
+  - id: CCH-HIGH-001
+    signal: High churn in recently changed code
+    evidence_pattern: new_code_high_churn
+    explanation: |
+      Newly written code that immediately requires heavy modification
+      suggests design issues or unclear requirements.
+    remediation: Improve upfront design and requirements clarity
+  - id: CCH-HIGH-002
+    signal: Files with >50% lines churned in 30 days
+    evidence_pattern: file_churn_ratio > 50%
+    explanation: |
+      Half or more of a file changing in a month indicates significant
+      instability requiring careful testing.
+    remediation: Prioritize testing and review for high-churn files
+  medium:
+  - id: CCH-MED-001
+    signal: Churn concentrated in few files
+    evidence_pattern: churn_concentration_high
+    remediation: Investigate why specific files are churning
+  - id: CCH-MED-002
+    signal: Delete-heavy churn (>40% of churn is deletions)
+    evidence_pattern: delete_ratio > 40%
+    remediation: Verify deletions are intentional, not regression fixes
+  low:
+  - id: CCH-LOW-001
+    signal: No churn tracking
+    evidence_pattern: no_churn_metrics
+    remediation: Add churn to development metrics
+  positive:
+  - id: CCH-POS-001
+    signal: Healthy churn rate (10-30% of additions)
+    evidence_pattern: 10% <= churn_rate <= 30%
+  - id: CCH-POS-002
+    signal: Churn decreasing as code stabilizes
+    evidence_pattern: churn_trend_decreasing
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Calculate Churn Metrics
+    description: |
+      Extract additions, deletions, and modifications from git
+      history to calculate churn rates.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Get overall churn
+      command: |
+        git log --numstat --since="30 days ago" --format="" | \
+          awk '{added+=$1; deleted+=$2} END {print "Added:", added, "Deleted:", deleted}'
+    - purpose: Get churn by file
+      command: |
+        git log --numstat --since="30 days ago" --format="" | \
+          awk '{a[$3]+=$1+$2} END {for (f in a) print a[f], f}' | sort -rn | head -20
+    expected_findings:
+    - Total lines added/deleted
+    - Per-file churn metrics
+  - id: '2'
+    name: Calculate Relative Churn
+    description: |
+      Normalize churn against file size to identify proportionally
+      high-churn files.
+    duration_estimate: 10 min
+    expected_findings:
+    - Churn/LOC ratios
+    - High relative churn files
+  - id: '3'
+    name: Analyze Churn Trends
+    description: |
+      Compare churn rates across time periods to identify trends
+      and patterns.
+    duration_estimate: 10 min
+    expected_findings:
+    - Week-over-week trends
+    - Churn pattern analysis
+output:
+  deliverables:
+  - type: metrics
+    format: structured
+    content:
+    - total_churn
+    - additions
+    - deletions
+    - relative_churn_by_file
+    - churn_trend
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Churn Metrics
+    - Trend Analysis
+    - Recommendations
+  confidence_guidance:
+    high: 90+ days of git history
+    medium: 30-90 days of history
+    low: Less than 30 days
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: nagappan-churn
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cch-001
+  item: Churn metrics calculated
+  level: BLOCKING
+  verification: Add/delete counts available
+  expected: Numeric churn values
+- id: cch-002
+  item: High-churn files identified
+  level: WARNING
+  verification: Relative churn calculated
+  expected: Prioritized file list
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: DORA Metrics
+    controls:
+    - Change Failure Rate
+relationships:
+  commonly_combined:
+  - code-quality.maintainability.change-frequency
+  - code-quality.maintainability.hotspot-analysis
+  - code-quality.testing.test-coverage

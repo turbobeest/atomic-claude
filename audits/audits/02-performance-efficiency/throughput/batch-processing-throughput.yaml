@@ -1,0 +1,278 @@
+audit:
+  id: performance-efficiency.throughput.batch-processing-throughput
+  name: Batch Processing Throughput Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: throughput
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures the throughput of batch processing systems
+    including ETL jobs, data transformations, report generation, and
+    scheduled tasks. It evaluates processing speed, completion times,
+    resource utilization, and identifies jobs at risk of missing SLAs.
+  why_it_matters: |
+    Batch jobs often have strict completion deadlines - reports must
+    be ready by morning, data must be processed before business hours,
+    billing must complete by end of month. Slow batch processing causes
+    missed SLAs, stale data, and blocked downstream processes.
+  when_to_run:
+  - When batch jobs approach SLA deadlines
+  - After data volume increases
+  - When adding new batch processing jobs
+  - During ETL pipeline optimization
+prerequisites:
+  required_artifacts:
+  - type: batch_job_metrics
+    description: Metrics for batch job execution times and throughput
+  - type: job_scheduler_access
+    description: Access to Airflow, Luigi, or job scheduler
+  access_requirements:
+  - Access to batch job monitoring
+  - Access to job scheduler UI/API
+  - Historical job execution data
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: batch_job_duration_seconds
+    purpose: Batch job execution duration
+    threshold: Within SLA window
+  - system: Airflow
+    query: SELECT dag_id, duration FROM task_instance WHERE state='success' ORDER BY end_date DESC
+    purpose: Recent job execution times
+    threshold: Stable or improving
+  - system: Prometheus
+    query: |
+      sum(rate(batch_records_processed_total[5m])) by (job_name)
+    purpose: Records processed per second by job
+    threshold: Meets processing requirements
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: airflow-best-practices
+    name: Apache Airflow Best Practices
+    url: https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html
+    offline_cache: true
+  - id: spark-tuning
+    name: Apache Spark Performance Tuning
+    url: https://spark.apache.org/docs/latest/tuning.html
+    offline_cache: true
+  - id: aws-batch-optimization
+    name: AWS Batch Optimization
+    url: https://docs.aws.amazon.com/batch/latest/userguide/best-practices.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: airflow-cli
+    purpose: Check DAG execution times
+    command: airflow dags list-runs -d my_dag --limit 10
+  - tool: spark-submit
+    purpose: Check Spark job metrics
+    command: spark-submit --status application_id
+  - tool: aws-cli
+    purpose: Check AWS Batch job status
+    command: |
+      aws batch describe-jobs --jobs job-id \
+        --query 'jobs[].{status:status,startedAt:startedAt,stoppedAt:stoppedAt}'
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.95,
+        sum(rate(batch_job_duration_seconds_bucket[24h])) by (le, job_name)
+      )
+    purpose: P95 batch job duration
+  - system: Prometheus
+    query: |
+      (batch_job_sla_seconds - batch_job_duration_seconds) / batch_job_sla_seconds
+    purpose: SLA headroom percentage
+signals:
+  critical:
+  - id: BATCH-CRIT-001
+    signal: Batch job exceeding SLA deadline
+    evidence_threshold: job_duration > sla_deadline
+    explanation: |
+      Jobs exceeding SLA deadlines cause downstream failures, stale
+      reports, and business impact. This requires immediate
+      investigation and potentially manual intervention.
+    remediation: Scale resources; optimize job; consider parallel processing
+  - id: BATCH-CRIT-002
+    signal: Batch job failing consistently
+    evidence_threshold: failure_rate > 20% over 5 runs
+    explanation: |
+      Consistent failures indicate a systemic issue that will not
+      self-resolve. Manual investigation and fix is required.
+    remediation: Investigate failure cause; fix data issues; add retry logic
+  high:
+  - id: BATCH-HIGH-001
+    signal: Batch job using more than 80% of SLA window
+    evidence_threshold: job_duration / sla_window > 0.8
+    explanation: |
+      Jobs consuming most of the SLA window have no buffer for
+      data growth or infrastructure issues. Small delays will
+      cause SLA breaches.
+    remediation: Optimize job performance; scale resources; consider earlier start time
+  - id: BATCH-HIGH-002
+    signal: Batch processing time growing faster than data volume
+    evidence_threshold: processing_time_growth > data_volume_growth
+    explanation: |
+      Sublinear scaling indicates algorithmic or infrastructure
+      issues that will worsen as data grows.
+    remediation: Review algorithm efficiency; add indexing; scale infrastructure
+  medium:
+  - id: BATCH-MED-001
+    signal: No batch job duration monitoring
+    remediation: Implement job duration metrics and SLA tracking
+  - id: BATCH-MED-002
+    signal: Batch jobs running sequentially when parallelizable
+    remediation: Identify independent jobs and parallelize execution
+  low:
+  - id: BATCH-LOW-001
+    signal: Batch job SLAs not documented
+  positive:
+  - id: BATCH-POS-001
+    signal: All batch jobs completing with >50% SLA headroom
+  - id: BATCH-POS-002
+    signal: Batch processing time scales linearly with data volume
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Batch Jobs
+    description: |
+      Identify all batch processing jobs, their schedules, SLAs,
+      and dependencies.
+    duration_estimate: 15 min
+    commands:
+    - purpose: List Airflow DAGs
+      command: airflow dags list --output table
+    - purpose: List scheduled jobs in Kubernetes
+      command: kubectl get cronjobs -A
+    expected_findings:
+    - List of batch jobs
+    - Schedules and SLAs
+  - id: '2'
+    name: Measure Job Performance
+    description: |
+      Analyze recent job execution times and identify trends.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Query job duration history
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query_range?query=batch_job_duration_seconds&start=2024-01-01T00:00:00Z&end=2024-01-07T00:00:00Z&step=1d'
+    - purpose: Get Airflow task durations
+      command: airflow tasks states-for-dag-run my_dag run_id
+    expected_findings:
+    - Job execution times
+    - Duration trends
+  - id: '3'
+    name: Analyze SLA Compliance
+    description: |
+      Compare job completion times against SLA requirements.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Query SLA breaches
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=count(batch_job_duration_seconds>batch_job_sla_seconds)'
+    expected_findings:
+    - SLA compliance rate
+    - Jobs at risk
+  - id: '4'
+    name: Identify Optimization Opportunities
+    description: |
+      Analyze job resource utilization and identify optimization
+      opportunities.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check job CPU utilization
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=avg(rate(container_cpu_usage_seconds_total{pod=~".*batch.*"}[5m]))by(pod)'
+    - purpose: Check parallelization
+      command: airflow dags show my_dag
+    expected_findings:
+    - Resource bottlenecks
+    - Parallelization opportunities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Batch Job Inventory
+    - Performance Analysis
+    - SLA Compliance Status
+    - Optimization Recommendations
+  confidence_guidance:
+    high: Historical data with >30 job executions
+    medium: Recent execution data (<10 runs)
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: airflow-best-practices
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires historical job data analysis
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: batch-001
+  item: All batch jobs completing within SLA
+  level: CRITICAL
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=count(batch_job_duration_seconds>batch_job_sla_seconds)' | \
+      jq '.data.result[0].value[1] | tonumber == 0'
+  expected: 'true'
+- id: batch-002
+  item: Batch job failure rate under 5%
+  level: BLOCKING
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(batch_job_failures_total[24h]))/sum(rate(batch_job_runs_total[24h]))' | \
+      jq '.data.result[0].value[1] | tonumber < 0.05'
+  expected: 'true'
+- id: batch-003
+  item: SLA monitoring and alerting configured
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm SLA alerts are set up for critical batch jobs
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - data-platform
+    - etl
+    - reporting
+relationships:
+  commonly_combined:
+  - performance-efficiency.throughput.data-ingestion-rate
+  - performance-efficiency.resource-utilization.cpu-efficiency

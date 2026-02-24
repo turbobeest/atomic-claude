@@ -1,0 +1,334 @@
+# ============================================================
+# Join Efficiency Audit
+# ============================================================
+# Evaluates database join operations for efficiency, identifying
+# suboptimal join strategies and missing join optimizations.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.database-performance.join-efficiency"
+  name: "Join Efficiency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "database-performance"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines database join operations to identify inefficient
+    join strategies, missing join indexes, suboptimal join order, and
+    opportunities for join optimization. It analyzes execution plans to
+    understand how the database is processing multi-table queries.
+
+  why_it_matters: |
+    Join operations are often the most expensive part of complex queries.
+    A poorly optimized join can take exponentially longer than necessary -
+    the difference between milliseconds and minutes. Incorrect join order
+    or missing indexes on join columns can cause nested loop joins to
+    scan millions of rows unnecessarily.
+
+  when_to_run:
+    - "After implementing new multi-table queries"
+    - "When investigating slow complex queries"
+    - "After schema changes affecting relationships"
+    - "During query performance optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-access"
+      description: "Access to EXPLAIN plans"
+    - type: "query-logs"
+      description: "Access to query statistics"
+
+  access_requirements:
+    - "EXPLAIN (ANALYZE, BUFFERS) privileges"
+    - "Access to pg_stat_statements or equivalent"
+    - "Read access to schema information"
+
+discovery:
+  metrics_queries:
+    - system: "PostgreSQL"
+      query: |
+        SELECT query, calls, mean_exec_time
+        FROM pg_stat_statements
+        WHERE query ~* 'JOIN' AND mean_exec_time > 100
+        ORDER BY total_exec_time DESC
+      purpose: "Slow queries with joins"
+      threshold: "JOIN queries should complete in < 100ms for OLTP"
+    - system: "PostgreSQL"
+      query: |
+        SELECT query FROM pg_stat_statements
+        WHERE query ~* 'JOIN.*JOIN.*JOIN'
+        ORDER BY total_exec_time DESC
+      purpose: "Complex multi-join queries"
+      threshold: "Multi-join queries need careful optimization"
+
+  code_patterns:
+    - pattern: "JOIN.*ON.*=|LEFT JOIN|RIGHT JOIN|INNER JOIN"
+      type: "regex"
+      scope: "source"
+      purpose: "Join patterns in application code"
+    - pattern: "CROSS JOIN|,\\s*\\w+\\s+WHERE"
+      type: "regex"
+      scope: "source"
+      purpose: "Potential cartesian products"
+
+knowledge_sources:
+  specifications:
+    - id: "postgres-joins"
+      name: "PostgreSQL Query Planning"
+      url: "https://www.postgresql.org/docs/current/planner-optimizer.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "join-types"
+      name: "Understanding Join Algorithms"
+      url: "https://use-the-index-luke.com/sql/join"
+      offline_cache: true
+    - id: "postgres-geqo"
+      name: "Genetic Query Optimizer"
+      url: "https://www.postgresql.org/docs/current/geqo.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "Analyze join execution plans"
+      command: "psql -c 'EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) <join_query>'"
+
+  monitoring_queries:
+    - system: "PostgreSQL"
+      query: |
+        SELECT query, calls, mean_exec_time, rows
+        FROM pg_stat_statements
+        WHERE query ~* 'JOIN'
+        ORDER BY mean_exec_time DESC
+      purpose: "Slowest join queries"
+
+signals:
+  critical:
+    - id: "JOIN-CRIT-001"
+      signal: "Nested loop join on large tables without index"
+      evidence_pattern: "EXPLAIN shows Nested Loop with Seq Scan on inner table"
+      explanation: |
+        Nested loop joins without index support perform O(n*m) operations.
+        For two 10,000-row tables, this means 100 million row comparisons
+        instead of 20,000 with proper indexes.
+      remediation: "Add index on join columns of inner table"
+
+    - id: "JOIN-CRIT-002"
+      signal: "Cartesian product (unintended cross join)"
+      evidence_pattern: "EXPLAIN shows rows = table1_rows * table2_rows"
+      explanation: |
+        Cartesian products multiply row counts, creating potentially billions
+        of rows from modest tables. This is almost always a bug - a missing
+        or incorrect join condition.
+      remediation: "Add missing join condition or fix query logic"
+
+  high:
+    - id: "JOIN-HIGH-001"
+      signal: "Suboptimal join order increasing work"
+      evidence_pattern: "Large table scanned before selective filter applied"
+      explanation: |
+        Poor join order scans large tables early, generating many intermediate
+        rows that are later filtered. Better order would filter first, reducing
+        work for subsequent joins.
+      remediation: "Hint join order or update statistics for better planning"
+
+    - id: "JOIN-HIGH-002"
+      signal: "Hash join on very large tables exceeding work_mem"
+      evidence_pattern: "Hash Join with Batches > 1"
+      explanation: |
+        When hash tables don't fit in work_mem, the database must batch the
+        operation to disk, significantly slowing the join. This is indicated
+        by multiple batches in EXPLAIN.
+      remediation: "Increase work_mem or optimize query to reduce hash table size"
+
+  medium:
+    - id: "JOIN-MED-001"
+      signal: "Merge join without presorted input"
+      evidence_pattern: "Sort operation before Merge Join"
+      remediation: "Add index to provide presorted input for merge join"
+
+    - id: "JOIN-MED-002"
+      signal: "Excessive joins in single query (> 5 tables)"
+      evidence_pattern: "Query joining more than 5 tables"
+      remediation: "Consider query decomposition or materialized views"
+
+  low:
+    - id: "JOIN-LOW-001"
+      signal: "Outer join where inner join would suffice"
+
+  positive:
+    - id: "JOIN-POS-001"
+      signal: "Index-based nested loops on selective joins"
+    - id: "JOIN-POS-002"
+      signal: "Hash joins fitting in memory for appropriate cases"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify slow join queries"
+      description: |
+        Find queries with JOIN operations that have high execution times
+        or resource consumption.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Slow JOIN queries from statistics"
+          command: |
+            psql -c "SELECT query, calls, mean_exec_time::int, rows FROM pg_stat_statements WHERE query ~* 'JOIN' AND mean_exec_time > 100 ORDER BY total_exec_time DESC LIMIT 15"
+        - purpose: "Queries with multiple joins"
+          command: |
+            psql -c "SELECT query, mean_exec_time FROM pg_stat_statements WHERE query ~* 'JOIN.*JOIN' ORDER BY mean_exec_time DESC LIMIT 10"
+      expected_findings:
+        - "Slow join queries"
+        - "Complex multi-join patterns"
+
+    - id: "2"
+      name: "Analyze join execution plans"
+      description: |
+        Generate detailed execution plans for slow join queries to
+        understand join strategies and costs.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "EXPLAIN ANALYZE for slow join"
+          command: |
+            psql -c "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) <slow_join_query>"
+        - purpose: "Check for nested loops without index"
+          command: |
+            psql -c "EXPLAIN (FORMAT JSON) <query>" | grep -E "Nested Loop|Seq Scan"
+      expected_findings:
+        - "Join algorithms used"
+        - "Cost breakdown by operation"
+
+    - id: "3"
+      name: "Check join column indexes"
+      description: |
+        Verify that indexes exist on columns used in join conditions.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "List foreign key columns and their indexes"
+          command: |
+            psql -c "SELECT tc.table_name, kcu.column_name, (SELECT COUNT(*) FROM pg_indexes WHERE tablename = tc.table_name AND indexdef LIKE '%' || kcu.column_name || '%') as index_count FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name WHERE tc.constraint_type = 'FOREIGN KEY'"
+        - purpose: "Check for unindexed FK columns"
+          command: |
+            psql -c "SELECT conrelid::regclass, a.attname FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) WHERE c.contype = 'f' AND NOT EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = c.conrelid AND a.attnum = ANY(i.indkey))"
+      expected_findings:
+        - "Index coverage on join columns"
+        - "Missing join indexes"
+
+    - id: "4"
+      name: "Detect cartesian products"
+      description: |
+        Search for queries that may produce unintended cartesian products
+        due to missing join conditions.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find potential cartesian joins in code"
+          command: |
+            grep -rn "CROSS JOIN\|FROM.*,.*WHERE" --include="*.sql" --include="*.java" --include="*.py"
+        - purpose: "Check query with suspicious row counts"
+          command: |
+            psql -c "SELECT query, rows, calls FROM pg_stat_statements WHERE rows > 1000000 AND query ~* 'FROM.*,'"
+      expected_findings:
+        - "Potential cartesian products"
+        - "Queries with unexpected row counts"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Slow Join Analysis"
+        - "Join Strategy Assessment"
+        - "Index Gap Analysis"
+        - "Optimization Recommendations"
+
+  confidence_guidance:
+    high: "EXPLAIN ANALYZE with production data"
+    medium: "EXPLAIN without ANALYZE"
+    low: "Query pattern analysis without execution"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "postgres-joins"
+        priority: "required"
+      - source_id: "join-types"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed execution plan analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "join-001"
+    item: "No nested loop joins without index support on large tables"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review EXPLAIN plans for Nested Loop with Seq Scan"
+    expected: "Confirmed by reviewer"
+
+  - id: "join-002"
+    item: "All foreign key columns have indexes"
+    level: "BLOCKING"
+    verification: |
+      psql -c "SELECT count(*) FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) WHERE c.contype = 'f' AND NOT EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = c.conrelid AND a.attnum = ANY(i.indkey))" -t | grep -q "^0$"
+    expected: "true"
+
+  - id: "join-003"
+    item: "No unintended cartesian products"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review queries with CROSS JOIN or comma-separated FROM"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.database-performance.query-optimization"
+    - "performance-efficiency.database-performance.missing-index"

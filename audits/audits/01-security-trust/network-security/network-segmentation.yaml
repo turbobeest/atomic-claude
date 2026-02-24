@@ -1,0 +1,467 @@
+audit:
+  id: security-trust.network-security.network-segmentation
+  name: Network Segmentation Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: network-security
+  tier: phd
+  estimated_duration: 4 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines network segmentation architecture to verify proper
+    isolation between network zones, workloads, and security domains. It
+    evaluates VLAN configurations, firewall rules between segments, micro-
+    segmentation implementations, and zero-trust network access controls.
+    The audit covers both traditional network segmentation and modern
+    software-defined approaches.
+  why_it_matters: |
+    Inadequate network segmentation enables lateral movement after initial
+    compromise, allowing attackers to pivot from low-value targets to critical
+    systems. The 2024 MITRE breach demonstrated how poor segmentation allowed
+    attackers to move laterally after VPN compromise. Proper segmentation
+    contains breaches, reduces blast radius, and is essential for zero-trust
+    architecture. Regulatory frameworks like PCI-DSS explicitly require
+    network segmentation for cardholder data environments.
+  when_to_run:
+  - Initial security assessment
+  - Network architecture changes
+  - Cloud migration projects
+  - Zero trust implementation
+  - Post-incident review
+  - Annual compliance audits
+prerequisites:
+  required_artifacts:
+  - type: network_diagram
+    description: Current network architecture documentation
+  - type: firewall_rules
+    description: Firewall rule exports from all network devices
+  - type: vlan_configuration
+    description: VLAN assignments and trunk configurations
+  access_requirements:
+  - Network device access (switches, routers, firewalls)
+  - Cloud network configuration access (VPC, security groups)
+  - SDN controller access if applicable
+  - Network scanning capabilities
+discovery:
+  code_patterns:
+  - pattern: vlan|subnet|security.?group|network.?policy
+    type: regex
+    scope: config
+    purpose: Identify network segmentation configurations
+  - pattern: allow.*any.*any|permit.*0\.0\.0\.0/0
+    type: regex
+    scope: config
+    purpose: Detect overly permissive network rules
+  - pattern: NetworkPolicy|Calico|Cilium
+    type: regex
+    scope: config
+    purpose: Identify Kubernetes network policies
+  file_patterns:
+  - glob: '**/network-policy*.yaml'
+    purpose: Kubernetes network policies
+  - glob: '**/firewall*.conf'
+    purpose: Firewall configurations
+  - glob: '**/vpc*.tf'
+    purpose: Terraform VPC configurations
+  - glob: '**/security-group*.tf'
+    purpose: AWS security group definitions
+knowledge_sources:
+  specifications:
+  - id: nist-sp-800-215
+    name: NIST SP 800-215 - Guide to a Secure Enterprise Network Landscape
+    url: https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-215.pdf
+    offline_cache: true
+    priority: required
+  - id: nist-sp-800-207
+    name: NIST SP 800-207 - Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-network-infrastructure
+    name: NSA Network Infrastructure Security Guide
+    url: https://media.defense.gov/2022/Jun/15/2003018261/-1/-1/0/CTR_NSA_NETWORK_INFRASTRUCTURE_SECURITY_GUIDE_20220615.PDF
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: cisa-zt-microsegmentation
+    name: CISA Zero Trust Microsegmentation Guidance
+    url: https://www.cisa.gov/sites/default/files/2025-07/ZT-Microsegmentation-Guidance-Part-One_508c.pdf
+    offline_cache: true
+  - id: pci-dss-segmentation
+    name: PCI-DSS Network Segmentation Guidance
+    url: https://www.pcisecuritystandards.org/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: nmap
+    purpose: Network discovery and segmentation verification
+    command: nmap -sn -PE 10.0.0.0/8 --exclude-file trusted.txt
+  - tool: tcpdump
+    purpose: Capture traffic to verify segment isolation
+    command: tcpdump -i eth0 -n 'host 10.0.1.1 and host 10.0.2.1'
+  - tool: traceroute
+    purpose: Trace paths between segments
+    command: traceroute -n target_host
+  scripts:
+  - id: segment-connectivity-test
+    language: bash
+    purpose: Test connectivity between network segments
+    source: inline
+    code: |
+      #!/bin/bash
+      # Test cross-segment connectivity
+      for src_segment in 10.0.1.0/24 10.0.2.0/24 10.0.3.0/24; do
+        for dst in 10.0.1.1 10.0.2.1 10.0.3.1 10.0.4.1; do
+          timeout 2 nc -zv $dst 22 2>&1 | grep -q succeeded && \
+            echo "ALERT: $src_segment can reach $dst:22"
+        done
+      done
+signals:
+  critical:
+  - id: NETSEG-CRIT-001
+    signal: No network segmentation implemented
+    cwe_id: CWE-653
+    evidence_indicators:
+    - All systems on single VLAN or subnet
+    - No firewall rules between internal systems
+    - Flat network architecture
+    explanation: |
+      A flat network with no segmentation allows unrestricted lateral
+      movement. Attackers who compromise any system can immediately
+      access all other systems on the network without additional barriers.
+    remediation: Implement network segmentation with at least DMZ, internal, and management zones
+  - id: NETSEG-CRIT-002
+    signal: Critical systems accessible from user workstations
+    cwe_id: CWE-923
+    evidence_indicators:
+    - Database servers reachable from end-user networks
+    - No jump host required for admin access
+    - Direct RDP/SSH from user VLANs to servers
+    explanation: |
+      Direct access from user workstations to critical systems bypasses
+      defense in depth. Compromised workstations can directly attack
+      production databases and core infrastructure.
+    remediation: Implement jump hosts/bastion hosts for administrative access with strict ACLs
+  - id: NETSEG-CRIT-003
+    signal: Cardholder data environment not isolated
+    cwe_id: CWE-653
+    evidence_indicators:
+    - PCI systems on same VLAN as general systems
+    - No firewall between CDE and rest of network
+    - Shared credentials across environments
+    explanation: |
+      PCI-DSS requires network segmentation to isolate cardholder data
+      environments. Failure to segment increases audit scope and risk
+      of data breach affecting payment card information.
+    remediation: Implement dedicated CDE network segment with strict access controls
+  high:
+  - id: NETSEG-HIGH-001
+    signal: Overly permissive firewall rules between segments
+    cwe_id: CWE-923
+    evidence_pattern: permit.*any.*any|allow.*0\.0\.0\.0
+    explanation: |
+      Rules allowing any-to-any traffic between segments effectively
+      negate the security benefits of segmentation. Each segment
+      should have explicit allow rules for required traffic only.
+    remediation: Replace any/any rules with specific port and protocol allowances
+  - id: NETSEG-HIGH-002
+    signal: No microsegmentation for container workloads
+    cwe_id: CWE-653
+    evidence_indicators:
+    - Missing Kubernetes NetworkPolicy resources
+    - All pods can communicate with all pods
+    - No service mesh network policies
+    explanation: |
+      Container environments without network policies allow unrestricted
+      pod-to-pod communication. Compromised containers can attack any
+      other workload in the cluster.
+    remediation: Implement default-deny NetworkPolicies with explicit allow rules
+  - id: NETSEG-HIGH-003
+    signal: Management network accessible from production
+    cwe_id: CWE-923
+    evidence_indicators:
+    - Network devices reachable from application servers
+    - Management interfaces on production VLANs
+    - No out-of-band management network
+    explanation: |
+      Management networks should be isolated to prevent compromised
+      production systems from attacking network infrastructure. Out-of-
+      band management is a security best practice.
+    remediation: Implement dedicated management network with restricted access
+  - id: NETSEG-HIGH-004
+    signal: Development environment can access production
+    cwe_id: CWE-653
+    evidence_indicators:
+    - Dev systems can reach prod databases
+    - Shared network segments between environments
+    - No environment isolation
+    explanation: |
+      Development environments typically have weaker security controls.
+      Access to production from dev allows attackers to pivot from
+      lower-security environments to critical systems.
+    remediation: Implement strict network isolation between development and production
+  medium:
+  - id: NETSEG-MED-001
+    signal: VLAN hopping vulnerabilities present
+    cwe_id: CWE-923
+    evidence_indicators:
+    - Native VLAN traffic untagged on trunks
+    - DTP enabled on access ports
+    - Missing VLAN pruning on trunks
+    explanation: |
+      VLAN hopping attacks allow attackers to access traffic from other
+      VLANs by exploiting switch misconfigurations.
+    remediation: Disable DTP, use dedicated native VLAN, prune unused VLANs
+  - id: NETSEG-MED-002
+    signal: Insufficient logging of cross-segment traffic
+    evidence_indicators:
+    - Firewall logs not capturing denied traffic
+    - No netflow between segments
+    - Limited visibility into east-west traffic
+    explanation: |
+      Without logging cross-segment traffic, detecting lateral movement
+      and policy violations becomes extremely difficult.
+    remediation: Enable firewall logging for all inter-segment traffic
+  - id: NETSEG-MED-003
+    signal: Static segmentation without identity awareness
+    evidence_indicators:
+    - Segmentation based solely on IP addresses
+    - No user/device identity in policy decisions
+    - No dynamic segment assignment
+    explanation: |
+      Static segmentation cannot adapt to modern threats. Identity-aware
+      microsegmentation provides stronger zero-trust security.
+    remediation: Implement identity-based access controls and dynamic segmentation
+  low:
+  - id: NETSEG-LOW-001
+    signal: Segmentation documentation outdated
+    evidence_indicators:
+    - Network diagrams don't match actual configuration
+    - Segment purposes not documented
+    - No segmentation change process
+    explanation: |
+      Outdated documentation leads to security gaps and misconfigurations
+      during changes.
+    remediation: Implement network documentation and change management process
+  positive:
+  - id: NETSEG-POS-001
+    signal: Zero trust microsegmentation implemented
+    explanation: Software-defined microsegmentation with identity awareness provides strongest protection
+  - id: NETSEG-POS-002
+    signal: Default-deny policies in place
+    explanation: Default-deny with explicit allow rules minimizes attack surface
+  - id: NETSEG-POS-003
+    signal: Network traffic fully logged and monitored
+    explanation: Comprehensive logging enables detection of lateral movement attempts
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Network Segments
+    description: |
+      Document all network segments including VLANs, subnets, cloud VPCs,
+      and security zones. Map the intended purpose and trust level of
+      each segment.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List VLANs on Cisco switch
+      command: show vlan brief
+    - purpose: List AWS VPCs
+      command: aws ec2 describe-vpcs --query 'Vpcs[*].[VpcId,CidrBlock,Tags]'
+    - purpose: List Kubernetes namespaces
+      command: kubectl get namespaces
+    expected_findings:
+    - Complete segment inventory with purposes
+    - Trust zone assignments for each segment
+  - id: '2'
+    name: Analyze Firewall Rules
+    description: |
+      Export and review firewall rules between segments. Identify overly
+      permissive rules and undocumented access paths.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Export iptables rules
+      command: iptables -L -n -v --line-numbers
+    - purpose: List AWS security groups
+      command: aws ec2 describe-security-groups --query 'SecurityGroups[*].[GroupId,GroupName,IpPermissions]'
+    - purpose: Search for any-any rules
+      command: grep -rE 'permit.*any.*any|allow.*0\.0\.0\.0' /etc/firewall/
+    expected_findings:
+    - Inventory of all inter-segment rules
+    - Identification of overly permissive rules
+  - id: '3'
+    name: Test Segment Isolation
+    description: |
+      Perform connectivity tests between segments to verify that access
+      controls are working as intended. Test from multiple source segments.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Test connectivity to database from user segment
+      command: nc -zv database.internal 5432
+    - purpose: Scan for accessible services from DMZ
+      command: nmap -sT -Pn -p 22,3389,3306,5432 internal_network_range
+    - purpose: Test east-west traffic in Kubernetes
+      command: kubectl exec -it test-pod -- curl -m 5 http://other-service.other-namespace
+    expected_findings:
+    - Verification that unauthorized paths are blocked
+    - Documentation of any unexpected connectivity
+  - id: '4'
+    name: Review Kubernetes Network Policies
+    description: |
+      Examine NetworkPolicy resources and service mesh policies to verify
+      workload microsegmentation in container environments.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all network policies
+      command: kubectl get networkpolicy --all-namespaces
+    - purpose: Check for default deny policies
+      command: kubectl get networkpolicy -A -o yaml | grep -A5 'policyTypes'
+    - purpose: Examine Calico policies if used
+      command: kubectl get globalnetworkpolicy
+    expected_findings:
+    - NetworkPolicy coverage for sensitive workloads
+    - Default-deny ingress/egress policies
+  - id: '5'
+    name: Evaluate Zero Trust Alignment
+    description: |
+      Assess how well current segmentation aligns with zero trust principles
+      including least privilege, identity-based access, and continuous
+      verification.
+    duration_estimate: 30 min
+    questions:
+    - Is access granted based on identity or only network location?
+    - Are there default-deny policies at each segment boundary?
+    - Is east-west traffic encrypted and authenticated?
+    - Can compromised workloads access lateral systems?
+    expected_findings:
+    - Gap analysis against zero trust requirements
+    - Roadmap for zero trust implementation
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Segment Inventory
+    - Isolation Testing Results
+    - Risk Assessment
+    - Recommendations
+  - type: network_diagram
+    format: visual
+    sections:
+    - Current segmentation architecture
+    - Recommended target architecture
+  confidence_guidance:
+    high: Direct connectivity testing confirms segmentation, firewall rules analyzed
+    medium: Configuration review completed but limited runtime testing
+    low: Based on documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: nist-sp-800-215
+      priority: required
+    - source_id: nist-sp-800-207
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Segmentation analysis requires comprehensive network access
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: netseg-001
+  item: Network segmentation implemented with multiple zones
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm at least DMZ, internal, and management segments exist
+  expected: Confirmed by reviewer
+- id: netseg-002
+  item: Firewall rules between segments use specific ports/protocols
+  level: CRITICAL
+  verification: grep -rE 'permit.*any.*any|allow.*0\.0\.0\.0/0' firewall-export.txt && echo 'FAIL' ||
+    echo 'PASS'
+  expected: PASS
+- id: netseg-003
+  item: Critical systems isolated from user workstations
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test that database/admin interfaces unreachable from user VLANs
+  expected: Confirmed by reviewer
+- id: netseg-004
+  item: Kubernetes NetworkPolicies exist for sensitive namespaces
+  level: BLOCKING
+  verification: kubectl get networkpolicy -n production 2>/dev/null | grep -q . && echo 'PASS' || echo
+    'FAIL'
+  expected: PASS
+- id: netseg-005
+  item: Development cannot access production networks
+  level: BLOCKING
+  verification: manual
+  verification_notes: Test connectivity from dev systems to production databases
+  expected: Confirmed by reviewer
+- id: netseg-006
+  item: Cross-segment traffic logged
+  level: WARNING
+  verification: manual
+  verification_notes: Verify firewall logs capture inter-segment traffic
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: PCI-DSS
+    controls:
+    - '1.2'
+    - '1.3'
+    - '1.4'
+  - framework: NIST-CSF
+    controls:
+    - PR.AC-5
+    - PR.DS-5
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.6
+  - framework: HIPAA
+    controls:
+    - 164.312(e)(1)
+relationships:
+  commonly_combined:
+  - security-trust.network-security.firewall-rules
+  - security-trust.network-security.internal-network-exposure
+  - security-trust.network-security.service-mesh-security

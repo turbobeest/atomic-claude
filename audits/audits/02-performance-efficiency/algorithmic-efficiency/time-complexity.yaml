@@ -1,0 +1,332 @@
+# ============================================================
+# TIME COMPLEXITY AUDIT
+# ============================================================
+# Identifies algorithms with poor time complexity that may cause
+# performance degradation as data scales.
+
+audit:
+  id: "performance-efficiency.algorithmic-efficiency.time-complexity"
+  name: "Time Complexity Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "algorithmic-efficiency"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes code for algorithms with suboptimal time complexity, particularly
+    O(n^2), O(n^3), or exponential algorithms that may perform adequately
+    with small datasets but degrade catastrophically at scale. Identifies
+    nested loops, repeated scans, and inefficient search patterns.
+
+  why_it_matters: |
+    An O(n^2) algorithm that runs in 1ms with 100 items takes 100 seconds
+    with 10,000 items. Poor algorithmic complexity is the most common cause
+    of systems that work in development but fail in production. These issues
+    are architectural and cannot be fixed by scaling hardware.
+
+  when_to_run:
+    - "Code review for critical paths"
+    - "Performance regression investigation"
+    - "Before scaling data volumes"
+    - "New feature implementation review"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+
+  access_requirements:
+    - "Source code repository access"
+
+discovery:
+  code_patterns:
+    - pattern: "for.*\\{[\\s\\S]*?for.*\\{"
+      type: "regex"
+      scope: "source"
+      purpose: "Find nested loops (potential O(n^2))"
+
+    - pattern: "\\.filter\\(.*\\.find\\(|\\.find\\(.*\\.filter\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find nested array operations"
+
+    - pattern: "\\.includes\\(.*inside.*for|\\.indexOf\\(.*inside.*for"
+      type: "regex"
+      scope: "source"
+      purpose: "Find linear search inside loops"
+
+    - pattern: "for.*in.*for.*in|foreach.*foreach"
+      type: "regex"
+      scope: "source"
+      purpose: "Find nested iteration patterns"
+
+    - pattern: "sort\\(.*sort\\(|sorted\\(.*sorted\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find redundant sorting"
+
+  file_patterns:
+    - glob: "**/*.{py,js,ts,java,go,rb,cs}"
+      purpose: "Source code files"
+
+knowledge_sources:
+  learning_resources:
+    - id: "big-o"
+      title: "Big O Notation"
+      type: "article"
+      reference: "https://www.bigocheatsheet.com/"
+
+    - id: "clrs-algorithms"
+      title: "Introduction to Algorithms (CLRS)"
+      type: "book"
+      reference: "ISBN: 978-0262033848"
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Find nested loop patterns"
+      offline_capable: true
+
+    - tool: "ESLint"
+      purpose: "JavaScript complexity analysis"
+      offline_capable: true
+
+    - tool: "SonarQube"
+      purpose: "Cyclomatic complexity analysis"
+      offline_capable: true
+
+  scripts:
+    - id: "nested-loop-finder"
+      language: "bash"
+      purpose: "Find potential O(n^2) patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find files with nested loops
+        rg -l 'for\s*\(' --type py --type js --type java | \
+        xargs -I {} sh -c 'rg -c "for\s*\(" {} | awk -F: "\$2>1{print \$1}"'
+
+signals:
+  critical:
+    - id: "TIME-CRIT-001"
+      signal: "O(n^2) or worse algorithm in hot path"
+      evidence_pattern: "Nested loops processing request data or database results"
+      explanation: |
+        Quadratic algorithms in request processing paths cause exponential
+        response time degradation. A 100ms response with 100 items becomes
+        10 seconds with 1000 items, causing timeouts and cascading failures.
+      remediation: "Replace with O(n log n) or O(n) algorithm using proper data structures"
+
+    - id: "TIME-CRIT-002"
+      signal: "Exponential algorithm (O(2^n) or O(n!))"
+      evidence_pattern: "Recursive functions without memoization, backtracking without pruning"
+      explanation: |
+        Exponential algorithms are only viable for tiny inputs. Even n=30
+        can take years to compute. These often appear in permission checking,
+        combination generation, or graph traversal.
+      remediation: "Add memoization, use dynamic programming, or limit input size"
+
+  high:
+    - id: "TIME-HIGH-001"
+      signal: "Linear search in loop (O(n^2) effective)"
+      evidence_pattern: "array.includes() or array.indexOf() inside for loop"
+      explanation: |
+        Using linear search (includes, indexOf, find) inside a loop creates
+        hidden O(n^2) complexity. With n=10000, this is 100 million operations.
+      remediation: "Convert search target to Set or Map for O(1) lookup"
+
+    - id: "TIME-HIGH-002"
+      signal: "Repeated sorting of same data"
+      evidence_pattern: "Multiple .sort() calls on same or overlapping data"
+      explanation: |
+        Each sort is O(n log n). Sorting the same data multiple times wastes
+        CPU and often indicates confused data flow.
+      remediation: "Sort once and maintain sorted order, or use sorted data structure"
+
+  medium:
+    - id: "TIME-MED-001"
+      signal: "Unnecessary array creation in loops"
+      evidence_pattern: "spread operator or concat inside loops"
+      explanation: |
+        Creating new arrays inside loops is O(n) per iteration, resulting
+        in O(n^2) total for the loop.
+      remediation: "Pre-allocate array or use push()"
+
+    - id: "TIME-MED-002"
+      signal: "String concatenation in loops"
+      evidence_pattern: "str += ... inside loop"
+      explanation: |
+        String concatenation creates new string objects, potentially O(n^2)
+        for total characters when done in loops.
+      remediation: "Use StringBuilder, join(), or template literals"
+
+  low:
+    - id: "TIME-LOW-001"
+      signal: "Suboptimal but acceptable algorithm for current scale"
+      evidence_pattern: "O(n^2) with small, bounded n"
+      remediation: "Document the bound and add assertion/validation"
+
+  positive:
+    - id: "TIME-POS-001"
+      signal: "Efficient algorithm with documented complexity"
+
+    - id: "TIME-POS-002"
+      signal: "Proper use of hash-based data structures for lookups"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify hot paths"
+      description: |
+        Determine which code paths are most critical for performance:
+        request handlers, data processing pipelines, search functions.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find API handlers"
+          command: "rg -n '@app.route|@router|def get|def post|async.*handler' --type py --type js"
+        - purpose: "Find data processing"
+          command: "rg -n 'process|transform|aggregate|compute' --type py --type js"
+
+      expected_findings:
+        - "Critical code paths identified"
+        - "Processing functions mapped"
+
+    - id: "2"
+      name: "Find nested loop patterns"
+      description: |
+        Search for nested loops and nested array operations that indicate
+        potential O(n^2) or worse complexity.
+      duration_estimate: "45 min"
+
+      commands:
+        - purpose: "Find nested for loops"
+          command: "rg -n 'for.*\\{' --type py --type js --type java -A 10 | grep -A 10 'for.*{'"
+        - purpose: "Find nested array methods"
+          command: "rg -n '\\.map\\(|\\.filter\\(|\\.forEach\\(' --type js --type ts -A 5"
+
+      expected_findings:
+        - "Nested loop instances"
+        - "Complexity assessment per instance"
+
+    - id: "3"
+      name: "Analyze loop internals"
+      description: |
+        Examine what operations happen inside loops, particularly looking
+        for hidden linear operations like includes, indexOf, or find.
+      duration_estimate: "45 min"
+
+      commands:
+        - purpose: "Find linear search in loops"
+          command: "rg -n '\\.includes\\(|\\.indexOf\\(|\\.find\\(' --type js --type ts --type py"
+
+      expected_findings:
+        - "Hidden complexity identification"
+        - "Data structure recommendations"
+
+    - id: "4"
+      name: "Document and prioritize"
+      description: |
+        Document findings with complexity analysis and prioritize based
+        on hot path criticality and expected data scale.
+      duration_estimate: "30 min"
+
+      expected_findings:
+        - "Prioritized issue list"
+        - "Remediation recommendations"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Critical Complexity Issues"
+        - "Hot Path Analysis"
+        - "Remediation Roadmap"
+
+  confidence_guidance:
+    high: "Direct complexity analysis with data scale verification"
+    medium: "Pattern matching with estimated complexity"
+    low: "Surface-level pattern detection"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "big-o"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "time-complexity-001"
+    item: "No O(n^2) algorithms in hot paths"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms no nested loops processing unbounded data in request paths"
+    expected: "Confirmed by reviewer"
+
+  - id: "time-complexity-002"
+    item: "No exponential algorithms without bounds"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Recursive functions have memoization or input size limits"
+    expected: "Confirmed by reviewer"
+
+  - id: "time-complexity-003"
+    item: "Linear searches use appropriate data structures"
+    level: "BLOCKING"
+    verification: "rg -l '\\.includes\\(|\\.indexOf\\(' --type js | head -5 | xargs -I {} echo 'Review: {}'"
+    expected: "Manual review required"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Code Quality"
+      controls: ["Performance"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.algorithmic-efficiency.space-complexity"
+    - "performance-efficiency.algorithmic-efficiency.data-structure-choice"
+    - "performance-efficiency.algorithmic-efficiency.hot-path-optimization"

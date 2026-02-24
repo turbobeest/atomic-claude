@@ -1,0 +1,318 @@
+# ============================================================
+# AUDIT: Auto-Scaling Policy Audit
+# Category: Scalability & Capacity > Horizontal Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.horizontal-scaling.auto-scaling-policy"
+  name: "Auto-Scaling Policy Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "horizontal-scaling"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates auto-scaling policies for appropriateness, effectiveness, and
+    alignment with application behavior. Reviews scaling triggers, thresholds,
+    cooldown periods, minimum/maximum instance counts, and predictive scaling
+    configurations. Assesses whether policies match actual workload patterns.
+
+  why_it_matters: |
+    Poorly configured auto-scaling policies lead to either over-provisioning
+    (wasted cost) or under-provisioning (degraded performance and outages).
+    Scaling too aggressively causes thrashing; scaling too slowly misses
+    demand spikes. Proper policies balance cost, performance, and reliability.
+
+  when_to_run:
+    - "During initial auto-scaling configuration"
+    - "After significant traffic pattern changes"
+    - "Following cost optimization reviews"
+    - "After scaling-related incidents"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Auto-scaling configuration (Terraform, CloudFormation, K8s HPA)"
+    - type: "metrics_data"
+      description: "Historical metrics for workload analysis"
+
+  access_requirements:
+    - "Infrastructure configuration access"
+    - "Cloud console or CLI access"
+    - "Metrics/monitoring system access"
+
+discovery:
+  code_patterns:
+    - pattern: "(autoscaling|HorizontalPodAutoscaler|scaling_policy)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect auto-scaling configuration"
+
+    - pattern: "(target_cpu_utilization|target_memory|targetAverageUtilization)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect scaling thresholds"
+
+    - pattern: "(cooldown|stabilizationWindowSeconds|scale_in_cooldown)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect cooldown configurations"
+
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Terraform infrastructure files"
+    - glob: "**/cloudformation/**/*.yaml"
+      purpose: "CloudFormation templates"
+    - glob: "**/k8s/**/*hpa*.yaml"
+      purpose: "Kubernetes HPA configurations"
+    - glob: "**/helm/**/values*.yaml"
+      purpose: "Helm chart values"
+
+knowledge_sources:
+  guides:
+    - id: "aws-autoscaling"
+      name: "AWS Auto Scaling Best Practices"
+      url: "https://docs.aws.amazon.com/autoscaling/ec2/userguide/auto-scaling-best-practices.html"
+      offline_cache: true
+
+    - id: "k8s-hpa"
+      name: "Kubernetes Horizontal Pod Autoscaler"
+      url: "https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "cloud-native-patterns"
+      title: "Cloud Native Patterns"
+      type: "book"
+      reference: "ISBN: 978-1617294297"
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Inspect Kubernetes HPA configuration"
+      command: "kubectl get hpa -o yaml"
+
+    - tool: "aws-cli"
+      purpose: "Inspect AWS Auto Scaling policies"
+      command: "aws autoscaling describe-policies"
+
+    - tool: "terraform"
+      purpose: "Review infrastructure as code"
+      command: "terraform show"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "kube_hpa_status_current_replicas / kube_hpa_spec_max_replicas"
+      purpose: "Check how close to max replicas"
+      threshold: "< 0.8 normally, investigate if consistently > 0.9"
+
+  scripts:
+    - id: "scaling-policy-extractor"
+      language: "bash"
+      purpose: "Extract and summarize scaling policies"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Kubernetes HPA ==="
+        kubectl get hpa -A -o custom-columns=\
+        'NAMESPACE:.metadata.namespace,NAME:.metadata.name,MIN:.spec.minReplicas,MAX:.spec.maxReplicas,TARGET:.spec.targetCPUUtilizationPercentage'
+        echo "=== AWS Auto Scaling Groups ==="
+        aws autoscaling describe-auto-scaling-groups --query \
+        'AutoScalingGroups[*].[AutoScalingGroupName,MinSize,MaxSize,DesiredCapacity]' --output table
+
+signals:
+  critical:
+    - id: "ASCALE-CRIT-001"
+      signal: "No auto-scaling configured for production workloads"
+      evidence_indicators:
+        - "Fixed instance count in production"
+        - "No HPA resources defined"
+        - "minReplicas equals maxReplicas"
+      explanation: |
+        Without auto-scaling, the system cannot respond to demand changes,
+        leading to either constant over-provisioning or outages during load spikes.
+      remediation: "Configure auto-scaling with appropriate min/max and scaling triggers"
+
+    - id: "ASCALE-CRIT-002"
+      signal: "Maximum replicas set too low for peak demand"
+      evidence_threshold: "max_replicas < historical_peak_requirement"
+      explanation: |
+        If maximum replicas cannot handle peak load, the system will degrade
+        during demand spikes even with scaling enabled.
+      remediation: "Analyze peak load requirements and set max replicas accordingly"
+
+  high:
+    - id: "ASCALE-HIGH-001"
+      signal: "No cooldown period configured"
+      evidence_pattern: "cooldown.*=.*0|stabilizationWindowSeconds.*0"
+      explanation: |
+        Without cooldown, rapid scaling up and down (thrashing) can occur,
+        causing instability and wasted resources.
+      remediation: "Configure appropriate cooldown periods (typically 3-5 minutes)"
+
+    - id: "ASCALE-HIGH-002"
+      signal: "Single metric scaling for complex workloads"
+      evidence_pattern: "metrics:.*\\n.*-.*type:.*Resource.*\\n(?!.*-)"
+      explanation: |
+        CPU-only scaling may not capture actual application load for I/O-bound
+        or memory-intensive workloads.
+      remediation: "Add custom metrics (queue depth, request rate, latency) for scaling triggers"
+
+  medium:
+    - id: "ASCALE-MED-001"
+      signal: "Aggressive scaling thresholds"
+      evidence_pattern: "targetCPUUtilizationPercentage.*[2-4][0-9]$"
+      remediation: "Consider raising CPU target to 60-80% to reduce unnecessary scaling"
+
+  positive:
+    - id: "ASCALE-POS-001"
+      signal: "Multi-metric scaling with custom metrics"
+      evidence_pattern: "metrics:.*type:.*Pods|type:.*External"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory auto-scaling configurations"
+      description: |
+        Collect all auto-scaling configurations from infrastructure code,
+        cloud consoles, and Kubernetes clusters.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find Terraform scaling resources"
+          command: "rg 'aws_autoscaling|kubernetes_horizontal_pod_autoscaler' --type tf"
+        - purpose: "Find Kubernetes HPA files"
+          command: "rg 'HorizontalPodAutoscaler' --type yaml"
+      expected_findings:
+        - "Complete inventory of scaling configurations"
+        - "Services without scaling configured"
+
+    - id: "2"
+      name: "Analyze scaling thresholds and limits"
+      description: |
+        Review scaling thresholds, minimum/maximum instance counts, and
+        cooldown periods for appropriateness.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Extract scaling thresholds"
+          command: "rg '(min.*replicas|max.*replicas|target.*utilization)' --type yaml --type tf"
+        - purpose: "Check cooldown settings"
+          command: "rg '(cooldown|stabilization)' --type yaml --type tf"
+      expected_findings:
+        - "Assessment of threshold appropriateness"
+        - "Identification of missing or misconfigured limits"
+
+    - id: "3"
+      name: "Validate against workload patterns"
+      description: |
+        Compare scaling configuration against actual historical metrics
+        to verify policy effectiveness.
+      duration_estimate: "60 min"
+      questions:
+        - "Does max replicas exceed historical peak requirement?"
+        - "Is scaling fast enough to handle demand ramp-up?"
+        - "Are cooldowns preventing thrashing without blocking needed scaling?"
+      expected_findings:
+        - "Alignment analysis of policy vs actual workload"
+        - "Recommendations for threshold adjustments"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Scaling Configuration Inventory"
+        - "Threshold Analysis"
+        - "Workload Alignment Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Configuration verified against historical metrics"
+    medium: "Configuration reviewed but historical validation pending"
+    low: "Configuration found but context unclear"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-autoscaling"
+        priority: "recommended"
+      - source_id: "k8s-hpa"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires metrics analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "auto-scaling-001"
+    item: "Auto-scaling configured for all production services"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify all production services have HPA or ASG configured"
+    expected: "Confirmed by reviewer"
+
+  - id: "auto-scaling-002"
+    item: "Max replicas sufficient for peak load"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Compare max replicas against historical peak requirements"
+    expected: "Max replicas > peak requirement + 20% headroom"
+
+  - id: "auto-scaling-003"
+    item: "Cooldown periods configured"
+    level: "BLOCKING"
+    verification: "rg '(cooldown|stabilization).*[1-9]' --type yaml --type tf || echo 'NOT_FOUND'"
+    expected: "Configuration present with non-zero values"
+
+governance:
+  applicable_to:
+    archetypes: ["web-service", "api-service", "microservice"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["REL-6", "COST-5"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.horizontal-scaling.scale-out-speed"
+    - "scalability-capacity.horizontal-scaling.scale-in-behavior"

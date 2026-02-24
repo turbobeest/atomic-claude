@@ -1,0 +1,344 @@
+# ============================================================
+# AUDIT: Speculative Generality Detection
+# ============================================================
+
+audit:
+  id: "code-quality.code-smells.speculative-generality"
+  name: "Speculative Generality Detection Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "code-smells"
+
+  tier: "expert"
+  estimated_duration: "40 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Identifies code created "just in case" for future needs that never
+    materialized. This includes unused abstractions, abstract classes with
+    only one implementation, interfaces implemented by only one class,
+    unused parameters "for extensibility," and hook methods that are never
+    overridden.
+
+  why_it_matters: |
+    Speculative generality adds complexity without value. It increases
+    maintenance burden, makes code harder to understand, and often guesses
+    wrong about future needs. Following YAGNI (You Aren't Gonna Need It)
+    leads to simpler, more focused code that can be generalized when
+    actually needed.
+
+  when_to_run:
+    - "During codebase cleanup"
+    - "Technical debt assessments"
+    - "When simplifying architecture"
+    - "Code reviews for new features"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+
+  access_requirements:
+    - "Read access to source code repository"
+
+discovery:
+  code_patterns:
+    - pattern: "abstract\\s+class\\s+\\w+"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify abstract classes"
+
+    - pattern: "interface\\s+\\w+"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify interfaces"
+
+    - pattern: "//\\s*(future|todo|later|someday|might)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify speculative comments"
+
+    - pattern: "(Factory|Strategy|Builder|Visitor)(?!Test)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify pattern classes"
+
+  file_patterns:
+    - glob: "**/*.{java,cs,ts,py,rb}"
+      purpose: "Object-oriented source files"
+
+knowledge_sources:
+  guides:
+    - id: "fowler-speculative"
+      name: "Martin Fowler - Speculative Generality"
+      url: "https://refactoring.guru/smells/speculative-generality"
+      offline_cache: true
+
+    - id: "yagni"
+      name: "Martin Fowler - YAGNI"
+      url: "https://martinfowler.com/bliki/Yagni.html"
+      offline_cache: true
+
+    - id: "fowler-collapse-hierarchy"
+      name: "Martin Fowler - Collapse Hierarchy"
+      url: "https://refactoring.com/catalog/collapseHierarchy.html"
+      offline_cache: true
+
+    - id: "refactoring-fowler"
+      name: "Martin Fowler - Refactoring"
+      url: "https://refactoring.com/"
+      offline_cache: false
+
+    - id: "refactoring-catalog"
+      name: "Refactoring Catalog"
+      url: "https://refactoring.com/catalog/"
+      offline_cache: false
+
+    - id: "clean-code"
+      name: "Robert C. Martin - Clean Code"
+      url: "https://www.oreilly.com/library/view/clean-code-a/9780136083238/"
+      offline_cache: false
+
+tooling:
+  static_analysis:
+    - tool: "sonarqube"
+      purpose: "Unused abstraction detection"
+      offline_capable: false
+    - tool: "pmd"
+      purpose: "Java unused code rules"
+      offline_capable: true
+    - tool: "eslint"
+      purpose: "TypeScript unused interface detection"
+      offline_capable: true
+
+  scripts:
+    - id: "speculative-scan"
+      language: "bash"
+      purpose: "Find single-implementation interfaces"
+      source: "inline"
+      code: |
+        # Find interfaces and count implementations
+        grep -rn --include="*.{ts,java}" -E "interface\s+\w+" . 2>/dev/null | head -50
+
+signals:
+  critical:
+    - id: "CS-SPEC-CRIT-001"
+      signal: "Complex abstract framework with no implementations"
+      evidence_pattern: "abstract.*class.*zero_implementations"
+      explanation: |
+        Abstract frameworks without implementations are pure speculation.
+        They add complexity with no benefit and should be removed.
+      remediation: "Remove unused abstractions entirely"
+
+    - id: "CS-SPEC-CRIT-002"
+      signal: "Multiple unused design pattern classes"
+      evidence_pattern: "(Factory|Strategy|Builder).*unused"
+      explanation: |
+        Implementing design patterns "just in case" adds unnecessary
+        indirection and complexity.
+      remediation: "Remove unused patterns, apply only when needed"
+
+  high:
+    - id: "CS-SPEC-HIGH-001"
+      signal: "Interface with only one implementation"
+      evidence_pattern: "interface.*single_impl"
+      explanation: |
+        Single-implementation interfaces add indirection without benefit
+        unless used for testing or external contracts.
+      remediation: "Remove interface unless needed for DI/testing"
+
+    - id: "CS-SPEC-HIGH-002"
+      signal: "Abstract class with only one subclass"
+      evidence_pattern: "abstract.*class.*single_subclass"
+      explanation: |
+        Single-subclass abstractions are premature generalization that
+        can be collapsed.
+      remediation: "Apply Collapse Hierarchy refactoring"
+
+  medium:
+    - id: "CS-SPEC-MED-001"
+      signal: "Unused method parameters for extensibility"
+      evidence_pattern: "param.*unused.*future"
+      remediation: "Remove unused parameters"
+
+    - id: "CS-SPEC-MED-002"
+      signal: "Empty hook methods never overridden"
+      evidence_pattern: "protected.*hook.*empty.*no_overrides"
+      remediation: "Remove unused hooks"
+
+  low:
+    - id: "CS-SPEC-LOW-001"
+      signal: "Comments indicating speculative code"
+      evidence_pattern: "//.*future|//.*might need|//.*later"
+      remediation: "Remove speculative comments and code"
+
+  positive:
+    - id: "CS-SPEC-POS-001"
+      signal: "All interfaces have multiple implementations"
+      evidence_pattern: "all_interfaces.*impl_count >= 2"
+    - id: "CS-SPEC-POS-002"
+      signal: "YAGNI principle documented in guidelines"
+      evidence_pattern: "contributing.*yagni"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Abstractions"
+      description: |
+        Find all interfaces, abstract classes, and base classes
+        in the codebase.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find interfaces"
+          command: |
+            grep -rn --include="*.{ts,java,cs}" -E "^(export\s+)?interface\s+\w+" . 2>/dev/null | head -100
+        - purpose: "Find abstract classes"
+          command: |
+            grep -rn --include="*.{ts,java,cs}" "abstract\s+class" . 2>/dev/null | head -50
+      expected_findings:
+        - "List of interfaces"
+        - "List of abstract classes"
+
+    - id: "2"
+      name: "Count Implementations"
+      description: |
+        For each abstraction, count how many concrete implementations
+        exist.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find implements clauses"
+          command: |
+            grep -rn --include="*.{ts,java}" "implements\s+\w+" . 2>/dev/null | head -100
+        - purpose: "Find extends clauses"
+          command: |
+            grep -rn --include="*.{ts,java}" "extends\s+\w+" . 2>/dev/null | head -100
+      expected_findings:
+        - "Implementation counts per interface"
+        - "Subclass counts per abstract class"
+
+    - id: "3"
+      name: "Find Speculative Comments"
+      description: |
+        Search for comments indicating code written for future needs.
+      duration_estimate: "5 min"
+      commands:
+        - purpose: "Find future-oriented comments"
+          command: |
+            grep -rn --include="*.{ts,java,py}" -iE "//.*future|#.*might need|//.*later|//.*someday" . 2>/dev/null | head -50
+      expected_findings:
+        - "Speculative code comments"
+        - "YAGNI violations"
+
+    - id: "4"
+      name: "Generate Simplification Plan"
+      description: |
+        Create prioritized list of abstractions to simplify or remove.
+      duration_estimate: "10 min"
+      expected_findings:
+        - "Abstractions to remove"
+        - "Hierarchies to collapse"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "abstraction_name"
+        - "type"
+        - "implementation_count"
+        - "recommendation"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Speculative Generality Inventory"
+        - "Implementation Analysis"
+        - "Simplification Recommendations"
+
+  confidence_guidance:
+    high: "Clear single implementation with no justification"
+    medium: "Likely speculative but may have hidden use"
+    low: "Context-dependent, may be intentional design"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "fowler-speculative"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires implementation analysis"
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "speculative-001"
+    item: "Interface/abstraction scan completed"
+    level: "BLOCKING"
+    verification: |
+      grep -rn --include="*.{ts,java}" -E "(interface|abstract class)\s+\w+" . 2>/dev/null | wc -l
+    expected: "Analysis complete"
+
+  - id: "speculative-002"
+    item: "Single-implementation interfaces documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review interface implementation counts"
+    expected: "All documented with justification"
+
+  - id: "speculative-003"
+    item: "Unused abstractions identified"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review for zero-implementation abstractions"
+    expected: "None or documented"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability"]
+    - framework: "XP"
+      controls: ["YAGNI"]
+
+relationships:
+  commonly_combined:
+    - "code-quality.code-smells.refused-bequest"
+    - "code-quality.dead-code.unused-function-method"
+    - "code-quality.technical-debt.debt-assessment"

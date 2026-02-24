@@ -1,0 +1,381 @@
+# ============================================================
+# AUDIT: Liskov Substitution Principle (LSP) Compliance
+# ============================================================
+# Evaluates whether subtypes are truly substitutable for their
+# base types without altering program correctness (the L in SOLID).
+# ============================================================
+
+audit:
+  id: "architecture-design.design-principles.liskov-substitution"
+  name: "Liskov Substitution Principle Compliance"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "design-principles"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates compliance with the Liskov Substitution Principle,
+    which states that objects of a superclass should be replaceable with
+    objects of a subclass without affecting program correctness. It identifies
+    inheritance hierarchies that violate behavioral substitutability through
+    precondition strengthening, postcondition weakening, or invariant violations.
+
+  why_it_matters: |
+    LSP violations cause:
+    - Runtime errors when using base type references
+    - Client code that must check concrete types (instanceof)
+    - Broken polymorphism and unreliable abstractions
+    - Subtle bugs when subclasses don't honor parent contracts
+    - Code that "works" but fails with different implementations
+    LSP ensures type hierarchies are semantically correct, not just syntactically.
+
+  when_to_run:
+    - "When designing inheritance hierarchies"
+    - "During code review of class extensions"
+    - "When encountering runtime type errors"
+    - "When clients frequently check concrete types"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+    - type: "api_documentation"
+      description: "Documentation of base class contracts"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Understanding of intended class contracts"
+
+discovery:
+  code_patterns:
+    - pattern: "throw.*UnsupportedOperationException|throw.*NotImplementedException"
+      type: "regex"
+      scope: "source"
+      purpose: "Find methods that refuse to implement inherited behavior"
+
+    - pattern: "@Override.*\\{\\s*\\}"
+      type: "regex"
+      scope: "source"
+      purpose: "Find empty override implementations"
+
+    - pattern: "instanceof\\s+[A-Z]\\w+\\s*\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find type checks that may indicate LSP issues"
+
+  file_patterns:
+    - glob: "**/*.java"
+      purpose: "Java source with inheritance"
+    - glob: "**/*.ts"
+      purpose: "TypeScript source with inheritance"
+    - glob: "**/*.py"
+      purpose: "Python source with inheritance"
+
+knowledge_sources:
+  specifications:
+    - id: "liskov-original"
+      name: "A Behavioral Notion of Subtyping - Barbara Liskov"
+      url: "https://www.cs.cmu.edu/~wing/publications/LiskovWing94.pdf"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "lsp-uncle-bob"
+      name: "The Liskov Substitution Principle"
+      url: "https://blog.cleancoder.com/uncle-bob/2020/10/18/Solid-Relevance.html"
+      offline_cache: true
+
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "clean-code"
+      name: "Clean Code Summary"
+      url: "https://gist.github.com/wojteklu/73c6914cc446146b8b533c0988cf8d29"
+      offline_cache: true
+
+  learning_resources:
+    - id: "agile-ppp"
+      title: "Agile Software Development: Principles, Patterns, and Practices"
+      type: "book"
+      reference: "Robert C. Martin - Chapter 10"
+
+    - id: "effective-java"
+      title: "Effective Java"
+      type: "book"
+      reference: "Joshua Bloch - Item 18"
+
+tooling:
+  static_analysis:
+    - tool: "SonarQube"
+      purpose: "Detect inheritance issues and UnsupportedOperationException"
+      offline_capable: false
+
+    - tool: "SpotBugs"
+      purpose: "Find inheritance contract violations"
+      offline_capable: true
+
+    - tool: "ErrorProne"
+      purpose: "Detect LSP violation patterns in Java"
+      offline_capable: true
+
+  scripts:
+    - id: "lsp-detector"
+      language: "bash"
+      purpose: "Find potential LSP violations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== UnsupportedOperationException Throws ==="
+        grep -rn "throw.*UnsupportedOperationException" --include="*.java" | head -30
+
+        echo "=== NotImplementedException Patterns ==="
+        grep -rn "NotImplemented\|Not implemented" --include="*.java" --include="*.ts" | head -20
+
+        echo "=== Empty Overrides ==="
+        grep -rn "@Override" -A2 --include="*.java" | grep -B1 "{}" | head -20
+
+signals:
+  critical:
+    - id: "LSP-CRIT-001"
+      signal: "Subclass throws UnsupportedOperationException for inherited method"
+      evidence_pattern: "@Override void parentMethod() { throw new UnsupportedOperationException(); }"
+      explanation: |
+        When a subclass refuses to implement inherited behavior, it cannot
+        substitute for the parent. Any code using the parent type will fail
+        when given this subclass, breaking polymorphism fundamentally.
+      remediation: "Review hierarchy - subclass may not be a true subtype; use composition"
+
+    - id: "LSP-CRIT-002"
+      signal: "Subclass strengthens preconditions beyond parent contract"
+      evidence_pattern: "Parent accepts null; subclass throws NPE on null"
+      explanation: |
+        If a subclass requires stricter inputs than the parent, code that
+        works with the parent will fail with the subclass. This violates
+        the substitutability contract.
+      remediation: "Subclass must accept all inputs parent accepts; weaken if needed"
+
+  high:
+    - id: "LSP-HIGH-001"
+      signal: "Subclass weakens postconditions"
+      evidence_pattern: "Parent returns non-null; subclass may return null"
+      explanation: |
+        When a subclass returns weaker guarantees than the parent promises,
+        clients relying on the parent contract will fail unexpectedly.
+      remediation: "Subclass must honor or strengthen parent guarantees"
+
+    - id: "LSP-HIGH-002"
+      signal: "Inheritance for code reuse, not subtyping"
+      evidence_pattern: "Subclass extends parent but violates is-a relationship"
+      explanation: |
+        The classic example is Square extending Rectangle - if setWidth
+        and setHeight are independent for Rectangle but coupled for Square,
+        substitutability breaks.
+      remediation: "Use composition instead of inheritance; favor interfaces"
+
+  medium:
+    - id: "LSP-MED-001"
+      signal: "Empty or no-op override implementations"
+      evidence_pattern: "@Override void method() { /* do nothing */ }"
+      remediation: "Review if subclass should implement interface; consider adapter"
+
+    - id: "LSP-MED-002"
+      signal: "Clients check concrete types after receiving interface"
+      evidence_pattern: "if (result instanceof ConcreteType) { ... }"
+      remediation: "Review interface design; may need additional method or pattern"
+
+  low:
+    - id: "LSP-LOW-001"
+      signal: "Subclass adds methods not in parent interface"
+      remediation: "Acceptable if polymorphism not needed for new methods"
+
+  positive:
+    - id: "LSP-POS-001"
+      signal: "Clean substitutability - subclasses honor all parent contracts"
+    - id: "LSP-POS-002"
+      signal: "Composition used where inheritance inappropriate"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Find UnsupportedOperation patterns"
+      description: |
+        Search for methods that throw UnsupportedOperationException
+        or similar, indicating refusal to implement inherited behavior.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find UnsupportedOperationException"
+          command: "grep -rn 'UnsupportedOperationException\\|NotImplementedException\\|NotSupportedException' --include='*.java' --include='*.ts' | head -30"
+        - purpose: "Find TODO not implemented"
+          command: "grep -rn 'TODO.*implement\\|FIXME.*implement' --include='*.java' --include='*.ts' | head -20"
+      expected_findings:
+        - "Methods refusing to implement inherited behavior"
+        - "Incomplete implementations"
+
+    - id: "2"
+      name: "Analyze inheritance hierarchies"
+      description: |
+        Review inheritance relationships to identify potential
+        is-a violations and misuse of inheritance.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find class hierarchies"
+          command: "grep -rn 'extends [A-Z]\\|: [A-Z].*{' --include='*.java' --include='*.ts' | grep -v Test | head -40"
+        - purpose: "Find deep hierarchies"
+          command: "grep -rn 'extends.*extends\\|class.*extends.*extends' --include='*.java' | head -20"
+      expected_findings:
+        - "Inheritance relationships"
+        - "Deep or complex hierarchies"
+
+    - id: "3"
+      name: "Check override patterns"
+      description: |
+        Find methods that override but provide empty or significantly
+        different behavior than expected.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find overrides"
+          command: "grep -rn '@Override' --include='*.java' -A3 | head -50"
+        - purpose: "Find empty overrides"
+          command: "grep -rn '@Override' -A2 --include='*.java' | grep -B1 '{}' | head -20"
+      expected_findings:
+        - "Override patterns"
+        - "Potentially problematic overrides"
+
+    - id: "4"
+      name: "Review type checking in client code"
+      description: |
+        Find instanceof checks that may indicate LSP violations
+        in the types being checked.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find instanceof usage"
+          command: "grep -rn 'instanceof [A-Z]' --include='*.java' | grep -v Test | head -30"
+        - purpose: "Find type casting after instanceof"
+          command: "grep -rn 'instanceof.*\\(.*\\)' --include='*.java' -A1 | head -30"
+      expected_findings:
+        - "Type checking patterns"
+        - "Potential LSP-related type checks"
+
+    - id: "5"
+      name: "Evaluate contract compliance"
+      description: |
+        For identified hierarchies, assess whether subclasses
+        truly honor parent contracts.
+      duration_estimate: "25 min"
+      questions:
+        - "Does the subclass represent a true is-a relationship?"
+        - "Can the subclass handle all inputs the parent handles?"
+        - "Does the subclass provide all guarantees the parent provides?"
+      expected_findings:
+        - "Contract compliance assessment"
+        - "Refactoring recommendations"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "LSP Violations Identified"
+        - "Hierarchy Analysis"
+        - "Refactoring Recommendations"
+
+  confidence_guidance:
+    high: "Clear LSP violation (UnsupportedOperationException)"
+    medium: "Suspicious pattern requiring context review"
+    low: "Potential concern based on structure"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "liskov-original"
+        priority: "required"
+      - source_id: "lsp-uncle-bob"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed hierarchy analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "lsp-001"
+    item: "No UnsupportedOperationException in interface implementations"
+    level: "CRITICAL"
+    verification: "grep -rn 'UnsupportedOperationException' --include='*.java' | grep -v Test | wc -l"
+    expected: "0 or documented with justification"
+
+  - id: "lsp-002"
+    item: "Inheritance hierarchies represent true is-a relationships"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "All extends relationships reviewed for substitutability"
+    expected: "Confirmed by reviewer"
+
+  - id: "lsp-003"
+    item: "Subclasses honor parent contracts"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Preconditions not strengthened, postconditions not weakened"
+    expected: "Confirmed by reviewer"
+
+  - id: "lsp-004"
+    item: "Composition preferred where inheritance inappropriate"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Code reuse via inheritance reviewed for LSP"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Reliability"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.design-principles.open-closed-principle"
+    - "architecture-design.design-principles.composition-vs-inheritance"
+    - "architecture-design.coupling.interface-coupling"

@@ -1,0 +1,283 @@
+# ============================================================
+# AUDIT: Checksum Verification Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-durability.checksum-verification"
+  name: "Checksum Verification Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-durability"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates checksum implementation and verification throughout the
+    data lifecycle. Examines checksums at rest (storage), in transit
+    (network), and during processing (application). Reviews checksum
+    algorithms, verification frequency, and handling of checksum failures.
+
+  why_it_matters: |
+    Checksums detect data corruption caused by hardware failures,
+    transmission errors, or software bugs. Without verification,
+    corrupted data is silently processed or stored, leading to
+    downstream failures or incorrect business decisions. End-to-end
+    checksums ensure data integrity across all system boundaries.
+
+  when_to_run:
+    - "During data pipeline architecture review"
+    - "When implementing file transfer mechanisms"
+    - "After data corruption incidents"
+    - "During security and integrity audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "codebase"
+      description: "Data processing and transfer code"
+    - type: "config"
+      description: "Storage and network configuration"
+
+  access_requirements:
+    - "Source code access"
+    - "Storage configuration access"
+    - "Network configuration access"
+
+discovery:
+  code_patterns:
+    - pattern: "checksum|md5|sha256|sha512|CRC|xxhash|murmur"
+      type: "regex"
+      scope: "source"
+      purpose: "Find checksum implementations"
+    - pattern: "verify|validate|integrity|hash.*match"
+      type: "regex"
+      scope: "source"
+      purpose: "Find verification logic"
+
+  file_patterns:
+    - glob: "**/upload*/**/*.{py,js,java,go}"
+      purpose: "File upload handlers"
+    - glob: "**/transfer*/**/*.{py,js,java,go}"
+      purpose: "Data transfer code"
+
+knowledge_sources:
+  specifications:
+    - id: "checksums-rfc"
+      name: "Data Integrity Verification Standards"
+      url: "https://datatracker.ietf.org/doc/html/rfc3230"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "s3-integrity"
+      name: "Amazon S3 Data Integrity"
+      url: "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "grep/semgrep"
+      purpose: "Find checksum usage patterns"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "aws cli"
+      purpose: "Verify S3 object integrity"
+      command: "aws s3api head-object --bucket bucket --key key --checksum-mode ENABLED"
+
+signals:
+  critical:
+    - id: "DD-CV-CRIT-001"
+      signal: "No checksums for data at rest"
+      evidence_indicators:
+        - "Files stored without checksum metadata"
+        - "Database blobs without integrity verification"
+      explanation: |
+        Data at rest can be silently corrupted by storage hardware
+        failures without any detection mechanism.
+      remediation: "Store checksums with data and verify on read"
+
+    - id: "DD-CV-CRIT-002"
+      signal: "Checksum verification disabled or bypassed"
+      evidence_pattern: "skip.*checksum|verify.*false|ignore.*integrity"
+      explanation: |
+        Disabled verification defeats the purpose of having checksums,
+        allowing corrupted data to propagate.
+      remediation: "Enable and enforce checksum verification"
+
+  high:
+    - id: "DD-CV-HIGH-001"
+      signal: "Weak checksum algorithm (MD5, CRC32) for integrity"
+      explanation: "Weak algorithms may not detect multi-bit errors reliably"
+      remediation: "Use SHA-256 or stronger for data integrity"
+
+    - id: "DD-CV-HIGH-002"
+      signal: "No checksum verification on network transfers"
+      explanation: "Network errors can corrupt data without detection"
+      remediation: "Enable checksums for all data transfers"
+
+  medium:
+    - id: "DD-CV-MED-001"
+      signal: "Checksum failures not logged or alerted"
+      remediation: "Log and alert on all checksum failures"
+
+    - id: "DD-CV-MED-002"
+      signal: "Checksum not propagated through processing pipeline"
+      remediation: "Maintain and verify checksums at each processing stage"
+
+  low:
+    - id: "DD-CV-LOW-001"
+      signal: "Checksum verification adds significant latency"
+
+  positive:
+    - id: "DD-CV-POS-001"
+      signal: "End-to-end checksum verification implemented"
+    - id: "DD-CV-POS-002"
+      signal: "Automated remediation for checksum failures"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Data Flows"
+      description: |
+        Identify all data flows that require integrity verification.
+      duration_estimate: "30 min"
+      questions:
+        - "What data is stored persistently?"
+        - "What data is transferred over networks?"
+        - "What data transformations occur?"
+      expected_findings:
+        - "Data flow inventory"
+        - "Critical data paths"
+
+    - id: "2"
+      name: "Review Checksum Implementation"
+      description: |
+        Examine how checksums are generated and stored.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find checksum code"
+          command: "grep -rn 'checksum\\|sha256\\|md5' --include='*.py' --include='*.java' ."
+      expected_findings:
+        - "Checksum algorithms used"
+        - "Checksum storage mechanism"
+
+    - id: "3"
+      name: "Verify Verification Logic"
+      description: |
+        Confirm checksums are actually verified at appropriate points.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find verification code"
+          command: "grep -rn 'verify\\|validate.*checksum\\|integrity' --include='*.py' --include='*.java' ."
+      expected_findings:
+        - "Verification points in code"
+        - "Error handling for mismatches"
+
+    - id: "4"
+      name: "Test Verification"
+      description: |
+        Verify that checksum failures are properly detected and handled.
+      duration_estimate: "30 min"
+      questions:
+        - "What happens when a checksum doesn't match?"
+        - "Are failures logged and alerted?"
+        - "Is there automated remediation?"
+      expected_findings:
+        - "Failure handling behavior"
+        - "Alert configuration"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Data Flow Analysis"
+        - "Checksum Coverage Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Code review with integrity testing"
+    medium: "Code review without testing"
+    low: "Documentation review only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "s3-integrity"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires thorough code analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "checksum-verification-001"
+    item: "Checksums generated for data at rest"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify checksum generation in storage code"
+    expected: "Confirmed by reviewer"
+
+  - id: "checksum-verification-002"
+    item: "Checksums verified on data retrieval"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify checksum validation in retrieval code"
+    expected: "Confirmed by reviewer"
+
+  - id: "checksum-verification-003"
+    item: "Checksum failures result in rejection and alerting"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review error handling for checksum mismatches"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["PI1.3"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-durability.data-corruption-detection"
+    - "reliability-resilience.data-durability.storage-redundancy"

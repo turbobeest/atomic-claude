@@ -1,0 +1,333 @@
+audit:
+  id: scalability-capacity.database-scalability.write-scaling
+  name: Write Scaling Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: database-scalability
+  tier: phd
+  estimated_duration: 4-5 hours  # median: 4h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines write scaling capabilities including write
+    throughput limits, write amplification, batching strategies,
+    async write patterns, write-ahead logging configuration, and
+    distributed write coordination. It assesses whether the system
+    can handle current and projected write loads.
+  why_it_matters: |
+    Write scaling is inherently harder than read scaling because writes
+    must be serialized for consistency. Write bottlenecks cause cascade
+    failures - queues back up, timeouts occur, and the entire system
+    degrades. Unlike reads, you cannot simply add more write replicas
+    without introducing complex distributed coordination.
+  when_to_run:
+  - When write latency increases under load
+  - Before launching write-heavy features
+  - When transaction queue depth increases
+  - During capacity planning for growth
+  - After observing write timeout errors
+prerequisites:
+  required_artifacts:
+  - type: database-configuration
+    description: Write-related database settings
+  - type: application-code
+    description: Write patterns and batching logic
+  - type: monitoring-data
+    description: Write throughput and latency metrics
+  access_requirements:
+  - Database performance metrics
+  - Transaction log access
+  - Application write path code
+  - Queue/buffer monitoring if applicable
+discovery:
+  code_patterns:
+  - pattern: bulk[_-]?insert|batch[_-]?write|multi[_-]?insert
+    type: regex
+    scope: source
+    purpose: Identify batch write implementations
+  - pattern: write[_-]?through|write[_-]?back|write[_-]?behind
+    type: regex
+    scope: source
+    purpose: Detect write caching patterns
+  - pattern: async[_-]?write|queue[_-]?write|defer.*write
+    type: regex
+    scope: source
+    purpose: Find asynchronous write patterns
+  file_patterns:
+  - glob: '**/wal*.conf'
+    purpose: Write-ahead log configuration
+  - glob: '**/write*.{py,java,go,ts}'
+    purpose: Write handling code
+  metrics_queries:
+  - system: Database Monitoring
+    query: rate(pg_stat_database_tup_inserted[5m])
+    purpose: Measure write throughput
+    threshold: Within 70% of tested maximum
+  - system: Database Monitoring
+    query: histogram_quantile(0.99, pg_stat_activity_max_tx_duration)
+    purpose: Identify long-running write transactions
+    threshold: < 1 second for OLTP
+knowledge_sources:
+  specifications:
+  - id: postgres-wal
+    name: PostgreSQL Write-Ahead Logging
+    url: https://www.postgresql.org/docs/current/wal.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: write-optimization
+    name: Database Write Optimization Techniques
+    url: https://use-the-index-luke.com/sql/dml
+    offline_cache: true
+  - id: cqrs-pattern
+    name: CQRS Pattern for Write Scaling
+    url: https://martinfowler.com/bliki/CQRS.html
+    offline_cache: true
+  papers:
+  - id: lsm-trees
+    title: The Log-Structured Merge-Tree (LSM-Tree)
+    url: https://www.cs.umb.edu/~pon} {-courses/cs637/readings/p351-o_neil.pdf
+tooling:
+  infrastructure_tools:
+  - tool: pg_stat_statements
+    purpose: Identify slow write queries
+    command: SELECT query, calls, mean_time FROM pg_stat_statements WHERE query LIKE '%INSERT%' OR query
+      LIKE '%UPDATE%' ORDER BY mean_time DESC LIMIT 20
+  - tool: iostat
+    purpose: Monitor disk I/O for write bottlenecks
+    command: iostat -x 1 10
+  monitoring_queries:
+  - system: Prometheus
+    query: rate(pg_stat_database_tup_inserted[5m]) + rate(pg_stat_database_tup_updated[5m]) + rate(pg_stat_database_tup_deleted[5m])
+    purpose: Total write operations per second
+  - system: Prometheus
+    query: pg_stat_activity_count{state='active',query=~'INSERT|UPDATE|DELETE'}
+    purpose: Active write transactions
+  scripts:
+  - id: write-load-analyzer
+    language: python
+    purpose: Analyze write patterns and identify optimization opportunities
+    source: inline
+    code: |
+      #!/usr/bin/env python3
+      """Analyze write load patterns from query logs."""
+      import re
+      from collections import defaultdict
+
+      def analyze_write_patterns(query_log: list) -> dict:
+          patterns = defaultdict(lambda: {'count': 0, 'total_time': 0})
+
+          for entry in query_log:
+              if re.search(r'\b(INSERT|UPDATE|DELETE)\b', entry['query'], re.I):
+                  table = extract_table(entry['query'])
+                  patterns[table]['count'] += 1
+                  patterns[table]['total_time'] += entry['duration']
+
+          return dict(patterns)
+signals:
+  critical:
+  - id: WRITE-CRIT-001
+    signal: Write throughput at >90% of tested capacity
+    evidence_threshold: current_writes_per_sec / max_tested_writes > 0.9
+    explanation: |
+      Operating near write capacity limits leaves no headroom for traffic
+      spikes. A small increase in load can cause cascading failures as
+      write queues back up and timeouts propagate through the system.
+    remediation: 'Implement write scaling strategy: sharding, batching, or CQRS'
+  - id: WRITE-CRIT-002
+    signal: No write batching for high-frequency operations
+    evidence_indicators:
+    - Individual INSERTs in tight loops
+    - No bulk insert APIs used
+    - Event/log writes done synchronously one at a time
+    explanation: |
+      Individual writes incur full transaction overhead each time.
+      Batching can improve throughput by 10-100x for high-frequency
+      write operations like logging, metrics, or event streams.
+    remediation: Implement write batching with configurable batch size and flush interval
+  high:
+  - id: WRITE-HIGH-001
+    signal: Synchronous writes blocking request threads
+    explanation: Sync writes tie up application threads, limiting concurrency
+    remediation: Implement async write patterns with proper error handling
+  - id: WRITE-HIGH-002
+    signal: Large transactions holding locks for extended periods
+    explanation: Long transactions cause lock contention and block other writes
+    remediation: Break large writes into smaller transactions; use batch processing
+  medium:
+  - id: WRITE-MED-001
+    signal: WAL configuration not optimized for write workload
+    remediation: Tune wal_buffers, checkpoint_completion_target, and max_wal_size
+  - id: WRITE-MED-002
+    signal: Indexes on high-write tables not evaluated
+    remediation: Review index necessity; each index adds write overhead
+  low:
+  - id: WRITE-LOW-001
+    signal: Write metrics not granular by operation type
+  positive:
+  - id: WRITE-POS-001
+    signal: Write-behind caching implemented for non-critical data
+  - id: WRITE-POS-002
+    signal: CQRS pattern separates read and write models
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Measure Current Write Throughput
+    description: |
+      Establish baseline write throughput metrics including
+      operations per second, latency distribution, and peak patterns.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get write operation rates
+      command: psql -c "SELECT tup_inserted, tup_updated, tup_deleted FROM pg_stat_database WHERE datname
+        = 'app_db'"
+    - purpose: Identify write latency percentiles
+      command: SELECT percentile_cont(0.99) WITHIN GROUP (ORDER BY duration) FROM query_log WHERE query_type
+        IN ('INSERT', 'UPDATE', 'DELETE')
+    expected_findings:
+    - Current write throughput (ops/sec)
+    - Write latency distribution
+    - Peak write periods
+  - id: '2'
+    name: Analyze Write Patterns
+    description: |
+      Examine write query patterns to identify optimization
+      opportunities including batching candidates and hot tables.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Find high-frequency write tables
+      command: SELECT relname, n_tup_ins, n_tup_upd FROM pg_stat_user_tables ORDER BY n_tup_ins + n_tup_upd
+        DESC LIMIT 20
+    - purpose: Identify unbatched writes
+      command: grep -E 'INSERT INTO.*VALUES.*\);$' query_log | head -100
+    expected_findings:
+    - Tables with highest write frequency
+    - Opportunities for batch optimization
+    - Write amplification from indexes
+  - id: '3'
+    name: Evaluate Write Scaling Architecture
+    description: |
+      Assess the architectural approach to write scaling including
+      partitioning, sharding, and async patterns.
+    duration_estimate: 60 min
+    questions:
+    - What is the theoretical maximum write throughput?
+    - Is write scaling horizontal or vertical?
+    - How are writes distributed across storage?
+    - What async/queue patterns are used?
+    expected_findings:
+    - Write scaling architecture assessment
+    - Bottleneck identification
+    - Capacity headroom calculation
+  - id: '4'
+    name: Test Write Performance Under Load
+    description: |
+      Conduct write performance testing to validate capacity
+      and identify degradation patterns.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Run write benchmark
+      command: pgbench -c 10 -j 2 -t 1000 -f write_test.sql app_db
+    - purpose: Monitor during test
+      command: watch -n 1 'psql -c "SELECT * FROM pg_stat_activity WHERE state = ''active'' AND query
+        LIKE ''%INSERT%''"'
+    expected_findings:
+    - Maximum sustained write throughput
+    - Degradation point under load
+    - Resource constraints (CPU, I/O, locks)
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Write Throughput Analysis
+    - Write Pattern Assessment
+    - Scaling Architecture Review
+    - Performance Test Results
+    - Recommendations
+  confidence_guidance:
+    high: Direct performance measurement under controlled conditions
+    medium: Analysis from production metrics with some assumptions
+    low: Estimates based on configuration without load testing
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: postgres-wal
+      priority: required
+    - source_id: write-optimization
+      priority: recommended
+  limitations:
+  - Cannot perform live write benchmarks
+  - Throughput analysis requires production metrics
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed performance analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: write-scaling-001
+  item: Write throughput capacity documented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm max tested throughput is documented with test conditions
+  expected: Confirmed by reviewer
+- id: write-scaling-002
+  item: Current write load under 70% of capacity
+  level: CRITICAL
+  verification: test $(echo 'scale=2; current_writes/max_writes' | bc) -lt 0.7 && echo PASS || echo FAIL
+  expected: PASS
+- id: write-scaling-003
+  item: Batch writes implemented for high-frequency operations
+  level: BLOCKING
+  verification: grep -r 'bulk_insert\|batch_write\|executemany' src/ | wc -l | test $(cat) -gt 0 && echo
+    PASS || echo FAIL
+  expected: PASS
+- id: write-scaling-004
+  item: Write scaling plan exists for 10x growth
+  level: WARNING
+  verification: manual
+  verification_notes: Review capacity planning documentation for write scaling strategy
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - high-scale-saas
+    - data-platform
+    - event-driven
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - A1.2
+relationships:
+  commonly_combined:
+  - scalability-capacity.database-scalability.sharding-strategy
+  - scalability-capacity.database-scalability.connection-scaling
+  - scalability-capacity.database-scalability.query-scalability

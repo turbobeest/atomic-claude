@@ -1,0 +1,276 @@
+# ============================================================
+# AUDIT: Resource Ownership Validation
+# Category: 34 - Business Logic & Domain
+# Subcategory: authorization-logic
+# ============================================================
+
+audit:
+  id: "business-logic-domain.authorization-logic.resource-ownership-validation"
+  name: "Resource Ownership Validation Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "business-logic-domain"
+  category_number: 34
+  subcategory: "authorization-logic"
+
+  tier: "expert"
+  estimated_duration: "4-6 hours"  # median: 5h
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "business-logic"
+
+  default_profiles:
+    - "full"
+    - "quick"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates how resource ownership is validated to prevent insecure direct
+    object references (IDOR). This audit examines whether users can only access
+    resources they own or have explicit permission to access, including data
+    accessed by ID in URLs, request bodies, and query parameters.
+
+  why_it_matters: |
+    IDOR vulnerabilities are among the most common web application security
+    issues. Without proper ownership validation, attackers can access, modify,
+    or delete other users' data simply by changing IDs in requests. This
+    causes data breaches and compliance violations.
+
+  when_to_run:
+    - "During security testing"
+    - "When implementing data access patterns"
+    - "Before security audits"
+    - "After IDOR vulnerabilities found"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Data access and authorization code"
+    - type: "api_endpoints"
+      description: "Endpoints that access resources by ID"
+    - type: "data_model"
+      description: "Resource ownership relationships"
+
+  access_requirements:
+    - "Read access to data access code"
+    - "Test environment with multiple users"
+    - "Access to API testing tools"
+
+discovery:
+  file_patterns:
+    - glob: "**/controllers/**/*.{ts,java,cs,py}"
+      purpose: "Find endpoints with ID parameters"
+    - glob: "**/repositories/**/*.{ts,java,cs,py}"
+      purpose: "Find data access code"
+    - glob: "**/services/**/*.{ts,java,cs,py}"
+      purpose: "Find business logic with resource access"
+    - glob: "**/policies/**/*.{ts,java,cs,py}"
+      purpose: "Find ownership policies"
+
+  interview_questions:
+    - role: "Security Engineer"
+      questions:
+        - "How do you prevent IDOR vulnerabilities?"
+        - "How is resource ownership verified?"
+        - "Have there been IDOR findings?"
+    - role: "Lead Developer"
+      questions:
+        - "How do you ensure users only access their own data?"
+        - "Is ownership checked at the query level?"
+        - "How are shared resources handled?"
+
+knowledge_sources:
+  guides:
+    - id: "owasp-idor"
+      name: "OWASP IDOR Prevention"
+      url: "https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html"
+    - id: "broken-access-control"
+      name: "OWASP Broken Access Control"
+      url: "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+
+  standards:
+    - id: "owasp-top-10"
+      name: "OWASP Top 10"
+      relevance: "Broken Access Control (#1 in 2021)"
+
+tooling:
+  analysis_tools:
+    - tool: "Burp Suite"
+      purpose: "IDOR testing"
+    - tool: "OWASP ZAP"
+      purpose: "Automated IDOR detection"
+    - tool: "AuthMatrix"
+      purpose: "Authorization matrix testing"
+    - tool: "Autorize"
+      purpose: "Burp authorization testing"
+
+signals:
+  critical:
+    - id: "ROV-CRIT-001"
+      signal: "Resources accessible by changing ID in URL"
+      evidence_indicators:
+        - "Changing /users/123 to /users/456 works"
+        - "No ownership validation on GET requests"
+        - "Other users' data returned"
+      explanation: |
+        Classic IDOR vulnerability allowing access to any user's data
+        by guessing or enumerating IDs. This is a critical security flaw.
+      remediation: "Validate ownership before returning any resource"
+
+    - id: "ROV-CRIT-002"
+      signal: "Resources modifiable by changing ID in request body"
+      evidence_indicators:
+        - "Changing resource_id in POST/PUT works"
+        - "Can update other users' resources"
+        - "Ownership not validated on mutations"
+      explanation: |
+        IDOR on mutations is even more dangerous as it allows data
+        manipulation and destruction across user boundaries.
+      remediation: "Validate ownership before any resource modification"
+
+  high:
+    - id: "ROV-HIGH-001"
+      signal: "Sequential IDs enabling enumeration"
+      evidence_indicators:
+        - "Auto-increment IDs in URLs"
+        - "Easy to guess other resource IDs"
+        - "No rate limiting on access attempts"
+      remediation: "Use UUIDs for external references; add rate limiting"
+
+    - id: "ROV-HIGH-002"
+      signal: "Ownership checked inconsistently"
+      evidence_indicators:
+        - "Some endpoints check ownership, others don't"
+        - "Different patterns across similar resources"
+        - "No standard ownership validation approach"
+      remediation: "Standardize ownership validation; apply to all resources"
+
+  medium:
+    - id: "ROV-MED-001"
+      signal: "Complex ownership rules not centralized"
+      evidence_indicators:
+        - "Ownership logic in multiple places"
+        - "Inconsistent sharing rules"
+        - "Difficult to audit ownership checks"
+      remediation: "Centralize ownership validation in policy layer"
+
+    - id: "ROV-MED-002"
+      signal: "Indirect references not validated"
+      evidence_indicators:
+        - "Nested resources accessible without parent check"
+        - "Related resources not validated"
+        - "Traversal through relationships bypasses ownership"
+      remediation: "Validate ownership through entire resource hierarchy"
+
+  low:
+    - id: "ROV-LOW-001"
+      signal: "Ownership validation not logged"
+      evidence_indicators:
+        - "No audit trail for ownership checks"
+        - "Cannot detect enumeration attempts"
+      remediation: "Log ownership validation failures"
+
+  positive:
+    - id: "ROV-POS-001"
+      signal: "All resource access includes ownership validation"
+    - id: "ROV-POS-002"
+      signal: "Centralized ownership policy enforcement"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Resource Endpoints"
+      description: "Map endpoints that access resources by ID"
+      duration_estimate: "1 hour"
+
+    - id: "2"
+      name: "Analyze Ownership Model"
+      description: "Document resource ownership relationships"
+      duration_estimate: "1 hour"
+
+    - id: "3"
+      name: "Test IDOR Scenarios"
+      description: "Attempt to access other users' resources"
+      duration_estimate: "2 hours"
+      tools:
+        - name: "Burp Suite Autorize"
+          action: "Run IDOR tests"
+
+    - id: "4"
+      name: "Review Code"
+      description: "Verify ownership checks in code"
+      duration_estimate: "1 hour"
+
+    - id: "5"
+      name: "Document Findings"
+      description: "Compile ownership validation findings"
+      duration_estimate: "30 minutes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      description: "List of IDOR vulnerabilities"
+
+    - type: "resource_matrix"
+      format: "structured"
+      description: "Resource ownership validation matrix"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Resource Inventory"
+        - "Ownership Analysis"
+        - "IDOR Testing Results"
+        - "Recommendations"
+
+closeout_checklist:
+  - id: "rov-001"
+    item: "Resource endpoints inventoried"
+    level: "REQUIRED"
+    verification: "automated"
+  - id: "rov-002"
+    item: "IDOR testing completed"
+    level: "REQUIRED"
+    verification: "manual"
+  - id: "rov-003"
+    item: "Ownership checks verified in code"
+    level: "WARNING"
+    verification: "manual"
+
+governance:
+  applicable_to:
+    archetypes: ["all-applications"]
+
+  compliance_mappings:
+    - framework: "OWASP Top 10"
+      control: "A01 Broken Access Control"
+      description: "IDOR prevention"
+    - framework: "PCI-DSS"
+      control: "6.5.4"
+      description: "Insecure direct object references"
+
+relationships:
+  commonly_combined:
+    - "business-logic-domain.authorization-logic.permission-enforcement"
+    - "security.api-security"
+  depends_on:
+    - "security.authentication"
+  feeds_into:
+    - "security.vulnerability-assessment"

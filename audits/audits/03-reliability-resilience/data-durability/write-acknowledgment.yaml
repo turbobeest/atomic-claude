@@ -1,0 +1,282 @@
+# ============================================================
+# AUDIT: Write Acknowledgment Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-durability.write-acknowledgment"
+  name: "Write Acknowledgment Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-durability"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates write acknowledgment settings across databases and message
+    queues. Examines consistency levels, ack configurations, fsync
+    settings, and whether writes are acknowledged only after durable
+    persistence. Assesses the trade-off between durability guarantees
+    and write latency.
+
+  why_it_matters: |
+    Write acknowledgment determines when data is considered "committed."
+    Weak acknowledgment (ack before persistence) risks data loss during
+    failures. Strong acknowledgment (wait for multiple replicas) provides
+    durability but increases latency. Understanding and correctly
+    configuring write acknowledgment is essential for data integrity.
+
+  when_to_run:
+    - "During data layer architecture review"
+    - "After investigating data loss incidents"
+    - "When optimizing write performance"
+    - "Before production deployment of data-critical systems"
+
+prerequisites:
+  required_artifacts:
+    - type: "config"
+      description: "Database and message queue configuration"
+    - type: "codebase"
+      description: "Application code for write operations"
+
+  access_requirements:
+    - "Database configuration access"
+    - "Application source code access"
+    - "Message queue configuration access"
+
+discovery:
+  code_patterns:
+    - pattern: "acks?=|w:|WriteConcern|QUORUM|ALL|min\\.insync"
+      type: "regex"
+      scope: "config"
+      purpose: "Find write acknowledgment settings"
+    - pattern: "fsync|sync|durability|journal"
+      type: "regex"
+      scope: "config"
+      purpose: "Find disk sync configuration"
+
+  file_patterns:
+    - glob: "**/application*.{yaml,properties}"
+      purpose: "Application configuration"
+    - glob: "**/kafka/**/*.properties"
+      purpose: "Kafka producer configuration"
+    - glob: "**/mongodb*.conf"
+      purpose: "MongoDB configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "kafka-acks"
+      name: "Kafka Producer Acknowledgments"
+      url: "https://kafka.apache.org/documentation/#producerconfigs_acks"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "mongodb-write-concern"
+      name: "MongoDB Write Concern"
+      url: "https://www.mongodb.com/docs/manual/reference/write-concern/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "grep"
+      purpose: "Find acknowledgment configurations"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "kafka-configs"
+      purpose: "Check Kafka producer config"
+      command: "kafka-configs.sh --describe --entity-type topics --entity-name topic-name"
+
+signals:
+  critical:
+    - id: "DD-WA-CRIT-001"
+      signal: "Write acknowledgment set to fire-and-forget (acks=0)"
+      evidence_pattern: "acks=0|acks: 0|fire.?and.?forget"
+      explanation: |
+        With acks=0, producers don't wait for any acknowledgment.
+        Data can be lost without any indication to the application.
+      remediation: "Use acks=all or acks=-1 for critical data"
+
+    - id: "DD-WA-CRIT-002"
+      signal: "Database configured without journaling or fsync"
+      evidence_pattern: "journal: false|nojournal|fsync: false"
+      explanation: |
+        Without journaling, committed transactions can be lost during
+        unexpected shutdowns, violating durability guarantees.
+      remediation: "Enable journaling and appropriate fsync settings"
+
+  high:
+    - id: "DD-WA-HIGH-001"
+      signal: "acks=1 used for critical data"
+      explanation: "Leader acknowledgment only means data loss if leader fails before replication"
+      remediation: "Use acks=all with min.insync.replicas >= 2 for critical data"
+
+    - id: "DD-WA-HIGH-002"
+      signal: "Write concern w:1 without journal on MongoDB"
+      explanation: "Single node acknowledgment without journal risks data loss"
+      remediation: "Use w:majority with j:true for critical operations"
+
+  medium:
+    - id: "DD-WA-MED-001"
+      signal: "Inconsistent write acknowledgment across application"
+      remediation: "Standardize write concern based on data criticality"
+
+    - id: "DD-WA-MED-002"
+      signal: "No timeout configured for write acknowledgment"
+      remediation: "Configure appropriate timeouts to prevent indefinite hangs"
+
+  low:
+    - id: "DD-WA-LOW-001"
+      signal: "Write acknowledgment settings not documented"
+
+  positive:
+    - id: "DD-WA-POS-001"
+      signal: "acks=all with min.insync.replicas >= 2 for critical data"
+    - id: "DD-WA-POS-002"
+      signal: "Write concern documented and aligned with durability requirements"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Write Operations"
+      description: |
+        Map all database and message queue write operations in the application.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find database write operations"
+          command: "grep -rn 'insert\\|update\\|save\\|produce\\|publish' --include='*.py' --include='*.java' ."
+      expected_findings:
+        - "Inventory of write operations"
+        - "Data criticality for each"
+
+    - id: "2"
+      name: "Review Database Configuration"
+      description: |
+        Check database-level durability and consistency settings.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check MongoDB write concern"
+          command: "db.adminCommand({getParameter: 1, writeConcern: 1})"
+      expected_findings:
+        - "Default write concern settings"
+        - "Journaling configuration"
+
+    - id: "3"
+      name: "Analyze Application Code"
+      description: |
+        Review how application code configures write acknowledgment.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find producer configuration"
+          command: "grep -rn 'acks\\|write.?concern\\|consistency' --include='*.yaml' --include='*.properties' ."
+      expected_findings:
+        - "Application-level acknowledgment settings"
+        - "Per-operation overrides"
+
+    - id: "4"
+      name: "Validate Durability Claims"
+      description: |
+        Test that acknowledged writes actually persist through failures.
+      duration_estimate: "30 min"
+      questions:
+        - "What happens to acknowledged writes if the leader fails?"
+        - "Are there scenarios where acknowledged writes could be lost?"
+      expected_findings:
+        - "Durability guarantee validation"
+        - "Gap analysis"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Write Operation Inventory"
+        - "Acknowledgment Configuration Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Configuration review with durability testing"
+    medium: "Configuration review without testing"
+    low: "Documentation review only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "kafka-acks"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires thorough configuration analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "write-ack-001"
+    item: "Critical data uses acks=all or equivalent"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify acknowledgment configuration for critical write paths"
+    expected: "Confirmed by reviewer"
+
+  - id: "write-ack-002"
+    item: "Journaling enabled on databases"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check database journaling configuration"
+    expected: "Confirmed by reviewer"
+
+  - id: "write-ack-003"
+    item: "min.insync.replicas >= 2 where acks=all"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify ISR configuration for Kafka topics"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["PI1.2"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-durability.replication-factor"
+    - "reliability-resilience.data-consistency.consistency-level"

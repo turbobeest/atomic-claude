@@ -1,0 +1,263 @@
+audit:
+  id: code-quality.dead-code.unused-variable
+  name: Unused Variable Detection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: dead-code
+  tier: expert
+  estimated_duration: 25 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Identifies declared variables that are never used within their scope.
+    This includes local variables, function parameters, class fields, and
+    module-level constants that are assigned but never read.
+  why_it_matters: |
+    Unused variables clutter code, waste memory (in some languages), and often
+    indicate incomplete implementations or refactoring artifacts. They confuse
+    developers reading the code and may mask bugs where a variable was intended
+    to be used but was accidentally omitted.
+  when_to_run:
+  - During code reviews
+  - Before merging feature branches
+  - During codebase cleanup
+  - As part of CI pipeline
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: ^\s*(const|let|var|int|string|bool)\s+(\w+)\s*=
+    type: regex
+    scope: source
+    purpose: Identify variable declarations
+  - pattern: _\w+\s*=
+    type: regex
+    scope: source
+    purpose: Identify intentionally unused variables (underscore prefix)
+  file_patterns:
+  - glob: '**/*.{js,ts,py,java,go,rb,cs,cpp,c}'
+    purpose: Source code files
+knowledge_sources:
+  specifications:
+  - id: cwe-563
+    name: 'CWE-563: Assignment to Variable without Use'
+    url: https://cwe.mitre.org/data/definitions/563.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: eslint-no-unused
+    name: ESLint no-unused-vars Rule
+    url: https://eslint.org/docs/latest/rules/no-unused-vars
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: eslint
+    purpose: JavaScript/TypeScript unused variable detection
+    offline_capable: true
+  - tool: pylint
+    purpose: Python unused variable detection (W0612)
+    offline_capable: true
+  - tool: go vet
+    purpose: Go unused variable detection
+    offline_capable: true
+  - tool: clippy
+    purpose: Rust unused variable detection
+    offline_capable: true
+  scripts:
+  - id: unused-var-scan
+    language: bash
+    purpose: Run linters for unused variables
+    source: inline
+    code: |
+      # ESLint check
+      npx eslint --rule 'no-unused-vars: error' . 2>/dev/null
+      # Pylint check
+      pylint --disable=all --enable=W0612 . 2>/dev/null
+signals:
+  critical:
+  - id: DC-UNUSED-CRIT-001
+    signal: Unused security-related variables (tokens, keys, credentials)
+    evidence_pattern: (token|key|secret|password|credential)\s*=.*[^\n]*//.*unused|never\s+used
+    cwe: CWE-563
+    explanation: |
+      Unused security variables may indicate incomplete authentication/authorization
+      implementations or accidentally disabled security checks.
+    remediation: Review security logic and either implement proper use or remove
+  - id: DC-UNUSED-CRIT-002
+    signal: Unused validation result variables
+    evidence_pattern: (valid|result|error|check)\s*=\s*(validate|check|verify).*[^\n]*unused
+    cwe: CWE-563
+    explanation: |
+      Validation results that are computed but never checked indicate
+      bypassed validation logic and potential security vulnerabilities.
+    remediation: Ensure validation results are properly checked
+  high:
+  - id: DC-UNUSED-HIGH-001
+    signal: Unused function parameters
+    evidence_pattern: function.*\(.*\).*{[^}]*}.*parameter.*unused
+    cwe: CWE-563
+    explanation: |
+      Unused parameters indicate API design issues or incomplete
+      implementations that may cause unexpected behavior.
+    remediation: Remove unused parameters or implement their intended use
+  - id: DC-UNUSED-HIGH-002
+    signal: More than 5% of variables unused in module
+    evidence_pattern: unused_variable_ratio > 5%
+    cwe: CWE-563
+    explanation: |
+      High ratio of unused variables indicates poor code hygiene and
+      likely incomplete refactoring or abandoned feature code.
+    remediation: Conduct code cleanup to remove unused declarations
+  medium:
+  - id: DC-UNUSED-MED-001
+    signal: Unused local variables in functions
+    evidence_pattern: no-unused-vars|W0612
+    remediation: Remove unused variable declarations
+  - id: DC-UNUSED-MED-002
+    signal: Unused class fields/properties
+    evidence_pattern: class.*{[^}]*unused.*field
+    remediation: Remove unused class members or document future use
+  low:
+  - id: DC-UNUSED-LOW-001
+    signal: Unused variables with underscore prefix (intentional)
+    evidence_pattern: _\w+\s*=
+    remediation: Verify underscore convention is intentional
+  positive:
+  - id: DC-UNUSED-POS-001
+    signal: No unused variable warnings from linters
+    evidence_pattern: zero_unused_warnings
+  - id: DC-UNUSED-POS-002
+    signal: Linter configured with no-unused-vars rule
+    evidence_pattern: eslintrc.*no-unused-vars.*error
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Run Language-Specific Linters
+    description: |
+      Execute appropriate linters for each language in the codebase
+      to detect unused variables.
+    duration_estimate: 10 min
+    commands:
+    - purpose: ESLint unused vars check
+      command: |
+        npx eslint --rule 'no-unused-vars: [error, {args: all}]' . 2>/dev/null | head -100
+    - purpose: Pylint unused variable check
+      command: |
+        pylint --disable=all --enable=W0612,W0613 **/*.py 2>/dev/null | head -100
+    expected_findings:
+    - List of unused variables by file
+    - Unused function parameters
+  - id: '2'
+    name: Analyze Patterns
+    description: |
+      Look for patterns in unused variables that might indicate
+      systematic issues or security concerns.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find security-related unused variables
+      command: |
+        grep -rn --include="*.{js,ts,py}" -E "(token|key|secret|auth)\s*=" . 2>/dev/null | head -50
+    expected_findings:
+    - Security-sensitive unused variables
+    - Validation variables not checked
+  - id: '3'
+    name: Calculate Metrics
+    description: |
+      Compute statistics on unused variables to understand scope
+      of the problem.
+    duration_estimate: 5 min
+    expected_findings:
+    - Total unused variables count
+    - Percentage by module/package
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - unused_variable_locations
+    - variable_type
+    - severity_classification
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Unused Variable Inventory
+    - Security Implications
+    - Cleanup Recommendations
+  confidence_guidance:
+    high: Static analysis confirms variable is never read
+    medium: Variable appears unused in analyzed scope
+    low: Dynamic analysis might reveal usage
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-563
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: unused-var-001
+  item: Linter analysis completed for all source files
+  level: BLOCKING
+  verification: |
+    npx eslint --rule 'no-unused-vars: warn' . 2>&1 | grep -c "warning\|error" || echo "0"
+  expected: Analysis complete, results documented
+- id: unused-var-002
+  item: No unused security-related variables
+  level: CRITICAL
+  verification: |
+    npx eslint --rule 'no-unused-vars: error' . 2>&1 | grep -iE "token|key|secret|auth" | wc -l
+  expected: '0'
+- id: unused-var-003
+  item: Unused variables documented for cleanup
+  level: WARNING
+  verification: manual
+  verification_notes: Review audit output for documented findings
+  expected: All findings documented
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-563
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+relationships:
+  commonly_combined:
+  - code-quality.dead-code.unused-function-method
+  - code-quality.dead-code.unused-import
+  - code-quality.dead-code.unreachable-code

@@ -1,0 +1,399 @@
+# ============================================================
+# AUDIT: Recovery Point Objective (RPO) Audit
+# ============================================================
+# Evaluates whether defined RPOs are realistic, documented, and
+# supported by actual backup frequencies and replication.
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "reliability-resilience.disaster-recovery.recovery-point-objective"
+
+  name: "Recovery Point Objective (RPO) Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "disaster-recovery"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "critical"
+
+  scope: "process"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Assesses Recovery Point Objectives (RPO) definitions across data
+    stores and systems. Evaluates whether RPOs are documented, realistic,
+    aligned with business tolerance for data loss, and achievable with
+    current backup frequency and replication strategies.
+
+  why_it_matters: |
+    RPO defines the maximum acceptable data loss measured in time.
+    If backups run every 24 hours, the RPO cannot be less than 24 hours.
+    Misaligned RPOs lead to unacceptable data loss during disasters,
+    causing business disruption, compliance violations, and customer impact.
+
+  when_to_run:
+    - "Annual disaster recovery planning"
+    - "After backup strategy changes"
+    - "When adding new data stores"
+    - "During data classification reviews"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "documentation"
+      description: "Business continuity plan with RPO definitions"
+    - type: "backup_configuration"
+      description: "Backup schedules and frequencies"
+    - type: "data_classification"
+      description: "Data criticality classifications"
+
+  access_requirements:
+    - "Access to business continuity documentation"
+    - "Backup configuration access"
+    - "Replication configuration details"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  file_patterns:
+    - glob: "**/backup*.yaml"
+      purpose: "Backup schedule configurations"
+    - glob: "**/replication*.yaml"
+      purpose: "Data replication configurations"
+
+  interviews:
+    - role: "Business Stakeholders"
+      questions:
+        - "What is the acceptable data loss for each critical system?"
+        - "What transactions or data are most sensitive to loss?"
+        - "Are there regulatory requirements for data retention?"
+      purpose: "Understand business tolerance for data loss"
+    - role: "Database/Platform Engineers"
+      questions:
+        - "What are current backup frequencies?"
+        - "Is real-time replication in place for critical data?"
+        - "What is the lag time for replicated data?"
+      purpose: "Assess technical capabilities for RPO achievement"
+
+  documents_to_review:
+    - type: "Business Impact Analysis"
+      purpose: "Understand data loss impact"
+    - type: "Backup schedules"
+      purpose: "Verify backup frequency supports RPO"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  specifications:
+    - id: "nist-cp"
+      name: "NIST SP 800-34 - Contingency Planning Guide"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-34/rev-1/final"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "aws-rpo-guidance"
+      name: "AWS Disaster Recovery Options"
+      url: "https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/"
+      offline_cache: true
+    - id: "sre-book"
+      name: "Site Reliability Engineering"
+      url: "https://sre.google/sre-book/table-of-contents/"
+      offline_cache: true
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "AWS RDS"
+      purpose: "Check automated backup retention and frequency"
+      command: "aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,BackupRetentionPeriod]'"
+    - tool: "kubectl"
+      purpose: "Check Velero backup schedules"
+      command: "kubectl get schedules.velero.io -A -o jsonpath='{range .items[*]}{.metadata.name}: {.spec.schedule}{\"\\n\"}{end}'"
+
+  monitoring_queries:
+    - system: "Backup monitoring"
+      query: "time_since_last_backup_seconds"
+      purpose: "Verify backup frequency meets RPO"
+      threshold: "< RPO in seconds"
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "RPO-CRIT-001"
+      signal: "Critical data stores have no defined RPO"
+      evidence_indicators:
+        - "RPO not documented"
+        - "No data loss tolerance specified"
+      explanation: |
+        Without defined RPOs, there is no target for backup frequency
+        and no way to assess whether data protection is adequate.
+      remediation: "Define RPOs for all data stores based on business impact analysis"
+
+    - id: "RPO-CRIT-002"
+      signal: "Backup frequency does not support defined RPO"
+      evidence_indicators:
+        - "RPO is 1 hour but backups run daily"
+        - "No continuous replication for near-zero RPO"
+      explanation: |
+        When backup frequency exceeds RPO, more data will be lost
+        than the business can tolerate during a disaster.
+      remediation: "Increase backup frequency or implement replication to meet RPO"
+
+  high:
+    - id: "RPO-HIGH-001"
+      signal: "RPO defined without considering replication lag"
+      explanation: "Replication lag can cause data loss beyond expected RPO"
+      remediation: "Monitor replication lag and factor into RPO calculations"
+
+    - id: "RPO-HIGH-002"
+      signal: "Different data stores have inconsistent RPOs causing recovery complexity"
+      explanation: "Inconsistent RPOs complicate disaster recovery and may cause data inconsistency"
+      remediation: "Align RPOs across related data stores or plan for inconsistency"
+
+  medium:
+    - id: "RPO-MED-001"
+      signal: "RPO not validated through actual data loss measurement"
+      remediation: "Test recovery and measure actual data loss vs RPO"
+
+    - id: "RPO-MED-002"
+      signal: "No monitoring for RPO compliance"
+      remediation: "Implement alerts when backup frequency threatens RPO"
+
+  low:
+    - id: "RPO-LOW-001"
+      signal: "RPO documentation not regularly reviewed"
+
+  positive:
+    - id: "RPO-POS-001"
+      signal: "RPOs defined and supported by appropriate backup/replication"
+    - id: "RPO-POS-002"
+      signal: "Continuous replication with monitored lag for zero-RPO systems"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Collect RPO Definitions"
+      description: |
+        Gather all documented RPOs from business continuity plans
+        and system documentation.
+      duration_estimate: "30 min"
+      questions:
+        - "Where are RPOs documented?"
+        - "Which data stores have defined RPOs?"
+        - "What business factors drive each RPO?"
+      expected_findings:
+        - "RPO matrix by data store"
+        - "Gaps in RPO coverage"
+
+    - id: "2"
+      name: "Inventory Backup Frequencies"
+      description: |
+        Document actual backup frequencies and replication configurations
+        for all data stores.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "List RDS backup configurations"
+          command: "aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,BackupRetentionPeriod]'"
+      expected_findings:
+        - "Backup frequency by data store"
+        - "Replication lag measurements"
+
+    - id: "3"
+      name: "Compare RPO to Backup Frequency"
+      description: |
+        Analyze whether backup frequencies and replication support
+        the defined RPOs.
+      duration_estimate: "30 min"
+      questions:
+        - "Does backup frequency support RPO?"
+        - "What is the worst-case data loss for each system?"
+      expected_findings:
+        - "RPO achievability assessment"
+        - "Gap analysis showing systems at risk"
+
+    - id: "4"
+      name: "Assess Replication Strategies"
+      description: |
+        For near-zero RPO requirements, evaluate replication
+        configurations and lag monitoring.
+      duration_estimate: "30 min"
+      questions:
+        - "Which systems use synchronous vs asynchronous replication?"
+        - "How is replication lag monitored?"
+        - "What happens if replication fails?"
+      expected_findings:
+        - "Replication strategy by system"
+        - "Lag monitoring effectiveness"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "rpo_matrix"
+      format: "table"
+      columns:
+        - "Data Store"
+        - "Defined RPO"
+        - "Backup Frequency"
+        - "Replication Type"
+        - "Achievable"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "RPO Coverage Analysis"
+        - "Achievability Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "RPO validated against actual backup/replication configurations"
+    medium: "RPO documented but configurations not independently verified"
+    low: "RPO based on estimates without configuration access"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "nist-cp"
+        priority: "required"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "RPO assessment requires comprehensive review"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "rpo-001"
+    item: "RPOs defined for all critical data stores"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review BCP documentation for RPO definitions"
+    expected: "Confirmed by reviewer"
+
+  - id: "rpo-002"
+    item: "Backup frequency supports defined RPO for each data store"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Compare backup schedules to RPO requirements"
+    expected: "Confirmed by reviewer"
+
+  - id: "rpo-003"
+    item: "Replication lag monitored for near-zero RPO systems"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify lag monitoring and alerting"
+    expected: "Confirmed by reviewer"
+
+  - id: "rpo-004"
+    item: "RPO aligned with data classification and business impact"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Cross-reference RPO with data criticality"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["A1.2"]
+    - framework: "ISO 22301"
+      controls: ["8.2.2"]
+    - framework: "GDPR"
+      controls: ["Art. 32"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.disaster-recovery.recovery-time-objective"
+    - "reliability-resilience.disaster-recovery.backup-strategy"
+    - "reliability-resilience.data-durability.data-replication"

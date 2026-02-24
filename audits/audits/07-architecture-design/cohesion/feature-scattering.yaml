@@ -1,0 +1,386 @@
+# ============================================================
+# AUDIT: Feature Scattering Analysis
+# ============================================================
+# Identifies features whose implementation is scattered across
+# multiple modules, making changes difficult and error-prone.
+# ============================================================
+
+audit:
+  id: "architecture-design.cohesion.feature-scattering"
+  name: "Feature Scattering Analysis"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "cohesion"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit identifies feature scattering - when a single business
+    feature or concern is implemented across multiple modules, packages,
+    or services rather than being localized. It uses git change analysis,
+    feature tagging, and code organization review to find scattered
+    implementations.
+
+  why_it_matters: |
+    Feature scattering causes:
+    - Difficulty understanding how a feature works end-to-end
+    - Multiple modules must change for single feature updates
+    - Higher risk of incomplete changes and bugs
+    - Harder onboarding - no single place to learn a feature
+    - Testing complexity spans multiple areas
+    Localizing features improves maintainability and development velocity.
+
+  when_to_run:
+    - "When feature changes require many module updates"
+    - "During architecture refactoring planning"
+    - "After merging multiple components"
+    - "When developers report difficulty understanding features"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+    - type: "version_control"
+      description: "Git history for change analysis"
+    - type: "feature_documentation"
+      description: "Documentation of major features (optional)"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Read access to git history"
+    - "Understanding of feature boundaries"
+
+discovery:
+  code_patterns:
+    - pattern: "TODO.*feature|FEATURE:|@feature"
+      type: "regex"
+      scope: "source"
+      purpose: "Find feature markers in code"
+
+    - pattern: "implements.*Feature|Feature\\w+Strategy"
+      type: "regex"
+      scope: "source"
+      purpose: "Find feature-related interfaces"
+
+  file_patterns:
+    - glob: "**/features/**"
+      purpose: "Feature-organized directories"
+    - glob: "**/*feature*"
+      purpose: "Feature-named files"
+
+knowledge_sources:
+  specifications:
+    - id: "feature-driven-development"
+      name: "Feature-Driven Development"
+      url: "https://en.wikipedia.org/wiki/Feature-driven_development"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "vertical-slice"
+      name: "Vertical Slice Architecture"
+      url: "https://jimmybogard.com/vertical-slice-architecture/"
+      offline_cache: true
+
+    - id: "ddd-evans"
+      name: "Domain-Driven Design Reference"
+      url: "https://www.domainlanguage.com/ddd/reference/"
+      offline_cache: true
+
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "pragmatic-programmer"
+      name: "Pragmatic Programmer Tips"
+      url: "https://pragprog.com/tips/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "feature-toggles"
+      title: "Feature Toggles (Feature Flags)"
+      type: "article"
+      reference: "Martin Fowler - martinfowler.com"
+
+    - id: "aop-concerns"
+      title: "Aspect-Oriented Programming"
+      type: "book"
+      reference: "AspectJ in Action - Ramnivas Laddad"
+
+tooling:
+  static_analysis:
+    - tool: "CodeScene"
+      purpose: "Analyze change coupling and feature hotspots"
+      offline_capable: false
+
+    - tool: "Structure101"
+      purpose: "Visualize feature distribution"
+      offline_capable: true
+
+  scripts:
+    - id: "feature-scatter-analyzer"
+      language: "bash"
+      purpose: "Analyze git commits for scattered changes"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find commits touching multiple modules
+        echo "=== Commits Touching Multiple Directories ==="
+        git log --oneline --name-only -n 100 | awk '
+          /^[a-f0-9]/ {
+            if (NR > 1 && dirs > 3) print commit ": " dirs " directories"
+            commit = $0; dirs = 0; delete seen
+          }
+          /\// {
+            dir = $0; gsub(/\/[^/]+$/, "", dir)
+            if (!seen[dir]++) dirs++
+          }
+        ' | head -20
+
+signals:
+  critical:
+    - id: "SCATTER-CRIT-001"
+      signal: "Feature implementation spans >5 modules"
+      evidence_pattern: "Single feature requires changes in >5 packages/modules"
+      explanation: |
+        When implementing or modifying a feature requires touching many
+        modules, the feature is too scattered. This leads to incomplete
+        changes, difficult testing, and high coordination overhead.
+      remediation: "Consider vertical slice architecture or feature modules"
+
+    - id: "SCATTER-CRIT-002"
+      signal: "Cross-cutting concern not properly abstracted"
+      evidence_pattern: "Logging/auth/validation code duplicated across features"
+      explanation: |
+        When cross-cutting concerns are implemented inline across features,
+        any change requires updating multiple locations, leading to
+        inconsistencies.
+      remediation: "Use AOP, middleware, or interceptor patterns"
+
+  high:
+    - id: "SCATTER-HIGH-001"
+      signal: "Feature commits consistently touch same distant modules"
+      evidence_pattern: "Git history shows pattern of multi-module commits"
+      explanation: |
+        Consistent multi-module commits indicate structural scattering
+        that slows development and increases bug risk.
+      remediation: "Refactor to co-locate related code; consider feature folders"
+
+    - id: "SCATTER-HIGH-002"
+      signal: "Business rule implemented in multiple locations"
+      evidence_pattern: "Same validation/calculation logic in different modules"
+      explanation: |
+        Duplicated business logic leads to inconsistencies when rules
+        change and one location is missed.
+      remediation: "Create single source of truth for business rules"
+
+  medium:
+    - id: "SCATTER-MED-001"
+      signal: "Feature toggle checks scattered across codebase"
+      evidence_pattern: "if(featureEnabled) checks in multiple modules"
+      remediation: "Centralize feature toggle evaluation; use facade"
+
+    - id: "SCATTER-MED-002"
+      signal: "UI component requires understanding multiple backend modules"
+      evidence_pattern: "Frontend component imports from many unrelated services"
+      remediation: "Create Backend-for-Frontend or aggregate API"
+
+  low:
+    - id: "SCATTER-LOW-001"
+      signal: "Configuration for single feature in multiple config files"
+      remediation: "Consider feature-specific config sections"
+
+  positive:
+    - id: "SCATTER-POS-001"
+      signal: "Feature changes localized to single module"
+    - id: "SCATTER-POS-002"
+      signal: "Vertical slice architecture with feature folders"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify major features"
+      description: |
+        Catalog the major features of the system to evaluate
+        their implementation distribution.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find feature markers"
+          command: "grep -rn 'FEATURE:\\|@feature\\|feature(' --include='*.java' --include='*.ts' | head -30"
+        - purpose: "Find feature directories"
+          command: "find . -type d -name '*feature*' | head -20"
+      expected_findings:
+        - "Feature inventory"
+        - "Existing feature organization"
+
+    - id: "2"
+      name: "Analyze change coupling via git"
+      description: |
+        Use git history to find files and directories that
+        change together, indicating feature coupling.
+      duration_estimate: "40 min"
+      commands:
+        - purpose: "Find multi-directory commits"
+          command: "git log --oneline --name-only -n 100 | awk '/^[a-f0-9]/{commit=$0;next} /\\//{dir=$0;gsub(/\\/[^\\/]+$/,\"\",dir);print commit,dir}' | sort | uniq -c | sort -rn | head -30"
+        - purpose: "Find change patterns"
+          command: "git log --oneline --stat -n 50 | grep -E '^[a-f0-9]|files changed' | head -40"
+      expected_findings:
+        - "Commit scope patterns"
+        - "Frequently co-changed directories"
+
+    - id: "3"
+      name: "Map feature implementations"
+      description: |
+        For key features, trace their implementation across
+        the codebase to measure scattering.
+      duration_estimate: "35 min"
+      commands:
+        - purpose: "Search for feature-related code"
+          command: "grep -rn 'payment\\|checkout\\|authentication' --include='*.java' --include='*.ts' | cut -d: -f1 | cut -d/ -f1-3 | sort | uniq -c | sort -rn | head -20"
+      expected_findings:
+        - "Feature distribution map"
+        - "Scatter metrics per feature"
+
+    - id: "4"
+      name: "Identify cross-cutting concerns"
+      description: |
+        Find cross-cutting concerns that are scattered rather
+        than properly abstracted.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find logging patterns"
+          command: "grep -rn 'log\\.' --include='*.java' | cut -d: -f1 | cut -d/ -f1-3 | sort | uniq -c | sort -rn | head -15"
+        - purpose: "Find security checks"
+          command: "grep -rn '@Secured\\|@PreAuthorize\\|requireAuth' --include='*.java' --include='*.ts' | head -20"
+      expected_findings:
+        - "Cross-cutting concern distribution"
+        - "Abstraction opportunities"
+
+    - id: "5"
+      name: "Assess vertical slice opportunities"
+      description: |
+        Evaluate whether vertical slice architecture or feature
+        modules could improve organization.
+      duration_estimate: "30 min"
+      questions:
+        - "Are features currently organized by technical layer or by capability?"
+        - "Would reorganizing by feature improve development efficiency?"
+        - "Can existing modules be split into feature-oriented structure?"
+      expected_findings:
+        - "Reorganization recommendations"
+        - "Priority features for consolidation"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "feature_map"
+      format: "visual"
+      sections:
+        - "Feature-to-Module Mapping"
+        - "Scattering Heat Map"
+        - "Cross-Cutting Concern Distribution"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Feature Scattering Analysis"
+        - "Consolidation Recommendations"
+
+  confidence_guidance:
+    high: "Git analysis confirms scattering patterns"
+    medium: "Structural analysis suggests scattering"
+    low: "Manual review needed for confirmation"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "vertical-slice"
+        priority: "required"
+      - source_id: "feature-driven-development"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "feature-scattering-001"
+    item: "Major features mapped to implementation locations"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Feature-to-module mapping documented"
+    expected: "Confirmed by reviewer"
+
+  - id: "feature-scattering-002"
+    item: "No feature spans >5 unrelated modules"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Scattered features identified with consolidation plan"
+    expected: "Confirmed by reviewer"
+
+  - id: "feature-scattering-003"
+    item: "Cross-cutting concerns properly abstracted"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Logging, auth, validation use common abstractions"
+    expected: "Confirmed by reviewer"
+
+  - id: "feature-scattering-004"
+    item: "Git change patterns analyzed"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Multi-module commits documented and analyzed"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modularity"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.cohesion.module-cohesion"
+    - "architecture-design.cohesion.shotgun-surgery-risk"
+    - "architecture-design.cross-cutting-concerns.aspect-separation"

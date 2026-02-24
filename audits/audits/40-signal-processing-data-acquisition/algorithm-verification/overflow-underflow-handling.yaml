@@ -1,0 +1,255 @@
+audit:
+  id: signal-processing-data-acquisition.algorithm-verification.overflow-underflow-handling
+  name: Overflow/Underflow Handling Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: algorithm-verification
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates handling of arithmetic overflow and underflow
+    in signal processing code. It examines:
+    - Integer overflow detection and handling
+    - Floating-point overflow/underflow behavior
+    - Saturation arithmetic implementation
+    - Intermediate result range analysis
+    - Defensive coding for overflow
+    - Testing with extreme values
+  why_it_matters: |
+    Overflow and underflow corrupt signal processing results:
+    - Integer overflow wraps silently in many languages
+    - Floating overflow produces infinity
+    - Floating underflow produces zero or denormals
+    - Overflow can cause sign flips in signed integers
+    - IIR filter overflow can cause instability
+
+    Without proper handling, overflow causes data corruption
+    that may not be immediately obvious.
+  when_to_run:
+  - Algorithm implementation
+  - Fixed-point conversion
+  - Safety-critical review
+  - Edge case testing
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Algorithm implementation
+  - type: value_ranges
+    description: Expected value ranges
+  access_requirements:
+  - Access to algorithm source
+  - Input range specifications
+discovery:
+  code_patterns:
+  - pattern: (overflow|saturate|clip|clamp)
+    type: regex
+    scope: source
+    purpose: Detect overflow handling
+  - pattern: (INT_MAX|INT_MIN|SHRT_MAX|DBL_MAX)
+    type: regex
+    scope: source
+    purpose: Detect limit checks
+  - pattern: (\+|-|\*).*\+.*(?!overflow)
+    type: regex
+    scope: source
+    purpose: Detect unchecked arithmetic
+  file_patterns:
+  - glob: '**/algorithm*.{c,h,cpp,py}'
+    purpose: Algorithm files
+  - glob: '**/math*.{c,h,cpp}'
+    purpose: Math files
+  - glob: '**/saturate*.{c,h,cpp}'
+    purpose: Saturation files
+signals:
+  critical:
+  - id: OVF-CRIT-001
+    signal: Integer overflow not detected or handled
+    evidence_indicators:
+    - Arithmetic without bounds checking
+    - Results wrap on overflow
+    - Negative results from positive inputs
+    explanation: |
+      Undetected integer overflow causes silent data corruption.
+      In signal processing, this can cause large errors or
+      sign reversals that corrupt downstream analysis.
+    remediation: |
+      - Use saturating arithmetic
+      - Check bounds before operations
+      - Use wider intermediate types
+      - Enable compiler overflow detection
+    cwe: CWE-190
+  - id: OVF-CRIT-002
+    signal: Overflow causes algorithm instability
+    evidence_indicators:
+    - IIR filter becomes unstable with overflow
+    - Feedback loops amplify overflow errors
+    - System state corrupted by overflow
+    explanation: |
+      Overflow in feedback paths (like IIR filters) can cause
+      runaway behavior where errors amplify rather than decay.
+      This makes the system unreliable.
+    remediation: |
+      - Implement saturation in feedback paths
+      - Scale values to prevent overflow
+      - Use wider internal representation
+      - Add overflow detection and reset
+  high:
+  - id: OVF-HIGH-001
+    signal: Intermediate results overflow
+    evidence_indicators:
+    - Product or sum overflows before final result
+    - Intermediate type too narrow
+    - Information lost before use
+    explanation: |
+      Even if final result fits in target type, intermediate
+      calculations may overflow. Wider intermediates prevent
+      this precision loss.
+    remediation: |
+      - Use wider type for intermediates
+      - Scale inputs before multiplication
+      - Use accumulator with guard bits
+      - Check intermediate ranges
+  - id: OVF-HIGH-002
+    signal: Floating underflow produces incorrect zeros
+    evidence_indicators:
+    - Small values become exactly zero
+    - Gradual underflow not handled
+    - Results affected by underflow
+    explanation: |
+      Floating underflow can produce zeros where small nonzero
+      values are expected. This affects operations like division
+      or logarithm that depend on nonzero values.
+    remediation: |
+      - Check for underflow conditions
+      - Use appropriate thresholds
+      - Consider denormal handling
+      - Scale values to avoid underflow
+  medium:
+  - id: OVF-MED-001
+    signal: Saturation not smooth
+    evidence_indicators:
+    - Hard clipping causes discontinuities
+    - Saturation causes artifacts
+    - No soft clipping option
+    explanation: |
+      Hard saturation causes discontinuities that create
+      harmonic distortion. Soft saturation may be preferable
+      for audio and some signal applications.
+    remediation: |
+      - Implement soft saturation if appropriate
+      - Document saturation characteristics
+      - Consider application-specific handling
+      - Test saturation behavior
+  low:
+  - id: OVF-LOW-001
+    signal: Overflow handling not documented
+    evidence_indicators:
+    - Saturation behavior not specified
+    - No overflow testing documented
+    - Handling strategy unclear
+    explanation: |
+      Undocumented overflow handling makes behavior unpredictable
+      and maintenance difficult.
+    remediation: |
+      - Document overflow handling strategy
+      - Specify saturation behavior
+      - Include in algorithm specification
+      - Add overflow tests
+  positive:
+  - id: OVF-POS-001
+    signal: Robust overflow handling
+    evidence_indicators:
+    - Saturation arithmetic implemented
+    - Overflow tested with extreme values
+    - Behavior documented
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: defensive-programmer
+  steps:
+  - id: '1'
+    name: Overflow Handling Review
+    description: |
+      Review overflow/underflow handling.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find overflow handling
+      command: |
+        grep -rniE "(overflow|saturate|clip|clamp)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    - purpose: Find limit checks
+      command: |
+        grep -rniE "(INT_MAX|INT_MIN|MAX|MIN)" \
+          --include="*.c" --include="*.h" . 2>/dev/null | head -20
+    expected_findings:
+    - Overflow handling
+    - Limit checks
+    - Saturation implementation
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Overflow Analysis
+    - Handling Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 1
+    signal-processing:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ovf-001
+  item: Overflow detected or prevented
+  level: CRITICAL
+  verification: |
+    grep -rniE "(overflow|saturate|clip)" \
+      --include="*.c" --include="*.h" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: ovf-002
+  item: Extreme values tested
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify testing with maximum and minimum inputs
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - signal-processing
+    - embedded-systems
+    - safety-critical
+relationships:
+  commonly_combined:
+  - signal-processing.algorithm-verification.numerical-precision
+  - signal-processing.filtering.filter-stability
+  - code-quality.error-handling.defensive-coding
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

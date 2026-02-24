@@ -1,0 +1,457 @@
+audit:
+  id: security-trust.input-validation.deserialization-attack
+  name: Deserialization Attack Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 2.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines applications for insecure deserialization vulnerabilities
+    where untrusted data is deserialized without proper validation. This includes
+    Java ObjectInputStream, Python pickle/marshal, PHP unserialize, Ruby Marshal,
+    .NET BinaryFormatter, and JavaScript eval of serialized data. These vulnerabilities
+    can lead to remote code execution, denial of service, and authentication bypass.
+  why_it_matters: |
+    Insecure deserialization was ranked #8 in OWASP Top Ten 2017 and is classified
+    as CWE-502 (Deserialization of Untrusted Data). Successful exploitation often
+    leads to remote code execution, making this one of the most severe vulnerability
+    classes. High-profile attacks like the 2015 Jenkins vulnerability demonstrate
+    the critical impact - attackers gain arbitrary code execution on vulnerable servers.
+  when_to_run:
+  - During security code reviews for applications handling serialized data
+  - When reviewing data exchange mechanisms between services
+  - Before deploying applications that process external serialized input
+  - When evaluating session management implementations
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code handling serialized data
+  access_requirements:
+  - Read access to application source code
+  - Access to configuration files for serialization settings
+discovery:
+  code_patterns:
+  - pattern: ObjectInputStream|readObject\(\)|ObjectOutputStream
+    type: regex
+    scope: source
+    purpose: Java native serialization
+  - pattern: pickle\.(load|loads)|cPickle|_pickle|marshal\.(load|loads)
+    type: regex
+    scope: source
+    purpose: Python deserialization functions
+  - pattern: unserialize\(|php://input.*unserialize
+    type: regex
+    scope: source
+    purpose: PHP deserialization
+  - pattern: Marshal\.load|YAML\.load(?!_safe)|unsafe_load
+    type: regex
+    scope: source
+    purpose: Ruby deserialization
+  - pattern: BinaryFormatter|SoapFormatter|ObjectStateFormatter
+    type: regex
+    scope: source
+    purpose: .NET dangerous deserializers
+  - pattern: eval\(|new Function\(|vm\.runIn
+    type: regex
+    scope: source
+    purpose: JavaScript code execution (pseudo-deserialization)
+  file_patterns:
+  - glob: '**/*.java'
+    purpose: Java files with potential ObjectInputStream usage
+  - glob: '**/*.py'
+    purpose: Python files with pickle usage
+  - glob: '**/*.php'
+    purpose: PHP files with unserialize
+  - glob: '**/*.rb'
+    purpose: Ruby files with Marshal.load
+  - glob: '**/*.cs'
+    purpose: C# files with BinaryFormatter
+knowledge_sources:
+  specifications:
+  - id: owasp-deserialization-cheatsheet
+    name: OWASP Deserialization Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Deserialization_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  - id: cwe-502
+    name: 'CWE-502: Deserialization of Untrusted Data'
+    url: https://cwe.mitre.org/data/definitions/502.html
+    offline_cache: true
+    priority: required
+  - id: owasp-insecure-deserialization
+    name: OWASP Insecure Deserialization
+    url: https://owasp.org/www-community/vulnerabilities/Insecure_Deserialization
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-top10-2017-a8
+    name: OWASP Top Ten 2017 A8 Insecure Deserialization
+    url: https://owasp.org/www-project-top-ten/2017/A8_2017-Insecure_Deserialization
+    offline_cache: true
+  - id: cert-ser-rules
+    name: CERT Java Secure Coding - Serialization
+    url: https://wiki.sei.cmu.edu/confluence/display/java/SER00-J.+Enable+serialization+compatibility
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect insecure deserialization patterns
+    offline_capable: true
+  - tool: spotbugs
+    purpose: Java security analysis including serialization issues
+    offline_capable: true
+  - tool: bandit
+    purpose: Python security linting with pickle detection
+    offline_capable: true
+  - tool: ysoserial
+    purpose: Java deserialization payload generation for testing
+    offline_capable: true
+  scripts:
+  - id: deserialization-scan
+    language: bash
+    purpose: Scan for insecure deserialization patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Scanning for Insecure Deserialization ==="
+
+      # Java
+      grep -rn --include="*.java" 'ObjectInputStream\|readObject' . 2>/dev/null
+
+      # Python
+      grep -rn --include="*.py" 'pickle\.load\|pickle\.loads\|marshal\.load' . 2>/dev/null
+
+      # PHP
+      grep -rn --include="*.php" 'unserialize(' . 2>/dev/null
+
+      # Ruby
+      grep -rn --include="*.rb" 'Marshal\.load\|YAML\.load[^_]' . 2>/dev/null
+
+      # .NET
+      grep -rn --include="*.cs" 'BinaryFormatter\|SoapFormatter' . 2>/dev/null
+signals:
+  critical:
+  - id: DESER-CRIT-001
+    signal: Java ObjectInputStream from untrusted source
+    evidence_pattern: ObjectInputStream.*socket|ObjectInputStream.*request|readObject\(\)
+    explanation: |
+      Java native deserialization (ObjectInputStream) of untrusted data enables
+      gadget chain attacks leading to remote code execution. Attackers craft
+      serialized objects that execute arbitrary code when deserialized. CWE-502.
+    remediation: Use allowlist-based filtering (SerialKiller, NotSoSerial) or avoid native serialization
+    cwe: CWE-502
+  - id: DESER-CRIT-002
+    signal: Python pickle with untrusted input
+    evidence_pattern: pickle\.(load|loads)\(.*request|pickle\.(load|loads)\(.*input
+    explanation: |
+      Python's pickle module can execute arbitrary Python code during
+      deserialization through the __reduce__ method. No conditions are
+      required for successful RCE - simply deserializing malicious pickle
+      data is sufficient. CWE-502.
+    remediation: Never use pickle with untrusted data; use JSON or secure alternatives
+    cwe: CWE-502
+  - id: DESER-CRIT-003
+    signal: PHP unserialize with user input
+    evidence_pattern: unserialize\(\$_(GET|POST|REQUEST|COOKIE)
+    explanation: |
+      PHP unserialize() of user input can trigger magic methods (__wakeup,
+      __destruct) leading to object injection attacks. Combined with suitable
+      gadget classes, this enables RCE. CWE-502.
+    remediation: Use JSON or implement allowed_classes whitelist in unserialize options
+    cwe: CWE-502
+  - id: DESER-CRIT-004
+    signal: .NET BinaryFormatter deserialization
+    evidence_pattern: BinaryFormatter.*Deserialize|new BinaryFormatter\(\)
+    explanation: |
+      .NET BinaryFormatter is inherently insecure and Microsoft recommends
+      against its use. It can execute arbitrary code through type confusion
+      attacks even with careful input validation. CWE-502.
+    remediation: Use JSON.NET, DataContractSerializer, or System.Text.Json
+    cwe: CWE-502
+  high:
+  - id: DESER-HIGH-001
+    signal: Ruby Marshal.load with external data
+    evidence_pattern: Marshal\.load\(.*params|Marshal\.load\(.*request
+    explanation: |
+      Ruby's Marshal.load can instantiate arbitrary objects and execute
+      code through ERB templates or other gadgets. Similar risks to
+      pickle and Java serialization. CWE-502.
+    remediation: Use JSON.parse or YAML.safe_load instead
+    cwe: CWE-502
+  - id: DESER-HIGH-002
+    signal: YAML.load without safe mode
+    evidence_pattern: YAML\.load\((?!.*safe)|yaml\.load\((?!.*Loader=.*SafeLoader)
+    explanation: |
+      YAML.load (Ruby) and yaml.load (Python) can instantiate arbitrary
+      objects. Ruby's Psych library and Python's PyYAML both support
+      object instantiation through YAML tags. CWE-502.
+    remediation: Use YAML.safe_load (Ruby) or yaml.safe_load (Python)
+    cwe: CWE-502
+  - id: DESER-HIGH-003
+    signal: XML External Entity in deserialization
+    evidence_pattern: XMLDecoder|XStream\.fromXML|Unmarshaller
+    explanation: |
+      Java XML deserialization (XMLDecoder, XStream) can be exploited
+      for RCE through specially crafted XML. XStream has had multiple
+      CVEs for deserialization attacks. CWE-502, CWE-611.
+    remediation: Use XStream security framework with allowlist, disable external entities
+    cwe: CWE-502
+  - id: DESER-HIGH-004
+    signal: JavaScript eval for data parsing
+    evidence_pattern: eval\(.*JSON|eval\(.*data|eval\(.*response
+    explanation: |
+      Using eval() to parse JSON or other data formats enables code
+      injection. While not traditional deserialization, it has the
+      same effect of executing untrusted code. CWE-94.
+    remediation: Use JSON.parse() which only parses data, never executes code
+    cwe: CWE-94
+  medium:
+  - id: DESER-MED-001
+    signal: Transient fields not used for sensitive data
+    evidence_pattern: private(?!.*transient).*password|private(?!.*transient).*key
+    explanation: |
+      Sensitive fields in serializable Java classes should be marked
+      transient to prevent them from being serialized and potentially
+      exposed. CWE-499.
+    remediation: Mark sensitive fields as transient in Serializable classes
+    cwe: CWE-499
+  - id: DESER-MED-002
+    signal: Missing input integrity verification
+    explanation: |
+      Serialized data should be signed or encrypted to detect tampering
+      before deserialization. Without integrity checks, attackers can
+      modify serialized payloads. CWE-345.
+    remediation: Implement HMAC or digital signatures on serialized data
+    cwe: CWE-345
+  - id: DESER-MED-003
+    signal: Deserialization in privileged context
+    evidence_pattern: doPrivileged.*deserialize|setAccessible.*readObject
+    explanation: |
+      Deserializing in a privileged security context expands the attack
+      surface for gadget chains. Attackers gain elevated permissions
+      through deserialization exploits. CWE-502.
+    remediation: Minimize privileges during deserialization, use security manager
+    cwe: CWE-502
+  positive:
+  - id: DESER-POS-001
+    signal: Using JSON for data interchange
+  - id: DESER-POS-002
+    signal: ObjectInputFilter implemented (Java 9+)
+  - id: DESER-POS-003
+    signal: Allowlist-based type filtering
+  - id: DESER-POS-004
+    signal: YAML.safe_load used consistently
+  - id: DESER-POS-005
+    signal: Signed/encrypted serialized data
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify serialization usage
+    description: |
+      Locate all instances of native serialization mechanisms across
+      different programming languages in the codebase.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find Java serialization
+      command: grep -rn --include='*.java' 'ObjectInputStream\|ObjectOutputStream\|Serializable\|readObject\|writeObject'
+        . 2>/dev/null | head -30
+    - purpose: Find Python pickle usage
+      command: grep -rn --include='*.py' 'pickle\|cPickle\|marshal\|shelve' . 2>/dev/null | head -20
+    - purpose: Find PHP unserialize
+      command: grep -rn --include='*.php' 'unserialize\|serialize' . 2>/dev/null | head -20
+    expected_findings:
+    - Serialization library usage
+    - Serializable class implementations
+  - id: '2'
+    name: Analyze data sources
+    description: |
+      Determine the source of data being deserialized to identify
+      if untrusted input is involved.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find network-sourced deserialization (Java)
+      command: grep -rn --include='*.java' -B5 'readObject()' . 2>/dev/null | grep -E 'socket|request|input'
+        | head -20
+    - purpose: Find request-sourced deserialization (Python)
+      command: grep -rn --include='*.py' 'pickle.load.*request\|loads.*request' . 2>/dev/null | head -20
+    - purpose: Find user input in deserialization (PHP)
+      command: grep -rn --include='*.php' 'unserialize.*\$_' . 2>/dev/null | head -20
+    expected_findings:
+    - Untrusted data sources for deserialization
+    - Network and user input flowing to deserializers
+  - id: '3'
+    name: Check for protection mechanisms
+    description: |
+      Verify presence of deserialization filters, type allowlists,
+      or alternative safe serialization formats.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Check for Java ObjectInputFilter
+      command: grep -rn --include='*.java' 'ObjectInputFilter\|setObjectInputFilter' . 2>/dev/null
+    - purpose: Check for type whitelisting
+      command: grep -rn --include='*.java' 'SerialKiller\|NotSoSerial\|allowed\s*class' . 2>/dev/null
+    - purpose: Check for safe YAML usage
+      command: grep -rn --include='*.py' --include='*.rb' 'safe_load\|SafeLoader' . 2>/dev/null
+    expected_findings:
+    - Deserialization filters in use
+    - Safe alternatives implementation
+  - id: '4'
+    name: Review Serializable classes
+    description: |
+      Examine custom Serializable class implementations for
+      sensitive data exposure and custom readObject methods.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find Serializable implementations
+      command: grep -rn --include='*.java' 'implements.*Serializable' . 2>/dev/null | head -20
+    - purpose: Check for custom readObject methods
+      command: grep -rn --include='*.java' 'private void readObject' . 2>/dev/null
+    - purpose: Check for transient sensitive fields
+      command: grep -rn --include='*.java' 'transient.*password\|transient.*secret\|transient.*key' .
+        2>/dev/null
+    expected_findings:
+    - Custom deserialization logic
+    - Sensitive field handling
+  - id: '5'
+    name: Run security scanners
+    description: |
+      Execute static analysis tools to detect insecure
+      deserialization patterns.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Run Bandit for Python
+      command: bandit -r . -f json 2>/dev/null | grep -i pickle || echo 'Bandit not available'
+    - purpose: Run Semgrep rules
+      command: semgrep --config=p/insecure-deserialization . 2>/dev/null || echo 'Semgrep not configured'
+    - purpose: Check for known vulnerable libraries
+      command: grep -rn 'commons-collections.*3\.[012]\|xstream.*1\.[0-3]' pom.xml build.gradle 2>/dev/null
+        || echo 'No vulnerable versions found'
+    expected_findings:
+    - Automated detection results
+    - Vulnerable library versions
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Critical Deserialization Vulnerabilities
+    - Language-Specific Findings
+    - Remediation Priority
+  confidence_guidance:
+    high: Direct evidence of untrusted data deserialization without filtering
+    medium: Deserialization present but source of data unclear
+    low: Serialization usage that requires data flow analysis
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-deserialization-cheatsheet
+      priority: required
+    - source_id: cwe-502
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough multi-language analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: deserialization-001
+  item: No unfiltered Java ObjectInputStream usage
+  level: CRITICAL
+  verification: grep -rn --include='*.java' 'new ObjectInputStream' . 2>/dev/null | grep -v 'ObjectInputFilter'
+    | wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: deserialization-002
+  item: No pickle.load with user input
+  level: CRITICAL
+  verification: grep -rn --include='*.py' 'pickle\.load.*request\|pickle\.loads.*request' . 2>/dev/null
+    | wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: deserialization-003
+  item: No PHP unserialize with $_GET/$_POST
+  level: CRITICAL
+  verification: grep -rn --include='*.php' 'unserialize.*\$_(GET|POST|REQUEST|COOKIE)' . 2>/dev/null |
+    wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: deserialization-004
+  item: YAML.safe_load used instead of YAML.load
+  level: BLOCKING
+  verification: grep -rn --include='*.py' --include='*.rb' 'yaml\.load[^_]\|YAML\.load[^_]' . 2>/dev/null
+    | wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: deserialization-005
+  item: JSON used for untrusted data interchange
+  level: WARNING
+  verification: grep -rn 'JSON\.parse\|json\.loads\|JSON\.parse' . 2>/dev/null | head -1 | grep -q . &&
+    echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - api-service
+    - microservice
+    - distributed-system
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A08:2017-Insecure Deserialization
+  - framework: CWE
+    controls:
+    - CWE-502
+    - CWE-94
+    - CWE-611
+  - framework: OWASP ASVS
+    controls:
+    - V5.5.1
+    - V5.5.2
+    - V5.5.3
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.injection
+  - security-trust.cryptography.data-integrity
+  - security-trust.application-security.dependency-vulnerabilities

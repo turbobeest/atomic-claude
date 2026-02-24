@@ -1,0 +1,369 @@
+audit:
+  id: infrastructure-as-code.provider-version.provider-authentication
+  name: Provider Authentication
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: provider-version
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: security
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines how Terraform authenticates with cloud providers,
+    evaluating:
+
+    - Authentication method (static keys, IAM roles, OIDC, workload identity)
+    - Credential storage and rotation
+    - Least privilege principle adherence
+    - Cross-account/project access patterns
+    - Credential scoping (per-environment, per-workspace)
+    - Dynamic credentials with Terraform Cloud
+
+    The focus is on minimizing credential exposure while maintaining
+    operational capability.
+  why_it_matters: |
+    Terraform requires privileged access to cloud providers. Poor
+    authentication practices lead to:
+
+    - Credential exposure in logs, repos, or CI artifacts
+    - Overly privileged service accounts
+    - Shared credentials across environments
+    - No credential rotation or expiration
+    - Inability to audit who made changes
+
+    Proper authentication enables security, auditability, and
+    least-privilege access for infrastructure operations.
+  when_to_run:
+  - During security assessment
+  - When setting up new IaC pipelines
+  - After credential exposure incidents
+  - During compliance audits
+prerequisites:
+  required_artifacts:
+  - type: cicd_configuration
+    description: CI/CD pipeline configurations
+  - type: terraform_configuration
+    description: Provider configurations
+  access_requirements:
+  - Access to CI/CD secret management
+  - Access to cloud IAM configurations
+  - Access to provider configuration files
+discovery:
+  code_patterns:
+  - pattern: AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY
+    type: keyword
+    scope: config
+    purpose: Find AWS static credentials
+  - pattern: GOOGLE_CREDENTIALS|GOOGLE_APPLICATION_CREDENTIALS
+    type: keyword
+    scope: config
+    purpose: Find GCP credentials
+  - pattern: ARM_CLIENT_ID|ARM_CLIENT_SECRET
+    type: keyword
+    scope: config
+    purpose: Find Azure credentials
+  - pattern: role-to-assume|id-token
+    type: regex
+    scope: config
+    purpose: Find OIDC configuration
+  - pattern: assume_role|assume_role_with_web_identity
+    type: keyword
+    scope: source
+    purpose: Find IAM role assumption
+  file_patterns:
+  - glob: '**/.github/workflows/*.yml'
+    purpose: GitHub Actions with auth configuration
+  - glob: '**/provider*.tf'
+    purpose: Provider authentication configuration
+  - glob: '**/*.tf'
+    purpose: Provider blocks with auth settings
+knowledge_sources:
+  specifications:
+  - id: terraform-cloud-dynamic-creds
+    name: Terraform Cloud Dynamic Credentials
+    url: https://developer.hashicorp.com/terraform/cloud-docs/workspaces/dynamic-provider-credentials
+    offline_cache: true
+    priority: required
+  guides:
+  - id: github-aws-oidc
+    name: GitHub Actions AWS OIDC
+    url: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
+    offline_cache: true
+  - id: aws-assume-role
+    name: AWS IAM Role Assumption
+    url: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-cli.html
+    offline_cache: true
+  - id: gcp-workload-identity
+    name: GCP Workload Identity Federation
+    url: https://cloud.google.com/iam/docs/workload-identity-federation
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: aws-actions/configure-aws-credentials
+    purpose: AWS OIDC authentication in GitHub Actions
+    command: 'uses: aws-actions/configure-aws-credentials@v4'
+  - tool: google-github-actions/auth
+    purpose: GCP authentication in GitHub Actions
+    command: 'uses: google-github-actions/auth@v2'
+  scripts:
+  - id: auth-audit
+    language: bash
+    purpose: Audit authentication configuration
+    source: inline
+    code: |
+      #!/bin/bash
+      # Audit Terraform authentication
+
+      echo "=== Static Credentials Check ==="
+      grep -r 'access_key\|secret_key' --include='*.tf' . 2>/dev/null && echo "WARNING: Static credentials in .tf files"
+
+      echo ""
+      echo "=== OIDC Configuration ==="
+      grep -r 'id-token\|role-to-assume\|workload_identity' .github/ --include='*.yml' 2>/dev/null | head -10
+
+      echo ""
+      echo "=== Environment Variables ==="
+      grep -r 'AWS_\|GOOGLE_\|ARM_' .github/ --include='*.yml' 2>/dev/null | head -20
+signals:
+  critical:
+  - id: IAC-AUTH-CRIT-001
+    signal: Static credentials hardcoded in Terraform files
+    evidence_pattern: access_key = "AKIA" or similar in .tf files
+    explanation: |
+      Hardcoded credentials in Terraform files are exposed to anyone
+      with repository access, stored in git history forever, and
+      cannot be rotated without code changes.
+    remediation: |
+      Remove hardcoded credentials immediately:
+      1. Revoke and rotate exposed credentials
+      2. Use environment variables or IAM roles
+      3. Audit git history for credential exposure
+      4. Consider git-filter-repo to remove from history
+  - id: IAC-AUTH-CRIT-002
+    signal: Long-lived static credentials in CI secrets
+    evidence_pattern: AWS_ACCESS_KEY_ID in secrets without OIDC
+    explanation: |
+      Static credentials don't expire, can't be automatically rotated,
+      and provide persistent access if leaked. OIDC provides
+      short-lived, automatically rotated credentials.
+    remediation: |
+      Migrate to OIDC authentication:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789:role/github-actions
+          aws-region: us-east-1
+          # No static credentials needed
+  high:
+  - id: IAC-AUTH-HIGH-001
+    signal: Overly permissive IAM role/service account
+    evidence_pattern: AdministratorAccess or Owner role
+    explanation: |
+      Terraform only needs permissions for the resources it manages.
+      Administrator access allows any action if credentials are
+      compromised.
+    remediation: |
+      Apply least privilege:
+      1. Audit actual permissions needed
+      2. Create custom policy with minimal permissions
+      3. Use separate roles per environment/workspace
+      4. Implement permission boundaries
+  - id: IAC-AUTH-HIGH-002
+    signal: Same credentials used across all environments
+    evidence_pattern: Single AWS_ACCESS_KEY for dev, staging, prod
+    explanation: |
+      Shared credentials across environments mean a compromise in
+      development can affect production. Environment isolation
+      requires separate credentials.
+    remediation: |
+      Use environment-specific credentials:
+      - Separate IAM roles per environment
+      - Different service accounts per environment
+      - Use assume_role for cross-account access
+  medium:
+  - id: IAC-AUTH-MED-001
+    signal: No credential rotation policy
+    remediation: |
+      Implement credential rotation:
+      - Use OIDC for automatic short-lived credentials
+      - Rotate static keys every 90 days
+      - Automate rotation with AWS Secrets Manager
+  - id: IAC-AUTH-MED-002
+    signal: Provider credentials logged in CI output
+    remediation: |
+      Mask credentials in CI:
+      - Use secret masking features
+      - Set TF_LOG with caution
+      - Review CI output for credential leaks
+  low:
+  - id: IAC-AUTH-LOW-001
+    signal: Authentication method not documented
+    remediation: Document authentication requirements in README
+  positive:
+  - id: IAC-AUTH-POS-001
+    signal: OIDC/workload identity used for CI authentication
+  - id: IAC-AUTH-POS-002
+    signal: Least-privilege IAM policies per workspace
+  - id: IAC-AUTH-POS-003
+    signal: Environment-specific credentials with assume_role
+  - id: IAC-AUTH-POS-004
+    signal: Dynamic credentials with Terraform Cloud
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Check for hardcoded credentials
+    description: |
+      Scan for static credentials in Terraform files.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find AWS credentials in .tf files
+      command: grep -r 'access_key\|secret_key' --include='*.tf' . 2>/dev/null | head -10
+    - purpose: Find GCP credentials in .tf files
+      command: grep -r 'credentials\s*=' --include='*.tf' . 2>/dev/null | head -10
+    - purpose: Scan for credential patterns
+      command: grep -r 'AKIA[A-Z0-9]\{16\}' . 2>/dev/null | head -5
+    expected_findings:
+    - Any hardcoded credentials
+    - Credential exposure
+  - id: '2'
+    name: Analyze CI/CD authentication
+    description: |
+      Review how CI pipelines authenticate with cloud providers.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Check for OIDC in GitHub Actions
+      command: grep -r -A10 'configure-aws-credentials\|google-github-actions/auth' .github/ --include='*.yml'
+        | head -30
+    - purpose: Check for static credentials in CI
+      command: grep -r 'AWS_ACCESS_KEY\|AWS_SECRET\|GOOGLE_CREDENTIALS' .github/ --include='*.yml' | head
+        -20
+    - purpose: Check for id-token permission
+      command: grep -r 'id-token' .github/ --include='*.yml' | head -10
+    expected_findings:
+    - Authentication method used
+    - OIDC vs static credentials
+  - id: '3'
+    name: Review provider assume_role configuration
+    description: |
+      Check if cross-account access uses proper role assumption.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find assume_role configuration
+      command: grep -r -A5 'assume_role' --include='*.tf' . | head -30
+    - purpose: Check for external_id usage
+      command: grep -r 'external_id' --include='*.tf' . | head -10
+    expected_findings:
+    - Role assumption patterns
+    - Cross-account access configuration
+  - id: '4'
+    name: Assess IAM permissions
+    description: |
+      Review the permissions granted to Terraform execution roles.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find IAM policy attachments in Terraform
+      command: grep -r 'aws_iam_role_policy_attachment\|policy_arn' --include='*.tf' . | head -20
+    - purpose: Check for admin policies
+      command: grep -r 'AdministratorAccess\|PowerUser' --include='*.tf' . | head -10
+    expected_findings:
+    - Permission scope
+    - Overly permissive policies
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Credential Security Assessment
+    - Authentication Method Review
+    - Permission Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Full review of auth config and IAM policies
+    medium: Configuration reviewed but IAM not audited
+    low: Only file presence confirmed
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-cloud-dynamic-creds
+      priority: required
+    - source_id: github-aws-oidc
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Security requires thorough review
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      reason: Core security audit
+    production:
+      included: true
+      reason: Critical for production security
+closeout_checklist:
+- id: auth-001
+  item: No hardcoded credentials in Terraform files
+  level: CRITICAL
+  verification: grep -r 'access_key\|secret_key\|AKIA' --include='*.tf' . | wc -l
+  expected: '0'
+- id: auth-002
+  item: CI uses OIDC or IAM roles (not static credentials)
+  level: CRITICAL
+  verification: grep -r 'id-token\|role-to-assume\|workload_identity' .github/ | wc -l
+  expected: '>0'
+- id: auth-003
+  item: IAM policies follow least privilege
+  level: BLOCKING
+  verification: grep -r 'AdministratorAccess\|\*:\*' --include='*.tf' . | wc -l
+  expected: '0'
+- id: auth-004
+  item: Separate credentials per environment
+  level: WARNING
+  verification: manual
+  verification_notes: Verify different roles/accounts per environment
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.2
+    - CC6.3
+  - framework: ISO 27001
+    controls:
+    - A.9.2.3
+    - A.9.4.2
+  - framework: CIS Controls
+    controls:
+    - '5.2'
+    - '5.4'
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.cicd-integration.iac-pipeline
+  - infrastructure-as-code.provider-version.provider-version-pinning

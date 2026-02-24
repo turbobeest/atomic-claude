@@ -1,0 +1,289 @@
+# ============================================================
+# AUDIT: Session Handling During Failover Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.high-availability.session-handling-during-failover"
+  name: "Session Handling During Failover Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "high-availability"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates how user sessions and in-flight requests are handled
+    during failover events. Examines session storage architecture,
+    session replication or persistence, reconnection logic, and the
+    user experience during instance or regional failures.
+
+  why_it_matters: |
+    Poor session handling during failover causes users to lose their
+    work, be forcibly logged out, or experience errors. This undermines
+    the benefit of high availability infrastructure. True HA requires
+    that sessions survive instance failures transparently, maintaining
+    user context and avoiding data loss.
+
+  when_to_run:
+    - "During architecture review for stateful applications"
+    - "After user complaints about session loss"
+    - "Before implementing HA patterns"
+    - "When changing session storage mechanism"
+
+prerequisites:
+  required_artifacts:
+    - type: "codebase"
+      description: "Session management implementation"
+    - type: "config"
+      description: "Session store configuration"
+
+  access_requirements:
+    - "Source code access"
+    - "Session store access (Redis, database, etc.)"
+    - "Test environment for failover simulation"
+
+discovery:
+  code_patterns:
+    - pattern: "session|Session|req\\.session|HttpSession"
+      type: "regex"
+      scope: "source"
+      purpose: "Find session management code"
+    - pattern: "redis|memcache|SESSION_ENGINE|session\\.store"
+      type: "regex"
+      scope: "config"
+      purpose: "Find session store configuration"
+
+  file_patterns:
+    - glob: "**/session*.{py,js,java,go}"
+      purpose: "Session management modules"
+    - glob: "**/config/**/*.{yaml,json,env}"
+      purpose: "Configuration files"
+
+knowledge_sources:
+  guides:
+    - id: "session-management"
+      name: "Session Management Best Practices"
+      url: "https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html"
+      offline_cache: true
+    - id: "release-it"
+      name: "Michael Nygard - Release It!"
+      url: "https://pragprog.com/titles/mnee2/release-it-second-edition/"
+      offline_cache: true
+    - id: "sre-book"
+      name: "Site Reliability Engineering"
+      url: "https://sre.google/sre-book/table-of-contents/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "distributed-systems"
+      title: "Distributed Systems Session Management"
+      type: "article"
+      reference: "Various architecture blogs"
+
+tooling:
+  infrastructure_tools:
+    - tool: "redis-cli"
+      purpose: "Inspect session data in Redis"
+      command: "redis-cli keys 'session:*' | head -10"
+
+  scripts:
+    - id: "session-failover-test"
+      language: "bash"
+      purpose: "Test session persistence during failover"
+      source: "inline"
+      code: |
+        # Create session, kill instance, verify session persists
+        SESSION_ID=$(curl -c - http://app/login | grep session)
+        # Kill backend instance
+        # Retry request with same session
+        curl -b "session=$SESSION_ID" http://app/profile
+
+signals:
+  critical:
+    - id: "HA-SF-CRIT-001"
+      signal: "Sessions stored only in application memory"
+      evidence_pattern: "In-memory session store without external persistence"
+      explanation: |
+        Memory-only sessions are lost when instances restart, forcing
+        users to re-authenticate and lose their work context.
+      remediation: "Use distributed session store (Redis, database) with replication"
+
+    - id: "HA-SF-CRIT-002"
+      signal: "Session store has no redundancy"
+      evidence_pattern: "Single Redis instance or non-replicated database for sessions"
+      explanation: |
+        If the session store fails, all users lose sessions simultaneously.
+      remediation: "Deploy session store with multi-AZ replication"
+
+  high:
+    - id: "HA-SF-HIGH-001"
+      signal: "No session replication across regions"
+      explanation: "Regional failover forces all users to re-authenticate"
+      remediation: "Implement cross-region session replication or stateless JWT tokens"
+
+    - id: "HA-SF-HIGH-002"
+      signal: "Long-running requests not handled during failover"
+      explanation: "In-flight requests are lost when instances fail"
+      remediation: "Implement request retry logic or idempotent operations"
+
+  medium:
+    - id: "HA-SF-MED-001"
+      signal: "Session expiration not aligned with failover expectations"
+      remediation: "Configure session TTL to survive expected failover duration"
+
+    - id: "HA-SF-MED-002"
+      signal: "No graceful session migration during planned failover"
+      remediation: "Implement connection draining for planned maintenance"
+
+  low:
+    - id: "HA-SF-LOW-001"
+      signal: "Session failover not tested regularly"
+
+  positive:
+    - id: "HA-SF-POS-001"
+      signal: "Stateless authentication with JWT tokens"
+    - id: "HA-SF-POS-002"
+      signal: "Session store replicated across availability zones"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Session Architecture"
+      description: |
+        Document how sessions are created, stored, and retrieved.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find session configuration"
+          command: "grep -rn 'session' config/ --include='*.yaml' --include='*.json'"
+      expected_findings:
+        - "Session storage mechanism"
+        - "Session serialization format"
+
+    - id: "2"
+      name: "Evaluate Session Store Redundancy"
+      description: |
+        Review the high availability of the session storage system.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check Redis cluster configuration"
+          command: "redis-cli cluster info"
+      expected_findings:
+        - "Replication configuration"
+        - "Multi-AZ deployment status"
+
+    - id: "3"
+      name: "Test Session Persistence"
+      description: |
+        Simulate failover and verify sessions survive.
+      duration_estimate: "45 min"
+      questions:
+        - "Do sessions persist when application instances restart?"
+        - "Do sessions survive session store failover?"
+        - "What is the user experience during failover?"
+      expected_findings:
+        - "Session survival rate during failover"
+        - "User experience documentation"
+
+    - id: "4"
+      name: "Review Reconnection Logic"
+      description: |
+        Examine client-side handling of connection failures.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find retry logic in client code"
+          command: "grep -rn 'retry\\|reconnect' --include='*.js' ."
+      expected_findings:
+        - "Client retry behavior"
+        - "Session recovery mechanisms"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Session Architecture Analysis"
+        - "Failover Impact Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full code review with failover testing"
+    medium: "Configuration review with limited testing"
+    low: "Documentation review only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "session-management"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires failover testing"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "session-failover-001"
+    item: "Sessions stored in distributed, redundant store"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify session store configuration and replication"
+    expected: "Confirmed by reviewer"
+
+  - id: "session-failover-002"
+    item: "Sessions survive application instance restart"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Test session persistence during instance failover"
+    expected: "Confirmed by reviewer"
+
+  - id: "session-failover-003"
+    item: "Client implements appropriate retry logic"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review client-side connection handling"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.high-availability.stateless-design"
+    - "reliability-resilience.high-availability.active-active-vs-active-passive"

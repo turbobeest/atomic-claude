@@ -1,0 +1,398 @@
+# ============================================================
+# AUDIT: Consumer Scaling Audit
+# ============================================================
+# Category 4: Scalability & Capacity
+# Subcategory 4.6: Async & Queue Scalability
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "scalability-capacity.async-queue-scalability.consumer-scaling"
+
+  name: "Consumer Scaling Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "async-queue-scalability"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "high"
+
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates message consumer scaling capabilities including horizontal
+    scaling mechanisms, consumer group configurations, prefetch settings,
+    and the ability to dynamically adjust consumer counts based on queue
+    depth and processing latency. Analyzes consumer throughput limits,
+    rebalancing behavior, and scaling response times.
+
+  why_it_matters: |
+    Consumer scaling directly determines message processing throughput and
+    latency. Insufficient consumer scaling leads to queue backlogs, stale
+    data, and SLA violations. Over-provisioned consumers waste resources
+    and may cause unnecessary rebalancing churn. Proper consumer scaling
+    ensures timely message processing while optimizing resource utilization.
+
+  when_to_run:
+    - "Before production deployment of message-driven services"
+    - "When experiencing processing backlogs"
+    - "During cost optimization initiatives"
+    - "After changes to message volume or processing complexity"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "consumer_configuration"
+      description: "Consumer service configurations and scaling policies"
+    - type: "metrics_system"
+      description: "Consumer throughput and latency metrics"
+    - type: "infrastructure_config"
+      description: "Auto-scaling configurations for consumer services"
+
+  access_requirements:
+    - "Access to consumer service configurations"
+    - "Access to container orchestration platform (K8s, ECS)"
+    - "Access to monitoring systems with consumer metrics"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "prefetch|concurrency|maxConcurrentConsumers"
+      type: "regex"
+      scope: "config"
+      purpose: "Find consumer concurrency settings"
+    - pattern: "consumer.*group|group\\.id"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify consumer group configurations"
+    - pattern: "HorizontalPodAutoscaler|targetCPUUtilization"
+      type: "regex"
+      scope: "config"
+      purpose: "Find auto-scaling configurations"
+
+  file_patterns:
+    - glob: "**/hpa*.yaml"
+      purpose: "Kubernetes HPA configurations"
+    - glob: "**/scaling*.json"
+      purpose: "AWS auto-scaling policies"
+    - glob: "**/*consumer*.yaml"
+      purpose: "Consumer service configurations"
+
+  metrics_queries:
+    - system: "Prometheus"
+      query: "sum(rate(messages_processed_total[5m])) by (consumer_group)"
+      purpose: "Consumer throughput by group"
+      threshold: "Should match or exceed producer rate"
+    - system: "Prometheus"
+      query: "kafka_consumer_lag_sum"
+      purpose: "Consumer lag indicating scaling needs"
+      threshold: "Should trend toward zero"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "kafka-consumer-config"
+      name: "Kafka Consumer Configuration"
+      url: "https://kafka.apache.org/documentation/#consumerconfigs"
+      offline_cache: true
+    - id: "k8s-hpa"
+      name: "Kubernetes Horizontal Pod Autoscaling"
+      url: "https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/"
+      offline_cache: true
+
+  papers:
+    - id: "consumer-scaling-patterns"
+      title: "Scaling Message Consumers: Patterns and Anti-patterns"
+      url: "https://www.confluent.io/blog/how-to-choose-number-of-kafka-partitions/"
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Check HPA status and scaling events"
+      command: "kubectl get hpa -A && kubectl describe hpa"
+    - tool: "kafka-consumer-groups"
+      purpose: "Analyze consumer group membership and lag"
+      command: "kafka-consumer-groups.sh --describe --group <group-name>"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "kube_hpa_status_current_replicas"
+      purpose: "Current consumer replica counts"
+    - system: "Prometheus"
+      query: "rate(kafka_consumer_records_consumed_total[5m])"
+      purpose: "Per-consumer throughput for capacity planning"
+
+  scripts:
+    - id: "consumer-lag-checker"
+      language: "bash"
+      purpose: "Check consumer lag across all groups"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check for consumer scaling configurations
+        echo "Checking consumer scaling configurations..."
+        grep -r "prefetch\|concurrency\|maxConsumers" . 2>/dev/null
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "CONSUMER-CRIT-001"
+      signal: "Consumer count limited below partition count"
+      evidence_pattern: "max_replicas < partition_count in scaling config"
+      explanation: |
+        When consumer replicas are limited below partition count, the
+        system cannot achieve maximum parallelism. During high load,
+        this becomes a hard ceiling on throughput.
+      remediation: "Set max replicas >= partition count for full parallelism"
+    - id: "CONSUMER-CRIT-002"
+      signal: "No auto-scaling configured for consumers"
+      evidence_pattern: "Absence of HPA or auto-scaling policy"
+      explanation: |
+        Without auto-scaling, consumer capacity is fixed regardless of
+        load, leading to either resource waste or processing backlogs.
+      remediation: "Implement HPA based on queue depth or processing latency"
+
+  high:
+    - id: "CONSUMER-HIGH-001"
+      signal: "Scaling metrics not aligned with business needs"
+      explanation: "CPU-based scaling may not reflect message processing needs"
+      remediation: "Use custom metrics like queue depth or consumer lag for scaling"
+    - id: "CONSUMER-HIGH-002"
+      signal: "Consumer rebalancing causes processing gaps"
+      explanation: "Frequent or slow rebalancing leads to message delays"
+      remediation: "Configure cooperative rebalancing and optimize group settings"
+
+  medium:
+    - id: "CONSUMER-MED-001"
+      signal: "Prefetch settings not optimized for message size"
+      remediation: "Tune prefetch based on message size and processing time"
+    - id: "CONSUMER-MED-002"
+      signal: "Scale-up response time exceeds SLA requirements"
+      remediation: "Reduce cooldown periods or pre-warm consumers"
+
+  low:
+    - id: "CONSUMER-LOW-001"
+      signal: "Consumer throughput metrics not granular by partition"
+
+  positive:
+    - id: "CONSUMER-POS-001"
+      signal: "Consumer scaling responds to queue depth within 60 seconds"
+    - id: "CONSUMER-POS-002"
+      signal: "Consumer count dynamically matches partition count under load"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Consumer Architecture"
+      description: |
+        Identify all consumer services, their queue subscriptions,
+        consumer groups, and current scaling configurations.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List consumer deployments and HPA"
+          command: "kubectl get deployments,hpa -A | grep consumer"
+      expected_findings:
+        - "Complete consumer service inventory"
+        - "Current and maximum replica counts"
+
+    - id: "2"
+      name: "Analyze Scaling Configurations"
+      description: |
+        Review auto-scaling policies, metrics used for scaling decisions,
+        and configured thresholds.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Get HPA details"
+          command: "kubectl describe hpa -A"
+      expected_findings:
+        - "Scaling metrics and thresholds"
+        - "Min/max replica limits"
+
+    - id: "3"
+      name: "Evaluate Consumer Group Settings"
+      description: |
+        Review consumer group configurations including session timeouts,
+        heartbeat intervals, and rebalancing strategies.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Rebalancing configuration"
+        - "Session timeout settings"
+
+    - id: "4"
+      name: "Throughput Capacity Analysis"
+      description: |
+        Calculate theoretical maximum throughput based on consumer count
+        and partition assignments.
+      duration_estimate: "30 min"
+      questions:
+        - "Can consumer count reach partition count?"
+        - "What is per-consumer throughput capacity?"
+        - "Is there headroom for traffic spikes?"
+      expected_findings:
+        - "Maximum achievable throughput"
+        - "Scaling bottlenecks"
+
+    - id: "5"
+      name: "Review Historical Scaling Events"
+      description: |
+        Analyze past scaling events to verify response times and
+        effectiveness during load changes.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Scale-up response times"
+        - "Rebalancing impact on processing"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Consumer Architecture Map"
+        - "Scaling Configuration Analysis"
+        - "Capacity Calculations"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Scaling configs verified, historical metrics analyzed"
+    medium: "Configuration reviewed with limited load testing data"
+    low: "Partial access to consumer infrastructure"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "kafka-consumer-config"
+        priority: "required"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure access and metrics analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "consumer-scaling-001"
+    item: "Auto-scaling configured for all consumer services"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify HPA or equivalent exists for each consumer"
+    expected: "Confirmed by reviewer"
+
+  - id: "consumer-scaling-002"
+    item: "Max replicas allow full partition parallelism"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "max_replicas >= partition_count for each consumer group"
+    expected: "Confirmed by reviewer"
+
+  - id: "consumer-scaling-003"
+    item: "Scaling metrics appropriate for message processing"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Custom metrics like lag or queue depth used, not just CPU"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["event-driven", "microservices", "data-pipeline"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.async-queue-scalability.queue-depth-scaling"
+    - "scalability-capacity.async-queue-scalability.partition-shard-key-design"

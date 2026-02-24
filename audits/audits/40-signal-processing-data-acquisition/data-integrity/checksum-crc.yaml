@@ -1,0 +1,264 @@
+audit:
+  id: signal-processing-data-acquisition.data-integrity.checksum-crc
+  name: Checksum/CRC Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: data-integrity
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates data integrity verification using checksums
+    and CRC algorithms for signal data. It examines:
+    - CRC polynomial selection and implementation
+    - Checksum algorithm appropriateness
+    - Error detection capability
+    - Implementation correctness
+    - Coverage of critical data paths
+    - Error handling on detection
+  why_it_matters: |
+    Data integrity verification catches corruption:
+    - Transmission errors can flip bits silently
+    - Storage media can have undetected errors
+    - CRC-32 detects all errors up to certain burst lengths
+    - Without verification, corrupted data used as valid
+    - IEEE 802.3 CRC widely used for communication
+
+    Undetected data corruption leads to invalid measurements
+    and potentially dangerous decisions based on bad data.
+  when_to_run:
+  - Data acquisition system design
+  - Communication protocol implementation
+  - Storage system design
+  - Safety-critical system review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: CRC/checksum implementation
+  - type: protocol_spec
+    description: Data format and integrity requirements
+  access_requirements:
+  - Access to integrity verification code
+  - Data format documentation
+discovery:
+  code_patterns:
+  - pattern: (crc|CRC|checksum|check_sum)
+    type: regex
+    scope: source
+    purpose: Detect integrity verification
+  - pattern: (crc32|crc16|crc8|polynomial)
+    type: regex
+    scope: source
+    purpose: Detect CRC implementation
+  - pattern: (verify|validate).*integrity
+    type: regex
+    scope: source
+    purpose: Detect integrity validation
+  file_patterns:
+  - glob: '**/crc*.{c,h,cpp,py}'
+    purpose: CRC implementation files
+  - glob: '**/checksum*.{c,h,cpp,py}'
+    purpose: Checksum files
+  - glob: '**/integrity*.{c,h,cpp,py}'
+    purpose: Integrity verification files
+knowledge_sources:
+  specifications:
+  - id: crc-catalog
+    name: CRC RevEng Polynomial Catalog
+    url: https://reveng.sourceforge.io/crc-catalogue/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: crc-tutorial
+    name: CRC Tutorial and Implementation
+    url: https://www.sunshine2k.de/articles/coding/crc/understanding_crc.html
+    offline_cache: true
+signals:
+  critical:
+  - id: CRC-CRIT-001
+    signal: No data integrity verification
+    evidence_indicators:
+    - Data transmitted without checksum
+    - No CRC on stored data
+    - Integrity assumed without verification
+    explanation: |
+      Without integrity verification, corrupted data is
+      indistinguishable from valid data. Bit errors from
+      transmission or storage go undetected.
+    remediation: |
+      - Implement CRC for data transmission
+      - Add checksum to stored data
+      - Verify integrity on data reception
+      - Log integrity failures
+    cwe: CWE-354
+  - id: CRC-CRIT-002
+    signal: Integrity check failure not handled
+    evidence_indicators:
+    - CRC computed but not checked
+    - Check failure silently ignored
+    - Corrupted data used anyway
+    explanation: |
+      Computing CRC without checking defeats the purpose.
+      Detected corruption must trigger appropriate error
+      handling, not be ignored.
+    remediation: |
+      - Verify CRC matches expected
+      - Reject data on mismatch
+      - Request retransmission or report error
+      - Log integrity failures
+    cwe: CWE-754
+  high:
+  - id: CRC-HIGH-001
+    signal: CRC algorithm too weak for application
+    evidence_indicators:
+    - CRC-8 for large data blocks
+    - Simple checksum for noisy channel
+    - Error detection inadequate
+    explanation: |
+      CRC strength must match data size and error rate.
+      CRC-8 sufficient for short packets; CRC-32 needed
+      for larger data. Simple checksums miss many errors.
+    remediation: |
+      - Use CRC-16 or CRC-32 for larger data
+      - Select polynomial for burst error detection
+      - Match algorithm to error characteristics
+      - Document detection capability
+  - id: CRC-HIGH-002
+    signal: CRC implementation incorrect
+    evidence_indicators:
+    - Test vectors don't match
+    - Different result than standard implementation
+    - Polynomial or parameters wrong
+    explanation: |
+      Incorrect CRC implementation may miss errors or
+      produce false failures. Implementation must match
+      standard exactly for interoperability.
+    remediation: |
+      - Test against known test vectors
+      - Verify polynomial and parameters
+      - Check initial value and final XOR
+      - Compare with reference implementation
+  medium:
+  - id: CRC-MED-001
+    signal: Not all critical data protected
+    evidence_indicators:
+    - Some data paths skip integrity check
+    - Metadata not protected
+    - Configuration data unchecked
+    explanation: |
+      All critical data should be integrity-protected.
+      Unprotected paths allow corruption to propagate
+      without detection.
+    remediation: |
+      - Audit all data paths for coverage
+      - Protect metadata and configuration
+      - Add integrity to all critical transfers
+      - Document protection coverage
+  low:
+  - id: CRC-LOW-001
+    signal: CRC configuration not documented
+    evidence_indicators:
+    - Polynomial not recorded
+    - Parameters not specified
+    - Algorithm choice not justified
+    explanation: |
+      Undocumented CRC configuration makes interoperability
+      and maintenance difficult. Parameters must be explicit.
+    remediation: |
+      - Document polynomial and parameters
+      - Specify initial value and final XOR
+      - Record bit/byte order conventions
+      - Include in interface documentation
+  positive:
+  - id: CRC-POS-001
+    signal: Comprehensive integrity verification
+    evidence_indicators:
+    - Appropriate CRC for data size
+    - All critical paths protected
+    - Proper error handling
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: software-engineer
+  steps:
+  - id: '1'
+    name: CRC Implementation Review
+    description: |
+      Review CRC/checksum implementation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find CRC implementation
+      command: |
+        grep -rniE "(crc|checksum)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - CRC algorithm
+    - Polynomial
+    - Verification points
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Integrity Verification Analysis
+    - Coverage Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 2
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: crc-001
+  item: Data integrity verification implemented
+  level: CRITICAL
+  verification: |
+    grep -rniE "(crc|checksum).*verify" \
+      --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: crc-002
+  item: Integrity failures handled
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify error handling on CRC mismatch
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - data-acquisition
+    - communications
+relationships:
+  commonly_combined:
+  - signal-processing.data-integrity.data-loss-detection
+  - signal-processing.data-integrity.buffer-management
+  - security-trust.data-security.data-integrity
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

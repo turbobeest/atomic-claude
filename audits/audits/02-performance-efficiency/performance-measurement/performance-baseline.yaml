@@ -1,0 +1,373 @@
+# ============================================================
+# AUDIT: Performance Baseline Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.performance-measurement.performance-baseline"
+  name: "Performance Baseline Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "performance-measurement"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Establishes and validates performance baselines for the application across
+    key dimensions: latency percentiles (p50, p95, p99), throughput capacity,
+    resource utilization targets, and user experience metrics (Core Web Vitals).
+    Verifies baselines are documented, measured correctly, and regularly updated.
+
+  why_it_matters: |
+    Without established baselines, teams cannot detect regressions or measure
+    improvement. Google's SRE book emphasizes that "you cannot improve what
+    you cannot measure." Performance baselines provide the reference point
+    for SLOs, capacity planning, and regression detection. Organizations
+    with documented baselines catch regressions 60% faster than those without.
+
+  when_to_run:
+    - "Initial application setup"
+    - "After major architectural changes"
+    - "Quarterly baseline reviews"
+    - "Before capacity planning"
+
+prerequisites:
+  required_artifacts:
+    - type: "documentation"
+      description: "Performance baseline documentation"
+    - type: "metrics_access"
+      description: "APM and monitoring system access"
+
+  access_requirements:
+    - "APM dashboard access (Datadog, New Relic, etc.)"
+    - "Performance documentation repository"
+    - "Historical metrics data"
+
+discovery:
+  file_patterns:
+    - glob: "**/performance*.md"
+      purpose: "Performance documentation"
+    - glob: "**/baselines/**"
+      purpose: "Baseline configuration"
+    - glob: "**/*slo*.*"
+      purpose: "SLO definitions"
+
+  documents_to_review:
+    - type: "Performance documentation"
+      purpose: "Verify baseline definitions exist"
+    - type: "SLO documentation"
+      purpose: "Review performance targets"
+
+  metrics_queries:
+    - system: "Prometheus"
+      query: "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))"
+      purpose: "Current p99 latency"
+      threshold: "< baseline + 10%"
+    - system: "Prometheus"
+      query: "rate(http_requests_total[5m])"
+      purpose: "Current throughput"
+      threshold: "> baseline - 10%"
+
+knowledge_sources:
+  guides:
+    - id: "sre-book"
+      name: "Google SRE Book - Service Level Objectives"
+      url: "https://sre.google/sre-book/service-level-objectives/"
+      offline_cache: true
+    - id: "web-vitals"
+      name: "Google Web Vitals"
+      url: "https://web.dev/vitals/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "sre-workbook"
+      title: "The Site Reliability Workbook"
+      type: "book"
+      reference: "O'Reilly, Google SRE Team"
+
+tooling:
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job="api"}[5m]))
+      purpose: "p50 latency"
+    - system: "Prometheus"
+      query: |
+        histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="api"}[5m]))
+      purpose: "p95 latency"
+    - system: "Prometheus"
+      query: |
+        histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="api"}[5m]))
+      purpose: "p99 latency"
+
+  scripts:
+    - id: "baseline-check"
+      language: "bash"
+      purpose: "Verify current performance against baselines"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Performance Baseline Check ==="
+
+        # Query Prometheus for current metrics
+        PROM_URL="${PROMETHEUS_URL:-http://localhost:9090}"
+
+        # p99 latency
+        P99=$(curl -s "$PROM_URL/api/v1/query?query=histogram_quantile(0.99,rate(http_request_duration_seconds_bucket[5m]))" \
+              | jq -r '.data.result[0].value[1]')
+
+        echo "Current p99 latency: ${P99}s"
+
+        # Compare to baseline (assumes BASELINE_P99 env var)
+        if [ -n "$BASELINE_P99" ]; then
+          DEVIATION=$(echo "scale=2; ($P99 - $BASELINE_P99) / $BASELINE_P99 * 100" | bc)
+          echo "Deviation from baseline: ${DEVIATION}%"
+        fi
+
+signals:
+  critical:
+    - id: "BASELINE-CRIT-001"
+      signal: "No documented performance baselines exist"
+      evidence_indicators:
+        - "No performance documentation found"
+        - "Team cannot state expected latency values"
+        - "No historical performance data retained"
+      explanation: |
+        Without baselines, there's no way to detect regressions or measure
+        progress. Teams operate in the dark, only discovering problems when
+        users complain. This is a fundamental observability gap that affects
+        all performance-related decisions.
+      remediation: "Establish baselines for: p50/p95/p99 latency, throughput, error rate, resource utilization"
+
+    - id: "BASELINE-CRIT-002"
+      signal: "Baselines not updated after major changes"
+      evidence_indicators:
+        - "Baseline document older than last major release"
+        - "Current metrics significantly differ from documented baselines"
+      explanation: |
+        Stale baselines lead to false alarms (if old baseline was worse) or
+        missed regressions (if old baseline was better). Baselines must be
+        updated after architectural changes, new features, or infrastructure
+        modifications.
+      remediation: "Establish process for baseline review after significant changes"
+
+  high:
+    - id: "BASELINE-HIGH-001"
+      signal: "Missing percentile breakdown (only averages documented)"
+      evidence_pattern: "Baseline documents only show average latency"
+      explanation: |
+        Averages hide tail latency problems. A service with 100ms average might
+        have p99 of 5 seconds, meaning 1% of users experience terrible performance.
+        SRE best practice is to track p50 (typical), p95 (high), and p99 (tail).
+      remediation: "Document p50, p95, p99 baselines for all key metrics"
+
+    - id: "BASELINE-HIGH-002"
+      signal: "Baselines not segmented by endpoint/operation"
+      evidence_pattern: "Single global latency baseline for all endpoints"
+      explanation: |
+        Different operations have different performance characteristics. A global
+        baseline of 200ms might hide that a specific endpoint regressed from
+        50ms to 500ms. Per-endpoint baselines enable precise regression detection.
+      remediation: "Establish per-endpoint/operation baselines for critical paths"
+
+  medium:
+    - id: "BASELINE-MED-001"
+      signal: "No Core Web Vitals baselines for frontend"
+      evidence_pattern: "Missing LCP, FID, CLS baseline documentation"
+      remediation: "Establish baselines for LCP (<2.5s), FID (<100ms), CLS (<0.1)"
+
+    - id: "BASELINE-MED-002"
+      signal: "Baselines not version-controlled"
+      evidence_pattern: "Baselines in wiki or spreadsheet without history"
+      remediation: "Store baseline definitions in version control alongside code"
+
+  low:
+    - id: "BASELINE-LOW-001"
+      signal: "No automated baseline validation in CI"
+
+  positive:
+    - id: "BASELINE-POS-001"
+      signal: "Comprehensive baseline documentation with percentiles"
+    - id: "BASELINE-POS-002"
+      signal: "Per-endpoint baselines for critical paths"
+    - id: "BASELINE-POS-003"
+      signal: "Automated baseline comparison in CI/CD"
+    - id: "BASELINE-POS-004"
+      signal: "Regular baseline review process documented"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Locate Baseline Documentation"
+      description: |
+        Search for existing performance baseline documentation including
+        SLO documents, performance specs, and benchmark results.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find performance documentation"
+          command: "find . -name '*performance*' -o -name '*baseline*' -o -name '*slo*' | head -20"
+        - purpose: "Search for latency targets"
+          command: "grep -rn 'p99\\|latency.*ms\\|response.*time' --include='*.md' --include='*.yaml' ."
+
+      questions:
+        - "Are performance baselines documented?"
+        - "When were baselines last updated?"
+
+      expected_findings:
+        - "Baseline documentation location"
+        - "Last update date"
+
+    - id: "2"
+      name: "Verify Baseline Coverage"
+      description: |
+        Review baseline documentation for completeness including
+        latency percentiles, throughput, and error rates.
+      duration_estimate: "30 min"
+
+      questions:
+        - "Are p50, p95, p99 latencies documented?"
+        - "Are baselines per-endpoint or only global?"
+        - "Are Core Web Vitals included (for frontend)?"
+        - "Are throughput and error rate baselines included?"
+
+      expected_findings:
+        - "Latency percentiles (p50, p95, p99)"
+        - "Per-endpoint breakdown"
+        - "Throughput and error rate targets"
+
+    - id: "3"
+      name: "Compare Current Performance to Baselines"
+      description: |
+        Query current metrics and compare to documented baselines
+        to verify baselines are still accurate.
+      duration_estimate: "40 min"
+
+      commands:
+        - purpose: "Query current p99 latency"
+          command: |
+            curl -s "$PROMETHEUS_URL/api/v1/query?query=histogram_quantile(0.99,rate(http_request_duration_seconds_bucket[1h]))" | jq '.data.result'
+        - purpose: "Query current throughput"
+          command: |
+            curl -s "$PROMETHEUS_URL/api/v1/query?query=rate(http_requests_total[1h])" | jq '.data.result'
+
+      expected_findings:
+        - "Current metrics within 10% of baselines"
+        - "Or documented reasons for deviation"
+
+    - id: "4"
+      name: "Review Baseline Update Process"
+      description: |
+        Verify there's a process for updating baselines after
+        significant changes.
+      duration_estimate: "20 min"
+
+      questions:
+        - "Is there a documented process for baseline updates?"
+        - "Are baselines reviewed after major releases?"
+        - "Who owns baseline accuracy?"
+
+      expected_findings:
+        - "Documented update process"
+        - "Clear ownership"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Baseline Documentation Status"
+        - "Baseline Accuracy Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct documentation and metrics review"
+    medium: "Partial baseline documentation found"
+    low: "Inferred from team interviews"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "sre-book"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive documentation and metrics review"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "baseline-001"
+    item: "Performance baselines documented"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm baseline documentation exists with latency, throughput, error rate"
+    expected: "Confirmed by reviewer"
+
+  - id: "baseline-002"
+    item: "Baselines include p50, p95, p99 percentiles"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify percentile breakdown in documentation"
+    expected: "Confirmed by reviewer"
+
+  - id: "baseline-003"
+    item: "Current metrics within 10% of baselines"
+    level: "BLOCKING"
+    verification: |
+      # Compare current p99 to baseline
+      CURRENT=$(curl -s "$PROMETHEUS_URL/api/v1/query?query=histogram_quantile(0.99,rate(http_request_duration_seconds_bucket[1h]))" | jq -r '.data.result[0].value[1]')
+      DEVIATION=$(echo "scale=0; ($CURRENT - $BASELINE_P99) * 100 / $BASELINE_P99" | bc)
+      if [ "${DEVIATION#-}" -lt 10 ]; then echo "PASS: ${DEVIATION}% deviation"; else echo "FAIL: ${DEVIATION}% deviation"; fi
+    expected: "PASS"
+
+  - id: "baseline-004"
+    item: "Baseline update process documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm process exists for updating baselines after changes"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.performance-measurement.performance-regression-detection"
+    - "performance-efficiency.performance-measurement.slo-sli-alignment"

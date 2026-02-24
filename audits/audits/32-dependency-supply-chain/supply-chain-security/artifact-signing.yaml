@@ -1,0 +1,277 @@
+# ============================================================
+# AUDIT: Artifact Signing
+# Category: 32 - Dependency & Supply Chain
+# Subcategory: supply-chain-security
+# ============================================================
+
+audit:
+  id: "dependency-supply-chain.supply-chain-security.artifact-signing"
+  name: "Artifact Signing Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "dependency-supply-chain"
+  category_number: 32
+  subcategory: "supply-chain-security"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "dependencies"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates the signing of software artifacts (packages,
+    containers, binaries) to ensure authenticity and integrity. It
+    assesses whether produced artifacts are signed and whether consumed
+    dependencies have verified signatures.
+
+  why_it_matters: |
+    Unsigned artifacts can be tampered with or replaced by malicious
+    versions. Artifact signing provides cryptographic proof of origin
+    and integrity. Without it, supply chain attacks can inject malware
+    at any point between build and deployment.
+
+  when_to_run:
+    - "When establishing build pipelines"
+    - "During security assessments"
+    - "After supply chain incidents"
+    - "For compliance requirements"
+
+prerequisites:
+  required_artifacts:
+    - type: "build_artifacts"
+      description: "Packages, containers, or binaries to sign/verify"
+    - type: "signing_keys"
+      description: "GPG keys, Sigstore credentials, etc."
+
+  access_requirements:
+    - "Access to signing infrastructure"
+    - "Access to artifact storage"
+
+discovery:
+  file_patterns:
+    - glob: "**/.gnupg/**"
+      purpose: "Find GPG configuration"
+    - glob: "**/cosign.key"
+      purpose: "Find cosign keys"
+    - glob: "**/*.sig"
+      purpose: "Find signature files"
+    - glob: "**/*.asc"
+      purpose: "Find GPG signatures"
+
+knowledge_sources:
+  guides:
+    - id: "sigstore"
+      name: "Sigstore"
+      url: "https://www.sigstore.dev/"
+
+    - id: "cosign"
+      name: "Cosign Container Signing"
+      url: "https://docs.sigstore.dev/cosign/overview/"
+
+  standards:
+    - id: "slsa-signing"
+      name: "SLSA Artifact Verification"
+      relevance: "Build integrity requirements"
+
+tooling:
+  analysis_tools:
+    - tool: "cosign"
+      purpose: "Sign and verify container images"
+    - tool: "gpg"
+      purpose: "Sign and verify packages"
+    - tool: "sigstore"
+      purpose: "Keyless signing with transparency"
+    - tool: "npm-signature"
+      purpose: "npm package signatures"
+
+signals:
+  critical:
+    - id: "DEP-SIGN-CRIT-001"
+      signal: "Production artifacts not signed"
+      evidence_indicators:
+        - "Container images without signatures"
+        - "Packages released without signing"
+      explanation: |
+        Unsigned artifacts provide no guarantee of authenticity or
+        integrity. Anyone with registry access could replace them
+        with malicious versions.
+      remediation: "Implement artifact signing for all releases"
+
+    - id: "DEP-SIGN-CRIT-002"
+      signal: "Signing keys compromised or exposed"
+      evidence_indicators:
+        - "Private keys in repository"
+        - "Keys accessible to unauthorized parties"
+      remediation: "Rotate keys immediately; secure key storage"
+
+  high:
+    - id: "DEP-SIGN-HIGH-001"
+      signal: "Signature verification not enforced"
+      evidence_indicators:
+        - "Signatures exist but not verified on pull"
+        - "No enforcement in deployment"
+      remediation: "Configure mandatory signature verification"
+
+    - id: "DEP-SIGN-HIGH-002"
+      signal: "Using long-lived signing keys"
+      evidence_indicators:
+        - "Same key for years"
+        - "No key rotation policy"
+      remediation: "Implement keyless signing or key rotation"
+
+  medium:
+    - id: "DEP-SIGN-MED-001"
+      signal: "Not all artifact types signed"
+      evidence_indicators:
+        - "Containers signed but npm packages not"
+        - "Inconsistent signing coverage"
+      remediation: "Extend signing to all artifact types"
+
+    - id: "DEP-SIGN-MED-002"
+      signal: "Manual signing process"
+      evidence_indicators:
+        - "Signing done manually"
+        - "Not integrated in CI/CD"
+      remediation: "Automate signing in build pipeline"
+
+  low:
+    - id: "DEP-SIGN-LOW-001"
+      signal: "Signature metadata incomplete"
+      evidence_indicators:
+        - "No timestamp in signature"
+        - "Missing identity information"
+      remediation: "Include complete metadata in signatures"
+
+  positive:
+    - id: "DEP-SIGN-POS-001"
+      signal: "All artifacts signed and verifiable"
+
+    - id: "DEP-SIGN-POS-002"
+      signal: "Keyless signing with transparency log"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "security-auditor"
+
+  steps:
+    - id: "1"
+      name: "Check for Container Signing"
+      description: "Verify container images are signed"
+      commands:
+        - purpose: "Check for cosign signatures"
+          command: "cosign verify myimage:latest 2>/dev/null || echo 'cosign verification failed or not configured'"
+
+    - id: "2"
+      name: "Check npm Provenance"
+      description: "Verify npm package provenance"
+      commands:
+        - purpose: "Check npm provenance"
+          command: "npm audit signatures 2>/dev/null || echo 'npm signature audit not available'"
+
+    - id: "3"
+      name: "Check CI/CD for Signing"
+      description: "Verify signing in build pipeline"
+      commands:
+        - purpose: "Check for signing in GitHub Actions"
+          command: "grep -rE '(cosign|gpg|sigstore|sign)' .github/workflows/ 2>/dev/null || echo 'No signing found in GitHub Actions'"
+
+    - id: "4"
+      name: "Verify Key Storage"
+      description: "Check signing keys are securely stored"
+      commands:
+        - purpose: "Check for exposed keys"
+          command: "find . -name '*.key' -o -name '*private*' -o -name '*.pem' 2>/dev/null | grep -v node_modules | head -10 || echo 'No obvious key files found'"
+        - purpose: "Check for keys in git"
+          command: "git ls-files | grep -iE '(key|private|secret|pem)' | head -10 || echo 'No key files in git'"
+
+    - id: "5"
+      name: "Check Signature Verification in Deployment"
+      description: "Verify signatures checked on deploy"
+      commands:
+        - purpose: "Document verification check"
+          command: "echo 'Verification Checklist:\n\n[ ] Kubernetes admission controller verifies signatures\n[ ] Docker content trust enabled\n[ ] Deployment scripts verify checksums\n[ ] Package manager verifies signatures'"
+
+    - id: "6"
+      name: "Review Signing Strategy"
+      description: "Document signing approach"
+      commands:
+        - purpose: "Generate signing strategy template"
+          command: "echo 'Artifact Signing Strategy:\n\nContainers: [ ] cosign [ ] notary [ ] none\nPackages: [ ] gpg [ ] sigstore [ ] none\nBinaries: [ ] gpg [ ] cosign [ ] none\n\nKey Management:\n[ ] Keyless (Sigstore/Fulcio)\n[ ] Long-lived keys in secret manager\n[ ] Hardware security module\n\nTransparency:\n[ ] Rekor transparency log\n[ ] Public key published'"
+
+output:
+  deliverables:
+    - type: "signing_assessment"
+      format: "structured"
+      description: "Evaluation of artifact signing practices"
+
+    - type: "verification_status"
+      format: "structured"
+      description: "Status of signature verification"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Signing Coverage"
+        - "Key Management"
+        - "Verification Enforcement"
+        - "Recommendations"
+
+closeout_checklist:
+  - id: "dep-sign-001"
+    item: "Release artifacts are signed"
+    level: "CRITICAL"
+    verification: "Signature exists on latest release"
+
+  - id: "dep-sign-002"
+    item: "Signing integrated in CI/CD"
+    level: "REQUIRED"
+    verification: "CI config shows signing"
+
+  - id: "dep-sign-003"
+    item: "Signature verification enforced"
+    level: "REQUIRED"
+    verification: "Deployment verifies signatures"
+
+  - id: "dep-sign-004"
+    item: "Keys securely managed"
+    level: "CRITICAL"
+    verification: "No exposed keys"
+
+governance:
+  applicable_to:
+    archetypes: ["software-distribution-projects"]
+
+  compliance_mappings:
+    - framework: "SLSA"
+      control: "Build L3"
+      description: "Provenance signed by build system"
+    - framework: "SOC 2"
+      control: "CC6.6"
+      description: "Restricting access by components"
+
+relationships:
+  commonly_combined:
+    - "dependency-supply-chain.supply-chain-security.provenance-verification"
+  depends_on:
+    - "security-trust.key-management"
+  feeds_into:
+    - "deployment-release.secure-distribution"

@@ -1,0 +1,363 @@
+# ============================================================
+# AUDIT: Request Batching Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.network-efficiency.request-batching"
+  name: "Request Batching Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "network-efficiency"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates request batching strategies across frontend and backend systems.
+    Analyzes API design for bulk operations, frontend data fetching patterns,
+    dataloader implementations, and opportunities to combine multiple requests
+    into single operations. Examines N+1 query patterns and chatty API usage.
+
+  why_it_matters: |
+    Each HTTP request incurs overhead: DNS resolution, TCP/TLS handshake,
+    request serialization, and network latency. Batching 10 requests into 1
+    can reduce total latency from 10*RTT to 1*RTT. The "N+1 problem" where
+    fetching a list requires N additional requests is one of the most common
+    performance anti-patterns. Batch APIs typically reduce load times by 50-90%.
+
+  when_to_run:
+    - "API design reviews"
+    - "Performance optimization initiatives"
+    - "When network waterfall shows many sequential requests"
+    - "After adding new API consumers"
+
+prerequisites:
+  required_artifacts:
+    - type: "codebase"
+      description: "Frontend and backend source code"
+    - type: "api_documentation"
+      description: "API specifications showing batch endpoints"
+
+  access_requirements:
+    - "Frontend application source code"
+    - "Backend API implementations"
+    - "Network monitoring for request analysis"
+
+discovery:
+  code_patterns:
+    - pattern: "Promise\\.all|Promise\\.allSettled|async\\.parallel"
+      type: "regex"
+      scope: "source"
+      purpose: "Find parallel request patterns"
+    - pattern: "forEach.*await|for.*await.*fetch"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect sequential async loops (N+1 pattern)"
+    - pattern: "DataLoader|batch|bulk"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find batching implementations"
+    - pattern: "/batch|/bulk|_bulk"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify batch API endpoints"
+
+  file_patterns:
+    - glob: "**/*loader*.{ts,js}"
+      purpose: "DataLoader implementations"
+    - glob: "**/api/**/*.{ts,js}"
+      purpose: "API client code"
+    - glob: "**/services/**/*.{ts,js}"
+      purpose: "Service layer implementations"
+
+knowledge_sources:
+  guides:
+    - id: "dataloader"
+      name: "DataLoader Documentation"
+      url: "https://github.com/graphql/dataloader"
+      offline_cache: true
+    - id: "react-query-batching"
+      name: "React Query Request Batching"
+      url: "https://tanstack.com/query/latest/docs/react/guides/request-batching"
+      offline_cache: true
+
+  learning_resources:
+    - id: "api-design"
+      title: "RESTful API Design: Best Practices"
+      type: "article"
+      reference: "https://restfulapi.net/resource-naming/"
+
+tooling:
+  static_analysis:
+    - tool: "eslint-plugin-no-loops"
+      purpose: "Detect async operations in loops"
+      offline_capable: true
+
+  scripts:
+    - id: "n-plus-one-detector"
+      language: "bash"
+      purpose: "Find potential N+1 patterns in code"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== N+1 Pattern Detection ==="
+
+        # Find await inside loops
+        echo -e "\n--- Await in loops ---"
+        grep -rn 'for.*{' --include='*.ts' --include='*.js' -A5 src/ | grep -E 'await.*fetch|await.*get|await.*post'
+
+        # Find sequential API calls
+        echo -e "\n--- Sequential fetch patterns ---"
+        grep -rn 'forEach.*async' --include='*.ts' --include='*.js' src/
+
+        # Find Promise.all opportunities
+        echo -e "\n--- Promise.all usage ---"
+        grep -rn 'Promise\.all' --include='*.ts' --include='*.js' src/ | wc -l
+
+signals:
+  critical:
+    - id: "BATCH-CRIT-001"
+      signal: "N+1 query pattern: await inside loop fetching related data"
+      evidence_pattern: "for.*await.*fetch|forEach.*await.*get"
+      explanation: |
+        The N+1 pattern occurs when code fetches a list of items, then makes
+        a separate request for each item's related data. For 100 items, this
+        means 101 requests instead of 2 batched requests. This is one of the
+        most impactful performance anti-patterns, often causing page loads
+        to take seconds instead of milliseconds.
+      remediation: "Use DataLoader, batch APIs, or include related data in initial response"
+
+    - id: "BATCH-CRIT-002"
+      signal: "No batch API available for frequently-accessed related data"
+      evidence_pattern: "Only singular endpoints exist: /items/:id but no /items?ids=1,2,3"
+      explanation: |
+        When clients need multiple items, forcing individual requests wastes
+        significant bandwidth and time. Without batch endpoints, clients
+        cannot optimize their data fetching regardless of how well-written
+        the frontend code is.
+      remediation: "Implement batch endpoints accepting multiple IDs: GET /items?ids=1,2,3 or POST /items/batch"
+
+  high:
+    - id: "BATCH-HIGH-001"
+      signal: "Sequential requests that could be parallelized"
+      evidence_pattern: "Multiple await statements for independent data"
+      explanation: |
+        Making independent requests sequentially doubles or triples total
+        wait time unnecessarily. If requests A, B, C are independent, they
+        should use Promise.all() to run in parallel.
+      remediation: "Use Promise.all([fetchA(), fetchB(), fetchC()]) for independent requests"
+
+    - id: "BATCH-HIGH-002"
+      signal: "DataLoader not used in GraphQL resolvers"
+      evidence_pattern: "GraphQL resolver fetches without DataLoader batching"
+      explanation: |
+        GraphQL's resolver pattern naturally creates N+1 queries. Without
+        DataLoader, each field resolution triggers a separate database query.
+        DataLoader automatically batches and deduplicates requests within
+        a single execution context.
+      remediation: "Implement DataLoader for all data sources accessed by resolvers"
+
+  medium:
+    - id: "BATCH-MED-001"
+      signal: "Batch endpoint exists but client doesn't use it"
+      evidence_pattern: "Batch API available but client makes individual requests"
+      remediation: "Refactor client to use batch endpoint for multiple item fetches"
+
+    - id: "BATCH-MED-002"
+      signal: "Batch size not limited (potential DoS)"
+      evidence_pattern: "Batch endpoint accepts unlimited items"
+      remediation: "Implement reasonable batch size limits (typically 100-1000 items)"
+
+  low:
+    - id: "BATCH-LOW-001"
+      signal: "Batching debounce window not optimized"
+
+  positive:
+    - id: "BATCH-POS-001"
+      signal: "DataLoader implemented for all data sources"
+    - id: "BATCH-POS-002"
+      signal: "Batch APIs available for all list operations"
+    - id: "BATCH-POS-003"
+      signal: "Promise.all used for parallel independent requests"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify N+1 Patterns"
+      description: |
+        Search codebase for the N+1 anti-pattern where async operations
+        occur inside loops, fetching data sequentially.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find await inside for loops"
+          command: "grep -rn 'for\\s*(.*{' --include='*.ts' --include='*.js' src/ | xargs -I{} grep -l 'await'"
+        - purpose: "Find forEach with async callbacks"
+          command: "grep -rn '\\.forEach.*async' --include='*.ts' --include='*.js' src/"
+        - purpose: "Find map with await"
+          command: "grep -rn '\\.map.*async' --include='*.ts' --include='*.js' src/ | head -20"
+
+      expected_findings:
+        - "List of files with potential N+1 patterns"
+        - "Specific line numbers for review"
+
+    - id: "2"
+      name: "Audit Batch API Availability"
+      description: |
+        Review API definitions to verify batch endpoints exist for
+        operations commonly performed on multiple items.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find batch/bulk endpoints"
+          command: "grep -rn '/batch\\|/bulk\\|_bulk' --include='*.ts' --include='*.js' --include='*.yaml' src/"
+        - purpose: "Find ID array parameters"
+          command: "grep -rn 'ids.*\\[\\]\\|ids.*Array' --include='*.ts' --include='*.js' src/"
+        - purpose: "Check OpenAPI for batch operations"
+          command: "grep -A5 'batch\\|bulk' openapi.yaml 2>/dev/null"
+
+      expected_findings:
+        - "List of batch endpoints"
+        - "Missing batch capabilities"
+
+    - id: "3"
+      name: "Review DataLoader Usage"
+      description: |
+        For GraphQL applications, verify DataLoader is implemented
+        for all data sources to prevent resolver N+1 queries.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find DataLoader imports"
+          command: "grep -rn 'DataLoader\\|dataloader' --include='*.ts' --include='*.js' src/"
+        - purpose: "Count resolvers vs dataloaders"
+          command: "echo 'Resolvers:' && grep -rn 'resolve.*:' --include='*.ts' src/graphql/ 2>/dev/null | wc -l"
+        - purpose: "Find context dataloader setup"
+          command: "grep -rn 'context.*loader\\|createLoaders' --include='*.ts' --include='*.js' src/"
+
+      expected_findings:
+        - "DataLoader implementations for each data source"
+        - "Loaders passed through GraphQL context"
+
+    - id: "4"
+      name: "Check Promise Parallelization"
+      description: |
+        Verify that independent async operations use Promise.all
+        or similar patterns for parallel execution.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Count Promise.all usage"
+          command: "grep -rn 'Promise\\.all' --include='*.ts' --include='*.js' src/ | wc -l"
+        - purpose: "Find sequential awaits"
+          command: "grep -B2 -A2 'await.*fetch' --include='*.ts' --include='*.js' src/ | grep -A1 'await.*fetch' | grep 'await'"
+        - purpose: "Find Promise.allSettled for error tolerance"
+          command: "grep -rn 'Promise\\.allSettled' --include='*.ts' --include='*.js' src/"
+
+      expected_findings:
+        - "Promise.all used for parallel requests"
+        - "Sequential awaits only where dependency exists"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "N+1 Pattern Analysis"
+        - "Batch API Coverage"
+        - "DataLoader Implementation"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct code pattern matches"
+    medium: "Inferred from API structure"
+    low: "Potential patterns requiring manual review"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "dataloader"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive code analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "batching-001"
+    item: "No await statements inside loops for independent data"
+    level: "CRITICAL"
+    verification: |
+      COUNT=$(grep -rn 'for.*{' --include='*.ts' --include='*.js' src/ -A10 | grep -E 'await.*(fetch|get|post)' | wc -l)
+      if [ "$COUNT" -eq 0 ]; then echo "PASS"; else echo "FAIL: $COUNT potential N+1 patterns"; fi
+    expected: "PASS"
+
+  - id: "batching-002"
+    item: "Batch endpoints available for list operations"
+    level: "BLOCKING"
+    verification: |
+      BATCH=$(grep -rn '/batch\|/bulk\|ids=' --include='*.ts' --include='*.js' src/ | wc -l)
+      if [ "$BATCH" -gt 0 ]; then echo "PASS: $BATCH batch patterns found"; else echo "FAIL: No batch endpoints"; fi
+    expected: "PASS"
+
+  - id: "batching-003"
+    item: "DataLoader used in GraphQL resolvers"
+    level: "BLOCKING"
+    verification: |
+      if [ -d "src/graphql" ]; then
+        DL=$(grep -rn 'DataLoader\|dataloader' --include='*.ts' --include='*.js' src/ | wc -l)
+        if [ "$DL" -gt 0 ]; then echo "PASS: DataLoader in use"; else echo "FAIL: No DataLoader"; fi
+      else echo "PASS: No GraphQL"; fi
+    expected: "PASS"
+
+  - id: "batching-004"
+    item: "Promise.all used for parallel requests"
+    level: "WARNING"
+    verification: |
+      PALL=$(grep -rn 'Promise\.all' --include='*.ts' --include='*.js' src/ | wc -l)
+      if [ "$PALL" -gt 0 ]; then echo "PASS: $PALL Promise.all usages"; else echo "FAIL: No Promise.all"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.network-efficiency.graphql-query-efficiency"
+    - "performance-efficiency.database-performance.query-optimization"

@@ -1,0 +1,276 @@
+audit:
+  id: signal-processing-data-acquisition.filtering.phase-distortion
+  name: Phase Distortion Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: filtering
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates filter phase response and its impact on signal
+    fidelity. It examines:
+    - Phase linearity across the passband
+    - Group delay variation
+    - Phase response vs. application requirements
+    - Filter type selection for phase requirements
+    - Phase distortion effects on waveforms
+    - Phase compensation techniques
+  why_it_matters: |
+    Phase distortion affects signal fidelity:
+    - Non-linear phase causes group delay dispersion
+    - Different frequencies arrive at different times
+    - Waveform shapes are distorted
+    - Transient signals are smeared
+    - For communications, phase distortion affects demodulation
+    - Linear phase (FIR) vs. minimum phase (IIR) trade-offs
+
+    Applications requiring waveform fidelity or precise timing must
+    control phase distortion through appropriate filter selection.
+  when_to_run:
+  - Filter design for waveform applications
+  - Transient signal analysis systems
+  - Communications system design
+  - Phase-sensitive measurements
+  - Filter selection review
+prerequisites:
+  required_artifacts:
+  - type: filter_specification
+    description: Filter requirements including phase
+  - type: source_code
+    description: Filter implementation
+  - type: application_requirements
+    description: Phase distortion tolerance
+  access_requirements:
+  - Access to filter specifications
+  - Phase response analysis tools
+  - Application requirements
+discovery:
+  code_patterns:
+  - pattern: (phase|group_delay|linear_phase)
+    type: regex
+    scope: source
+    purpose: Detect phase considerations
+  - pattern: (fir|FIR).*symmetric
+    type: regex
+    scope: source
+    purpose: Detect linear phase FIR
+  - pattern: (bessel|linear|phase)_(filter|response)
+    type: regex
+    scope: source
+    purpose: Detect phase-optimized filters
+  file_patterns:
+  - glob: '**/filter*.{c,h,cpp,py}'
+    purpose: Filter implementation files
+  - glob: '**/phase*.{c,h,cpp,py}'
+    purpose: Phase processing files
+knowledge_sources:
+  specifications:
+  - id: oppenheim-phase
+    name: Discrete-Time Signal Processing - Phase
+    url: https://www.pearson.com/store/p/discrete-time-signal-processing/P100000298298
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ti-filter-phase
+    name: Texas Instruments Filter Phase Response
+    url: https://www.ti.com/lit/an/sloa088/sloa088.pdf
+    offline_cache: true
+signals:
+  critical:
+  - id: PHASE-CRIT-001
+    signal: Phase distortion corrupting waveform measurements
+    evidence_indicators:
+    - Pulse shapes distorted by filtering
+    - Transient timing affected
+    - Non-linear phase in measurement path
+    explanation: |
+      Non-linear phase causes different frequencies to be delayed
+      differently, distorting transient waveforms. For pulse or
+      transient measurements, this can corrupt critical features.
+    remediation: |
+      - Use linear phase FIR filter
+      - Use Bessel IIR for maximally flat delay
+      - Implement phase equalization
+      - Accept broader transition band for better phase
+    cwe: CWE-682
+  high:
+  - id: PHASE-HIGH-001
+    signal: IIR filter where linear phase required
+    evidence_indicators:
+    - IIR filter in waveform preservation path
+    - Non-linear phase response documented
+    - Application requires linear phase
+    explanation: |
+      IIR filters have inherently non-linear phase. For applications
+      requiring waveform fidelity, IIR introduces distortion that
+      may be unacceptable. FIR or phase equalization is needed.
+    remediation: |
+      - Replace IIR with symmetric FIR
+      - Add phase equalizer after IIR
+      - Accept phase distortion if tolerable
+      - Use Bessel IIR for minimum phase distortion
+  - id: PHASE-HIGH-002
+    signal: Group delay variation exceeds tolerance
+    evidence_indicators:
+    - Group delay varies significantly across passband
+    - Different frequency components delayed differently
+    - Timing-critical application affected
+    explanation: |
+      Group delay variation causes different frequency components
+      to arrive at different times. For timing-critical applications,
+      this creates measurement ambiguity.
+    remediation: |
+      - Use maximally flat delay filter (Bessel)
+      - Implement group delay equalization
+      - Use symmetric FIR for constant group delay
+      - Accept narrower bandwidth for flatter delay
+  medium:
+  - id: PHASE-MED-001
+    signal: Phase response not characterized
+    evidence_indicators:
+    - Only magnitude response specified
+    - Phase response not measured
+    - Phase requirements not documented
+    explanation: |
+      Without phase characterization, distortion effects cannot
+      be assessed. Many applications implicitly assume linear phase
+      that IIR filters do not provide.
+    remediation: |
+      - Characterize phase response
+      - Document phase requirements
+      - Verify phase meets application needs
+      - Include phase in filter specifications
+  - id: PHASE-MED-002
+    signal: Filter type not optimized for phase requirements
+    evidence_indicators:
+    - Chebyshev used where Bessel appropriate
+    - Phase not considered in filter selection
+    - Trade-offs not analyzed
+    explanation: |
+      Different filter types have different phase characteristics.
+      Optimizing for magnitude response (Chebyshev/Elliptic) gives
+      worse phase than optimizing for phase (Bessel/FIR).
+    remediation: |
+      - Select filter type based on phase needs
+      - Use Bessel for flat group delay
+      - Use symmetric FIR for linear phase
+      - Document type selection rationale
+  low:
+  - id: PHASE-LOW-001
+    signal: Phase requirements not documented
+    evidence_indicators:
+    - No phase specification
+    - Linear phase assumed but not verified
+    - Phase tolerance not defined
+    explanation: |
+      Without documented requirements, phase distortion tolerance
+      is unknown. System may be over-designed or under-performing
+      with respect to phase.
+    remediation: |
+      - Document phase requirements
+      - Specify acceptable group delay variation
+      - Include phase in acceptance criteria
+      - Verify phase meets requirements
+  positive:
+  - id: PHASE-POS-001
+    signal: Appropriate filter type for phase requirements
+    evidence_indicators:
+    - Linear phase FIR where waveform fidelity needed
+    - Phase requirements documented and met
+    - Trade-offs properly balanced
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: dsp-engineer
+  steps:
+  - id: '1'
+    name: Phase Requirement Analysis
+    description: |
+      Review phase requirements and filter selection.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find filter type configuration
+      command: |
+        grep -rniE "(fir|iir|bessel|cheby|butter)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - Filter type identification
+    - Phase-related configuration
+    - Application context
+  - id: '2'
+    name: Phase Response Verification
+    description: |
+      Verify phase response meets requirements.
+    duration_estimate: 30 min
+    manual_verification: true
+    expected_findings:
+    - Phase linearity assessment
+    - Group delay variation
+    - Application impact analysis
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Phase Response Analysis
+    - Application Impact
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: phase-001
+  item: Phase response meets application requirements
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify phase distortion within tolerance
+  expected: Confirmed by reviewer
+- id: phase-002
+  item: Filter type appropriate for phase needs
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify FIR/Bessel used if linear phase needed
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - signal-processing
+    - audio-systems
+    - instrumentation
+    - communications
+relationships:
+  commonly_combined:
+  - signal-processing.filtering.filter-design
+  - signal-processing.filtering.group-delay
+  - signal-processing.spectral-analysis.fft-implementation
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

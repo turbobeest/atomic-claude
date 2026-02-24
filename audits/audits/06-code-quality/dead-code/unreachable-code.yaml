@@ -1,0 +1,275 @@
+audit:
+  id: code-quality.dead-code.unreachable-code
+  name: Unreachable Code Detection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: dead-code
+  tier: expert
+  estimated_duration: 30 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Identifies code that can never be executed due to control flow structures.
+    This includes code after return/throw/break/continue statements, code in
+    impossible conditional branches, and code in disabled conditional compilation.
+  why_it_matters: |
+    Unreachable code inflates codebase size, confuses developers, and may indicate
+    logic errors. It increases maintenance burden and can hide security issues.
+    CWE-561 classifies dead code as a quality weakness that affects reliability.
+  when_to_run:
+  - During code reviews
+  - Before major releases
+  - During codebase cleanup initiatives
+  - After major refactoring
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: return\s+[^;]+;\s*[^}\s]
+    type: regex
+    scope: source
+    purpose: Detect statements after return
+  - pattern: throw\s+[^;]+;\s*[^}\s]
+    type: regex
+    scope: source
+    purpose: Detect statements after throw
+  - pattern: break\s*;\s*[^}\s]
+    type: regex
+    scope: source
+    purpose: Detect statements after break
+  - pattern: if\s*\(\s*false\s*\)
+    type: regex
+    scope: source
+    purpose: Detect always-false conditions
+  - pattern: while\s*\(\s*false\s*\)
+    type: regex
+    scope: source
+    purpose: Detect never-executing loops
+  file_patterns:
+  - glob: '**/*.{js,ts,py,java,go,rb,cs,cpp,c}'
+    purpose: Source code files
+knowledge_sources:
+  specifications:
+  - id: cwe-561
+    name: 'CWE-561: Dead Code'
+    url: https://cwe.mitre.org/data/definitions/561.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: sei-dead-code
+    name: SEI CERT C Coding Standard - MSC12-C
+    url: https://wiki.sei.cmu.edu/confluence/display/c/MSC12-C.+Detect+and+remove+code+that+has+no+effect+or+is+never+executed
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: eslint
+    purpose: JavaScript/TypeScript unreachable code detection
+    offline_capable: true
+  - tool: pylint
+    purpose: Python unreachable code detection
+    offline_capable: true
+  - tool: go vet
+    purpose: Go unreachable code detection
+    offline_capable: true
+  - tool: clang-tidy
+    purpose: C/C++ unreachable code detection
+    offline_capable: true
+  scripts:
+  - id: unreachable-scan
+    language: bash
+    purpose: Detect common unreachable code patterns
+    source: inline
+    code: |
+      # Find code after return statements
+      grep -rn --include="*.{js,ts,java,py}" -E "return\s+[^;]+;\s*\w" . 2>/dev/null
+signals:
+  critical:
+  - id: DC-UNREACH-CRIT-001
+    signal: Code after unconditional return in critical security functions
+    evidence_pattern: return\s+[^;]+;\s*\w+.*security|auth|crypt
+    cwe: CWE-561
+    explanation: |
+      Unreachable code in security-critical functions may indicate incomplete
+      security checks or logic errors that could leave vulnerabilities.
+    remediation: Remove unreachable code and verify security logic is complete
+  - id: DC-UNREACH-CRIT-002
+    signal: Dead code hiding security bypass
+    evidence_pattern: if\s*\(\s*false\s*\).*\{[^}]*security|validation
+    cwe: CWE-561
+    explanation: |
+      Disabled security code could indicate intentional bypass or accidental
+      deactivation of important protections.
+    remediation: Review security intent and either restore or properly remove code
+  high:
+  - id: DC-UNREACH-HIGH-001
+    signal: Unreachable code after throw/return/break statements
+    evidence_pattern: (return|throw|break|continue)\s+[^;]*;\s*[a-zA-Z]
+    cwe: CWE-561
+    explanation: |
+      Code after control flow termination will never execute and indicates
+      logic errors or incomplete refactoring.
+    remediation: Remove unreachable statements or fix control flow logic
+  - id: DC-UNREACH-HIGH-002
+    signal: Always-false conditional blocks
+    evidence_pattern: if\s*\(\s*(false|0|null)\s*\)
+    cwe: CWE-561
+    explanation: |
+      Conditions that always evaluate to false create dead code blocks that
+      add complexity without providing functionality.
+    remediation: Remove the entire conditional block
+  medium:
+  - id: DC-UNREACH-MED-001
+    signal: Dead code in switch statements (unreachable cases)
+    evidence_pattern: case\s+[^:]+:\s*break;\s*case
+    remediation: Consolidate or remove empty switch cases
+  - id: DC-UNREACH-MED-002
+    signal: Commented-out return statements preceding code
+    evidence_pattern: //\s*return.*\n\s*\w
+    remediation: Remove commented code or restore proper control flow
+  low:
+  - id: DC-UNREACH-LOW-001
+    signal: Defensive unreachable default cases
+    evidence_pattern: default:\s*throw|unreachable
+    remediation: Consider if defensive coding is necessary here
+  positive:
+  - id: DC-UNREACH-POS-001
+    signal: No unreachable code detected by static analysis
+    evidence_pattern: zero_unreachable_warnings
+  - id: DC-UNREACH-POS-002
+    signal: CI configured to fail on unreachable code
+    evidence_pattern: lint_config.*no-unreachable
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Run Static Analysis
+    description: |
+      Execute static analysis tools to detect unreachable code patterns
+      across the codebase.
+    duration_estimate: 10 min
+    commands:
+    - purpose: ESLint no-unreachable check
+      command: |
+        npx eslint --rule 'no-unreachable: error' . 2>/dev/null
+    - purpose: Find code after return statements
+      command: |
+        grep -rn --include="*.js" --include="*.ts" -E "return\s+[^;]+;\s*[a-zA-Z]" . 2>/dev/null | head -50
+    expected_findings:
+    - List of unreachable code locations
+    - Severity classification
+  - id: '2'
+    name: Pattern-Based Detection
+    description: |
+      Use regex patterns to find common unreachable code scenarios
+      not caught by standard linters.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find always-false conditions
+      command: |
+        grep -rn --include="*.{js,ts,java,py}" -E "if\s*\(\s*(false|0)\s*\)" . 2>/dev/null
+    expected_findings:
+    - Always-false conditionals
+    - Disabled code blocks
+  - id: '3'
+    name: Classify and Prioritize
+    description: |
+      Review detected unreachable code and classify by severity based
+      on location (security-critical vs. utility code).
+    duration_estimate: 10 min
+    expected_findings:
+    - Prioritized list of issues
+    - Security-related findings
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - unreachable_code_locations
+    - severity_classification
+    - code_context
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Unreachable Code Inventory
+    - Risk Assessment
+    - Remediation Plan
+  confidence_guidance:
+    high: Static analysis confirms unreachability
+    medium: Pattern match suggests unreachability
+    low: Manual review needed to confirm
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-561
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: unreachable-001
+  item: Static analysis completed for all source files
+  level: BLOCKING
+  verification: |
+    find . -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.java" | wc -l
+  expected: All files analyzed
+- id: unreachable-002
+  item: No critical unreachable code in security paths
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts}" -E "return\s+[^;]+;\s*\w" . 2>/dev/null | grep -i "auth\|security\|crypt" | wc -l
+  expected: '0'
+- id: unreachable-003
+  item: Unreachable code findings documented
+  level: WARNING
+  verification: manual
+  verification_notes: Review audit output for documented findings
+  expected: All findings documented
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-561
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+  - framework: SEI CERT
+    controls:
+    - MSC12-C
+relationships:
+  commonly_combined:
+  - code-quality.dead-code.unused-function-method
+  - code-quality.dead-code.unused-variable
+  - code-quality.maintainability.cyclomatic-complexity

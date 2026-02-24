@@ -1,0 +1,442 @@
+audit:
+  id: security-trust.application-security.websocket-security
+  name: WebSocket Security Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: application-security
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines WebSocket implementations for security vulnerabilities
+    including origin validation, authentication, authorization, input
+    validation, and DoS protection. It evaluates Cross-Site WebSocket Hijacking
+    (CSWSH) vulnerabilities, message security, and proper handshake handling.
+  why_it_matters: |
+    WebSockets bypass traditional browser security controls like Same-Origin
+    Policy and CORS. CWE-1385 (Missing Origin Validation in WebSockets) enables
+    Cross-Site WebSocket Hijacking where attackers can hijack authenticated
+    connections. WebSocket connections are persistent, making them targets
+    for DoS attacks. Proper security controls must be explicitly implemented.
+  when_to_run:
+  - WebSocket feature implementation
+  - Security assessment
+  - Real-time feature review
+  - API security audit
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: WebSocket server and client code
+  - type: running_application
+    description: Application with WebSocket endpoints
+  access_requirements:
+  - Source code access
+  - WebSocket endpoint access
+  - Browser developer tools
+discovery:
+  code_patterns:
+  - pattern: WebSocket|ws://|wss://|socket\.io|sockjs
+    type: regex
+    scope: source
+    purpose: Identify WebSocket implementations
+  - pattern: origin|verifyClient|allowedOrigins
+    type: regex
+    scope: source
+    purpose: Identify origin validation
+  - pattern: on.*message|onmessage|socket\.on
+    type: regex
+    scope: source
+    purpose: Identify message handlers
+  file_patterns:
+  - glob: '**/websocket*.js'
+    purpose: WebSocket server configurations
+  - glob: '**/socket*.js'
+    purpose: Socket.io configurations
+  - glob: '**/ws*.py'
+    purpose: Python WebSocket handlers
+knowledge_sources:
+  specifications:
+  - id: cwe-1385
+    name: 'CWE-1385: Missing Origin Validation in WebSockets'
+    url: https://cwe.mitre.org/data/definitions/1385.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-websocket
+    name: OWASP WebSocket Security Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/WebSocket_Security_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-websocket-testing
+    name: OWASP Testing WebSockets
+    url: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/11-Client-side_Testing/10-Testing_WebSockets
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: websocat
+    purpose: Test WebSocket connections
+    command: 'websocat -H ''Origin: https://evil.com'' wss://target/ws'
+  - tool: wscat
+    purpose: Interactive WebSocket client
+    command: wscat -c wss://target/ws
+  - tool: burp
+    purpose: WebSocket traffic interception
+    command: Manual testing with Burp Suite WebSocket history
+  scripts:
+  - id: cswsh-test
+    language: html
+    purpose: Test Cross-Site WebSocket Hijacking
+    source: inline
+    code: |
+      <!DOCTYPE html>
+      <html>
+      <body>
+      <script>
+      var ws = new WebSocket("wss://target/ws");
+      ws.onopen = function() {
+        console.log("Connected - CSWSH possible!");
+        ws.send(JSON.stringify({type: "test"}));
+      };
+      ws.onmessage = function(e) {
+        console.log("Data received:", e.data);
+      };
+      ws.onerror = function(e) {
+        console.log("Connection failed - may be protected");
+      };
+      </script>
+      </body>
+      </html>
+signals:
+  critical:
+  - id: WS-CRIT-001
+    signal: No origin validation in WebSocket handshake
+    cwe_id: CWE-1385
+    evidence_indicators:
+    - Origin header not checked
+    - All origins accepted
+    - verifyClient not implemented
+    explanation: |
+      Without origin validation, any website can establish WebSocket
+      connections as the victim user, enabling Cross-Site WebSocket
+      Hijacking (CSWSH). This is similar to CSRF but for persistent
+      connections.
+    remediation: Validate Origin header against allowlist in verifyClient callback
+  - id: WS-CRIT-002
+    signal: WebSocket accepts unauthenticated connections
+    cwe_id: CWE-306
+    evidence_indicators:
+    - No authentication before connection
+    - Session token not validated
+    - Anonymous WebSocket access allowed
+    explanation: |
+      WebSockets don't have native authentication. Without explicit
+      authentication checks, anyone can connect and interact with
+      the WebSocket server.
+    remediation: Require authentication before WebSocket upgrade; validate tokens
+  - id: WS-CRIT-003
+    signal: Using ws:// instead of wss:// in production
+    cwe_id: CWE-319
+    evidence_pattern: ws://(?!localhost|127\.0\.0\.1)
+    explanation: |
+      Unencrypted WebSocket connections (ws://) transmit data in
+      plaintext, enabling eavesdropping and man-in-the-middle attacks.
+    remediation: Use wss:// (WebSocket Secure) in production
+  high:
+  - id: WS-HIGH-001
+    signal: Message input not validated
+    cwe_id: CWE-20
+    evidence_indicators:
+    - Messages parsed without validation
+    - User input directly processed
+    - No schema validation for JSON messages
+    explanation: |
+      WebSocket messages can contain injection payloads (XSS, SQLi, etc.)
+      All incoming messages must be validated and sanitized like any
+      other user input.
+    remediation: Implement strict input validation for all WebSocket messages
+  - id: WS-HIGH-002
+    signal: No authorization checks for operations
+    cwe_id: CWE-285
+    evidence_indicators:
+    - All authenticated users can perform all operations
+    - No message-level authorization
+    - Missing role checks
+    explanation: |
+      Authentication is not authorization. Users may be authenticated
+      but shouldn't have access to all WebSocket operations.
+    remediation: Implement authorization checks for each message type/action
+  - id: WS-HIGH-003
+    signal: No rate limiting on connections or messages
+    cwe_id: CWE-770
+    evidence_indicators:
+    - Unlimited connections per IP
+    - Unlimited messages per connection
+    - No message size limits
+    explanation: |
+      WebSocket connections are persistent. Without rate limiting,
+      attackers can exhaust server resources via connection or
+      message flooding.
+    remediation: Implement rate limiting for connections, messages, and message size
+  - id: WS-HIGH-004
+    signal: CSRF tokens not used for WebSocket
+    cwe_id: CWE-352
+    evidence_indicators:
+    - WebSocket upgrade without CSRF token
+    - Only cookies used for auth
+    explanation: |
+      If the application relies solely on cookies for authentication,
+      CSWSH attacks can hijack sessions. CSRF tokens add another layer
+      of protection.
+    remediation: Include CSRF token in WebSocket handshake for additional protection
+  medium:
+  - id: WS-MED-001
+    signal: Origin validation uses substring matching
+    cwe_id: CWE-1385
+    evidence_pattern: origin\.includes|origin\.indexOf|origin\.endsWith
+    explanation: |
+      Substring matching for origin validation can be bypassed. For
+      example, checking for 'example.com' allows 'attackerexample.com'.
+    remediation: Use exact origin matching against explicit allowlist
+  - id: WS-MED-002
+    signal: No connection timeout for idle connections
+    cwe_id: CWE-400
+    evidence_indicators:
+    - Connections persist indefinitely
+    - No pingPong heartbeat
+    - No idle timeout
+    explanation: |
+      Idle connections consume server resources. Without timeouts,
+      attackers can open many connections and leave them idle.
+    remediation: Implement ping/pong heartbeat and idle connection timeout
+  - id: WS-MED-003
+    signal: Sensitive data in WebSocket messages not encrypted
+    cwe_id: CWE-311
+    evidence_indicators:
+    - Passwords in messages
+    - PII transmitted
+    - No additional encryption
+    explanation: |
+      Even with wss://, additional encryption for sensitive data
+      provides defense in depth.
+    remediation: Encrypt sensitive message content; avoid sending passwords via WebSocket
+  low:
+  - id: WS-LOW-001
+    signal: WebSocket events not logged
+    cwe_id: CWE-778
+    evidence_indicators:
+    - No connection logging
+    - No message logging
+    - No audit trail
+    explanation: |
+      Without logging, detecting and investigating WebSocket attacks
+      is difficult.
+    remediation: Log connections, disconnections, and significant events
+  positive:
+  - id: WS-POS-001
+    signal: Strict origin validation with allowlist
+    explanation: CSWSH prevented by proper origin checking
+  - id: WS-POS-002
+    signal: WSS with authentication and authorization
+    explanation: Secure transport with proper access controls
+  - id: WS-POS-003
+    signal: Rate limiting and message validation
+    explanation: DoS and injection protection implemented
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify WebSocket Endpoints
+    description: |
+      Locate all WebSocket endpoints and understand their purpose.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find WebSocket server code
+      command: grep -rn 'WebSocket\|wss://\|ws://' src/
+    - purpose: Find Socket.io configuration
+      command: grep -rn 'socket\.io\|io\.listen\|io\.of' src/
+    - purpose: Check network traffic for WebSocket upgrades
+      command: curl -sI https://target/socket.io/ | grep -i upgrade
+    expected_findings:
+    - WebSocket endpoint URLs
+    - Server configuration
+  - id: '2'
+    name: Test Origin Validation
+    description: |
+      Test if WebSocket connections are accepted from arbitrary origins.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Connect with malicious origin
+      command: 'websocat -H ''Origin: https://evil.com'' wss://target/ws'
+    - purpose: Test from HTML page (browser)
+      command: echo 'Open CSWSH test page in browser from different origin'
+    expected_findings:
+    - Origin validation status
+    - CSWSH vulnerability
+  - id: '3'
+    name: Test Authentication
+    description: |
+      Verify that WebSocket connections require proper authentication.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Connect without authentication
+      command: websocat wss://target/ws
+    - purpose: Connect with invalid token
+      command: 'websocat -H ''Authorization: Bearer invalid'' wss://target/ws'
+    - purpose: Connect with expired session
+      command: 'websocat -H ''Cookie: session=expired'' wss://target/ws'
+    expected_findings:
+    - Authentication enforcement
+    - Session validation
+  - id: '4'
+    name: Test Message Handling
+    description: |
+      Test input validation and injection vulnerabilities in message
+      handling.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Send XSS payload
+      command: echo '{"message":"<script>alert(1)</script>"}' | websocat wss://target/ws
+    - purpose: Send SQLi payload
+      command: echo '{"query":"1 OR 1=1"}' | websocat wss://target/ws
+    - purpose: Send oversized message
+      command: python -c 'print("A"*1000000)' | websocat wss://target/ws
+    expected_findings:
+    - Input validation
+    - Message size limits
+  - id: '5'
+    name: Review Server Configuration
+    description: |
+      Examine WebSocket server configuration for security settings.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find verifyClient implementation
+      command: grep -rn 'verifyClient\|allowedOrigins\|handleUpgrade' src/
+    - purpose: Check rate limiting configuration
+      command: grep -rn 'maxPayload\|limit\|throttle' src/
+    expected_findings:
+    - Security configuration
+    - Rate limiting settings
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Origin Validation Analysis
+    - Authentication Review
+    - Message Security
+    - Recommendations
+  confidence_guidance:
+    high: Direct testing confirms vulnerabilities, code reviewed
+    medium: Testing completed without code access
+    low: Based on configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-websocket
+      priority: required
+    - source_id: cwe-1385
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: WebSocket audit requires connection and message testing
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ws-001
+  item: Origin validation implemented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test connection from malicious origin is rejected
+  expected: Confirmed by reviewer
+- id: ws-002
+  item: Authentication required for connections
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test unauthenticated connection is rejected
+  expected: Confirmed by reviewer
+- id: ws-003
+  item: WSS used in production
+  level: CRITICAL
+  verification: grep -rn 'ws://' src/ config/ | grep -v 'localhost\|127.0.0.1' | wc -l | grep -q '^0'
+    && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: ws-004
+  item: Message input validated
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify input validation on incoming messages
+  expected: Confirmed by reviewer
+- id: ws-005
+  item: Rate limiting implemented
+  level: WARNING
+  verification: manual
+  verification_notes: Test that rapid connections/messages are throttled
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP-ASVS
+    controls:
+    - 13.1.1
+    - 13.1.2
+    - 13.2.1
+  - framework: PCI-DSS
+    controls:
+    - 6.5.9
+    - 6.5.10
+  - framework: NIST-CSF
+    controls:
+    - PR.AC-1
+    - PR.DS-5
+relationships:
+  commonly_combined:
+  - security-trust.application-security.csrf-protection
+  - security-trust.authentication.session-management
+  - security-trust.input-validation.injection-prevention

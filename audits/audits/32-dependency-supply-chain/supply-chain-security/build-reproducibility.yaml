@@ -1,0 +1,269 @@
+# ============================================================
+# AUDIT: Build Reproducibility
+# Category: 32 - Dependency & Supply Chain
+# Subcategory: supply-chain-security
+# ============================================================
+
+audit:
+  id: "dependency-supply-chain.supply-chain-security.build-reproducibility"
+  name: "Build Reproducibility Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "dependency-supply-chain"
+  category_number: 32
+  subcategory: "supply-chain-security"
+
+  tier: "expert"
+  estimated_duration: "3-6 hours"  # median: 4h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "dependencies"
+
+  default_profiles:
+    - "full"
+    - "comprehensive"
+
+  blocks_phase: false
+  parallelizable: false
+
+description:
+  what: |
+    This audit evaluates whether software builds are reproducible,
+    meaning the same source code and build process produces bit-for-bit
+    identical outputs. It assesses dependency pinning, build isolation,
+    and factors that prevent reproducibility.
+
+  why_it_matters: |
+    Reproducible builds allow independent verification that binaries
+    match source code. Without reproducibility, there's no way to verify
+    if a binary was built from claimed sources or if it contains hidden
+    malware. Reproducibility is foundational to supply chain trust.
+
+  when_to_run:
+    - "When establishing build infrastructure"
+    - "For security-critical applications"
+    - "During SLSA compliance efforts"
+    - "When supply chain guarantees are needed"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+    - type: "build_config"
+      description: "Build configuration and scripts"
+    - type: "lock_file"
+      description: "Dependency lock files"
+
+  access_requirements:
+    - "Ability to run builds"
+    - "Access to build environment"
+
+discovery:
+  file_patterns:
+    - glob: "**/Dockerfile*"
+      purpose: "Find Docker build files"
+    - glob: "**/package-lock.json"
+      purpose: "Find npm lock files"
+    - glob: "**/.github/workflows/*.yml"
+      purpose: "Find CI build configs"
+
+knowledge_sources:
+  guides:
+    - id: "reproducible-builds"
+      name: "Reproducible Builds Project"
+      url: "https://reproducible-builds.org/"
+
+    - id: "slsa-hermetic"
+      name: "SLSA Hermetic Builds"
+      url: "https://slsa.dev/spec/v1.0/requirements#hermetic"
+
+  standards:
+    - id: "slsa-reproducibility"
+      name: "SLSA Build Requirements"
+      relevance: "Reproducibility requirements"
+
+tooling:
+  analysis_tools:
+    - tool: "diffoscope"
+      purpose: "Compare build outputs"
+    - tool: "reprotest"
+      purpose: "Test reproducibility"
+    - tool: "strip-nondeterminism"
+      purpose: "Remove non-deterministic elements"
+
+signals:
+  critical:
+    - id: "DEP-REPRO-CRIT-001"
+      signal: "Builds produce different outputs with same inputs"
+      evidence_indicators:
+        - "Different checksums for same source"
+        - "Timestamps embedded in builds"
+      explanation: |
+        Non-reproducible builds cannot be verified. You cannot prove
+        a binary matches its source, making supply chain verification
+        impossible.
+      remediation: "Identify and eliminate sources of non-determinism"
+
+  high:
+    - id: "DEP-REPRO-HIGH-001"
+      signal: "Floating dependency versions allow different builds"
+      evidence_indicators:
+        - "No lock files"
+        - "Loose version constraints"
+      remediation: "Pin all dependencies with lock files"
+
+    - id: "DEP-REPRO-HIGH-002"
+      signal: "Build environment not controlled"
+      evidence_indicators:
+        - "Builds depend on system state"
+        - "Different results on different machines"
+      remediation: "Use containerized, controlled build environment"
+
+  medium:
+    - id: "DEP-REPRO-MED-001"
+      signal: "Timestamps in build outputs"
+      evidence_indicators:
+        - "Build date in binaries"
+        - "File modification times vary"
+      remediation: "Use SOURCE_DATE_EPOCH; normalize timestamps"
+
+    - id: "DEP-REPRO-MED-002"
+      signal: "Non-deterministic toolchain behavior"
+      evidence_indicators:
+        - "Compiler produces different output"
+        - "Linker order varies"
+      remediation: "Pin toolchain versions; use deterministic flags"
+
+  low:
+    - id: "DEP-REPRO-LOW-001"
+      signal: "Minor reproducibility issues in non-critical outputs"
+      evidence_indicators:
+        - "Debug symbols differ"
+        - "Documentation timestamps vary"
+      remediation: "Address if full reproducibility required"
+
+  positive:
+    - id: "DEP-REPRO-POS-001"
+      signal: "Builds are fully reproducible"
+
+    - id: "DEP-REPRO-POS-002"
+      signal: "Reproducibility verified by independent builds"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Check Dependency Determinism"
+      description: "Verify dependencies are fully pinned"
+      commands:
+        - purpose: "Check npm lock exists"
+          command: "test -f package-lock.json && echo 'package-lock.json exists' || echo 'Missing package-lock.json'"
+        - purpose: "Check npm ci availability"
+          command: "npm ci --dry-run 2>&1 | head -5 || echo 'npm ci not available'"
+
+    - id: "2"
+      name: "Check Build Environment"
+      description: "Assess build environment control"
+      commands:
+        - purpose: "Check for Dockerfile"
+          command: "test -f Dockerfile && echo 'Dockerfile exists' || echo 'No Dockerfile'"
+        - purpose: "Check for pinned base image"
+          command: "grep '^FROM' Dockerfile 2>/dev/null | head -5 || echo 'No Dockerfile'"
+
+    - id: "3"
+      name: "Perform Test Build"
+      description: "Run build and capture output"
+      commands:
+        - purpose: "Run build"
+          command: "npm run build 2>/dev/null && sha256sum dist/* 2>/dev/null | head -10 || echo 'Build or dist not available'"
+
+    - id: "4"
+      name: "Run Second Build"
+      description: "Build again and compare"
+      commands:
+        - purpose: "Second build for comparison"
+          command: "npm run build 2>/dev/null && sha256sum dist/* 2>/dev/null | head -10 || echo 'Second build not run'"
+
+    - id: "5"
+      name: "Compare Build Outputs"
+      description: "Check for differences between builds"
+      commands:
+        - purpose: "Compare with diffoscope"
+          command: "diffoscope build1/output build2/output 2>/dev/null | head -50 || echo 'diffoscope not available; compare manually'"
+
+    - id: "6"
+      name: "Check for Timestamps"
+      description: "Identify embedded timestamps"
+      commands:
+        - purpose: "Check for SOURCE_DATE_EPOCH"
+          command: "grep -r 'SOURCE_DATE_EPOCH' .github/workflows/ Dockerfile Makefile 2>/dev/null || echo 'SOURCE_DATE_EPOCH not set'"
+
+output:
+  deliverables:
+    - type: "reproducibility_assessment"
+      format: "structured"
+      description: "Assessment of build reproducibility"
+
+    - type: "non_determinism_report"
+      format: "list"
+      description: "Sources of non-determinism identified"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Reproducibility Test Results"
+        - "Non-Determinism Sources"
+        - "Recommendations"
+
+closeout_checklist:
+  - id: "dep-repro-001"
+    item: "Dependencies fully pinned"
+    level: "CRITICAL"
+    verification: "Lock files complete"
+
+  - id: "dep-repro-002"
+    item: "Build environment controlled"
+    level: "REQUIRED"
+    verification: "Containerized or documented"
+
+  - id: "dep-repro-003"
+    item: "Reproducibility tested"
+    level: "REQUIRED"
+    verification: "Multiple builds compared"
+
+  - id: "dep-repro-004"
+    item: "Non-determinism eliminated"
+    level: "RECOMMENDED"
+    verification: "Builds produce identical output"
+
+governance:
+  applicable_to:
+    archetypes: ["security-critical-projects"]
+
+  compliance_mappings:
+    - framework: "SLSA"
+      control: "Build L3"
+      description: "Reproducible builds"
+    - framework: "Reproducible Builds"
+      control: "Full"
+      description: "Bit-for-bit reproducibility"
+
+relationships:
+  commonly_combined:
+    - "dependency-supply-chain.supply-chain-security.provenance-verification"
+  depends_on:
+    - "dependency-supply-chain.supply-chain-security.dependency-pinning"
+  feeds_into:
+    - "security-trust.build-verification"

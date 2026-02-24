@@ -1,0 +1,294 @@
+audit:
+  id: documentation-knowledge.api-documentation.api-reference-completeness
+  name: API Reference Completeness Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: documentation-knowledge
+  category_number: 27
+  subcategory: api-documentation
+  tier: expert
+  estimated_duration: 3-5 hours  # median: 4h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: documentation
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates the completeness of API reference documentation,
+    ensuring all endpoints, parameters, request/response schemas, and
+    behaviors are documented. The audit compares implemented APIs against
+    documentation to identify gaps and assesses documentation quality
+    for consumer usability.
+  why_it_matters: |
+    Incomplete API documentation forces consumers to reverse-engineer
+    API behavior through trial and error, leading to integration delays,
+    support burden, and incorrect API usage. Complete, accurate reference
+    documentation enables self-service API adoption and reduces friction
+    for API consumers both internal and external.
+  when_to_run:
+  - Before API releases or version upgrades
+  - When API adoption metrics show friction
+  - During developer experience reviews
+  - After adding new API endpoints
+prerequisites:
+  required_artifacts:
+  - type: api_implementation
+    description: Access to API source code or running instance
+  - type: api_documentation
+    description: Access to API reference documentation
+  access_requirements:
+  - Read access to API source code
+  - Read access to API documentation
+  - Access to API specification files
+discovery:
+  file_patterns:
+  - glob: '**/openapi*.yaml'
+    purpose: Find OpenAPI specifications
+  - glob: '**/openapi*.json'
+    purpose: Find OpenAPI JSON specs
+  - glob: '**/swagger*.yaml'
+    purpose: Find Swagger specifications
+  - glob: '**/api-docs/**/*.md'
+    purpose: Find API documentation
+  - glob: '**/docs/api/**/*'
+    purpose: Find API reference docs
+  code_patterns:
+  - pattern: '@(Get|Post|Put|Delete|Patch)Mapping'
+    purpose: Find Spring API endpoints
+  - pattern: '@app\.(get|post|put|delete|patch)'
+    purpose: Find Flask/FastAPI endpoints
+  - pattern: router\.(get|post|put|delete|patch)
+    purpose: Find Express endpoints
+knowledge_sources:
+  guides:
+  - id: openapi-spec
+    name: OpenAPI Specification
+    url: https://spec.openapis.org/oas/latest.html
+    offline_cache: true
+  - id: api-docs-best-practices
+    name: API Documentation Best Practices
+    url: https://swagger.io/resources/articles/best-practices-in-api-documentation/
+    offline_cache: true
+tooling:
+  analysis_tools:
+  - tool: openapi-generator
+    purpose: Validate OpenAPI specification
+    command: openapi-generator validate -i openapi.yaml
+  - tool: spectral
+    purpose: Lint OpenAPI specification
+    command: spectral lint openapi.yaml
+  comparison_commands:
+  - purpose: List endpoints in code
+    command: grep -rn '@.*Mapping\|@app\.\|router\.' --include='*.py' --include='*.java' --include='*.ts'
+      | grep -E '(get|post|put|delete|patch)' | head -30
+  - purpose: List endpoints in OpenAPI spec
+    command: yq '.paths | keys' openapi.yaml
+signals:
+  critical:
+  - id: APIREF-CRIT-001
+    signal: Public API has no reference documentation
+    evidence_indicators:
+    - No OpenAPI/Swagger specification
+    - No API reference pages
+    - Consumers report guessing at API behavior
+    explanation: |
+      Public APIs without documentation cannot be reliably consumed.
+      This severely limits API adoption and creates support burden.
+    remediation: Create comprehensive API reference documentation immediately
+  - id: APIREF-CRIT-002
+    signal: Documentation missing for >30% of endpoints
+    evidence_threshold: Coverage < 70%
+    explanation: |
+      Significant documentation gaps mean consumers cannot use
+      portions of the API without support assistance.
+    remediation: Audit and document all undocumented endpoints
+  high:
+  - id: APIREF-HIGH-001
+    signal: Request/response schemas not documented
+    evidence_indicators:
+    - No schema definitions in spec
+    - Example payloads missing
+    - Field types not specified
+    explanation: |
+      Without schema documentation, consumers cannot construct valid
+      requests or parse responses correctly.
+    remediation: Add complete schema definitions for all endpoints
+  - id: APIREF-HIGH-002
+    signal: API documentation out of sync with implementation
+    evidence_indicators:
+    - Documented endpoints don't exist
+    - Undocumented endpoints in production
+    - Parameter documentation incorrect
+    explanation: |
+      Out-of-sync documentation causes integration failures and
+      erodes trust in documentation accuracy.
+    remediation: Implement automated documentation validation
+  - id: APIREF-HIGH-003
+    signal: Required parameters not marked as required
+    evidence_indicators:
+    - Consumers get unexpected errors
+    - Required fields not indicated in docs
+    explanation: |
+      Missing required parameter documentation causes integration
+      failures that are frustrating to debug.
+    remediation: Mark all required parameters in documentation
+  medium:
+  - id: APIREF-MED-001
+    signal: Parameter constraints not documented
+    explanation: |
+      Without constraints (min/max, patterns, enums), consumers
+      submit invalid values causing errors.
+    remediation: Document all parameter constraints and validations
+  - id: APIREF-MED-002
+    signal: Response codes not comprehensively documented
+    remediation: Document all possible response codes and meanings
+  - id: APIREF-MED-003
+    signal: Deprecated endpoints not marked
+    remediation: Mark deprecated endpoints with deprecation notices
+  low:
+  - id: APIREF-LOW-001
+    signal: API documentation not versioned
+    remediation: Version documentation with API versions
+  - id: APIREF-LOW-002
+    signal: Documentation lacks changelog
+    remediation: Add changelog documenting API changes
+  positive:
+  - id: APIREF-POS-001
+    signal: 100% endpoint documentation coverage
+  - id: APIREF-POS-002
+    signal: Documentation auto-generated from code
+  - id: APIREF-POS-003
+    signal: Documentation includes complete schemas
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Extract Implemented Endpoints
+    description: |
+      Identify all API endpoints from source code or running
+      application.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find endpoints in code
+      command: grep -rn '@.*Mapping\|@app\.\|router\.' --include='*.py' --include='*.java' --include='*.ts'
+        src/
+    - purpose: Extract from running API
+      command: curl -s http://localhost:8080/v3/api-docs | jq '.paths | keys'
+    expected_findings:
+    - Complete endpoint inventory
+    - HTTP methods per endpoint
+  - id: '2'
+    name: Extract Documented Endpoints
+    description: |
+      Parse API documentation to identify documented endpoints.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Parse OpenAPI spec
+      command: yq '.paths | keys[]' openapi.yaml
+    - purpose: Count documented endpoints
+      command: yq '.paths | length' openapi.yaml
+    expected_findings:
+    - Documented endpoint list
+    - Documentation source identified
+  - id: '3'
+    name: Calculate Coverage
+    description: |
+      Compare implemented vs documented endpoints to calculate
+      documentation coverage.
+    duration_estimate: 30 min
+    expected_findings:
+    - Coverage percentage
+    - List of undocumented endpoints
+    - List of over-documented (stale) endpoints
+  - id: '4'
+    name: Evaluate Documentation Quality
+    description: |
+      Review documented endpoints for documentation completeness.
+    duration_estimate: 60 min
+    quality_checklist:
+    - Endpoint description present
+    - All parameters documented
+    - Request body schema defined
+    - Response schemas defined
+    - Response codes documented
+    - Examples provided
+    - Authentication requirements noted
+    expected_findings:
+    - Quality scores per endpoint
+    - Common quality gaps
+  - id: '5'
+    name: Validate Schema Accuracy
+    description: |
+      Verify documented schemas match actual API behavior.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Test endpoint against schema
+      command: curl -s http://localhost:8080/api/resource | ajv validate -s schema.json
+    expected_findings:
+    - Schema validation results
+    - Discrepancies identified
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coverage Analysis
+    - Quality Assessment
+    - Accuracy Validation
+    - Recommendations
+  - type: coverage_report
+    format: table
+    description: Endpoint-by-endpoint documentation status
+  confidence_guidance:
+    high: Automated validation of all endpoints
+    medium: Manual review of sample endpoints
+    low: Existence check only
+closeout_checklist:
+- id: apiref-001
+  item: All public endpoints documented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Compare implemented vs documented endpoints
+  expected: 100% coverage for public APIs
+- id: apiref-002
+  item: Request/response schemas complete
+  level: BLOCKING
+  verification: spectral lint openapi.yaml --ruleset schema-required
+  expected: No missing schemas
+- id: apiref-003
+  item: Documentation validated against implementation
+  level: WARNING
+  verification: manual
+  verification_notes: Test documented behavior against actual API
+  expected: No significant discrepancies
+- id: apiref-004
+  item: Required parameters marked
+  level: WARNING
+  verification: yq '.paths.*.*.parameters[] | select(.required == true)' openapi.yaml
+  expected: All required params marked
+governance:
+  applicable_to:
+    archetypes:
+    - api-service
+    - microservice
+    - public-api
+relationships:
+  commonly_combined:
+  - documentation-knowledge.api-documentation.openapi-spec-quality
+  - documentation-knowledge.api-documentation.api-examples-coverage
+  feeds_into:
+  - developer-experience.api-usability
+  - api-management.adoption-metrics

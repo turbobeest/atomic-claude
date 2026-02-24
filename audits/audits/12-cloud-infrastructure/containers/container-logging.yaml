@@ -1,0 +1,389 @@
+# ============================================================
+# AUDIT FILE: Container Logging
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.containers.container-logging"
+  name: "Container Logging"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "containers"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines container logging configurations including log output to stdout/stderr,
+    log aggregation pipelines, log format standardization, log retention policies,
+    sensitive data handling in logs, and integration with centralized logging
+    systems. Evaluates whether logs are properly structured, collected, and
+    available for debugging and security analysis.
+
+  why_it_matters: |
+    Effective logging is essential for debugging, monitoring, security analysis,
+    and compliance. Poor logging practices can result in lost debugging context,
+    security blind spots, compliance violations from missing audit trails, or
+    data breaches from logged sensitive information. Containerized environments
+    require specific logging patterns due to ephemeral container lifetimes.
+
+  when_to_run:
+    - "Before deploying new services to production"
+    - "After logging-related incidents or debugging difficulties"
+    - "During security and compliance audits"
+    - "When implementing or upgrading log aggregation systems"
+
+prerequisites:
+  required_artifacts:
+    - type: "container-logs"
+      description: "Access to container log output"
+    - type: "logging-infrastructure"
+      description: "Log aggregation and storage systems"
+
+  access_requirements:
+    - "kubectl logs access"
+    - "Access to log aggregation system (ELK, Loki, CloudWatch)"
+    - "Application configuration for log format settings"
+
+discovery:
+  file_patterns:
+    - glob: "**/fluentd*.yaml"
+      purpose: "Fluentd logging configurations"
+    - glob: "**/fluent-bit*.yaml"
+      purpose: "Fluent Bit configurations"
+    - glob: "**/filebeat*.yaml"
+      purpose: "Filebeat configurations"
+    - glob: "**/promtail*.yaml"
+      purpose: "Promtail/Loki configurations"
+    - glob: "**/logging*.yaml"
+      purpose: "General logging configurations"
+
+  code_patterns:
+    - pattern: "console\\.log|print\\(|fmt\\.Print"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect unstructured logging patterns"
+    - pattern: "password|secret|token|key"
+      type: "regex"
+      scope: "source"
+      purpose: "Check for potential sensitive data logging"
+    - pattern: "LOG_LEVEL|LOGGING|logger"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify logging configuration"
+    - pattern: "json|structured"
+      type: "keyword"
+      scope: "config"
+      purpose: "Check for structured logging setup"
+
+knowledge_sources:
+  specifications:
+    - id: "12-factor-logs"
+      name: "12-Factor App - Logs"
+      url: "https://12factor.net/logs"
+      offline_cache: true
+      priority: "required"
+    - id: "cis-kubernetes"
+      name: "CIS Kubernetes Benchmark"
+      url: "https://www.cisecurity.org/benchmark/kubernetes"
+      offline_cache: true
+      priority: "required"
+    - id: "nsa-kubernetes"
+      name: "NSA Kubernetes Hardening Guide"
+      url: "https://media.defense.gov/2022/Aug/29/2003066362/-1/-1/0/CTR_KUBERNETES_HARDENING_GUIDANCE_1.2_20220829.PDF"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "k8s-logging"
+      name: "Kubernetes Logging Architecture"
+      url: "https://kubernetes.io/docs/concepts/cluster-administration/logging/"
+      offline_cache: true
+    - id: "otel-logging"
+      name: "OpenTelemetry Logging"
+      url: "https://opentelemetry.io/docs/concepts/signals/logs/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Access container logs"
+      command: "kubectl logs <pod-name> --tail=100"
+    - tool: "stern"
+      purpose: "Multi-pod log tailing"
+      command: "stern <pod-pattern> --tail=50"
+    - tool: "fluentd"
+      purpose: "Log collection and forwarding"
+      command: "fluentd --dry-run -c fluent.conf"
+
+  scripts:
+    - id: "log-audit"
+      language: "bash"
+      purpose: "Basic logging audit"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Check log format (JSON vs plain) ==="
+        kubectl logs <pod> --tail=5 | head -1 | python -c "import sys,json; json.loads(sys.stdin.read())" && echo "JSON" || echo "Plain text"
+        echo "=== Check for sensitive data patterns ==="
+        kubectl logs <pod> --tail=1000 | grep -iE "(password|secret|token|api.?key)" | head -5
+
+signals:
+  critical:
+    - id: "CONTAINER-LOG-CRIT-001"
+      signal: "Sensitive data logged in plain text"
+      evidence_pattern: "Passwords, tokens, or keys visible in logs"
+      explanation: |
+        Logged sensitive data persists in log aggregation systems and
+        can be accessed by anyone with log access. This creates a
+        significant security and compliance risk.
+      remediation: "Implement log sanitization, mask sensitive fields"
+    - id: "CONTAINER-LOG-CRIT-002"
+      signal: "No log aggregation for production"
+      evidence_pattern: "Logs only available via kubectl logs"
+      explanation: |
+        Without log aggregation, logs are lost when containers restart
+        or are replaced. Historical logs are unavailable for debugging
+        or security investigation.
+      remediation: "Implement centralized log aggregation (ELK, Loki, CloudWatch)"
+
+  high:
+    - id: "CONTAINER-LOG-HIGH-001"
+      signal: "Logs written to files instead of stdout"
+      evidence_pattern: "Logs written to /var/log or other file paths"
+      explanation: |
+        Container orchestrators expect logs on stdout/stderr. File-based
+        logging requires additional sidecars and can fill container
+        storage.
+      remediation: "Configure applications to log to stdout/stderr"
+    - id: "CONTAINER-LOG-HIGH-002"
+      signal: "No structured logging format"
+      evidence_pattern: "Plain text logs without consistent format"
+      explanation: |
+        Unstructured logs are difficult to parse, search, and analyze.
+        Log aggregation queries become complex and unreliable.
+      remediation: "Implement JSON or structured logging format"
+    - id: "CONTAINER-LOG-HIGH-003"
+      signal: "Missing correlation IDs in logs"
+      evidence_pattern: "No request_id or trace_id in log entries"
+      explanation: |
+        Without correlation IDs, tracing requests across services is
+        extremely difficult in distributed systems.
+      remediation: "Add correlation IDs and integrate with tracing systems"
+
+  medium:
+    - id: "CONTAINER-LOG-MED-001"
+      signal: "Excessive log verbosity in production"
+      evidence_pattern: "DEBUG level logging in production pods"
+      remediation: "Set appropriate log levels (INFO/WARN) for production"
+    - id: "CONTAINER-LOG-MED-002"
+      signal: "Inconsistent log formats across services"
+      evidence_pattern: "Different log schemas used by different services"
+      remediation: "Standardize log format across all services"
+    - id: "CONTAINER-LOG-MED-003"
+      signal: "Log retention too short"
+      evidence_pattern: "Logs older than 7 days not available"
+      remediation: "Configure appropriate retention based on requirements"
+
+  low:
+    - id: "CONTAINER-LOG-LOW-001"
+      signal: "Missing timestamp in logs"
+      remediation: "Include ISO8601 timestamps in all log entries"
+    - id: "CONTAINER-LOG-LOW-002"
+      signal: "No log sampling for high-volume services"
+      remediation: "Implement log sampling to reduce costs while maintaining visibility"
+
+  positive:
+    - id: "CONTAINER-LOG-POS-001"
+      signal: "Structured JSON logging implemented"
+    - id: "CONTAINER-LOG-POS-002"
+      signal: "Centralized log aggregation with appropriate retention"
+    - id: "CONTAINER-LOG-POS-003"
+      signal: "Correlation IDs present for distributed tracing"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory logging configurations"
+      description: |
+        Identify logging configurations across all services including
+        log levels, formats, and output destinations.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check log output destinations"
+          command: "kubectl get pods -A -o json | jq '.items[] | {name: .metadata.name, containers: [.spec.containers[] | {name: .name, command: .command, args: .args}]}'"
+        - purpose: "Check logging agent pods"
+          command: "kubectl get pods -A | grep -E 'fluentd|fluent-bit|filebeat|promtail'"
+      expected_findings:
+        - "Logging configuration inventory"
+        - "Log aggregation agent status"
+
+    - id: "2"
+      name: "Analyze log format and structure"
+      description: |
+        Examine actual log output to verify format, structure, and
+        consistency across services.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Sample logs from various services"
+          command: "kubectl logs <pod> --tail=10"
+        - purpose: "Check if logs are JSON"
+          command: "kubectl logs <pod> --tail=1 | jq . 2>/dev/null && echo 'JSON format' || echo 'Not JSON'"
+      expected_findings:
+        - "Log format assessment"
+        - "Structured logging adoption status"
+
+    - id: "3"
+      name: "Check for sensitive data in logs"
+      description: |
+        Search logs for potentially sensitive information that
+        should not be logged.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Search for sensitive patterns"
+          command: "kubectl logs <pod> --tail=1000 | grep -iE '(password|secret|token|bearer|authorization|api.?key|private.?key)' | head -10"
+        - purpose: "Check for PII patterns"
+          command: "kubectl logs <pod> --tail=1000 | grep -iE '(ssn|credit.?card|\\b[0-9]{3}-[0-9]{2}-[0-9]{4}\\b)' | head -10"
+      expected_findings:
+        - "Sensitive data exposure assessment"
+        - "PII logging violations"
+
+    - id: "4"
+      name: "Verify log aggregation pipeline"
+      description: |
+        Confirm logs are being collected and stored in centralized
+        logging system.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check logging agent config"
+          command: "kubectl get configmap -n logging -o yaml"
+        - purpose: "Check logging agent metrics"
+          command: "kubectl logs -n logging -l app=fluentd --tail=50"
+      expected_findings:
+        - "Log aggregation pipeline health"
+        - "Collection coverage verification"
+
+    - id: "5"
+      name: "Assess correlation and tracing"
+      description: |
+        Verify logs include correlation IDs and can be used for
+        distributed tracing.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check for trace IDs"
+          command: "kubectl logs <pod> --tail=100 | grep -iE '(trace.?id|request.?id|correlation.?id|x-request-id)'"
+      expected_findings:
+        - "Correlation ID implementation status"
+        - "Tracing integration assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Logging Architecture Assessment"
+        - "Security and Compliance Findings"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct log inspection, aggregation query results"
+    medium: "Configuration analysis, sampling-based assessment"
+    low: "Inferred from limited log samples"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "12-factor-logs"
+        priority: "required"
+      - source_id: "k8s-logging"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires live log inspection"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "container-logging-001"
+    item: "No sensitive data in logs"
+    level: "CRITICAL"
+    verification: "kubectl logs <pod> --tail=1000 | grep -iEc '(password|secret|token).*=' | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "container-logging-002"
+    item: "Log aggregation pipeline operational"
+    level: "CRITICAL"
+    verification: "kubectl get pods -n logging -l app=fluentd -o json | jq '.items[].status.phase' | grep -q Running && echo PASS || echo FAIL"
+    expected: "PASS"
+  - id: "container-logging-003"
+    item: "Logs output to stdout/stderr"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify application configuration outputs to stdout/stderr"
+    expected: "Confirmed by reviewer"
+  - id: "container-logging-004"
+    item: "Structured logging implemented"
+    level: "WARNING"
+    verification: "kubectl logs <pod> --tail=1 | jq . && echo PASS || echo FAIL"
+    expected: "PASS"
+  - id: "container-logging-005"
+    item: "Correlation IDs present in logs"
+    level: "WARNING"
+    verification: "kubectl logs <pod> --tail=100 | grep -qiE '(trace|request|correlation).?id' && echo PASS || echo FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.2", "CC7.3"]
+    - framework: "PCI-DSS"
+      controls: ["10.2", "10.3", "10.5"]
+    - framework: "HIPAA"
+      controls: ["164.312(b)"]
+    - framework: "GDPR"
+      controls: ["Article 30", "Article 32"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.containers.container-orchestration"
+    - "cloud-infrastructure.service-mesh.observability-integration"
+    - "cloud-infrastructure.cloud-security.cloud-audit-logging"

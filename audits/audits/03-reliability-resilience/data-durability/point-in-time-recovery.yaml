@@ -1,0 +1,281 @@
+# ============================================================
+# AUDIT: Point-in-Time Recovery Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-durability.point-in-time-recovery"
+  name: "Point-in-Time Recovery Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-durability"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates point-in-time recovery (PITR) capability for databases
+    including write-ahead log (WAL) archiving, transaction log backup,
+    PITR configuration, and recovery procedures. Examines the granularity
+    of recovery (to the second vs to the backup) and the retention of
+    transaction logs.
+
+  why_it_matters: |
+    Point-in-time recovery enables restoring a database to any moment
+    before a data corruption or accidental deletion event. Without PITR,
+    recovery is limited to the last snapshot, potentially losing hours
+    of transactions. PITR is essential for achieving low RPO and for
+    recovering from logical data corruption.
+
+  when_to_run:
+    - "During database architecture review"
+    - "When defining RPO requirements"
+    - "After data loss incidents"
+    - "During compliance audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure"
+      description: "Database configuration"
+    - type: "documentation"
+      description: "RPO requirements"
+
+  access_requirements:
+    - "Database admin access"
+    - "Cloud console or CLI access"
+    - "Transaction log storage access"
+
+discovery:
+  code_patterns:
+    - pattern: "wal.*archive|archive_mode|point.?in.?time|PITR|binlog"
+      type: "regex"
+      scope: "config"
+      purpose: "Find PITR configuration"
+
+  file_patterns:
+    - glob: "**/postgresql.conf"
+      purpose: "PostgreSQL configuration"
+    - glob: "**/my.cnf"
+      purpose: "MySQL configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "rds-pitr"
+      name: "Amazon RDS Point-in-Time Recovery"
+      url: "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PIT.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "postgres-pitr"
+      name: "PostgreSQL Continuous Archiving and PITR"
+      url: "https://www.postgresql.org/docs/current/continuous-archiving.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws cli"
+      purpose: "Check RDS PITR settings"
+      command: "aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,BackupRetentionPeriod,LatestRestorableTime]'"
+    - tool: "psql"
+      purpose: "Check PostgreSQL archive settings"
+      command: "SHOW archive_mode; SHOW archive_command;"
+
+signals:
+  critical:
+    - id: "DD-PITR-CRIT-001"
+      signal: "PITR not enabled for critical databases"
+      evidence_indicators:
+        - "archive_mode = off in PostgreSQL"
+        - "RDS BackupRetentionPeriod = 0"
+      explanation: |
+        Without PITR, recovery is limited to periodic snapshots.
+        Data changes between snapshots are permanently lost.
+      remediation: "Enable PITR with appropriate retention period"
+
+    - id: "DD-PITR-CRIT-002"
+      signal: "Transaction log storage has insufficient retention"
+      evidence_indicators:
+        - "WAL files deleted before backup retention period"
+        - "Binary logs expire before they can be used for recovery"
+      explanation: |
+        If transaction logs are deleted before they're needed,
+        PITR recovery to affected time points becomes impossible.
+      remediation: "Align transaction log retention with backup retention"
+
+  high:
+    - id: "DD-PITR-HIGH-001"
+      signal: "Transaction log archival not verified"
+      explanation: "Archive failures may go undetected until recovery is attempted"
+      remediation: "Monitor archive success and alert on failures"
+
+    - id: "DD-PITR-HIGH-002"
+      signal: "PITR recovery never tested"
+      explanation: "Untested recovery may fail when needed"
+      remediation: "Conduct regular PITR recovery drills"
+
+  medium:
+    - id: "DD-PITR-MED-001"
+      signal: "Transaction logs stored only in primary region"
+      remediation: "Replicate transaction logs to secondary region"
+
+    - id: "DD-PITR-MED-002"
+      signal: "No documented PITR recovery procedure"
+      remediation: "Document step-by-step PITR recovery process"
+
+  low:
+    - id: "DD-PITR-LOW-001"
+      signal: "PITR recovery time not measured"
+
+  positive:
+    - id: "DD-PITR-POS-001"
+      signal: "PITR enabled with retention exceeding RPO requirements"
+    - id: "DD-PITR-POS-002"
+      signal: "Regular PITR recovery testing documented"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Verify PITR Configuration"
+      description: |
+        Check PITR settings for all critical databases.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check RDS PITR status"
+          command: "aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,BackupRetentionPeriod,LatestRestorableTime]'"
+        - purpose: "Check PostgreSQL archive mode"
+          command: "psql -c 'SHOW archive_mode;'"
+      expected_findings:
+        - "PITR status per database"
+        - "Transaction log archival configuration"
+
+    - id: "2"
+      name: "Review Retention Alignment"
+      description: |
+        Verify transaction log retention matches recovery requirements.
+      duration_estimate: "30 min"
+      questions:
+        - "How far back can PITR recover?"
+        - "Is retention aligned with RPO requirements?"
+      expected_findings:
+        - "Recovery window per database"
+        - "RPO alignment assessment"
+
+    - id: "3"
+      name: "Verify Archive Health"
+      description: |
+        Confirm transaction logs are being archived successfully.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check archive status"
+          command: "aws rds describe-db-instances --query 'DBInstances[*].LatestRestorableTime'"
+      expected_findings:
+        - "Archive lag"
+        - "Archive failure history"
+
+    - id: "4"
+      name: "Test PITR Capability"
+      description: |
+        Conduct or review results of PITR recovery test.
+      duration_estimate: "45 min"
+      questions:
+        - "When was PITR last tested?"
+        - "What was the recovery time?"
+        - "Was data integrity verified after recovery?"
+      expected_findings:
+        - "Test results and timing"
+        - "Recovery procedure validation"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "PITR Configuration Analysis"
+        - "Recovery Capability Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Configuration review with PITR testing"
+    medium: "Configuration review with test result review"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "rds-pitr"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires database access and testing"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "pitr-001"
+    item: "PITR enabled for all critical databases"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify PITR configuration for each critical database"
+    expected: "Confirmed by reviewer"
+
+  - id: "pitr-002"
+    item: "Transaction log retention meets RPO requirements"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Compare retention period to documented RPO"
+    expected: "Confirmed by reviewer"
+
+  - id: "pitr-003"
+    item: "PITR recovery tested within last quarter"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review PITR test records and results"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["A1.2", "A1.3"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-durability.snapshot-strategy"
+    - "reliability-resilience.disaster-recovery.backup-restoration-testing"

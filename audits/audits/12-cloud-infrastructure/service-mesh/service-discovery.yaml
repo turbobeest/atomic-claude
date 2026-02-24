@@ -1,0 +1,378 @@
+# ============================================================
+# AUDIT FILE: Service Discovery
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.service-mesh.service-discovery"
+  name: "Service Discovery"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "service-mesh"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates service discovery mechanisms within the service mesh including
+    service registration, DNS resolution, endpoint discovery, health-aware
+    routing, multi-cluster discovery, and external service integration.
+    Examines how services locate and communicate with each other and
+    how failures are detected and handled.
+
+  why_it_matters: |
+    Service discovery is fundamental to microservice communication. Faulty
+    discovery can route traffic to unhealthy instances, cause service
+    unavailability, or create security risks through stale service records.
+    Proper service discovery ensures reliable communication and supports
+    dynamic scaling and deployment patterns.
+
+  when_to_run:
+    - "After service mesh installation or upgrades"
+    - "When experiencing intermittent service connectivity issues"
+    - "Before multi-cluster deployments"
+    - "During reliability engineering reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "service-mesh"
+      description: "Running service mesh with discovery capabilities"
+    - type: "service-configs"
+      description: "Kubernetes services and mesh service entries"
+
+  access_requirements:
+    - "kubectl access to query services and endpoints"
+    - "Access to mesh control plane"
+    - "DNS query capability within cluster"
+
+discovery:
+  file_patterns:
+    - glob: "**/service*.yaml"
+      purpose: "Kubernetes service definitions"
+    - glob: "**/serviceentry*.yaml"
+      purpose: "External service registrations"
+    - glob: "**/workloadentry*.yaml"
+      purpose: "Workload registrations"
+    - glob: "**/endpoints*.yaml"
+      purpose: "Endpoint configurations"
+
+  code_patterns:
+    - pattern: "ServiceEntry"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find external service definitions"
+    - pattern: "resolution:\\s*STATIC"
+      type: "regex"
+      scope: "config"
+      purpose: "Find static endpoint configurations"
+    - pattern: "location:\\s*MESH_EXTERNAL"
+      type: "regex"
+      scope: "config"
+      purpose: "Find external service entries"
+
+knowledge_sources:
+  specifications:
+    - id: "k8s-service-discovery"
+      name: "Kubernetes Service Discovery"
+      url: "https://kubernetes.io/docs/concepts/services-networking/service/"
+      offline_cache: true
+      priority: "required"
+    - id: "istio-discovery"
+      name: "Istio Service Discovery"
+      url: "https://istio.io/latest/docs/ops/configuration/traffic-management/service-entries/"
+      offline_cache: true
+      priority: "required"
+    - id: "nist-800-207"
+      name: "NIST SP 800-207: Zero Trust Architecture"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-207/final"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "multi-cluster"
+      name: "Multi-cluster Service Discovery"
+      url: "https://istio.io/latest/docs/setup/install/multicluster/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Query services and endpoints"
+      command: "kubectl get endpoints -A"
+    - tool: "istioctl"
+      purpose: "Analyze mesh service discovery"
+      command: "istioctl proxy-config endpoints <pod>"
+    - tool: "nslookup"
+      purpose: "Test DNS resolution"
+      command: "kubectl exec <pod> -- nslookup <service>"
+
+  scripts:
+    - id: "discovery-audit"
+      language: "bash"
+      purpose: "Audit service discovery"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Services without endpoints ==="
+        kubectl get endpoints -A -o json | jq -r '.items[] | select(.subsets == null or .subsets == []) | "\(.metadata.namespace)/\(.metadata.name)"'
+        echo "=== External ServiceEntries ==="
+        kubectl get serviceentries -A -o wide
+        echo "=== DNS resolution test ==="
+        kubectl exec deploy/test -it -- nslookup kubernetes.default.svc.cluster.local
+
+signals:
+  critical:
+    - id: "DISCOVERY-CRIT-001"
+      signal: "Services with no healthy endpoints"
+      evidence_pattern: "Endpoints resource with empty subsets"
+      explanation: |
+        Services without healthy endpoints cannot receive traffic.
+        This indicates all pods are unhealthy or no pods match
+        the service selector.
+      remediation: "Verify pod health, selector matching, and readiness probes"
+    - id: "DISCOVERY-CRIT-002"
+      signal: "DNS resolution failures in cluster"
+      evidence_pattern: "CoreDNS failures or DNS lookup timeouts"
+      explanation: |
+        DNS failures break service discovery for all services
+        using DNS-based discovery, causing widespread connectivity issues.
+      remediation: "Investigate CoreDNS health and scaling"
+
+  high:
+    - id: "DISCOVERY-HIGH-001"
+      signal: "Stale service endpoints"
+      evidence_pattern: "Endpoints pointing to terminated pods"
+      explanation: |
+        Stale endpoints cause traffic to be routed to non-existent
+        pods, resulting in connection failures.
+      remediation: "Verify endpoint controller health, check pod termination handling"
+    - id: "DISCOVERY-HIGH-002"
+      signal: "External services without ServiceEntry"
+      evidence_pattern: "Direct external calls without mesh registration"
+      explanation: |
+        External services not registered with the mesh bypass
+        traffic management, observability, and security features.
+      remediation: "Create ServiceEntry for all external dependencies"
+    - id: "DISCOVERY-HIGH-003"
+      signal: "Service selector mismatch"
+      evidence_pattern: "Service selector doesn't match any pod labels"
+      explanation: |
+        Mismatched selectors prevent pods from being discovered
+        by the service, causing service unavailability.
+      remediation: "Align service selectors with pod labels"
+
+  medium:
+    - id: "DISCOVERY-MED-001"
+      signal: "Headless services without explicit endpoints"
+      evidence_pattern: "ClusterIP: None without StatefulSet or explicit endpoints"
+      remediation: "Verify headless service configuration is intentional"
+    - id: "DISCOVERY-MED-002"
+      signal: "No health-aware endpoint selection"
+      evidence_pattern: "Traffic routed to pods without readiness probes"
+      remediation: "Implement readiness probes for health-aware routing"
+    - id: "DISCOVERY-MED-003"
+      signal: "Inconsistent service naming"
+      evidence_pattern: "Services not following naming conventions"
+      remediation: "Standardize service naming for easier discovery"
+
+  low:
+    - id: "DISCOVERY-LOW-001"
+      signal: "Services without proper annotations"
+      remediation: "Add descriptive annotations for service documentation"
+    - id: "DISCOVERY-LOW-002"
+      signal: "Excessive ServiceEntry count"
+      remediation: "Review and consolidate external service definitions"
+
+  positive:
+    - id: "DISCOVERY-POS-001"
+      signal: "All services have healthy endpoints"
+    - id: "DISCOVERY-POS-002"
+      signal: "External services properly registered with mesh"
+    - id: "DISCOVERY-POS-003"
+      signal: "DNS resolution working correctly"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory services and endpoints"
+      description: |
+        Collect all services and their endpoints to identify
+        discovery issues.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List all services"
+          command: "kubectl get svc -A -o wide"
+        - purpose: "List all endpoints"
+          command: "kubectl get endpoints -A"
+        - purpose: "Find services without endpoints"
+          command: "kubectl get endpoints -A -o json | jq -r '.items[] | select(.subsets == null) | \"\\(.metadata.namespace)/\\(.metadata.name)\"'"
+      expected_findings:
+        - "Service inventory"
+        - "Services without healthy endpoints"
+
+    - id: "2"
+      name: "Verify DNS resolution"
+      description: |
+        Test DNS resolution for services to ensure discovery
+        is working correctly.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Test internal DNS"
+          command: "kubectl exec <pod> -- nslookup <service>.<namespace>.svc.cluster.local"
+        - purpose: "Check CoreDNS health"
+          command: "kubectl get pods -n kube-system -l k8s-app=kube-dns"
+      expected_findings:
+        - "DNS resolution status"
+        - "CoreDNS health assessment"
+
+    - id: "3"
+      name: "Review service selectors"
+      description: |
+        Verify service selectors correctly match pod labels.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Get service selectors"
+          command: "kubectl get svc -A -o json | jq '.items[] | {namespace: .metadata.namespace, name: .metadata.name, selector: .spec.selector}'"
+        - purpose: "Check matching pods"
+          command: "kubectl get pods -A -l <selector-label> -o wide"
+      expected_findings:
+        - "Selector-to-pod mapping"
+        - "Mismatched selectors"
+
+    - id: "4"
+      name: "Audit external service entries"
+      description: |
+        Review ServiceEntry configurations for external service
+        discovery.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List ServiceEntries"
+          command: "kubectl get serviceentries -A -o yaml"
+        - purpose: "Check resolution type"
+          command: "kubectl get serviceentries -A -o json | jq '.items[] | {name: .metadata.name, resolution: .spec.resolution, endpoints: .spec.endpoints}'"
+      expected_findings:
+        - "External service inventory"
+        - "ServiceEntry configuration review"
+
+    - id: "5"
+      name: "Verify mesh endpoint discovery"
+      description: |
+        Check how the mesh discovers and routes to endpoints.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check proxy endpoints"
+          command: "istioctl proxy-config endpoints <pod> -o json"
+        - purpose: "Verify endpoint status"
+          command: "istioctl proxy-config clusters <pod> | grep -v HEALTHY"
+      expected_findings:
+        - "Mesh endpoint view"
+        - "Unhealthy endpoint detection"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Service Discovery Health"
+        - "External Service Integration"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct kubectl/istioctl verification"
+    medium: "Inferred from configuration analysis"
+    low: "Based on naming or convention violations"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-service-discovery"
+        priority: "required"
+      - source_id: "istio-discovery"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires live cluster inspection"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "service-discovery-001"
+    item: "All services have healthy endpoints"
+    level: "CRITICAL"
+    verification: "kubectl get endpoints -A -o json | jq '[.items[] | select(.subsets == null or .subsets == [])] | length' | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "service-discovery-002"
+    item: "DNS resolution working"
+    level: "CRITICAL"
+    verification: "kubectl exec <pod> -- nslookup kubernetes.default.svc.cluster.local && echo PASS || echo FAIL"
+    expected: "PASS"
+  - id: "service-discovery-003"
+    item: "External services registered with mesh"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify all external dependencies have ServiceEntry"
+    expected: "Confirmed by reviewer"
+  - id: "service-discovery-004"
+    item: "Service selectors match pods"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify service selectors correctly match pod labels"
+    expected: "Confirmed by reviewer"
+  - id: "service-discovery-005"
+    item: "CoreDNS healthy and scaled"
+    level: "WARNING"
+    verification: "kubectl get pods -n kube-system -l k8s-app=kube-dns -o json | jq '[.items[] | select(.status.phase==\"Running\")] | length' | awk '{print ($1>=2)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["A1.1", "A1.2"]
+    - framework: "ISO27001"
+      controls: ["A.17.2.1"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.service-mesh.service-mesh-security"
+    - "cloud-infrastructure.service-mesh.traffic-management"
+    - "cloud-infrastructure.containers.container-health-checks"

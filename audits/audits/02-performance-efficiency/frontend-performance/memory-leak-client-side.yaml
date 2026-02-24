@@ -1,0 +1,349 @@
+# ============================================================
+# MEMORY LEAK (CLIENT-SIDE) AUDIT
+# ============================================================
+# Identifies patterns that cause memory leaks in browser-based
+# JavaScript applications.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.frontend-performance.memory-leak-client-side"
+  name: "Memory Leak (Client-Side) Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "frontend-performance"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Identifies client-side memory leak patterns including forgotten event
+    listeners, detached DOM nodes, closure-based leaks, setInterval without
+    cleanup, and improper React/Vue lifecycle management. Examines code
+    patterns and uses heap profiling to detect actual leaks.
+
+  why_it_matters: |
+    Client-side memory leaks cause progressive performance degradation.
+    As memory usage grows, garbage collection pauses increase, causing
+    jank. Eventually, the tab may crash or become unresponsive. SPAs are
+    particularly vulnerable as users stay on the same page for extended periods.
+
+  when_to_run:
+    - "When memory usage grows over time"
+    - "During SPA development"
+    - "When users report slow pages after extended use"
+    - "After implementing subscription-based features"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "JavaScript/TypeScript source files"
+    - type: "deployed_application"
+      description: "Running application for heap profiling"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Chrome DevTools for memory profiling"
+
+discovery:
+  code_patterns:
+    - pattern: "addEventListener(?!.*removeEventListener)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find event listeners without cleanup"
+
+    - pattern: "setInterval(?!.*clearInterval)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find intervals without cleanup"
+
+    - pattern: "subscribe(?!.*unsubscribe|dispose)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find subscriptions without cleanup"
+
+    - pattern: "useEffect\\([^)]+\\)(?!.*return)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find useEffect without cleanup"
+
+  file_patterns:
+    - glob: "**/*.js"
+      purpose: "JavaScript files"
+    - glob: "**/*.ts"
+      purpose: "TypeScript files"
+    - glob: "**/*.tsx"
+      purpose: "React components"
+    - glob: "**/*.vue"
+      purpose: "Vue components"
+
+knowledge_sources:
+  guides:
+    - id: "memory-leaks"
+      name: "Finding and Fixing Memory Leaks"
+      url: "https://developer.chrome.com/docs/devtools/memory-problems/"
+      offline_cache: true
+
+    - id: "js-memory-management"
+      name: "JavaScript Memory Management"
+      url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Memory_Management"
+      offline_cache: true
+
+  learning_resources:
+    - id: "react-cleanup"
+      title: "React useEffect Cleanup"
+      type: "article"
+      reference: "https://react.dev/learn/synchronizing-with-effects#how-to-handle-the-effect-firing-twice-in-development"
+
+tooling:
+  static_analysis:
+    - tool: "ESLint (react-hooks/exhaustive-deps)"
+      purpose: "Detect missing cleanup in hooks"
+      offline_capable: true
+
+    - tool: "Chrome DevTools Memory"
+      purpose: "Heap snapshots and profiling"
+      offline_capable: false
+
+  scripts:
+    - id: "find-leak-patterns"
+      language: "bash"
+      purpose: "Find common memory leak patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find addEventListener without cleanup
+        grep -rn 'addEventListener' --include='*.js' --include='*.ts' --include='*.tsx' .
+        # Find setInterval without clearInterval
+        grep -rn 'setInterval' --include='*.js' --include='*.ts' --include='*.tsx' .
+        # Find useEffect without return
+        grep -rn 'useEffect(' --include='*.tsx' --include='*.jsx' -A10 . | grep -B5 '}, \[\]'
+
+signals:
+  critical:
+    - id: "MEMLEAK-CRIT-001"
+      signal: "Event listener added without cleanup"
+      evidence_pattern: "addEventListener[^}]*(?!removeEventListener)"
+      explanation: |
+        Event listeners prevent garbage collection of the elements and
+        closures they reference. Without removal, each navigation/render
+        adds more listeners, consuming memory indefinitely.
+      remediation: "Add removeEventListener in cleanup function, useEffect return, or componentWillUnmount"
+
+    - id: "MEMLEAK-CRIT-002"
+      signal: "setInterval without clearInterval"
+      evidence_pattern: "setInterval[^}]*(?!clearInterval)"
+      explanation: |
+        Intervals continue running even after components unmount.
+        They hold references preventing garbage collection and
+        may execute code on unmounted components.
+      remediation: "Store interval ID and call clearInterval in cleanup"
+
+  high:
+    - id: "MEMLEAK-HIGH-001"
+      signal: "useEffect without cleanup function"
+      evidence_pattern: "useEffect\\([^)]*=>\\s*\\{[^}]*\\}\\s*,\\s*\\[\\]\\)(?!.*return)"
+      explanation: |
+        useEffect hooks that set up subscriptions or listeners without
+        returning a cleanup function leak on every re-render and unmount.
+      remediation: "Return cleanup function from useEffect"
+
+    - id: "MEMLEAK-HIGH-002"
+      signal: "Observable subscription without unsubscribe"
+      evidence_pattern: "\\.subscribe\\((?!.*unsubscribe)"
+      explanation: |
+        RxJS and similar observable subscriptions must be unsubscribed
+        when components unmount to prevent memory leaks.
+      remediation: "Store subscription and call unsubscribe in cleanup"
+
+    - id: "MEMLEAK-HIGH-003"
+      signal: "Closure capturing large objects"
+      evidence_pattern: "function.*\\{.*large.*object.*\\}.*callback"
+      explanation: |
+        Closures capture their lexical scope. If a closure references
+        large objects and is long-lived (event handler, interval), those
+        objects cannot be garbage collected.
+      remediation: "Minimize closure scope, copy needed values instead of capturing objects"
+
+  medium:
+    - id: "MEMLEAK-MED-001"
+      signal: "DOM references stored in variables"
+      evidence_pattern: "const\\s+\\w+\\s*=\\s*document\\.(getElementById|querySelector)"
+      remediation: "Clear DOM references when elements are removed"
+
+    - id: "MEMLEAK-MED-002"
+      signal: "Cache without size limit"
+      evidence_pattern: "cache\\[|Map\\(\\)|new Set\\("
+      remediation: "Implement LRU cache or size limits"
+
+  low:
+    - id: "MEMLEAK-LOW-001"
+      signal: "Console.log in production"
+      evidence_pattern: "console\\.(log|debug|info)(?!.*NODE_ENV)"
+      remediation: "Remove console statements in production"
+
+  positive:
+    - id: "MEMLEAK-POS-001"
+      signal: "Proper cleanup in useEffect"
+      evidence_pattern: "useEffect.*return.*=>"
+
+    - id: "MEMLEAK-POS-002"
+      signal: "AbortController for fetch cleanup"
+      evidence_pattern: "AbortController|abort\\(\\)"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Find event listener patterns"
+      description: |
+        Locate all addEventListener calls and verify cleanup.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find event listeners"
+          command: "grep -rn 'addEventListener' --include='*.js' --include='*.ts' --include='*.tsx' ."
+        - purpose: "Find removals"
+          command: "grep -rn 'removeEventListener' --include='*.js' --include='*.ts' --include='*.tsx' ."
+      expected_findings:
+        - "Event listener usage"
+        - "Cleanup coverage"
+
+    - id: "2"
+      name: "Find timer patterns"
+      description: |
+        Locate setInterval and setTimeout calls and verify cleanup.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find intervals"
+          command: "grep -rn 'setInterval\\|setTimeout' --include='*.js' --include='*.ts' --include='*.tsx' ."
+        - purpose: "Find cleanup"
+          command: "grep -rn 'clearInterval\\|clearTimeout' --include='*.js' --include='*.ts' --include='*.tsx' ."
+      expected_findings:
+        - "Timer usage"
+        - "Cleanup coverage"
+
+    - id: "3"
+      name: "Check React/Vue lifecycle"
+      description: |
+        Verify cleanup in component lifecycle hooks.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find useEffect hooks"
+          command: "grep -rn 'useEffect' --include='*.tsx' --include='*.jsx' -A15 ."
+        - purpose: "Find Vue destroy hooks"
+          command: "grep -rn 'beforeDestroy\\|onUnmounted' --include='*.vue' ."
+      expected_findings:
+        - "Lifecycle hook coverage"
+        - "Missing cleanup"
+
+    - id: "4"
+      name: "Profile memory usage"
+      description: |
+        Use Chrome DevTools to take heap snapshots and identify leaks.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Take heap snapshots (DevTools)"
+          command: "DevTools > Memory > Take heap snapshot before and after navigation"
+      expected_findings:
+        - "Memory growth patterns"
+        - "Detached DOM nodes"
+        - "Growing object counts"
+
+    - id: "5"
+      name: "Check subscription patterns"
+      description: |
+        Find observable subscriptions and verify unsubscription.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find subscriptions"
+          command: "grep -rn '\\.subscribe(' --include='*.ts' --include='*.tsx' ."
+      expected_findings:
+        - "Subscription patterns"
+        - "Cleanup coverage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Memory Leak Patterns"
+        - "Heap Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Heap profiling shows memory growth"
+    medium: "Code patterns indicate likely leak"
+    low: "Potential issue requiring profiling to confirm"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "memory-leaks"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed profiling"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "memleak-001"
+    item: "All event listeners have cleanup"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Each addEventListener has corresponding removeEventListener"
+    expected: "Confirmed by reviewer"
+
+  - id: "memleak-002"
+    item: "All setInterval calls have cleanup"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Each setInterval has corresponding clearInterval"
+    expected: "Confirmed by reviewer"
+
+  - id: "memleak-003"
+    item: "useEffect hooks have cleanup functions"
+    level: "BLOCKING"
+    verification: "grep -rn 'useEffect' --include='*.tsx' -A10 . | grep -c 'return'"
+    expected: "Count matches useEffect count"
+
+governance:
+  applicable_to:
+    archetypes: ["webapp", "spa"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.frontend-performance.dom-size"
+    - "performance-efficiency.frontend-performance.core-web-vitals"

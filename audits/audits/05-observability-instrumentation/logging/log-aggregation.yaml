@@ -1,0 +1,294 @@
+audit:
+  id: observability-instrumentation.logging.log-aggregation
+  name: Log Aggregation Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: logging
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the log aggregation infrastructure including collection agents,
+    transport mechanisms, storage backends, and query capabilities. Reviews
+    whether all services are properly shipping logs to a central system,
+    latency from log generation to availability, and aggregation reliability.
+  why_it_matters: |
+    Centralized log aggregation is essential for troubleshooting distributed
+    systems. Without proper aggregation, operators must SSH into individual
+    servers to access logs, making incident response slow and correlation
+    across services impossible. Poor aggregation leads to blind spots during
+    outages when visibility is most critical.
+  when_to_run:
+  - Initial observability infrastructure setup
+  - After adding new services or environments
+  - When experiencing log gaps or delays
+  - During observability platform evaluation
+prerequisites:
+  required_artifacts:
+  - type: infrastructure_config
+    description: Log collector and aggregation system configuration
+  - type: deployment_manifests
+    description: Kubernetes manifests or deployment configs showing log agents
+  access_requirements:
+  - Access to log aggregation platform (ELK, Splunk, Datadog, etc.)
+  - Access to infrastructure configuration
+  - Read access to collector agent configurations
+discovery:
+  code_patterns:
+  - pattern: fluentd|fluent-bit|logstash|filebeat|vector|promtail
+    type: keyword
+    scope: config
+    purpose: Identify log shipping agents
+  - pattern: elasticsearch|splunk|datadog|cloudwatch|loki
+    type: keyword
+    scope: config
+    purpose: Identify log backends
+  file_patterns:
+  - glob: '**/fluent*.conf'
+    purpose: Fluentd/Fluent Bit configuration
+  - glob: '**/logstash*.conf'
+    purpose: Logstash pipeline configuration
+  - glob: '**/filebeat*.yml'
+    purpose: Filebeat configuration
+  - glob: '**/vector*.toml'
+    purpose: Vector configuration
+  metrics_queries:
+  - system: Prometheus
+    query: sum(rate(fluentd_output_status_emit_count[5m])) by (tag)
+    purpose: Log throughput by source
+    threshold: '> 0 for all expected sources'
+knowledge_sources:
+  guides:
+  - id: elk-best-practices
+    name: Elastic Stack Best Practices
+    url: https://www.elastic.co/guide/en/elasticsearch/reference/current/best-practices.html
+    offline_cache: true
+  - id: datadog-logging
+    name: Datadog Log Management
+    url: https://docs.datadoghq.com/logs/
+    offline_cache: true
+  learning_resources:
+  - id: observability-engineering
+    title: Observability Engineering
+    type: book
+    reference: O'Reilly Media - Log Aggregation Patterns
+tooling:
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: Inspect log collector daemonsets
+    command: kubectl get daemonsets -n logging
+  - tool: curl
+    purpose: Check log backend health
+    command: curl -s elasticsearch:9200/_cluster/health
+  monitoring_queries:
+  - system: Prometheus
+    query: fluentd_output_status_buffer_queue_length
+    purpose: Check for log buffering/backpressure
+  scripts:
+  - id: check-log-coverage
+    language: bash
+    purpose: Verify all services are sending logs
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Checking log collector deployment ==="
+      kubectl get daemonsets -n logging -o wide
+      echo "=== Checking for services missing logs ==="
+      # Compare running pods vs unique log sources
+signals:
+  critical:
+  - id: LOG-AGG-CRIT-001
+    signal: No centralized log aggregation system in place
+    evidence_indicators:
+    - No log collector agents deployed
+    - Logs only available on individual hosts
+    explanation: |
+      Without centralized aggregation, troubleshooting requires direct host access,
+      making incident response slow and cross-service correlation impossible.
+    remediation: Deploy a log aggregation stack (ELK, Loki, Datadog, etc.)
+  - id: LOG-AGG-CRIT-002
+    signal: Services not shipping logs to aggregation system
+    evidence_indicators:
+    - Missing log entries for specific services
+    - Log collector not running on all nodes
+    explanation: Gaps in log coverage create blind spots during incidents
+    remediation: Ensure log collectors run on all nodes and collect from all services
+  high:
+  - id: LOG-AGG-HIGH-001
+    signal: Significant log ingestion delay (>5 minutes)
+    explanation: Delayed logs reduce effectiveness during active incidents
+    remediation: Investigate collector buffering, network issues, or backend capacity
+  - id: LOG-AGG-HIGH-002
+    signal: Log collector experiencing backpressure
+    explanation: Buffered logs may be lost during collector restart or high load
+    remediation: Scale collector resources or add buffer persistence
+  medium:
+  - id: LOG-AGG-MED-001
+    signal: No dead letter queue for failed log ingestion
+    remediation: Configure fallback storage for logs that fail to ship
+  - id: LOG-AGG-MED-002
+    signal: Single point of failure in log pipeline
+    remediation: Add redundancy to log collectors and backends
+  low:
+  - id: LOG-AGG-LOW-001
+    signal: Log collector using excessive resources
+  positive:
+  - id: LOG-AGG-POS-001
+    signal: All services shipping logs with <1 minute latency
+  - id: LOG-AGG-POS-002
+    signal: High availability log aggregation infrastructure
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify log aggregation infrastructure
+    description: |
+      Discover what log collection and aggregation systems are deployed,
+      including agents, transport, and storage backends.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find log collector deployments
+      command: kubectl get daemonsets,deployments -A | grep -i 'fluent\|logstash\|filebeat\|vector\|promtail'
+    - purpose: Find log backend services
+      command: kubectl get services -A | grep -i 'elastic\|loki\|splunk'
+    expected_findings:
+    - Log collector type and deployment model
+    - Log backend system identification
+  - id: '2'
+    name: Verify log coverage
+    description: |
+      Confirm that all services and environments are shipping logs to
+      the aggregation system without gaps.
+    duration_estimate: 25 min
+    commands:
+    - purpose: List unique log sources in backend
+      command: curl -s 'elasticsearch:9200/_cat/indices?v' | grep logs
+    - purpose: Compare running services vs log sources
+      command: kubectl get pods -A --no-headers | wc -l
+    questions:
+    - Are all namespaces/services represented in logs?
+    - Are all environments (staging, prod) aggregated?
+    expected_findings:
+    - Coverage percentage
+    - Missing services or environments
+  - id: '3'
+    name: Measure log ingestion latency
+    description: |
+      Determine the time between log generation and availability
+      in the aggregation system.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Generate test log and measure appearance time
+      command: echo 'AUDIT_TEST_LOG_$(date +%s)' | logger && sleep 60 && curl -s 'elasticsearch:9200/logs-*/_search?q=AUDIT_TEST_LOG'
+    expected_findings:
+    - Ingestion latency measurement
+    - Latency consistency across services
+  - id: '4'
+    name: Assess pipeline reliability
+    description: |
+      Evaluate the reliability of the log pipeline including buffering,
+      retry mechanisms, and failure handling.
+    duration_estimate: 25 min
+    questions:
+    - What happens when the backend is unavailable?
+    - Is there buffer persistence for collector restarts?
+    - Are there alerts for log pipeline failures?
+    expected_findings:
+    - Buffer configuration
+    - Failure handling mechanisms
+    - Alerting coverage
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Infrastructure Overview
+    - Coverage Analysis
+    - Latency Assessment
+    - Reliability Evaluation
+    - Recommendations
+  confidence_guidance:
+    high: Direct measurement and verification of log pipeline
+    medium: Configuration review without runtime verification
+    low: Inferred from documentation or incomplete data
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: elk-best-practices
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime verification
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: log-agg-001
+  item: Log collector agents running on all nodes
+  level: CRITICAL
+  verification: kubectl get daemonset -n logging -o jsonpath='{.items[0].status.numberReady}' | xargs
+    -I {} test {} -gt 0 && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: log-agg-002
+  item: All services represented in log aggregation
+  level: BLOCKING
+  verification: manual
+  verification_notes: Compare list of running services with unique log sources in aggregation system
+  expected: Confirmed by reviewer
+- id: log-agg-003
+  item: Log ingestion latency under 5 minutes
+  level: WARNING
+  verification: manual
+  verification_notes: Generate test log and measure time to appearance in aggregation system
+  expected: Latency < 300 seconds
+- id: log-agg-004
+  item: Alerting configured for log pipeline failures
+  level: WARNING
+  verification: manual
+  verification_notes: Verify alerts exist for collector failures, backend unavailability
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.2
+    - CC7.3
+    - CC7.4
+  - framework: PCI-DSS
+    controls:
+    - '10.5'
+    - '10.7'
+relationships:
+  commonly_combined:
+  - observability-instrumentation.logging.structured-logging
+  - observability-instrumentation.logging.log-retention
+  - observability-instrumentation.logging.log-storage-cost

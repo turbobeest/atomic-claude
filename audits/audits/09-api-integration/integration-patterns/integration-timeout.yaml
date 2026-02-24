@@ -1,0 +1,351 @@
+audit:
+  id: api-integration.integration-patterns.integration-timeout
+  name: Integration Timeout Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: integration-patterns
+  tier: phd
+  estimated_duration: 75 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - reliability
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates timeout configuration for all integration points including
+    HTTP clients, database connections, message queues, and external
+    APIs. Analyzes connection timeouts, read timeouts, overall request
+    timeouts, and timeout handling.
+  why_it_matters: |
+    Missing or incorrect timeouts cause resource exhaustion, cascading
+    failures, and poor user experience. A single slow dependency without
+    timeout can hang all requests, exhaust thread pools, and bring
+    down the entire system.
+  when_to_run:
+  - Reliability assessments
+  - After timeout-related incidents
+  - Integration performance reviews
+  - Before adding new dependencies
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: HTTP client and integration code
+  - type: configuration
+    description: Connection and timeout configuration
+  access_requirements:
+  - Read access to integration code
+  - Access to configuration files
+discovery:
+  code_patterns:
+  - pattern: timeout|Timeout|TIMEOUT
+    type: regex
+    scope: source
+    purpose: Detect timeout configuration
+  - pattern: connect|connection|socket
+    type: regex
+    scope: source
+    purpose: Detect connection handling
+  - pattern: deadline|expire|ttl
+    type: regex
+    scope: source
+    purpose: Detect alternative timeout patterns
+  file_patterns:
+  - glob: '**/config/**'
+    purpose: Configuration files
+  - glob: '**/clients/**'
+    purpose: HTTP clients
+  - glob: '**/*client*.ts'
+    purpose: Client implementations
+knowledge_sources:
+  specifications:
+  - id: building-microservices
+    name: Sam Newman - Building Microservices
+    url: https://www.oreilly.com/library/view/building-microservices-2nd/9781492034018/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: timeout-patterns
+    name: Timeout Best Practices
+    url: https://docs.microsoft.com/en-us/azure/architecture/patterns/timeout
+    offline_cache: true
+  - id: circuit-breaker
+    name: Circuit Breaker Pattern
+    url: https://docs.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker
+    offline_cache: true
+  learning_resources:
+  - id: resilience-engineering
+    title: Release It! Stability Patterns
+    type: book
+    reference: Michael Nygard
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect missing timeout patterns
+    offline_capable: true
+  scripts:
+  - id: timeout-scan
+    language: bash
+    purpose: Analyze timeout configuration
+    source: inline
+    code: |
+      echo "=== Integration Timeout Analysis ==="
+      echo "--- Timeout configuration ---"
+      grep -rn "timeout\|Timeout" \
+        --include="*.ts" --include="*.java" --include="*.py" --include="*.yaml" . 2>/dev/null | \
+        grep -v node_modules | head -40
+
+      echo "--- HTTP client configuration ---"
+      grep -rn "axios\|fetch\|HttpClient\|requests\." \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Database timeouts ---"
+      grep -rn "pool\|connection.*timeout\|query.*timeout" \
+        --include="*.ts" --include="*.java" --include="*.py" --include="*.yaml" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: IT-CRIT-001
+    signal: HTTP client with no timeout configured
+    evidence_pattern: fetch() or axios() without timeout option
+    explanation: |
+      HTTP clients without timeouts can hang indefinitely waiting
+      for slow or unresponsive services. This exhausts thread pools
+      and connection limits, causing cascading failures.
+    remediation: Configure connect and read timeouts on all HTTP clients
+  - id: IT-CRIT-002
+    signal: Database queries without timeout
+    evidence_pattern: Database queries run without statement timeout
+    explanation: |
+      Long-running queries without timeouts hold connections and
+      can lock tables indefinitely. This causes connection pool
+      exhaustion and blocks other queries.
+    remediation: Set statement_timeout or query timeout on all queries
+  high:
+  - id: IT-HIGH-001
+    signal: Timeout too generous for real-time paths
+    evidence_pattern: 60+ second timeout on user-facing requests
+    explanation: |
+      Long timeouts on user-facing paths create poor experience.
+      Users abandon requests before timeout, but server resources
+      remain tied up until timeout expires.
+    remediation: Use short timeouts (5-15 seconds) for user-facing paths
+  - id: IT-HIGH-002
+    signal: No separate connect vs read timeout
+    evidence_pattern: Single timeout for connection and read
+    explanation: |
+      Connect timeout should be short (1-5 seconds) since connection
+      should be quick. Read timeout can be longer for legitimate
+      slow responses. Combining them causes poor failure detection.
+    remediation: Configure separate connect and read timeouts
+  - id: IT-HIGH-003
+    signal: External API calls without individual timeouts
+    evidence_pattern: Third-party API calls use default/no timeout
+    explanation: |
+      External APIs are outside your control and can become slow
+      or unresponsive. Each external dependency should have explicit
+      timeout tuned to its expected latency.
+    remediation: Set explicit timeout per external API based on SLA
+  medium:
+  - id: IT-MED-001
+    signal: Timeouts not configurable per environment
+    evidence_pattern: Hardcoded timeout values
+    remediation: Make timeouts configurable via environment variables
+  - id: IT-MED-002
+    signal: No timeout for message queue operations
+    evidence_pattern: Queue publish/consume without timeout
+    remediation: Set timeouts on queue operations
+  - id: IT-MED-003
+    signal: Timeout errors not handled gracefully
+    evidence_pattern: Timeout throws generic error
+    remediation: Handle timeout errors with specific fallback behavior
+  low:
+  - id: IT-LOW-001
+    signal: Timeout values not documented
+    evidence_pattern: No documentation of timeout configuration
+    remediation: Document timeout values and rationale
+  positive:
+  - id: IT-POS-001
+    signal: All HTTP clients have explicit timeout
+    evidence_pattern: Timeout configured on every HTTP request
+  - id: IT-POS-002
+    signal: Separate connect and read timeouts
+    evidence_pattern: Different values for connection and read
+  - id: IT-POS-003
+    signal: Timeouts tuned per integration
+    evidence_pattern: Different timeouts for different services
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Integration Points
+    description: |
+      Find all external integration points.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find HTTP clients
+      command: |
+        grep -rn "axios\|fetch\|HttpClient\|http\.\|requests\." \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -40
+    - purpose: Find database connections
+      command: |
+        grep -rn "createConnection\|createPool\|connect\(" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Integration points
+    - Client types
+  - id: '2'
+    name: Analyze Timeout Configuration
+    description: |
+      Check timeout settings on all integrations.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find timeout configuration
+      command: |
+        grep -rn "timeout\|Timeout\|TIMEOUT" \
+          --include="*.ts" --include="*.java" --include="*.py" --include="*.yaml" . 2>/dev/null | \
+          grep -v node_modules | head -50
+    - purpose: Find default configs
+      command: |
+        grep -rn "createAxiosClient\|httpClient\(\|new.*Client" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Timeout presence
+    - Timeout values
+  - id: '3'
+    name: Review Database Timeouts
+    description: |
+      Check database query and connection timeouts.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find database timeout config
+      command: |
+        grep -rn "statement_timeout\|query.*timeout\|pool.*timeout" \
+          --include="*.ts" --include="*.java" --include="*.py" --include="*.yaml" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Query timeout
+    - Connection timeout
+  - id: '4'
+    name: Check External API Timeouts
+    description: |
+      Verify external APIs have explicit timeouts.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find external API calls
+      command: |
+        grep -rn "api\.\|api/\|/v[0-9]/" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -i "http\|fetch\|request" | grep -v node_modules | head -30
+    expected_findings:
+    - External API calls
+    - Timeout configuration
+  - id: '5'
+    name: Evaluate Timeout Handling
+    description: |
+      Check how timeout errors are handled.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find timeout error handling
+      command: |
+        grep -rn "TimeoutError\|timeout.*error\|catch.*timeout" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Error handling
+    - Fallback behavior
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - integration_inventory
+    - timeout_coverage
+    - timeout_values
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Timeout Coverage
+    - Risk Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Clear missing timeout on critical path
+    medium: Timeout exists but may be too generous
+    low: Requires load testing to confirm issues
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: timeout-patterns
+      priority: required
+    - source_id: circuit-breaker
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+    full:
+      included: true
+      priority: 1
+    reliability:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: it-001
+  item: All HTTP clients have timeout configured
+  level: CRITICAL
+  verification: |
+    grep -rn "timeout" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -i "axios\|fetch\|http" | grep -v node_modules | \
+      wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: it-002
+  item: Database queries have timeout
+  level: CRITICAL
+  verification: |
+    grep -rn "statement_timeout\|query.*timeout\|timeout" \
+      --include="*.ts" --include="*.java" --include="*.yaml" . 2>/dev/null | \
+      grep -i "database\|db\|sql\|pool" | grep -v node_modules | \
+      wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: it-003
+  item: Timeouts are configurable
+  level: WARNING
+  verification: |
+    grep -rn "TIMEOUT\|timeout.*env\|timeout.*config" \
+      --include="*.ts" --include="*.java" --include="*.yaml" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Reliability
+    - Performance Efficiency
+relationships:
+  commonly_combined:
+  - api-integration.integration-patterns.retry-pattern
+  - reliability-resilience.circuit-breaker.circuit-implementation
+  - reliability-resilience.timeout-management.timeout-configuration

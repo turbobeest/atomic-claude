@@ -1,0 +1,400 @@
+audit:
+  id: infrastructure-as-code.testing-validation.iac-integration-testing
+  name: IaC Integration Testing
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: testing-validation
+  tier: phd
+  estimated_duration: 3-5 hours  # median: 4h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates the implementation of integration testing for
+    Infrastructure as Code that provisions actual cloud resources (or uses
+    mock services like LocalStack) to verify real-world behavior.
+
+    Integration testing validates:
+    - Resources are created with correct configurations
+    - Cross-resource dependencies work correctly
+    - Network connectivity and security groups function as expected
+    - IAM permissions allow intended operations
+    - Outputs contain expected values
+
+    Tools examined include Terratest, kitchen-terraform, the native Terraform
+    testing framework with mocked providers, and LocalStack for AWS mocking.
+  why_it_matters: |
+    Unit tests cannot catch issues that only manifest when resources interact
+    with cloud APIs. Integration tests verify:
+    - Cloud provider API compatibility
+    - Resource interdependencies
+    - Actual network and security behavior
+    - Cross-module integration
+
+    Without integration testing:
+    - Module changes may break dependent modules
+    - Provider updates may introduce incompatibilities
+    - Security configurations may not work as intended
+    - Recovery procedures may fail when needed
+  when_to_run:
+  - When establishing IaC testing strategy
+  - Before releasing new module versions
+  - After upgrading Terraform or provider versions
+  - During infrastructure reliability assessment
+prerequisites:
+  required_artifacts:
+  - type: terraform_configuration
+    description: Terraform modules and configurations to test
+  - type: test_infrastructure
+    description: Testing environment (cloud account, LocalStack, etc.)
+  access_requirements:
+  - Cloud credentials for test environment
+  - Permissions to create/destroy test resources
+  - Access to test result artifacts
+discovery:
+  code_patterns:
+  - pattern: terratest|gruntwork
+    type: keyword
+    scope: source
+    purpose: Find Terratest test implementations
+  - pattern: go_test|testing\.T
+    type: regex
+    scope: source
+    purpose: Identify Go-based infrastructure tests
+  - pattern: localstack
+    type: keyword
+    scope: config
+    purpose: Detect LocalStack mock cloud usage
+  - pattern: mock_provider|override_resource
+    type: regex
+    scope: source
+    purpose: Find Terraform native mock configurations
+  - pattern: terraform\.Apply|terraform\.Destroy
+    type: regex
+    scope: source
+    purpose: Identify Terratest apply/destroy operations
+  file_patterns:
+  - glob: '**/test/**/*_test.go'
+    purpose: Terratest Go test files
+  - glob: '**/tests/**/*.tftest.hcl'
+    purpose: Native Terraform integration test files
+  - glob: '**/docker-compose*.yml'
+    purpose: LocalStack container configurations
+  - glob: '**/Makefile'
+    purpose: Test automation targets
+  - glob: '**/*.tftest.hcl'
+    purpose: HCL test files with run blocks
+knowledge_sources:
+  specifications:
+  - id: terratest-docs
+    name: Terratest Documentation
+    url: https://terratest.gruntwork.io/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: terraform-testing-guide
+    name: HashiCorp Testing Guide
+    url: https://developer.hashicorp.com/terraform/language/tests
+    offline_cache: true
+  - id: localstack-terraform
+    name: LocalStack with Terraform
+    url: https://docs.localstack.cloud/user-guide/integrations/terraform/
+    offline_cache: true
+  - id: gruntwork-testing-practices
+    name: Gruntwork Testing Best Practices
+    url: https://terratest.gruntwork.io/docs/testing-best-practices/testing-best-practices-overview/
+    offline_cache: true
+  papers:
+  - id: localstack-terratest
+    title: 'go-localstack: LocalStack integration with Terratest'
+    url: https://github.com/elgohr/go-localstack
+tooling:
+  static_analysis:
+  - tool: go vet
+    purpose: Validates Go test code
+    offline_capable: true
+  infrastructure_tools:
+  - tool: terratest
+    purpose: Go library for infrastructure testing with real resources
+    command: go test -v -timeout 30m ./test/...
+  - tool: terraform test
+    purpose: Native HCL-based integration tests
+    command: terraform test
+  - tool: LocalStack
+    purpose: Local AWS cloud simulation for testing
+    command: localstack start -d
+  - tool: kitchen-terraform
+    purpose: Test Kitchen driver for Terraform testing
+    command: bundle exec kitchen test
+  scripts:
+  - id: terratest-example
+    language: go
+    purpose: Example Terratest integration test structure
+    source: inline
+    code: |
+      package test
+
+      import (
+          "testing"
+          "github.com/gruntwork-io/terratest/modules/terraform"
+          "github.com/stretchr/testify/assert"
+      )
+
+      func TestVpcModule(t *testing.T) {
+          t.Parallel()
+
+          terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
+              TerraformDir: "../modules/vpc",
+              Vars: map[string]interface{}{
+                  "cidr_block": "10.0.0.0/16",
+                  "environment": "test",
+              },
+          })
+
+          defer terraform.Destroy(t, terraformOptions)
+          terraform.InitAndApply(t, terraformOptions)
+
+          vpcId := terraform.Output(t, terraformOptions, "vpc_id")
+          assert.NotEmpty(t, vpcId)
+      }
+signals:
+  critical:
+  - id: IAC-INT-CRIT-001
+    signal: No integration testing for infrastructure modules
+    evidence_pattern: Absence of *_test.go files or integration *.tftest.hcl
+    explanation: |
+      Without integration testing, module changes are only validated when
+      deployed to production, risking outages and security incidents.
+      Real cloud provider behavior cannot be verified through unit tests alone.
+    remediation: |
+      Implement integration testing using Terratest or native Terraform tests:
+      1. Create test/ directory with *_test.go files for critical modules
+      2. Use LocalStack for cost-effective AWS testing
+      3. Configure dedicated cloud test account for real resource validation
+      4. Add defer terraform.Destroy() to ensure cleanup
+  high:
+  - id: IAC-INT-HIGH-001
+    signal: Integration tests exist but no automated cleanup
+    evidence_pattern: Missing 'defer.*Destroy' or cleanup mechanisms
+    explanation: |
+      Tests that don't clean up resources cause cost accumulation and
+      potential security exposure from orphaned infrastructure.
+    remediation: |
+      Always implement cleanup:
+      - Terratest: defer terraform.Destroy(t, terraformOptions)
+      - Native tests: Use run blocks with command = destroy
+      - CI/CD: Add cleanup job that runs on failure
+  - id: IAC-INT-HIGH-002
+    signal: Integration tests not running in CI/CD pipeline
+    evidence_pattern: No terratest or terraform test in CI configuration
+    explanation: |
+      Tests that only run locally are often skipped, allowing regressions
+      to reach production environments.
+    remediation: |
+      Add integration tests to CI/CD with appropriate triggers:
+      - Run on module changes
+      - Schedule nightly for cost control
+      - Use feature flags to control expensive test execution
+  medium:
+  - id: IAC-INT-MED-001
+    signal: Tests not running in parallel
+    evidence_pattern: Missing t.Parallel() in Go tests
+    remediation: |
+      Add t.Parallel() to Terratest functions to reduce execution time:
+      func TestModule(t *testing.T) {
+          t.Parallel()
+          // ... test code
+      }
+  - id: IAC-INT-MED-002
+    signal: No test isolation between environments
+    remediation: |
+      Use unique naming with random suffixes to prevent resource conflicts:
+      terraform.Options{
+        Vars: map[string]interface{}{
+          "name_prefix": fmt.Sprintf("test-%s", random.UniqueId()),
+        },
+      }
+  low:
+  - id: IAC-INT-LOW-001
+    signal: Test timeouts not configured appropriately
+    remediation: 'Set appropriate timeouts: go test -timeout 30m'
+  positive:
+  - id: IAC-INT-POS-001
+    signal: Comprehensive Terratest coverage with LocalStack for cost control
+  - id: IAC-INT-POS-002
+    signal: Tests verify both resource creation and actual functionality
+  - id: IAC-INT-POS-003
+    signal: Integration tests run automatically in CI/CD
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory integration test infrastructure
+    description: |
+      Identify all integration testing implementations including Terratest,
+      native Terraform tests, LocalStack configurations, and CI/CD integration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find Terratest files
+      command: find . -name '*_test.go' -type f | head -30
+    - purpose: Find native integration tests
+      command: find . -name '*.tftest.hcl' -exec grep -l 'command = apply' {} \; | head -20
+    - purpose: Check for LocalStack
+      command: grep -r 'localstack' . --include='*.yml' --include='*.yaml' --include='*.go' | head -20
+    - purpose: Check CI/CD for integration tests
+      command: grep -r 'terratest\|terraform test\|go test' .github/ .gitlab-ci.yml 2>/dev/null | head
+        -20
+    expected_findings:
+    - Terratest implementation locations
+    - Mock infrastructure configurations
+    - CI/CD integration status
+  - id: '2'
+    name: Analyze test coverage by module
+    description: |
+      Map which modules have integration test coverage and identify gaps
+      in testing critical infrastructure components.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List modules
+      command: find . -name 'main.tf' -exec dirname {} \; | sort -u
+    - purpose: Match tests to modules
+      command: |
+        for module in $(find ./modules -maxdepth 1 -type d 2>/dev/null); do
+          name=$(basename $module)
+          if grep -rq "$name" ./test/ 2>/dev/null; then
+            echo "COVERED: $name"
+          else
+            echo "MISSING: $name"
+          fi
+        done
+    expected_findings:
+    - Module coverage percentage
+    - Critical modules without tests
+  - id: '3'
+    name: Review test implementation quality
+    description: |
+      Examine test code for best practices including cleanup, parallelization,
+      meaningful assertions, and proper error handling.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check for cleanup patterns
+      command: grep -r 'defer.*Destroy\|terraform.Destroy' ./test/ 2>/dev/null | wc -l
+    - purpose: Check for parallel execution
+      command: grep -r 't.Parallel()' ./test/ 2>/dev/null | wc -l
+    - purpose: Check assertion quality
+      command: grep -r 'assert\.' ./test/ 2>/dev/null | head -30
+    expected_findings:
+    - Cleanup implementation status
+    - Parallel test execution
+    - Assertion coverage
+  - id: '4'
+    name: Evaluate test environment isolation
+    description: |
+      Verify tests use isolated environments that won't interfere with
+      production or other test runs.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for unique naming
+      command: grep -r 'random.UniqueId\|uuid\|timestamp' ./test/ 2>/dev/null | head -20
+    - purpose: Check for dedicated test account
+      command: grep -r 'AWS_PROFILE\|test-account\|sandbox' ./test/ .github/ 2>/dev/null | head -20
+    expected_findings:
+    - Resource naming isolation
+    - Account/environment isolation
+  - id: '5'
+    name: Execute sample integration tests
+    description: |
+      Run integration tests (or a subset) to verify they execute correctly
+      and produce meaningful results.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Run tests with verbose output
+      command: go test -v -timeout 30m ./test/... 2>&1 | head -100
+    expected_findings:
+    - Test execution results
+    - Any failures or timeouts
+    - Resource creation/destruction success
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Integration Test Coverage Analysis
+    - Test Quality Assessment
+    - CI/CD Integration Review
+    - Recommendations
+  confidence_guidance:
+    high: Tests executed successfully with observable resource creation
+    medium: Test code reviewed but not executed
+    low: Only presence of test files verified
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: terratest-docs
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Integration tests are time-consuming
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      reason: Critical for production reliability
+closeout_checklist:
+- id: iac-int-001
+  item: Critical modules have integration test coverage
+  level: CRITICAL
+  verification: manual
+  verification_notes: Reviewer confirms VPC, IAM, and security modules have tests
+  expected: Confirmed by reviewer
+- id: iac-int-002
+  item: Tests implement proper cleanup
+  level: BLOCKING
+  verification: grep -r 'defer.*Destroy' ./test/ | wc -l
+  expected: '>0'
+- id: iac-int-003
+  item: Integration tests run in CI/CD
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify CI config includes integration test execution
+  expected: Confirmed by reviewer
+- id: iac-int-004
+  item: Test environments are isolated from production
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify tests use dedicated accounts/workspaces
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC8.1
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.testing-validation.iac-unit-testing
+  - infrastructure-as-code.testing-validation.plan-review-process
+  - infrastructure-as-code.cicd-integration.iac-pipeline

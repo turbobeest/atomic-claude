@@ -1,0 +1,397 @@
+audit:
+  id: infrastructure-as-code.testing-validation.iac-unit-testing
+  name: IaC Unit Testing
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: testing-validation
+  tier: phd
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the implementation and coverage of unit testing for
+    Infrastructure as Code configurations. It evaluates the use of terraform
+    validate, tflint, checkov, and the native Terraform testing framework to
+    verify module correctness without provisioning actual cloud resources.
+
+    Unit tests for IaC validate:
+    - Syntax correctness and HCL parsing
+    - Variable validation rules
+    - Resource configuration compliance
+    - Module interface contracts
+    - Conditional logic and expressions
+  why_it_matters: |
+    Unit testing forms the base of the IaC testing pyramid and provides rapid
+    feedback on configuration errors. Without unit tests:
+    - Syntax errors reach plan/apply stages, wasting time
+    - Invalid resource configurations cause deployment failures
+    - Security misconfigurations propagate to production
+    - Refactoring becomes risky without regression detection
+    - Teams lose confidence in making changes
+
+    Studies show that catching issues at the unit test level is 10-100x cheaper
+    than finding them in production.
+  when_to_run:
+  - Before implementing new Terraform modules
+  - When establishing IaC testing strategy
+  - After security audit identifies configuration issues
+  - During DevOps maturity assessment
+prerequisites:
+  required_artifacts:
+  - type: terraform_configuration
+    description: Terraform or OpenTofu configuration files
+  - type: module_source
+    description: Reusable module definitions to test
+  access_requirements:
+  - Read access to Terraform/OpenTofu configuration repository
+  - Ability to run terraform commands locally or in CI
+discovery:
+  code_patterns:
+  - pattern: terraform\s+validate
+    type: regex
+    scope: config
+    purpose: Check for terraform validate usage in scripts/CI
+  - pattern: \.tftest\.hcl$
+    type: regex
+    scope: source
+    purpose: Find native Terraform test files
+  - pattern: tflint
+    type: keyword
+    scope: config
+    purpose: Detect tflint linter configuration
+  - pattern: checkov|bridgecrew
+    type: regex
+    scope: config
+    purpose: Find security/compliance scanning tools
+  - pattern: validation\s*\{
+    type: regex
+    scope: source
+    purpose: Identify variable validation blocks
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform configuration files to analyze
+  - glob: '**/tests/**/*.tftest.hcl'
+    purpose: Native Terraform test files
+  - glob: '**/.tflint.hcl'
+    purpose: TFLint configuration
+  - glob: '**/.checkov.yaml'
+    purpose: Checkov configuration
+  - glob: '**/Makefile'
+    purpose: Check for test automation targets
+knowledge_sources:
+  specifications:
+  - id: terraform-testing-docs
+    name: HashiCorp Terraform Testing Documentation
+    url: https://developer.hashicorp.com/terraform/language/tests
+    offline_cache: true
+    priority: required
+  guides:
+  - id: gcp-terraform-testing
+    name: Google Cloud Terraform Testing Best Practices
+    url: https://cloud.google.com/docs/terraform/best-practices/testing
+    offline_cache: true
+  - id: tflint-docs
+    name: TFLint Documentation
+    url: https://github.com/terraform-linters/tflint
+    offline_cache: true
+  - id: checkov-docs
+    name: Checkov IaC Security Scanner
+    url: https://www.checkov.io/1.Welcome/Quick%20Start.html
+    offline_cache: true
+  papers:
+  - id: iac-testing-pyramid
+    title: The Infrastructure as Code Testing Pyramid
+    url: https://www.hashicorp.com/blog/testing-hashicorp-terraform
+tooling:
+  static_analysis:
+  - tool: terraform validate
+    purpose: Validates configuration syntax and internal consistency
+    offline_capable: true
+  - tool: tflint
+    purpose: Lints Terraform files for errors, best practices, and cloud-specific rules
+    offline_capable: true
+  - tool: checkov
+    purpose: Scans for security and compliance violations
+    offline_capable: true
+  - tool: terraform fmt
+    purpose: Validates consistent formatting
+    offline_capable: true
+  infrastructure_tools:
+  - tool: terraform test
+    purpose: Runs native HCL-based unit and integration tests
+    command: terraform test -filter=tests/unit
+  scripts:
+  - id: find-untested-modules
+    language: bash
+    purpose: Identifies Terraform modules without corresponding test files
+    source: inline
+    code: |
+      #!/bin/bash
+      # Find modules without test files
+      find . -name "main.tf" -type f | while read module; do
+        module_dir=$(dirname "$module")
+        test_dir="${module_dir}/tests"
+        if [ ! -d "$test_dir" ] || [ -z "$(ls -A $test_dir/*.tftest.hcl 2>/dev/null)" ]; then
+          echo "MISSING TESTS: $module_dir"
+        fi
+      done
+signals:
+  critical:
+  - id: IAC-UNIT-CRIT-001
+    signal: No unit testing implemented for Terraform configurations
+    evidence_pattern: Absence of *.tftest.hcl files and no tflint/checkov in CI
+    explanation: |
+      Complete absence of unit testing means syntax errors, security issues,
+      and misconfigurations are only discovered during deployment attempts,
+      causing failed deployments and potential security incidents.
+    remediation: |
+      Implement a minimum unit testing baseline:
+      1. Add terraform validate to CI pipeline
+      2. Configure tflint with cloud-specific rulesets
+      3. Add checkov for security scanning
+      4. Create *.tftest.hcl files for critical modules
+  high:
+  - id: IAC-UNIT-HIGH-001
+    signal: Missing variable validation blocks for sensitive inputs
+    evidence_pattern: variable.*\{[^}]*(?!validation)[^}]*\}
+    explanation: |
+      Variables without validation accept any input, allowing invalid
+      configurations to pass unit tests and fail at plan/apply time.
+    remediation: |
+      Add validation blocks to variables with expected formats:
+      variable "environment" {
+        validation {
+          condition     = contains(["dev", "staging", "prod"], var.environment)
+          error_message = "Environment must be dev, staging, or prod."
+        }
+      }
+  - id: IAC-UNIT-HIGH-002
+    signal: TFLint not configured or not running in CI
+    evidence_pattern: Absence of .tflint.hcl or tflint in CI config
+    explanation: |
+      TFLint catches cloud-specific issues like invalid instance types,
+      deprecated resources, and naming convention violations that
+      terraform validate misses.
+    remediation: |
+      Add .tflint.hcl configuration and integrate into CI:
+      plugin "aws" { enabled = true }
+      rule "terraform_naming_convention" { enabled = true }
+  medium:
+  - id: IAC-UNIT-MED-001
+    signal: No terraform fmt check in CI pipeline
+    evidence_pattern: Absence of 'terraform fmt -check' in CI
+    remediation: |
+      Add formatting check to CI: terraform fmt -check -recursive
+  - id: IAC-UNIT-MED-002
+    signal: Test files exist but no coverage metrics tracked
+    remediation: |
+      Track which modules have tests and aim for 100% critical module coverage
+  low:
+  - id: IAC-UNIT-LOW-001
+    signal: Inconsistent test file naming conventions
+    remediation: Standardize on *.tftest.hcl naming pattern
+  positive:
+  - id: IAC-UNIT-POS-001
+    signal: Comprehensive unit testing with tflint, checkov, and native tests
+  - id: IAC-UNIT-POS-002
+    signal: Variable validation blocks on all sensitive inputs
+  - id: IAC-UNIT-POS-003
+    signal: Pre-commit hooks enforce validation before commits
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory test infrastructure
+    description: |
+      Identify all unit testing tools and configurations present in the
+      codebase. Look for tflint, checkov, terraform test files, and CI
+      pipeline configurations.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find Terraform test files
+      command: find . -name '*.tftest.hcl' -type f
+    - purpose: Check for tflint configuration
+      command: find . -name '.tflint.hcl' -type f
+    - purpose: Check for checkov configuration
+      command: find . -name '.checkov.yaml' -o -name '.checkov.yml' | head -20
+    - purpose: Look for validation in CI configs
+      command: grep -r 'terraform validate\|tflint\|checkov' .github/ .gitlab-ci.yml Jenkinsfile 2>/dev/null
+        | head -50
+    expected_findings:
+    - List of test files and their locations
+    - Testing tools configured in the project
+    - CI pipeline test integration status
+  - id: '2'
+    name: Analyze variable validation coverage
+    description: |
+      Check what percentage of variables have validation blocks, focusing
+      on sensitive inputs like environment names, regions, and instance types.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Count variables with validation
+      command: grep -l 'validation {' **/*.tf 2>/dev/null | wc -l
+    - purpose: Find variables without validation
+      command: grep -B5 'variable.*{' **/*.tf | grep -A5 'variable' | grep -v 'validation' | head -50
+    expected_findings:
+    - Percentage of variables with validation
+    - High-risk variables lacking validation
+  - id: '3'
+    name: Run terraform validate
+    description: |
+      Execute terraform validate on all root modules to catch syntax and
+      configuration errors.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Validate all configurations
+      command: terraform init -backend=false && terraform validate
+    expected_findings:
+    - Validation pass/fail status
+    - Any syntax or reference errors
+  - id: '4'
+    name: Execute tflint analysis
+    description: |
+      Run tflint with appropriate plugins to identify cloud-specific issues
+      and best practice violations.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Run tflint
+      command: tflint --init && tflint --recursive
+    expected_findings:
+    - Linting errors and warnings
+    - Cloud-specific issues detected
+  - id: '5'
+    name: Run security scanning
+    description: |
+      Execute checkov or similar security scanner to identify compliance
+      and security issues in the configurations.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Run checkov scan
+      command: checkov -d . --framework terraform --compact
+    expected_findings:
+    - Security violations by severity
+    - Compliance check results
+  - id: '6'
+    name: Evaluate test coverage
+    description: |
+      Assess which modules have test coverage and identify gaps in testing.
+    duration_estimate: 15 min
+    commands:
+    - purpose: List modules without tests
+      command: |
+        for dir in $(find . -name 'main.tf' -exec dirname {} \\;); do
+          if [ ! -d "${dir}/tests" ]; then
+            echo "No tests: $dir"
+          fi
+        done
+    expected_findings:
+    - Modules with test coverage
+    - Critical modules lacking tests
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Unit Testing Coverage Analysis
+    - Tool Configuration Review
+    - Security Scan Results
+    - Recommendations
+  confidence_guidance:
+    high: Test files examined, tools executed, coverage calculated
+    medium: Configuration reviewed but tools not executed
+    low: Only file presence checked, no execution
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-testing-docs
+      priority: required
+    - source_id: tflint-docs
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: terraform validate is fast and catches critical issues
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      reason: Unit testing catches security misconfigurations early
+closeout_checklist:
+- id: iac-unit-001
+  item: terraform validate passes on all configurations
+  level: CRITICAL
+  verification: terraform validate
+  expected: Success
+- id: iac-unit-002
+  item: tflint configured and passing
+  level: BLOCKING
+  verification: test -f .tflint.hcl && tflint --recursive
+  expected: PASS
+- id: iac-unit-003
+  item: Security scanner (checkov) enabled
+  level: BLOCKING
+  verification: checkov -d . --framework terraform --check CKV_AWS_1 2>/dev/null && echo PASS || echo
+    FAIL
+  expected: PASS
+- id: iac-unit-004
+  item: Critical modules have test coverage
+  level: WARNING
+  verification: manual
+  verification_notes: Reviewer confirms critical modules have *.tftest.hcl files
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC8.1
+  - framework: ISO 27001
+    controls:
+    - A.14.2.8
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.testing-validation.iac-integration-testing
+  - infrastructure-as-code.testing-validation.plan-review-process
+  - infrastructure-as-code.cicd-integration.iac-pipeline
+
+  # Multi-tool IaC testing:
+  # Terraform:
+  #   terraform test
+  #   terratest (Go): go test -v ./test/
+  #   terraform-compliance: terraform-compliance -p plan.out -f features/
+  # Pulumi:
+  #   pulumi preview --expect-no-changes
+  #   pulumi up --dry-run
+  # CloudFormation:
+  #   taskcat test run
+  #   cfn-guard validate -d template.yaml -r rules/
+  # CDK:
+  #   npm test (Jest assertions)
+  #   cdk diff
+  # Ansible:
+  #   molecule test
+  #   ansible-test sanity

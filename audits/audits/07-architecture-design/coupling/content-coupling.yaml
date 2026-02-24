@@ -1,0 +1,354 @@
+audit:
+  id: architecture-design.coupling.content-coupling
+  name: Content Coupling Detection
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: architecture-design
+  category_number: 7
+  subcategory: coupling
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - architecture
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit detects content coupling - the tightest and most
+    pathological form of coupling where one module directly accesses
+    or modifies the internal data of another module, bypassing its
+    public interface. This includes reflection to access private fields,
+    direct memory manipulation, pointer arithmetic into foreign structures,
+    and package-private/friend access to internals.
+  why_it_matters: |
+    Content coupling is the worst coupling type because:
+    - Completely destroys encapsulation and information hiding
+    - Makes any internal change potentially breaking
+    - Creates invisible dependencies impossible to trace statically
+    - Prevents meaningful testing and mocking
+    - Often indicates security vulnerabilities
+    - Violates fundamental OOP principles
+    Any content coupling should be treated as critical technical debt.
+  when_to_run:
+  - During security audits
+  - When experiencing mysterious breakages after internal changes
+  - During architecture hardening
+  - Before modularizing a monolith
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Complete source code including test code
+  access_requirements:
+  - Read access to all source code
+  - Understanding of language-specific encapsulation mechanisms
+discovery:
+  code_patterns:
+  - pattern: \.getDeclaredField\(|\.setAccessible\(true\)
+    type: regex
+    scope: source
+    purpose: Java reflection accessing private fields
+  - pattern: getattr\(.*,\s*['"]_|setattr\(.*,\s*['"]_
+    type: regex
+    scope: source
+    purpose: Python accessing private attributes via reflection
+  - pattern: \[\s*['"]_\w+['"]\s*\]
+    type: regex
+    scope: source
+    purpose: JavaScript bracket notation for private properties
+  - pattern: friend\s+class|friend\s+void
+    type: regex
+    scope: source
+    purpose: C++ friend declarations
+  - pattern: unsafe\s*\{|\*mut\s+|\*const\s+
+    type: regex
+    scope: source
+    purpose: Rust unsafe blocks and raw pointers
+  - pattern: reinterpret_cast|const_cast
+    type: regex
+    scope: source
+    purpose: C++ dangerous casts
+  file_patterns:
+  - glob: '**/*.java'
+    purpose: Java source with potential reflection
+  - glob: '**/*.py'
+    purpose: Python dynamic attribute access
+  - glob: '**/*.cpp'
+    purpose: C++ friend and pointer manipulation
+  - glob: '**/*.rs'
+    purpose: Rust unsafe code
+knowledge_sources:
+  specifications:
+  - id: yourdon-constantine
+    name: Structured Design - Coupling Spectrum
+    url: https://en.wikipedia.org/wiki/Coupling_(computer_programming)
+    offline_cache: true
+    priority: required
+  guides:
+  - id: java-reflection-guide
+    name: Java Reflection API Best Practices
+    url: https://docs.oracle.com/javase/tutorial/reflect/
+    offline_cache: true
+  - id: ddd-evans
+    name: Domain-Driven Design Reference
+    url: https://www.domainlanguage.com/ddd/reference/
+    offline_cache: true
+  - id: clean-architecture
+    name: Clean Architecture
+    url: https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html
+    offline_cache: true
+  - id: pragmatic-programmer
+    name: Pragmatic Programmer Tips
+    url: https://pragprog.com/tips/
+    offline_cache: true
+  learning_resources:
+  - id: information-hiding
+    title: On the Criteria To Be Used in Decomposing Systems into Modules
+    type: paper
+    reference: David Parnas, 1972
+  - id: effective-java
+    title: Effective Java
+    type: book
+    reference: 'Joshua Bloch - Item 16: Favor composition over inheritance'
+tooling:
+  static_analysis:
+  - tool: SonarQube
+    purpose: Detect reflection usage and encapsulation violations
+    offline_capable: false
+  - tool: ErrorProne
+    purpose: Java static analysis for dangerous patterns
+    offline_capable: true
+  - tool: SpotBugs
+    purpose: Detect reflection and security issues
+    offline_capable: true
+  - tool: Clippy
+    purpose: Rust linter for unsafe code patterns
+    offline_capable: true
+  scripts:
+  - id: content-coupling-scanner
+    language: bash
+    purpose: Find content coupling indicators
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Java Reflection Access ==="
+      grep -rn "setAccessible\|getDeclaredField\|getDeclaredMethod" --include="*.java" | grep -v "Test"
+
+      echo "=== Python Private Attribute Access ==="
+      grep -rn "\._[a-z]\|getattr.*'_" --include="*.py" | grep -v "test_"
+
+      echo "=== C++ Friend Declarations ==="
+      grep -rn "friend class\|friend void" --include="*.cpp" --include="*.hpp"
+signals:
+  critical:
+  - id: CONTENT-CRIT-001
+    signal: Reflection used to access private fields in production code
+    evidence_pattern: setAccessible(true) followed by get/set on Field
+    explanation: |
+      Using reflection to bypass encapsulation destroys all guarantees
+      of the class's public contract. Any internal change will break
+      the calling code, and this coupling is invisible to refactoring tools.
+    remediation: Request proper API from owning module; if external, create wrapper
+  - id: CONTENT-CRIT-002
+    signal: Direct modification of another module's internal state
+    evidence_pattern: Field.set() on private field of foreign class
+    explanation: |
+      Directly modifying internal state bypasses all validation and
+      invariant checking, potentially corrupting object state.
+    remediation: Use setter methods; if none exist, request or extend the API
+  - id: CONTENT-CRIT-003
+    signal: Unsafe pointer manipulation to access private data
+    evidence_pattern: reinterpret_cast or pointer arithmetic into object
+    explanation: |
+      Pointer manipulation to access private data is undefined behavior
+      and creates the most fragile possible coupling.
+    remediation: Use proper language mechanisms; refactor to expose needed data
+  high:
+  - id: CONTENT-HIGH-001
+    signal: Package-private access used across logical boundaries
+    evidence_pattern: Classes in same package but different modules access internals
+    explanation: |
+      Java's package-private access can be abused when packages span
+      module boundaries, creating hidden coupling.
+    remediation: Properly modularize with module-info.java; use interfaces
+  - id: CONTENT-HIGH-002
+    signal: Python double-underscore name mangling bypassed
+    evidence_pattern: Accessing _ClassName__private_field directly
+    explanation: |
+      Python's name mangling is a convention for private access. Bypassing
+      it creates fragile coupling to implementation details.
+    remediation: Use public methods; request API changes if needed
+  medium:
+  - id: CONTENT-MED-001
+    signal: Reflection in test code accessing private methods
+    evidence_pattern: Test uses reflection to call private methods
+    remediation: Test via public API; consider if method should be package-private
+  - id: CONTENT-MED-002
+    signal: Friend class pattern overused
+    evidence_pattern: Multiple friend declarations in a class
+    remediation: Refactor to reduce need for friend access; use interfaces
+  low:
+  - id: CONTENT-LOW-001
+    signal: Reflection for legitimate framework purposes
+    remediation: Document clearly; ensure framework is mature and stable
+  positive:
+  - id: CONTENT-POS-001
+    signal: Strict encapsulation with no private access violations
+  - id: CONTENT-POS-002
+    signal: Use of module system to enforce boundaries
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Scan for reflection usage
+    description: |
+      Find all uses of reflection APIs that could access private
+      members across module boundaries.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find Java reflection
+      command: grep -rn 'setAccessible\|getDeclaredField\|getDeclaredMethod' --include='*.java' | grep
+        -v 'Test.java' | head -30
+    - purpose: Find Python reflection
+      command: grep -rn 'getattr.*_\|setattr.*_\|__dict__' --include='*.py' | grep -v 'test_' | head -30
+    expected_findings:
+    - Reflection usage locations
+    - Target classes being reflected upon
+  - id: '2'
+    name: Identify cross-module private access
+    description: |
+      Determine if reflection accesses internals of classes from
+      different modules/packages.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find private field names in reflection
+      command: grep -rn 'getDeclaredField.*"' --include='*.java' | grep -v Test | head -20
+    - purpose: Find package boundary violations
+      command: grep -rn 'import.*\.internal\.' --include='*.java' | head -20
+    expected_findings:
+    - Cross-module reflection targets
+    - Internal package imports
+  - id: '3'
+    name: Check for unsafe code patterns
+    description: |
+      In lower-level languages, find unsafe blocks and pointer
+      manipulation that could access foreign data.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find Rust unsafe blocks
+      command: grep -rn 'unsafe\s*{' --include='*.rs' | head -20
+    - purpose: Find C++ dangerous casts
+      command: grep -rn 'reinterpret_cast\|const_cast' --include='*.cpp' | head -20
+    expected_findings:
+    - Unsafe code locations
+    - Dangerous cast usage
+  - id: '4'
+    name: Analyze friend relationships
+    description: |
+      In C++, identify friend class declarations and assess
+      if they create inappropriate coupling.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find friend declarations
+      command: grep -rn 'friend class\|friend void' --include='*.cpp' --include='*.hpp' | head -20
+    expected_findings:
+    - Friend relationship map
+    - Over-exposed classes
+  - id: '5'
+    name: Assess test code reflection
+    description: |
+      Review test code for reflection that indicates missing
+      API or poor testability design.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find test reflection
+      command: grep -rn 'setAccessible' --include='*Test.java' --include='*Spec.java' | head -20
+    expected_findings:
+    - Testing patterns requiring reflection
+    - API gaps revealed by tests
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Content Coupling Violations
+    - Security Implications
+    - Remediation Plan
+  confidence_guidance:
+    high: Direct evidence of private access via reflection or pointer
+    medium: Pattern suggests content coupling, context needed
+    low: Potential content coupling in dynamic code
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: yourdon-constantine
+      priority: required
+    - source_id: information-hiding
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Critical coupling type, quick scan worthwhile
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: content-coupling-001
+  item: No production reflection accessing private fields
+  level: CRITICAL
+  verification: grep -rn 'setAccessible(true)' --include='*.java' | grep -v Test | wc -l
+  expected: 0 or documented exceptions
+- id: content-coupling-002
+  item: Cross-module internal access eliminated
+  level: CRITICAL
+  verification: manual
+  verification_notes: No imports from .internal. packages across module boundaries
+  expected: Confirmed by reviewer
+- id: content-coupling-003
+  item: Unsafe code justified and contained
+  level: BLOCKING
+  verification: manual
+  verification_notes: All unsafe blocks have documented justification
+  expected: Confirmed by reviewer
+- id: content-coupling-004
+  item: Test reflection documented as technical debt
+  level: WARNING
+  verification: manual
+  verification_notes: Test reflection tracked with API improvement tickets
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+    - Security
+  - framework: OWASP
+    controls:
+    - Broken Access Control
+relationships:
+  commonly_combined:
+  - architecture-design.coupling.tight-coupling-detection
+  - architecture-design.design-principles.open-closed-principle
+  - architecture-design.design-principles.dependency-inversion

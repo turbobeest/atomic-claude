@@ -1,0 +1,385 @@
+audit:
+  id: security-trust.cryptography.encryption-in-transit
+  name: Encryption in Transit Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: cryptography
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    Examines the implementation of encryption for data in transit across
+    all communication channels. Verifies TLS configuration, certificate
+    validation, cipher suite selection, and protection against downgrade
+    attacks. Covers HTTPS, database connections, API calls, message queues,
+    and internal service communication.
+  why_it_matters: |
+    Data in transit without encryption is vulnerable to eavesdropping,
+    man-in-the-middle attacks, and data tampering. CWE-319 (Cleartext
+    Transmission) is a critical vulnerability. NIST SP 800-52r2 mandates
+    TLS 1.2+ for federal systems, and TLS 1.3 is preferred for new
+    implementations.
+  when_to_run:
+  - Initial security assessment
+  - After TLS configuration changes
+  - Before production deployment
+  - During certificate renewals
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application with network communication
+  - type: configuration
+    description: TLS/SSL configuration files
+  access_requirements:
+  - Read access to source code
+  - Access to server configuration
+  - Access to network configuration
+discovery:
+  code_patterns:
+  - pattern: (http|HTTP):\/\/(?!localhost|127\.0\.0\.1)
+    type: regex
+    scope: source
+    purpose: Find unencrypted HTTP URLs
+  - pattern: (TLS|SSL|tls|ssl).*version|version.*(TLS|SSL)
+    type: regex
+    scope: source
+    purpose: Locate TLS version configuration
+  - pattern: (VERIFY_NONE|verify.*false|insecure|skip.*verify)
+    type: regex
+    scope: source
+    purpose: Find disabled certificate validation
+  - pattern: cipher.*(suite|list)|cipher.*(weak|export|null)
+    type: regex
+    scope: source
+    purpose: Find cipher suite configuration
+  - pattern: (createSecureContext|SSLContext|TLSSocket)
+    type: regex
+    scope: source
+    purpose: Locate TLS implementation
+  file_patterns:
+  - glob: '**/ssl/**'
+    purpose: SSL/TLS configuration
+  - glob: '**/nginx*.conf'
+    purpose: Nginx TLS settings
+  - glob: '**/apache*.conf'
+    purpose: Apache TLS settings
+  - glob: '**/config/https*'
+    purpose: HTTPS configuration
+knowledge_sources:
+  specifications:
+  - id: nist-sp-800-52r2
+    name: 'NIST SP 800-52r2: TLS Implementation Guidelines'
+    url: https://csrc.nist.gov/publications/detail/sp/800-52/rev-2/final
+    offline_cache: true
+    priority: required
+  - id: rfc-8446
+    name: 'RFC 8446: TLS 1.3'
+    url: https://www.rfc-editor.org/rfc/rfc8446
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-tls
+    name: OWASP Transport Layer Security Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
+    offline_cache: true
+  - id: mozilla-tls
+    name: Mozilla TLS Configuration Generator
+    url: https://ssl-config.mozilla.org/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect insecure TLS patterns
+    offline_capable: true
+  - tool: testssl.sh
+    purpose: TLS configuration testing
+    offline_capable: false
+  scripts:
+  - id: tls-search
+    language: bash
+    purpose: Find TLS configuration patterns
+    source: inline
+    code: |
+      # Search for TLS-related patterns
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs,conf,yaml}" \
+        -E "(TLS|SSL|https|HTTPS|verify|cipher)" .
+signals:
+  critical:
+  - id: EIT-CRIT-001
+    signal: Sensitive data sent over HTTP
+    evidence_pattern: (http|HTTP):\/\/(?!localhost|127\.0\.0\.1).*\.(api|auth|login|data)
+    cwe: CWE-319
+    explanation: |
+      Sensitive data is transmitted over unencrypted HTTP connections,
+      allowing eavesdroppers to intercept credentials, tokens, and data.
+    remediation: Use HTTPS for all external communication; redirect HTTP to HTTPS
+  - id: EIT-CRIT-002
+    signal: Certificate validation disabled
+    evidence_pattern: (VERIFY_NONE|verify.*false|rejectUnauthorized.*false|insecureSkipVerify)
+    cwe: CWE-295
+    explanation: |
+      TLS certificate validation is disabled, allowing man-in-the-middle
+      attacks with forged certificates.
+    remediation: Enable certificate validation; use proper CA certificates
+  - id: EIT-CRIT-003
+    signal: SSLv3 or TLS 1.0 enabled
+    evidence_pattern: (SSLv3|TLSv1\.0|TLS1_0|ssl3|tls1[^0-9])
+    cwe: CWE-326
+    explanation: |
+      Deprecated TLS versions (SSLv3, TLS 1.0, TLS 1.1) have known
+      vulnerabilities (POODLE, BEAST) and should be disabled.
+    remediation: Require minimum TLS 1.2; prefer TLS 1.3
+  high:
+  - id: EIT-HIGH-001
+    signal: Weak cipher suites allowed
+    evidence_pattern: (NULL|EXPORT|DES|RC4|MD5|SHA1).*cipher|cipher.*(NULL|EXPORT|DES|RC4)
+    cwe: CWE-327
+    explanation: |
+      Weak cipher suites allow cryptographic attacks and don't provide
+      adequate security for modern threats.
+    remediation: Use only strong cipher suites; prefer AEAD ciphers
+  - id: EIT-HIGH-002
+    signal: Self-signed certificate in production
+    evidence_pattern: self.?signed.*true|allowInvalidCertificates|accept.*self
+    cwe: CWE-295
+    explanation: |
+      Self-signed certificates don't provide identity verification
+      and enable man-in-the-middle attacks.
+    remediation: Use certificates from trusted Certificate Authorities
+  - id: EIT-HIGH-003
+    signal: Missing certificate hostname validation
+    evidence_pattern: (checkServerIdentity|verifyHostname|VERIFY_HOST).*false
+    cwe: CWE-297
+    explanation: |
+      Certificate hostname validation is disabled, allowing attackers
+      to present valid certificates from different domains.
+    remediation: Enable hostname verification on all TLS connections
+  medium:
+  - id: EIT-MED-001
+    signal: Mixed content (HTTP resources in HTTPS page)
+    evidence_pattern: http:\/\/[^'"]*\.(js|css|img|src)
+    cwe: CWE-319
+    remediation: Load all resources over HTTPS
+  - id: EIT-MED-002
+    signal: Missing HSTS header
+    evidence_pattern: (?!Strict-Transport-Security)
+    cwe: CWE-319
+    remediation: Enable HSTS with appropriate max-age
+  low:
+  - id: EIT-LOW-001
+    signal: OCSP stapling not configured
+    evidence_pattern: ocsp.*(?!stapling|on|enabled)
+    remediation: Enable OCSP stapling for certificate validation
+  positive:
+  - id: EIT-POS-001
+    signal: TLS 1.3 enforced
+    evidence_pattern: TLSv1\.3|TLS1_3|minVersion.*1\.3
+  - id: EIT-POS-002
+    signal: Modern cipher suites configured
+    evidence_pattern: ECDHE.*GCM|CHACHA20-POLY1305
+  - id: EIT-POS-003
+    signal: HSTS configured
+    evidence_pattern: Strict-Transport-Security|HSTS.*true
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Network Communication
+    description: |
+      Map all network communication including external APIs,
+      databases, message queues, and internal services.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find HTTP/HTTPS URLs
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "https?:\\/\\/[^'\"\\s]+" .
+    - purpose: Find network connection patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(connect|fetch|axios|request|http\\.get)" .
+    expected_findings:
+    - All external communication over HTTPS
+    - Internal service communication encrypted
+  - id: '2'
+    name: Analyze TLS Configuration
+    description: |
+      Review TLS version settings and cipher suite
+      configuration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find TLS version configuration
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs,conf,yaml}" -E \
+          "(TLS|SSL).*(version|1\\.[023]|1_[023])" .
+    - purpose: Find cipher suite configuration
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs,conf}" -E \
+          "(cipher|CIPHER).*(suite|list)" .
+    expected_findings:
+    - TLS 1.2+ required
+    - Strong cipher suites only
+  - id: '3'
+    name: Verify Certificate Validation
+    description: |
+      Ensure certificate validation is properly enabled
+      on all TLS connections.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find certificate validation settings
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(verify|VERIFY|rejectUnauthorized|insecure)" .
+    - purpose: Check for disabled validation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(verify.*false|VERIFY_NONE|insecureSkipVerify)" .
+    expected_findings:
+    - Certificate validation enabled
+    - No verification bypass
+  - id: '4'
+    name: Check Security Headers
+    description: |
+      Verify that appropriate security headers are set
+      for HTTPS responses.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find HSTS configuration
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs,conf}" -E \
+          "(Strict-Transport-Security|HSTS)" .
+    - purpose: Find other security headers
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs,conf}" -E \
+          "(X-Content-Type-Options|X-Frame-Options)" .
+    expected_findings:
+    - HSTS enabled
+    - Security headers configured
+  - id: '5'
+    name: Review Database/Service Connections
+    description: |
+      Verify that database and internal service connections
+      use TLS.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find database connection strings
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs,conf,yaml,env}" -E \
+          "(postgres|mysql|mongodb|redis):\\/\\/" .
+    - purpose: Check for TLS on connections
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs,conf}" -E \
+          "(sslMode|ssl=true|tls=true|useSSL)" .
+    expected_findings:
+    - Database connections use TLS
+    - Internal service communication encrypted
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - TLS Configuration Analysis
+    - Certificate Validation Assessment
+    - Recommendations
+  confidence_guidance:
+    high: TLS 1.2+ with proper validation across all channels
+    medium: TLS present but version or configuration concerns
+    low: TLS patterns found but configuration unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: nist-sp-800-52r2
+      priority: required
+    - source_id: owasp-tls
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: eit-001
+  item: No HTTP for sensitive data
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "http://.*api\|http://.*auth" . | wc -l
+  expected: '0'
+- id: eit-002
+  item: Certificate validation enabled
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(verify.*false\|VERIFY_NONE\|rejectUnauthorized.*false)" . | wc -l
+  expected: '0'
+- id: eit-003
+  item: Minimum TLS 1.2 required
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go,conf}" "(SSLv3\|TLSv1\\.0\|TLSv1\\.1)" . | wc -l
+  expected: '0'
+- id: eit-004
+  item: HSTS configured
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go,conf}" "Strict-Transport-Security\|HSTS" . | wc -l
+  expected: Greater than 0
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST SP 800-52r2
+    controls:
+    - TLS Implementation
+  - framework: PCI-DSS
+    controls:
+    - '4.1'
+  - framework: HIPAA
+    controls:
+    - 164.312(e)(1)
+  - framework: CWE
+    controls:
+    - CWE-319
+    - CWE-295
+    - CWE-326
+relationships:
+  commonly_combined:
+  - security-trust.cryptography.certificate-management
+  - security-trust.cryptography.encryption-at-rest
+  - security-trust.network-security.network-configuration

@@ -1,0 +1,328 @@
+# ============================================================
+# AUDIT FILE: Cost Anomaly Detection
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.cloud-cost.cost-anomaly-detection"
+  name: "Cost Anomaly Detection"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "cloud-cost"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates cost anomaly detection configuration including AWS Cost
+    Anomaly Detection monitors, alert thresholds, root cause analysis,
+    and anomaly response workflows. Examines detection coverage,
+    sensitivity settings, and integration with operational processes.
+
+  why_it_matters: |
+    Cost anomalies can indicate runaway resources, misconfigurations,
+    security incidents (cryptomining), or genuine business growth. Early
+    detection prevents unexpected bills and enables rapid response. Without
+    anomaly detection, issues may not be discovered until the monthly bill.
+
+  when_to_run:
+    - "During initial cloud setup"
+    - "Monthly cost reviews"
+    - "After experiencing unexpected cost spikes"
+    - "When onboarding new workloads"
+
+prerequisites:
+  required_artifacts:
+    - type: "cloud-account"
+      description: "Access to cost anomaly detection service"
+    - type: "cost-data"
+      description: "Historical cost data for baseline"
+
+  access_requirements:
+    - "Cost Explorer and anomaly detection access"
+    - "SNS notification configuration access"
+    - "Access to historical cost data"
+
+discovery:
+  file_patterns:
+    - glob: "**/anomaly*.tf"
+      purpose: "Anomaly detection configurations"
+    - glob: "**/cost-monitor*.yaml"
+      purpose: "Cost monitor configurations"
+
+  code_patterns:
+    - pattern: "aws_ce_anomaly_monitor"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find anomaly monitor definitions"
+    - pattern: "aws_ce_anomaly_subscription"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find anomaly subscriptions"
+
+knowledge_sources:
+  specifications:
+    - id: "aws-anomaly-detection"
+      name: "AWS Cost Anomaly Detection"
+      url: "https://docs.aws.amazon.com/cost-management/latest/userguide/manage-ad.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "finops-anomaly"
+      name: "FinOps Anomaly Detection"
+      url: "https://www.finops.org/framework/capabilities/anomaly-detection/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Query anomaly detection"
+      command: "aws ce get-anomaly-monitors"
+    - tool: "cost-explorer"
+      purpose: "View detected anomalies"
+      command: "aws ce get-anomalies --date-interval Start=<start>,End=<end>"
+
+  scripts:
+    - id: "anomaly-audit"
+      language: "bash"
+      purpose: "Audit anomaly detection configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Anomaly Monitors ==="
+        aws ce get-anomaly-monitors --query 'AnomalyMonitors[*].[MonitorArn,MonitorName,MonitorType,MonitorDimension]' --output table
+        echo "=== Anomaly Subscriptions ==="
+        aws ce get-anomaly-subscriptions --query 'AnomalySubscriptions[*].[SubscriptionArn,SubscriptionName,Threshold]' --output table
+        echo "=== Recent Anomalies ==="
+        aws ce get-anomalies --date-interval Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) --query 'Anomalies[*].[AnomalyId,RootCauses[0].Service,Impact.TotalImpact]' --output table
+
+signals:
+  critical:
+    - id: "ANOMALY-CRIT-001"
+      signal: "No anomaly detection configured"
+      evidence_pattern: "Zero anomaly monitors found"
+      explanation: |
+        Without anomaly detection, cost spikes go unnoticed until
+        the monthly bill. Significant overruns can accumulate before
+        discovery.
+      remediation: "Enable Cost Anomaly Detection for all services"
+    - id: "ANOMALY-CRIT-002"
+      signal: "Active anomalies not investigated"
+      evidence_pattern: "Open anomalies older than 7 days"
+      explanation: |
+        Unaddressed anomalies may indicate ongoing issues that
+        continue to incur excess costs.
+      remediation: "Investigate and resolve all detected anomalies"
+
+  high:
+    - id: "ANOMALY-HIGH-001"
+      signal: "Anomaly notifications not configured"
+      evidence_pattern: "Monitors without subscriptions"
+      explanation: |
+        Detected anomalies that aren't communicated provide no value.
+        Notifications must reach people who can investigate.
+      remediation: "Configure anomaly subscriptions with appropriate thresholds"
+    - id: "ANOMALY-HIGH-002"
+      signal: "Coverage gaps in anomaly monitoring"
+      evidence_pattern: "Major services not monitored"
+      explanation: |
+        Anomalies in unmonitored services will not be detected,
+        creating blind spots in cost visibility.
+      remediation: "Ensure all significant cost drivers are monitored"
+    - id: "ANOMALY-HIGH-003"
+      signal: "Detection threshold too high"
+      evidence_pattern: "Threshold > 50% of typical spend"
+      explanation: |
+        High thresholds mean significant anomalies go unreported.
+        Only extreme cost spikes trigger alerts.
+      remediation: "Lower thresholds to appropriate sensitivity"
+
+  medium:
+    - id: "ANOMALY-MED-001"
+      signal: "No root cause analysis workflow"
+      evidence_pattern: "Anomalies not linked to investigation process"
+      remediation: "Establish anomaly investigation runbook"
+    - id: "ANOMALY-MED-002"
+      signal: "Historical anomaly patterns not reviewed"
+      evidence_pattern: "No trend analysis of anomalies"
+      remediation: "Review anomaly history for systemic issues"
+    - id: "ANOMALY-MED-003"
+      signal: "Alert fatigue from false positives"
+      evidence_pattern: "High volume of non-actionable alerts"
+      remediation: "Tune thresholds to reduce false positives"
+
+  low:
+    - id: "ANOMALY-LOW-001"
+      signal: "Anomaly data not integrated with ITSM"
+      remediation: "Integrate anomalies with incident management"
+    - id: "ANOMALY-LOW-002"
+      signal: "No automated response for known patterns"
+      remediation: "Automate response for recurring anomaly types"
+
+  positive:
+    - id: "ANOMALY-POS-001"
+      signal: "Comprehensive anomaly monitoring in place"
+    - id: "ANOMALY-POS-002"
+      signal: "All anomalies investigated and resolved"
+    - id: "ANOMALY-POS-003"
+      signal: "Root cause analysis documented"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory anomaly monitors"
+      description: |
+        Identify all configured anomaly monitors and their scope.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "List monitors"
+          command: "aws ce get-anomaly-monitors"
+        - purpose: "Check monitor coverage"
+          command: "aws ce get-anomaly-monitors --query 'AnomalyMonitors[*].[MonitorName,MonitorType,MonitorDimension]'"
+      expected_findings:
+        - "Monitor inventory"
+        - "Coverage assessment"
+
+    - id: "2"
+      name: "Review subscription configuration"
+      description: |
+        Examine anomaly notification subscriptions and thresholds.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "List subscriptions"
+          command: "aws ce get-anomaly-subscriptions"
+        - purpose: "Check threshold settings"
+          command: "aws ce get-anomaly-subscriptions --query 'AnomalySubscriptions[*].[SubscriptionName,Threshold,ThresholdExpression]'"
+      expected_findings:
+        - "Subscription configuration"
+        - "Threshold appropriateness"
+
+    - id: "3"
+      name: "Review detected anomalies"
+      description: |
+        Examine recent anomalies and their resolution status.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Get recent anomalies"
+          command: "aws ce get-anomalies --date-interval Start=$(date -d '90 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d)"
+        - purpose: "Analyze root causes"
+          command: "aws ce get-anomalies --date-interval Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) --query 'Anomalies[*].[AnomalyId,RootCauses]'"
+      expected_findings:
+        - "Anomaly history"
+        - "Resolution status"
+
+    - id: "4"
+      name: "Assess response process"
+      description: |
+        Evaluate the workflow for investigating and resolving anomalies.
+      duration_estimate: "15 min"
+      questions:
+        - "Who receives anomaly alerts?"
+        - "What is the investigation process?"
+        - "How are resolutions documented?"
+      expected_findings:
+        - "Process assessment"
+        - "Workflow gaps"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Detection Coverage Analysis"
+        - "Anomaly Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct API queries, anomaly data"
+    medium: "Configuration analysis"
+    low: "Process review based"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-anomaly-detection"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires anomaly analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "cost-anomaly-detection-001"
+    item: "Anomaly detection monitors configured"
+    level: "CRITICAL"
+    verification: "aws ce get-anomaly-monitors --query 'AnomalyMonitors' | jq 'length' | awk '{print ($1>0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "cost-anomaly-detection-002"
+    item: "Anomaly subscriptions configured"
+    level: "CRITICAL"
+    verification: "aws ce get-anomaly-subscriptions --query 'AnomalySubscriptions' | jq 'length' | awk '{print ($1>0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "cost-anomaly-detection-003"
+    item: "No open anomalies older than 7 days"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check for unresolved anomalies"
+    expected: "Confirmed by reviewer"
+  - id: "cost-anomaly-detection-004"
+    item: "All major services covered by monitoring"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify top cost services have monitors"
+    expected: "Confirmed by reviewer"
+  - id: "cost-anomaly-detection-005"
+    item: "Investigation process documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify anomaly response runbook exists"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "FinOps"
+      controls: ["Anomaly Detection", "Forecasting"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.cloud-cost.budget-monitoring"
+    - "cloud-infrastructure.cloud-cost.cost-allocation"
+    - "cloud-infrastructure.cloud-security.security-monitoring"

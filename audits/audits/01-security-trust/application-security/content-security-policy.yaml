@@ -1,0 +1,421 @@
+audit:
+  id: security-trust.application-security.content-security-policy
+  name: Content Security Policy Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: application-security
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines Content Security Policy (CSP) implementation
+    including directive configuration, source restrictions, inline script
+    handling, and reporting configuration. It evaluates the effectiveness
+    of CSP in preventing XSS, data injection, and other code injection
+    attacks.
+  why_it_matters: |
+    CSP is the primary browser-side defense against XSS attacks. A properly
+    configured CSP can prevent script injection even when application code
+    has vulnerabilities. However, weak CSP with unsafe-inline or overly
+    permissive sources provides little protection. CSP is essential for
+    defense-in-depth against code injection attacks.
+  when_to_run:
+  - New application deployment
+  - After CSP policy changes
+  - Security assessment
+  - XSS remediation verification
+  - Compliance audits
+prerequisites:
+  required_artifacts:
+  - type: endpoint_list
+    description: Application URLs to test
+  - type: csp_policy
+    description: Current CSP policy documentation
+  access_requirements:
+  - HTTP access to application
+  - Browser developer console
+  - CSP report endpoint access if applicable
+discovery:
+  code_patterns:
+  - pattern: Content-Security-Policy|CSP
+    type: regex
+    scope: config
+    purpose: Identify CSP configuration
+  - pattern: default-src|script-src|style-src|img-src
+    type: regex
+    scope: config
+    purpose: Identify CSP directives
+  - pattern: unsafe-inline|unsafe-eval|unsafe-hashes
+    type: regex
+    scope: config
+    purpose: Identify weak CSP directives
+  file_patterns:
+  - glob: '**/security-headers*.conf'
+    purpose: Header configuration files
+  - glob: '**/csp*.js'
+    purpose: CSP middleware configuration
+  - glob: '**/helmet*.js'
+    purpose: Helmet.js security configuration
+knowledge_sources:
+  specifications:
+  - id: csp-level3
+    name: Content Security Policy Level 3
+    url: https://www.w3.org/TR/CSP3/
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-csp-cheatsheet
+    name: OWASP Content Security Policy Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html
+    offline_cache: true
+  - id: mdn-csp
+    name: MDN Content-Security-Policy
+    url: https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP
+    offline_cache: true
+  - id: csp-evaluator
+    name: Google CSP Evaluator
+    url: https://csp-evaluator.withgoogle.com/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Retrieve CSP header
+    command: curl -sI https://target | grep -i 'content-security-policy'
+  - tool: csp-evaluator
+    purpose: Analyze CSP effectiveness
+    command: Visit https://csp-evaluator.withgoogle.com/
+  scripts:
+  - id: csp-analysis
+    language: bash
+    purpose: Extract and analyze CSP directives
+    source: inline
+    code: |
+      #!/bin/bash
+      CSP=$(curl -sI "$1" | grep -i 'content-security-policy' | sed 's/.*: //')
+      echo "=== CSP Directives ==="
+      echo "$CSP" | tr ';' '\n'
+      echo "=== Unsafe Directives ==="
+      echo "$CSP" | grep -oE "unsafe-[a-z]+"
+signals:
+  critical:
+  - id: CSP-CRIT-001
+    signal: No Content-Security-Policy header
+    cwe_id: CWE-79
+    evidence_pattern: Content-Security-Policy.*not found
+    explanation: |
+      Without CSP, browsers have no policy-based restrictions on script
+      execution. XSS attacks have no browser-level mitigation, relying
+      entirely on application-level input validation.
+    remediation: Implement Content-Security-Policy header with strict default-src
+  - id: CSP-CRIT-002
+    signal: CSP with unsafe-inline allows inline scripts
+    cwe_id: CWE-79
+    evidence_pattern: script-src.*unsafe-inline|default-src.*unsafe-inline
+    explanation: |
+      unsafe-inline allows execution of inline scripts, which is the
+      primary XSS attack vector. This directive completely negates
+      CSP's XSS protection for script injection.
+    remediation: Remove unsafe-inline; use nonces or hashes for inline scripts
+  - id: CSP-CRIT-003
+    signal: CSP with unsafe-eval allows dynamic code execution
+    cwe_id: CWE-95
+    evidence_pattern: script-src.*unsafe-eval|default-src.*unsafe-eval
+    explanation: |
+      unsafe-eval allows eval(), Function(), and other dynamic code
+      execution. Attackers can exploit this to execute injected code
+      even without inline script tags.
+    remediation: Remove unsafe-eval; refactor code to avoid eval()
+  high:
+  - id: CSP-HIGH-001
+    signal: Overly permissive default-src
+    cwe_id: CWE-79
+    evidence_pattern: 'default-src.*\*|default-src.*https:'
+    explanation: |
+      Permissive default-src allows loading resources from many sources,
+      expanding the attack surface. Attackers may inject scripts from
+      allowed origins.
+    remediation: Set restrictive default-src 'self' or 'none'
+  - id: CSP-HIGH-002
+    signal: Script-src allows unsafe origins
+    cwe_id: CWE-79
+    evidence_pattern: script-src.*(\*|data:|blob:)
+    explanation: |
+      Allowing scripts from wildcards, data: URIs, or blob: enables
+      attackers to inject executable code without hosting it externally.
+    remediation: 'Remove wildcards and data:/blob: from script-src'
+  - id: CSP-HIGH-003
+    signal: Missing object-src restriction
+    cwe_id: CWE-79
+    evidence_pattern: (?!.*object-src)
+    explanation: |
+      Without object-src restriction, attackers can inject Flash or
+      other plugin content. object-src should be 'none' unless plugins
+      are required.
+    remediation: Add object-src 'none'
+  - id: CSP-HIGH-004
+    signal: base-uri not restricted
+    cwe_id: CWE-79
+    evidence_pattern: (?!.*base-uri)
+    explanation: |
+      Without base-uri restriction, attackers can inject <base> tags
+      to hijack relative URLs and redirect script loads.
+    remediation: Add base-uri 'self' or 'none'
+  medium:
+  - id: CSP-MED-001
+    signal: CSP in report-only mode
+    cwe_id: CWE-16
+    evidence_pattern: Content-Security-Policy-Report-Only
+    explanation: |
+      Report-only mode logs violations but doesn't block them. This is
+      useful for testing but provides no protection in production.
+    remediation: Move from report-only to enforcing mode after validation
+  - id: CSP-MED-002
+    signal: Missing frame-ancestors directive
+    cwe_id: CWE-1021
+    evidence_pattern: (?!.*frame-ancestors)
+    explanation: |
+      frame-ancestors provides clickjacking protection. While X-Frame-
+      Options exists, frame-ancestors is more flexible and is the
+      modern standard.
+    remediation: Add frame-ancestors 'none' or 'self'
+  - id: CSP-MED-003
+    signal: Nonces not used for inline scripts
+    evidence_indicators:
+    - Inline scripts present
+    - No nonce in CSP
+    - unsafe-inline used instead
+    explanation: |
+      Nonces are the preferred way to allow specific inline scripts
+      while blocking injected scripts. They're more secure than
+      unsafe-inline.
+    remediation: Implement nonce-based CSP for inline scripts
+  - id: CSP-MED-004
+    signal: No upgrade-insecure-requests directive
+    cwe_id: CWE-319
+    evidence_pattern: (?!.*upgrade-insecure-requests)
+    explanation: |
+      upgrade-insecure-requests automatically upgrades HTTP requests
+      to HTTPS, preventing mixed content issues.
+    remediation: Add upgrade-insecure-requests directive
+  low:
+  - id: CSP-LOW-001
+    signal: No CSP violation reporting configured
+    evidence_pattern: (?!.*report-uri|report-to)
+    explanation: |
+      Without violation reporting, security teams have no visibility
+      into blocked attacks or policy issues.
+    remediation: Configure report-uri or report-to for violation monitoring
+  positive:
+  - id: CSP-POS-001
+    signal: Strict CSP with nonces
+    explanation: Modern CSP implementation using nonces for inline scripts
+  - id: CSP-POS-002
+    signal: No unsafe directives
+    explanation: CSP doesn't use unsafe-inline or unsafe-eval
+  - id: CSP-POS-003
+    signal: CSP reporting enabled
+    explanation: Violation reporting provides visibility into attacks
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Retrieve CSP Header
+    description: |
+      Fetch the Content-Security-Policy header and extract all
+      directives for analysis.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Get CSP header
+      command: curl -sI https://target | grep -i 'content-security-policy'
+    - purpose: Check for report-only
+      command: curl -sI https://target | grep -i 'content-security-policy-report-only'
+    - purpose: Parse directives
+      command: curl -sI https://target | grep -i 'content-security-policy' | sed 's/;/\n/g'
+    expected_findings:
+    - Complete CSP policy
+    - All directive values
+  - id: '2'
+    name: Analyze CSP Effectiveness
+    description: |
+      Use CSP evaluation tools to identify weaknesses and bypass
+      possibilities.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for unsafe directives
+      command: curl -sI https://target | grep -i 'content-security-policy' | grep -oE 'unsafe-[a-z]+'
+    - purpose: Check for permissive sources
+      command: curl -sI https://target | grep -i 'content-security-policy' | grep -oE '(\*|data:|blob:)'
+    - purpose: Use Google CSP Evaluator
+      command: echo 'Visit https://csp-evaluator.withgoogle.com/ with the policy'
+    expected_findings:
+    - Unsafe directive usage
+    - Permissive source allowances
+  - id: '3'
+    name: Test CSP Enforcement
+    description: |
+      Verify that CSP actually blocks violations by attempting to
+      inject content.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Test inline script blocking (in browser console)
+      command: echo 'document.write("<script>alert(1)</script>")'
+    - purpose: Check browser console for CSP errors
+      command: Open DevTools > Console > Look for CSP violation messages
+    expected_findings:
+    - Violations properly blocked
+    - Console shows CSP errors for blocked content
+  - id: '4'
+    name: Review CSP Configuration
+    description: |
+      Examine server configuration to understand how CSP is set and
+      ensure consistency.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find CSP configuration
+      command: grep -rn 'Content-Security-Policy\|contentSecurityPolicy' config/ src/
+    - purpose: Check for environment differences
+      command: grep -rn 'CSP\|csp' config/*.env config/*.prod
+    expected_findings:
+    - CSP configuration location
+    - Environment-specific policies
+  - id: '5'
+    name: Check Consistency Across Pages
+    description: |
+      Verify CSP is applied consistently across all application pages
+      and endpoints.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Test multiple pages
+      command: for page in / /login /app /admin; do echo "$page:"; curl -sI "https://target$page" | grep
+        -i 'content-security-policy' | head -1; done
+    expected_findings:
+    - CSP presence on all pages
+    - Consistency of policy
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - CSP Policy Analysis
+    - Directive Review
+    - Bypass Assessment
+    - Recommendations
+  confidence_guidance:
+    high: CSP analyzed and tested, configuration reviewed
+    medium: Header analysis without enforcement testing
+    low: Based on header observation only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-csp-cheatsheet
+      priority: required
+    - source_id: mdn-csp
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: CSP audit requires detailed directive analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: csp-001
+  item: Content-Security-Policy header present
+  level: CRITICAL
+  verification: curl -sI https://$HOST 2>/dev/null | grep -qi 'content-security-policy' && echo 'PASS'
+    || echo 'FAIL'
+  expected: PASS
+- id: csp-002
+  item: No unsafe-inline in script-src
+  level: CRITICAL
+  verification: curl -sI https://$HOST 2>/dev/null | grep -i 'content-security-policy' | grep -qi 'unsafe-inline'
+    && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: csp-003
+  item: No unsafe-eval in script-src
+  level: CRITICAL
+  verification: curl -sI https://$HOST 2>/dev/null | grep -i 'content-security-policy' | grep -qi 'unsafe-eval'
+    && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: csp-004
+  item: object-src restricted
+  level: BLOCKING
+  verification: curl -sI https://$HOST 2>/dev/null | grep -i 'content-security-policy' | grep -qi 'object-src'
+    && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: csp-005
+  item: CSP in enforcing mode (not report-only)
+  level: BLOCKING
+  verification: curl -sI https://$HOST 2>/dev/null | grep -qi 'content-security-policy-report-only' &&
+    echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: csp-006
+  item: frame-ancestors directive present
+  level: WARNING
+  verification: curl -sI https://$HOST 2>/dev/null | grep -i 'content-security-policy' | grep -qi 'frame-ancestors'
+    && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP-ASVS
+    controls:
+    - 14.4.3
+    - 14.4.5
+  - framework: PCI-DSS
+    controls:
+    - 6.5.7
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-5
+relationships:
+  commonly_combined:
+  - security-trust.application-security.security-headers
+  - security-trust.application-security.clickjacking-protection
+  - security-trust.input-validation.xss-prevention

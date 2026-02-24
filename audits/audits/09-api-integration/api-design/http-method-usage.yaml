@@ -1,0 +1,315 @@
+# ============================================================
+# AUDIT: HTTP Method Usage Assessment
+# ============================================================
+# Evaluates correct usage of HTTP methods per RFC 7231 semantics
+# ============================================================
+
+audit:
+  id: "api-integration.api-design.http-method-usage"
+
+  name: "HTTP Method Usage Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "api-design"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)
+    are used according to RFC 7231 semantics. Examines safety (no side effects),
+    idempotency, and appropriate method selection for each operation type.
+
+  why_it_matters: |
+    Correct HTTP method usage enables proper caching, prevents unintended side
+    effects from prefetching/crawling, supports retry logic, and ensures
+    interoperability with HTTP infrastructure (proxies, CDNs, browsers).
+    Misuse can cause data corruption, security vulnerabilities, and cache poisoning.
+
+  when_to_run:
+    - "During API design reviews"
+    - "Before security assessments"
+    - "When debugging caching issues"
+    - "After API refactoring"
+
+prerequisites:
+  required_artifacts:
+    - type: "api-source"
+      description: "API route definitions and handlers"
+
+  access_requirements:
+    - "Read access to API source code"
+
+discovery:
+  code_patterns:
+    - pattern: "@(Get|Post|Put|Patch|Delete)Mapping"
+      type: "regex"
+      scope: "source"
+      purpose: "Spring HTTP method annotations"
+    - pattern: "app\\.(get|post|put|patch|delete|head|options)\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Express HTTP method handlers"
+    - pattern: "@(app|router)\\.(get|post|put|patch|delete)"
+      type: "regex"
+      scope: "source"
+      purpose: "FastAPI/Flask method decorators"
+
+  file_patterns:
+    - glob: "**/controllers/**/*.{java,ts,py}"
+      purpose: "Controller implementations"
+    - glob: "**/routes/**/*.{js,ts}"
+      purpose: "Route handlers"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc-7231"
+      name: "RFC 7231 - HTTP/1.1 Semantics and Content"
+      url: "https://datatracker.ietf.org/doc/html/rfc7231"
+      offline_cache: true
+      priority: "required"
+    - id: "rfc-5789"
+      name: "RFC 5789 - PATCH Method for HTTP"
+      url: "https://datatracker.ietf.org/doc/html/rfc5789"
+      offline_cache: true
+      priority: "required"
+    - id: "openapi-spec"
+      name: "OpenAPI Specification"
+      url: "https://spec.openapis.org/oas/latest.html"
+      offline_cache: true
+      priority: "recommended"
+    - id: "owasp-api-security"
+      name: "OWASP API Security Top 10"
+      url: "https://owasp.org/API-Security/"
+      offline_cache: true
+      priority: "recommended"
+
+tooling:
+  static_analysis:
+    - tool: "spectral"
+      purpose: "Lint OpenAPI for method usage"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "HTTP-CRIT-001"
+      signal: "GET request performs data modification"
+      evidence_pattern: "@GetMapping.*\\n.*\\.(save|delete|update|remove|create)"
+      explanation: |
+        GET must be safe (no side effects). Data modification via GET enables
+        CSRF through links, causes unintended changes from prefetching/crawling,
+        and violates HTTP semantics that caches and proxies depend on.
+      remediation: "Use POST/PUT/DELETE for state-changing operations"
+
+    - id: "HTTP-CRIT-002"
+      signal: "DELETE operation not idempotent"
+      evidence_pattern: "@DeleteMapping.*throw.*AlreadyDeleted|NotFound.*after.*delete"
+      explanation: |
+        DELETE must be idempotent - repeated calls should have same effect.
+        Throwing errors on re-deletion breaks retry logic and causes
+        unnecessary client error handling.
+      remediation: "Return 204 or 404 consistently; don't error on re-deletion"
+
+  high:
+    - id: "HTTP-HIGH-001"
+      signal: "POST used for retrieval operations"
+      evidence_pattern: "@PostMapping.*(find|get|list|search|fetch)"
+      explanation: |
+        Using POST for retrieval prevents caching, bookmarking, and link sharing.
+        It also obscures operation semantics and violates REST conventions.
+      remediation: "Use GET for retrieval; if body is needed, consider query params or POST with search semantics"
+
+    - id: "HTTP-HIGH-002"
+      signal: "PUT used for partial updates"
+      evidence_pattern: "@PutMapping.*partial|@PutMapping.*Optional"
+      explanation: |
+        PUT should replace the entire resource. Partial updates via PUT cause
+        confusion and may result in unintended null overwrites.
+      remediation: "Use PATCH for partial updates with proper content type"
+
+  medium:
+    - id: "HTTP-MED-001"
+      signal: "Missing HEAD support for GET endpoints"
+      evidence_indicators:
+        - "GET endpoints without corresponding HEAD handling"
+        - "No response to HEAD requests"
+      remediation: "Ensure HEAD is supported for all GET endpoints"
+
+    - id: "HTTP-MED-002"
+      signal: "OPTIONS not returning allowed methods"
+      evidence_indicators:
+        - "OPTIONS returns empty Allow header"
+        - "No CORS preflight handling"
+      remediation: "Return proper Allow header listing supported methods"
+
+  low:
+    - id: "HTTP-LOW-001"
+      signal: "POST returns 200 instead of 201 for creation"
+      remediation: "Return 201 Created with Location header for resource creation"
+
+  positive:
+    - id: "HTTP-POS-001"
+      signal: "Correct method semantics consistently applied"
+    - id: "HTTP-POS-002"
+      signal: "Proper idempotency for PUT and DELETE"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map HTTP Methods to Handlers"
+      description: |
+        Identify all HTTP method handlers and their associated operations.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find GET handlers"
+          command: "grep -rn '@GetMapping\\|app\\.get\\|@app\\.get' --include='*.java' --include='*.ts' --include='*.py' ."
+        - purpose: "Find POST handlers"
+          command: "grep -rn '@PostMapping\\|app\\.post\\|@app\\.post' --include='*.java' --include='*.ts' --include='*.py' ."
+        - purpose: "Find PUT/PATCH/DELETE handlers"
+          command: "grep -rn '@\\(Put\\|Patch\\|Delete\\)Mapping\\|app\\.\\(put\\|patch\\|delete\\)' --include='*.java' --include='*.ts' --include='*.py' ."
+      expected_findings:
+        - "Complete handler inventory"
+        - "Method distribution"
+
+    - id: "2"
+      name: "Check GET Safety"
+      description: |
+        Verify GET handlers do not modify state.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find state changes in GET handlers"
+          command: "grep -rn -A20 '@GetMapping' --include='*.java' . | grep -E '\\.(save|delete|update|persist|remove)\\('"
+        - purpose: "Find write operations in GET routes"
+          command: "grep -rn -A20 'app\\.get\\(' --include='*.js' --include='*.ts' . | grep -E '\\.(save|delete|update|create|insert)\\('"
+      expected_findings:
+        - "State modifications in GET handlers"
+        - "Write operations triggered by GET"
+
+    - id: "3"
+      name: "Verify Idempotency"
+      description: |
+        Check that PUT and DELETE are properly idempotent.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find non-idempotent delete patterns"
+          command: "grep -rn -A10 '@DeleteMapping' --include='*.java' . | grep -E 'throw.*NotFound|AlreadyDeleted'"
+        - purpose: "Find PUT with partial semantics"
+          command: "grep -rn -A10 '@PutMapping' --include='*.java' . | grep -E 'Optional|partial|merge'"
+      expected_findings:
+        - "Non-idempotent DELETE implementations"
+        - "PUT with partial update semantics"
+
+    - id: "4"
+      name: "Review Response Codes"
+      description: |
+        Verify appropriate response codes for each method.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find POST creation responses"
+          command: "grep -rn -A15 '@PostMapping' --include='*.java' . | grep -E 'HttpStatus|ResponseEntity|return.*200'"
+        - purpose: "Find DELETE responses"
+          command: "grep -rn -A10 '@DeleteMapping' --include='*.java' . | grep -E 'HttpStatus|ResponseEntity'"
+      expected_findings:
+        - "Response code patterns"
+        - "Missing 201/204 status codes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Method Usage Matrix"
+        - "Key Findings"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear code patterns showing method semantics"
+    medium: "Method handlers found but implementation unclear"
+    low: "Limited handler code available"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "rfc-7231"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed handler analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "http-method-001"
+    item: "GET handlers do not modify state"
+    level: "CRITICAL"
+    verification: |
+      if grep -rn -A20 '@GetMapping\|app\.get(' --include='*.java' --include='*.ts' --include='*.js' . 2>/dev/null | grep -qE '\.(save|delete|update|remove|insert)\('; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "http-method-002"
+    item: "DELETE operations are idempotent"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms DELETE returns consistent results on repeated calls"
+    expected: "Confirmed by reviewer"
+
+  - id: "http-method-003"
+    item: "POST not used for simple retrieval"
+    level: "BLOCKING"
+    verification: |
+      if grep -rn '@PostMapping\|app\.post(' --include='*.java' --include='*.ts' --include='*.js' . 2>/dev/null | grep -qiE '(find|get|list|fetch)All\|ById'; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "http-method-004"
+    item: "PUT used for complete replacement only"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms PUT handlers replace entire resources"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["api-service", "microservice", "backend"]
+
+  compliance_frameworks:
+    - framework: "API Design Standards"
+      controls: ["HTTP-001", "HTTP-002"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.api-design.rest-maturity-level"
+    - "api-integration.api-design.idempotency-design"
+    - "api-integration.error-handling.http-status-code-usage"

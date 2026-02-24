@@ -1,0 +1,313 @@
+audit:
+  id: cost-economics.cost-visibility.billing-data-quality
+  name: Billing Data Quality Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: cost-visibility
+  tier: expert
+  estimated_duration: 3-5 hours  # median: 4h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: organizational
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the quality and reliability of billing data
+    used for cost management. It evaluates data completeness, accuracy,
+    timeliness, and consistency across sources. The audit also assesses
+    data pipelines that transform and aggregate billing information.
+  why_it_matters: |
+    All FinOps decisions depend on accurate billing data. Poor data
+    quality leads to incorrect reports, flawed optimization decisions,
+    and disputed chargebacks. Data quality issues compound over time,
+    making historical analysis unreliable and forecasting inaccurate.
+  when_to_run:
+  - Monthly data quality assessment
+  - Before major financial reporting
+  - After changes to billing data pipelines
+  - When discrepancies are detected
+prerequisites:
+  required_artifacts:
+  - type: billing-data
+    description: Access to raw and processed billing data
+  - type: data-pipeline
+    description: Access to billing data transformation logic
+  - type: reconciliation-reports
+    description: Historical reconciliation records
+  access_requirements:
+  - Access to AWS CUR, Azure usage details, or GCP billing export
+  - Access to data warehouses with processed billing data
+  - Access to data pipeline configurations
+  - Access to cloud provider invoices
+discovery:
+  data_sources:
+  - provider: AWS
+    source: Cost and Usage Report (CUR)
+    purpose: Detailed billing line items
+  - provider: Azure
+    source: Usage Details API / Export
+    purpose: Detailed consumption data
+  - provider: GCP
+    source: BigQuery Billing Export
+    purpose: Detailed billing records
+  quality_dimensions:
+  - dimension: Completeness
+    description: All expected data is present
+  - dimension: Accuracy
+    description: Data matches invoiced amounts
+  - dimension: Timeliness
+    description: Data available when needed
+  - dimension: Consistency
+    description: Data matches across sources
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: aws-cur-dictionary
+    name: AWS Cost and Usage Report Data Dictionary
+    url: https://docs.aws.amazon.com/cur/latest/userguide/data-dictionary.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: finops-data-ingestion
+    name: FinOps - Data Ingestion and Normalization
+    url: https://www.finops.org/framework/capabilities/data-ingestion/
+    offline_cache: true
+  - id: billing-data-best-practices
+    name: Cloud Billing Data Best Practices
+    url: https://docs.aws.amazon.com/cur/latest/userguide/what-is-cur.html
+    offline_cache: true
+tooling:
+  data_quality_tools:
+  - tool: Great Expectations
+    purpose: Data quality validation framework
+  - tool: dbt
+    purpose: Data transformation with tests
+  - tool: AWS Athena
+    purpose: Query CUR data directly
+signals:
+  critical:
+  - id: BDQ-CRIT-001
+    signal: Billing data missing for significant time periods
+    evidence_pattern: Gaps in daily/hourly billing records
+    explanation: |
+      Missing billing data creates blind spots in cost analysis.
+      Important spending during those periods cannot be attributed
+      or analyzed, leading to incomplete financial pictures.
+    remediation: Investigate and resolve data pipeline failures
+  - id: BDQ-CRIT-002
+    signal: Processed data does not reconcile with invoices
+    evidence_threshold: variance > 5%
+    explanation: |
+      When aggregated billing data differs significantly from
+      actual invoices, financial reporting is unreliable. This
+      indicates transformation errors or missing data.
+    remediation: Audit data pipeline for transformation errors
+  high:
+  - id: BDQ-HIGH-001
+    signal: Billing data not available for 48+ hours
+    evidence_threshold: data_lag > 48 hours
+    explanation: |
+      Delayed billing data prevents timely response to cost
+      anomalies and makes real-time optimization impossible.
+    remediation: Optimize data pipeline for faster delivery
+  - id: BDQ-HIGH-002
+    signal: Inconsistent data between cost management tools
+    evidence_pattern: Different totals in different tools
+    explanation: |
+      When multiple tools show different cost totals, stakeholders
+      lose trust in cost data. This inconsistency often stems from
+      different aggregation logic or timing.
+    remediation: Standardize data sources and transformation logic
+  medium:
+  - id: BDQ-MED-001
+    signal: Amortization calculations inconsistent
+    evidence_pattern: RI/SP amortization varies between reports
+    remediation: Standardize amortization methodology
+  - id: BDQ-MED-002
+    signal: No automated data quality validation
+    evidence_pattern: Manual quality checks only
+    remediation: Implement automated data quality tests
+  low:
+  - id: BDQ-LOW-001
+    signal: Data lineage not documented
+    evidence_pattern: Transformation logic not traceable
+    remediation: Document data lineage and transformations
+  positive:
+  - id: BDQ-POS-001
+    signal: Billing data reconciles within 0.1% of invoices
+  - id: BDQ-POS-002
+    signal: Automated data quality checks with alerting
+  - id: BDQ-POS-003
+    signal: Near-real-time billing data availability
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory billing data sources
+    description: |
+      Catalog all sources of billing data including native cloud
+      exports, third-party tools, and internal systems.
+    duration_estimate: 30 min
+    expected_findings:
+    - Data source inventory
+    - Data flow documentation
+  - id: '2'
+    name: Assess data completeness
+    description: |
+      Verify that billing data is complete without gaps in time
+      periods, accounts, or services.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check for date gaps in CUR data
+      command: |
+        aws athena start-query-execution --query-string "
+          SELECT DATE(line_item_usage_start_date) as usage_date,
+                 COUNT(*) as record_count
+          FROM cur_database.cur_table
+          WHERE year='2025' AND month='01'
+          GROUP BY DATE(line_item_usage_start_date)
+          ORDER BY usage_date"
+    expected_findings:
+    - Completeness assessment
+    - Gap identification
+  - id: '3'
+    name: Validate data accuracy
+    description: |
+      Reconcile processed billing data against cloud provider
+      invoices to verify accuracy.
+    duration_estimate: 60 min
+    expected_findings:
+    - Invoice reconciliation results
+    - Variance analysis
+  - id: '4'
+    name: Evaluate data timeliness
+    description: |
+      Measure the lag between cost incurrence and data availability
+      in reporting systems.
+    duration_estimate: 30 min
+    expected_findings:
+    - Data lag measurements
+    - Pipeline performance metrics
+  - id: '5'
+    name: Check cross-source consistency
+    description: |
+      Compare data across different tools and reports to verify
+      consistency.
+    duration_estimate: 45 min
+    expected_findings:
+    - Cross-source comparison
+    - Inconsistency identification
+  - id: '6'
+    name: Review data quality controls
+    description: |
+      Evaluate automated tests and monitoring for billing data
+      quality.
+    duration_estimate: 30 min
+    expected_findings:
+    - Quality control inventory
+    - Test coverage assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Completeness Assessment
+    - Accuracy Validation
+    - Timeliness Analysis
+    - Recommendations
+  - type: metrics_dashboard
+    metrics:
+    - Data completeness percentage
+    - Invoice reconciliation variance
+    - Data lag (hours)
+    - Cross-source consistency score
+  confidence_guidance:
+    high: Full reconciliation with invoices completed
+    medium: Sampling-based validation
+    low: Limited access to verification data
+offline:
+  capability: minimal
+  cache_manifest:
+    knowledge:
+    - source_id: finops-data-ingestion
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed data analysis
+    full:
+      included: true
+      priority: 2
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: bdq-001
+  item: Billing data reconciles with invoices
+  level: CRITICAL
+  verification: automated
+  expected: variance < 1%
+- id: bdq-002
+  item: No gaps in billing data
+  level: BLOCKING
+  verification: automated
+  expected: completeness = 100%
+- id: bdq-003
+  item: Data available within 24 hours
+  level: WARNING
+  verification: automated
+  expected: data_lag < 24 hours
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - hybrid
+    - enterprise
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Data Ingestion and Normalization
+  - framework: SOX
+    controls:
+    - IT General Controls
+relationships:
+  commonly_combined:
+  - cost-economics.cost-visibility.cost-attribution
+  - cost-economics.financial-governance.forecasting
+  - cost-economics.cost-allocation.chargeback

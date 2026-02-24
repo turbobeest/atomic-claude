@@ -1,6 +1,11 @@
 """ATOMIC CLAUDE - Knowledge Graph
 
-FalkorDB-backed knowledge graph for SDLC pipeline phases."""
+FalkorDB-backed knowledge graph for SDLC pipeline phases.
+
+Two graphs:
+  - 'atomic-claude': Pipeline state (sources, findings, requirements, tasks, etc.)
+  - 'atomic-audits': Audit catalog (2,186 audit definitions for phase audit tasks)
+"""
 
 from .connection import GraphConnection
 from .manager import GraphManager
@@ -12,6 +17,13 @@ from .exceptions import (
     CycleDetectedError,
     QueryError,
     NodeNotFoundError,
+)
+from .audit_loader import (
+    get_audit_graph,
+    load_audit_catalog,
+    query_audits,
+    query_audits_for_task,
+    get_audit_stats,
 )
 
 
@@ -32,6 +44,11 @@ def get_graph(phase_id: str = "unknown", host: str = None,
 
 __all__ = [
     "get_graph",
+    "get_audit_graph",
+    "load_audit_catalog",
+    "query_audits",
+    "query_audits_for_task",
+    "get_audit_stats",
     "GraphConnection",
     "GraphManager",
     "NodeLabel",

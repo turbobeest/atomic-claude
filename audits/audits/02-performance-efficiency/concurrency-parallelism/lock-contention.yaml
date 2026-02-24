@@ -1,0 +1,353 @@
+# ============================================================
+# LOCK CONTENTION AUDIT
+# ============================================================
+# Identifies performance bottlenecks caused by excessive lock
+# contention in concurrent systems.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.concurrency-parallelism.lock-contention"
+  name: "Lock Contention Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "concurrency-parallelism"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes lock usage patterns to identify contention hotspots that degrade
+    performance under concurrent load. Examines lock granularity, hold times,
+    and frequency of contention. Reviews for coarse-grained locks that
+    serialize operations unnecessarily.
+
+  why_it_matters: |
+    Lock contention is a primary cause of poor scalability in concurrent
+    systems. High contention causes threads to spend time waiting rather
+    than working, leading to increased latency and reduced throughput.
+    Systems may perform well under light load but collapse under production traffic.
+
+  when_to_run:
+    - "When latency increases under concurrent load"
+    - "When adding threads does not improve throughput"
+    - "Before scaling a service horizontally"
+    - "After profiling reveals lock-related CPU usage"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code with locking mechanisms"
+    - type: "runtime_environment"
+      description: "Ability to run application under load for profiling"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Ability to run profiling tools against the application"
+
+discovery:
+  code_patterns:
+    - pattern: "synchronized\\s*\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find synchronized blocks in Java"
+
+    - pattern: "\\.(lock|Lock)\\(\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find explicit lock acquisitions"
+
+    - pattern: "sync\\.Mutex|sync\\.RWMutex"
+      type: "regex"
+      scope: "source"
+      purpose: "Find mutex usage in Go"
+
+    - pattern: "ReentrantLock|ReadWriteLock"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Java lock implementations"
+
+    - pattern: "threading\\.Lock|threading\\.RLock"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Python lock usage"
+
+  file_patterns:
+    - glob: "**/*.java"
+      purpose: "Java source files"
+    - glob: "**/*.go"
+      purpose: "Go source files"
+    - glob: "**/*.py"
+      purpose: "Python source files"
+
+knowledge_sources:
+  specifications:
+    - id: "cwe-833"
+      name: "CWE-833: Deadlock"
+      url: "https://cwe.mitre.org/data/definitions/833.html"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "java-lock-performance"
+      name: "Java Lock Performance Guide"
+      url: "https://docs.oracle.com/javase/tutorial/essential/concurrency/locksync.html"
+      offline_cache: true
+
+    - id: "go-mutex-docs"
+      name: "Go sync.Mutex Documentation"
+      url: "https://pkg.go.dev/sync#Mutex"
+      offline_cache: true
+
+  learning_resources:
+    - id: "art-multiprocessor"
+      title: "The Art of Multiprocessor Programming"
+      type: "book"
+      reference: "ISBN 978-0123973375"
+
+tooling:
+  static_analysis:
+    - tool: "async-profiler"
+      purpose: "Lock contention profiling for JVM"
+      offline_capable: true
+
+    - tool: "perf"
+      purpose: "Linux lock contention analysis"
+      offline_capable: true
+
+    - tool: "pprof"
+      purpose: "Go mutex contention profiling"
+      offline_capable: true
+
+  scripts:
+    - id: "find-coarse-locks"
+      language: "bash"
+      purpose: "Find potentially coarse-grained locks"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find synchronized methods (often too coarse)
+        grep -rn "synchronized.*void\|synchronized.*Object" --include="*.java" .
+        # Find large lock scopes in Go
+        grep -rn -A20 "\.Lock()" --include="*.go" . | grep -B20 "\.Unlock()"
+
+signals:
+  critical:
+    - id: "LOCK-CRIT-001"
+      signal: "Global lock serializing all operations"
+      evidence_pattern: "synchronized.*class|global.*mutex|single.*lock"
+      explanation: |
+        A single global lock protecting all operations completely eliminates
+        parallelism. All threads must wait for every operation, making the
+        system effectively single-threaded regardless of available cores.
+      remediation: "Implement fine-grained locking, sharding, or lock-free algorithms"
+
+    - id: "LOCK-CRIT-002"
+      signal: "Lock held during I/O or external calls"
+      evidence_pattern: "synchronized.*\\{[^}]*(read|write|http|sql|connect)"
+      explanation: |
+        Holding locks during slow I/O operations blocks all other threads
+        waiting for the lock, even though the lock holder is just waiting.
+        This dramatically reduces throughput.
+      remediation: "Release lock before I/O, use async patterns, or separate I/O from critical section"
+
+  high:
+    - id: "LOCK-HIGH-001"
+      signal: "Coarse-grained lock on entire collection"
+      evidence_pattern: "synchronized.*List|synchronized.*Map(?!Concurrent)"
+      explanation: |
+        Synchronizing an entire collection when only element-level locking is
+        needed causes unnecessary contention. Multiple threads could safely
+        operate on different elements concurrently.
+      remediation: "Use ConcurrentHashMap, striped locks, or segment-level locking"
+
+    - id: "LOCK-HIGH-002"
+      signal: "Exclusive lock where read-write lock would suffice"
+      evidence_pattern: "Mutex.*(?!RW)|sync\\.Mutex(?!.*RWMutex)"
+      explanation: |
+        Using exclusive locks for read-heavy workloads unnecessarily serializes
+        readers. Read-write locks allow multiple concurrent readers.
+      remediation: "Use RWMutex/ReadWriteLock for read-heavy access patterns"
+
+    - id: "LOCK-HIGH-003"
+      signal: "Synchronized method instead of block"
+      evidence_pattern: "synchronized\\s+\\w+\\s+\\w+\\("
+      explanation: |
+        Synchronized methods lock on 'this' for the entire method duration.
+        This is often coarser than necessary and locks the wrong object.
+      remediation: "Use synchronized blocks with fine-grained lock objects"
+
+  medium:
+    - id: "LOCK-MED-001"
+      signal: "Lock ordering inconsistency risk"
+      evidence_pattern: "multiple.*lock|nested.*synchronized"
+      remediation: "Establish and document consistent lock ordering to prevent deadlocks"
+
+    - id: "LOCK-MED-002"
+      signal: "Spin lock in user code"
+      evidence_pattern: "while.*!tryLock|spin.*lock"
+      remediation: "Prefer blocking locks; spin locks are rarely appropriate in application code"
+
+  low:
+    - id: "LOCK-LOW-001"
+      signal: "Lock not using try-finally pattern"
+      evidence_pattern: "\\.lock\\(\\)(?![^}]*finally)"
+      remediation: "Always release locks in finally block to ensure release on exception"
+
+  positive:
+    - id: "LOCK-POS-001"
+      signal: "Use of concurrent collections"
+      evidence_pattern: "ConcurrentHashMap|sync\\.Map|atomic\\."
+
+    - id: "LOCK-POS-002"
+      signal: "Proper read-write lock usage"
+      evidence_pattern: "RWMutex|ReadWriteLock|RLock"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory all locks"
+      description: |
+        Find all synchronization primitives in the codebase and document
+        what each lock protects.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find all synchronization points in Java"
+          command: "grep -rn 'synchronized\\|ReentrantLock\\|ReadWriteLock' --include='*.java' ."
+        - purpose: "Find all mutex usage in Go"
+          command: "grep -rn 'sync\\.Mutex\\|sync\\.RWMutex' --include='*.go' ."
+      expected_findings:
+        - "Complete inventory of locks"
+        - "Initial assessment of lock granularity"
+
+    - id: "2"
+      name: "Analyze lock scope and duration"
+      description: |
+        For each lock, determine the scope of the critical section and
+        identify operations performed while holding the lock.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find large synchronized blocks"
+          command: "grep -rn -A30 'synchronized' --include='*.java' . | head -100"
+      expected_findings:
+        - "Lock hold times (static estimate)"
+        - "Operations within critical sections"
+
+    - id: "3"
+      name: "Profile lock contention"
+      description: |
+        Run the application under realistic load with lock profiling enabled.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Profile JVM lock contention"
+          command: "java -XX:+PrintGCDetails -jar app.jar & async-profiler -e lock -d 30 -f lock.html <pid>"
+        - purpose: "Profile Go mutex contention"
+          command: "go test -bench . -mutexprofile mutex.out && go tool pprof mutex.out"
+      expected_findings:
+        - "Lock contention hotspots"
+        - "Threads blocked waiting for locks"
+
+    - id: "4"
+      name: "Identify optimization opportunities"
+      description: |
+        Based on findings, identify where lock contention can be reduced
+        through finer granularity, different synchronization primitives,
+        or lock-free alternatives.
+      duration_estimate: "25 min"
+      expected_findings:
+        - "Recommendations for lock optimization"
+        - "Candidates for lock-free data structures"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Lock Inventory"
+        - "Contention Hotspots"
+        - "Optimization Recommendations"
+
+  confidence_guidance:
+    high: "Profiling data shows high contention, clear bottleneck identified"
+    medium: "Code patterns suggest contention risk under load"
+    low: "Potential issue based on lock structure"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "java-lock-performance"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires profiling under load"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "lock-contention-001"
+    item: "All locks identified and catalogued"
+    level: "BLOCKING"
+    verification: "grep -rn 'synchronized\\|Mutex\\|Lock' --include='*.java' --include='*.go' . | wc -l"
+    expected: "Count documented"
+
+  - id: "lock-contention-002"
+    item: "Lock contention profiled under load"
+    level: "CRITICAL"
+    verification: "test -f lock-profile-results.html && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "lock-contention-003"
+    item: "No global locks serializing operations"
+    level: "CRITICAL"
+    verification: "grep -rn 'synchronized.*class\\|global.*lock' --include='*.java' . | wc -l"
+    expected: "0"
+
+governance:
+  applicable_to:
+    archetypes: ["api", "service", "library"]
+
+  compliance_frameworks:
+    - framework: "CWE"
+      controls: ["CWE-833"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.concurrency-parallelism.thread-safety"
+    - "performance-efficiency.concurrency-parallelism.deadlock-risk"

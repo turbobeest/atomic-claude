@@ -1,0 +1,378 @@
+audit:
+  id: cloud-infrastructure.containers.container-orchestration
+  name: Container Orchestration
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: containers
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates container orchestration configuration and practices including
+    Kubernetes cluster configuration, deployment strategies, pod security
+    policies, namespace isolation, RBAC configuration, network policies,
+    and workload management. Examines both control plane and worker node
+    security and operational readiness.
+  why_it_matters: |
+    Container orchestration platforms manage critical workloads at scale.
+    Misconfigurations can lead to unauthorized access, resource exhaustion,
+    service disruptions, and security breaches. Proper orchestration ensures
+    reliable deployments, efficient resource utilization, and security
+    isolation between workloads.
+  when_to_run:
+  - During initial cluster setup or major upgrades
+  - Before deploying new applications to production clusters
+  - After security incidents or configuration changes
+  - Regular compliance and security audits
+prerequisites:
+  required_artifacts:
+  - type: kubernetes-cluster
+    description: Access to Kubernetes cluster or orchestration platform
+  - type: manifest-files
+    description: Kubernetes manifests, Helm charts, or deployment configs
+  access_requirements:
+  - kubectl access with appropriate RBAC permissions
+  - Access to cluster API server
+  - Read access to namespace configurations
+discovery:
+  file_patterns:
+  - glob: '**/deployment*.yaml'
+    purpose: Kubernetes deployment manifests
+  - glob: '**/service*.yaml'
+    purpose: Service definitions
+  - glob: '**/ingress*.yaml'
+    purpose: Ingress configurations
+  - glob: '**/values*.yaml'
+    purpose: Helm chart values
+  - glob: '**/Chart.yaml'
+    purpose: Helm chart definitions
+  - glob: '**/kustomization.yaml'
+    purpose: Kustomize configurations
+  code_patterns:
+  - pattern: privileged:\s*true
+    type: regex
+    scope: config
+    purpose: Detect privileged container configurations
+  - pattern: hostNetwork:\s*true
+    type: regex
+    scope: config
+    purpose: Detect host network access
+  - pattern: hostPID:\s*true
+    type: regex
+    scope: config
+    purpose: Detect host PID namespace sharing
+  - pattern: 'securityContext:'
+    type: keyword
+    scope: config
+    purpose: Identify security context definitions
+knowledge_sources:
+  specifications:
+  - id: cis-kubernetes
+    name: CIS Kubernetes Benchmark
+    url: https://www.cisecurity.org/benchmark/kubernetes
+    offline_cache: true
+    priority: required
+  - id: nsa-kubernetes
+    name: NSA Kubernetes Hardening Guide
+    url: https://media.defense.gov/2022/Aug/29/2003066362/-1/-1/0/CTR_KUBERNETES_HARDENING_GUIDANCE_1.2_20220829.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: k8s-security
+    name: Kubernetes Security Best Practices
+    url: https://kubernetes.io/docs/concepts/security/
+    offline_cache: true
+  - id: k8s-production
+    name: Production Best Practices
+    url: https://kubernetes.io/docs/setup/production-environment/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: Kubernetes cluster management and inspection
+    command: kubectl get all --all-namespaces
+  - tool: kube-bench
+    purpose: CIS benchmark compliance checking
+    command: kube-bench run --targets node,master
+  - tool: kubesec
+    purpose: Security risk analysis for Kubernetes resources
+    command: kubesec scan deployment.yaml
+  - tool: polaris
+    purpose: Best practices validation
+    command: polaris audit --audit-path .
+  - tool: kube-hunter
+    purpose: Kubernetes penetration testing
+    command: kube-hunter --remote <cluster-ip>
+  scripts:
+  - id: cluster-audit
+    language: bash
+    purpose: Basic cluster security audit
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Cluster Info ==="
+      kubectl cluster-info
+      echo "=== Privileged Pods ==="
+      kubectl get pods -A -o json | jq '.items[] | select(.spec.containers[].securityContext.privileged==true) | .metadata.name'
+      echo "=== Host Network Pods ==="
+      kubectl get pods -A -o json | jq '.items[] | select(.spec.hostNetwork==true) | .metadata.name'
+signals:
+  critical:
+  - id: CONTAINER-ORCH-CRIT-001
+    signal: Privileged containers running in production
+    evidence_pattern: 'privileged: true in pod spec'
+    explanation: |
+      Privileged containers have full access to the host system,
+      bypassing all container isolation. This is equivalent to
+      running as root on the host.
+    remediation: Remove privileged flag, use specific capabilities instead
+  - id: CONTAINER-ORCH-CRIT-002
+    signal: Missing or overly permissive RBAC
+    evidence_pattern: ClusterRoleBinding with cluster-admin to service accounts
+    explanation: |
+      Overly permissive RBAC allows lateral movement and privilege
+      escalation within the cluster.
+    remediation: Implement least-privilege RBAC with specific permissions
+  - id: CONTAINER-ORCH-CRIT-003
+    signal: API server exposed without authentication
+    evidence_pattern: Anonymous authentication enabled on API server
+    explanation: |
+      Unauthenticated API server access allows anyone to interact
+      with the cluster control plane.
+    remediation: Enable authentication and disable anonymous access
+  high:
+  - id: CONTAINER-ORCH-HIGH-001
+    signal: Missing network policies
+    evidence_pattern: No NetworkPolicy resources in namespace
+    explanation: |
+      Without network policies, all pods can communicate with each
+      other, enabling lateral movement if one is compromised.
+    remediation: Implement network policies for namespace isolation
+  - id: CONTAINER-ORCH-HIGH-002
+    signal: Pods running as root
+    evidence_pattern: 'runAsUser: 0 or missing runAsNonRoot: true'
+    explanation: |
+      Root containers increase the impact of container escape
+      vulnerabilities.
+    remediation: 'Set runAsNonRoot: true in security context'
+  - id: CONTAINER-ORCH-HIGH-003
+    signal: Missing pod security standards
+    evidence_pattern: No PodSecurityPolicy or Pod Security Admission
+    explanation: |
+      Without pod security enforcement, any workload configuration
+      is allowed, including insecure configurations.
+    remediation: Implement Pod Security Standards at namespace level
+  medium:
+  - id: CONTAINER-ORCH-MED-001
+    signal: Missing resource requests and limits
+    evidence_pattern: No resources.requests or resources.limits
+    remediation: Define CPU and memory requests/limits for all containers
+  - id: CONTAINER-ORCH-MED-002
+    signal: Default service account used
+    evidence_pattern: serviceAccountName not specified or set to default
+    remediation: Create dedicated service accounts with minimal permissions
+  - id: CONTAINER-ORCH-MED-003
+    signal: Secrets mounted as environment variables
+    evidence_pattern: secretKeyRef in env configuration
+    remediation: Mount secrets as files instead of environment variables
+  low:
+  - id: CONTAINER-ORCH-LOW-001
+    signal: Missing pod disruption budgets
+    remediation: Define PodDisruptionBudgets for critical workloads
+  - id: CONTAINER-ORCH-LOW-002
+    signal: Labels and annotations incomplete
+    remediation: Add comprehensive labels for organization and management
+  positive:
+  - id: CONTAINER-ORCH-POS-001
+    signal: Pod Security Standards enforced at namespace level
+  - id: CONTAINER-ORCH-POS-002
+    signal: Network policies implemented for all namespaces
+  - id: CONTAINER-ORCH-POS-003
+    signal: RBAC follows least-privilege principle
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Cluster configuration review
+    description: |
+      Review cluster-level configuration including API server settings,
+      authentication mechanisms, and control plane security.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get cluster info
+      command: kubectl cluster-info
+    - purpose: Check API server configuration
+      command: kubectl get configmap -n kube-system
+    expected_findings:
+    - Cluster version and configuration baseline
+    - Authentication and authorization settings
+  - id: '2'
+    name: RBAC analysis
+    description: |
+      Analyze Role-Based Access Control configuration for overly
+      permissive bindings and privilege escalation paths.
+    duration_estimate: 40 min
+    commands:
+    - purpose: List cluster roles
+      command: kubectl get clusterroles
+    - purpose: List cluster role bindings
+      command: kubectl get clusterrolebindings -o wide
+    - purpose: Check for cluster-admin bindings
+      command: kubectl get clusterrolebindings -o json | jq '.items[] | select(.roleRef.name=="cluster-admin")'
+    expected_findings:
+    - Inventory of RBAC configurations
+    - Identification of overly permissive bindings
+  - id: '3'
+    name: Pod security analysis
+    description: |
+      Review pod security configurations across namespaces including
+      security contexts, privilege settings, and capability assignments.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find privileged pods
+      command: 'kubectl get pods -A -o json | jq ''.items[] | select(.spec.containers[].securityContext.privileged==true)
+        | {namespace: .metadata.namespace, name: .metadata.name}'''
+    - purpose: Check pod security admission
+      command: 'kubectl get namespaces -o json | jq ''.items[] | {name: .metadata.name, labels: .metadata.labels}'''
+    expected_findings:
+    - List of privileged or insecure pods
+    - Pod security enforcement status
+  - id: '4'
+    name: Network policy review
+    description: |
+      Examine network policies for proper namespace isolation and
+      egress/ingress controls.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List network policies
+      command: kubectl get networkpolicies -A
+    - purpose: Check default deny policies
+      command: 'kubectl get networkpolicies -A -o json | jq ''.items[] | select(.spec.podSelector=={})
+        | {namespace: .metadata.namespace, name: .metadata.name}'''
+    expected_findings:
+    - Network policy coverage assessment
+    - Identification of namespaces without policies
+  - id: '5'
+    name: Workload configuration review
+    description: |
+      Review deployment configurations for best practices including
+      resource limits, health checks, and deployment strategies.
+    duration_estimate: 35 min
+    commands:
+    - purpose: Check deployments without resource limits
+      command: 'kubectl get deployments -A -o json | jq ''.items[] | select(.spec.template.spec.containers[].resources.limits==null)
+        | {namespace: .metadata.namespace, name: .metadata.name}'''
+    - purpose: Check for health probes
+      command: 'kubectl get deployments -A -o json | jq ''.items[] | select(.spec.template.spec.containers[].livenessProbe==null)
+        | {namespace: .metadata.namespace, name: .metadata.name}'''
+    expected_findings:
+    - Workloads missing resource constraints
+    - Workloads missing health checks
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Cluster Security Posture
+    - RBAC Analysis
+    - Network Security
+    - Recommendations
+  confidence_guidance:
+    high: Direct kubectl query results, configuration verification
+    medium: Inferred from manifest analysis
+    low: Based on absence of expected configurations
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: cis-kubernetes
+      priority: required
+    - source_id: nsa-kubernetes
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires live cluster access and comprehensive review
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: container-orchestration-001
+  item: No privileged containers in production namespaces
+  level: CRITICAL
+  verification: kubectl get pods -A -o json | jq '[.items[] | select(.spec.containers[].securityContext.privileged==true)]
+    | length' | awk '{print ($1==0)?"PASS":"FAIL"}'
+  expected: PASS
+- id: container-orchestration-002
+  item: Network policies exist for all production namespaces
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify each production namespace has at least one NetworkPolicy
+  expected: Confirmed by reviewer
+- id: container-orchestration-003
+  item: RBAC follows least-privilege principle
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review ClusterRoleBindings for overly permissive access
+  expected: Confirmed by reviewer
+- id: container-orchestration-004
+  item: Pod Security Standards enforced
+  level: BLOCKING
+  verification: kubectl get namespaces -o json | jq '[.items[] | select(.metadata.labels["pod-security.kubernetes.io/enforce"])]
+    | length' | awk '{print ($1>0)?"PASS":"FAIL"}'
+  expected: PASS
+- id: container-orchestration-005
+  item: All deployments have resource limits
+  level: WARNING
+  verification: kubectl get deployments -A -o json | jq '[.items[] | select(.spec.template.spec.containers[].resources.limits==null)]
+    | length' | awk '{print ($1==0)?"PASS":"FAIL"}'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - CC6.6
+    - CC6.7
+  - framework: PCI-DSS
+    controls:
+    - '2.2'
+    - '7.1'
+    - '7.2'
+  - framework: NIST-CSF
+    controls:
+    - PR.AC-4
+    - PR.DS-5
+    - PR.PT-3
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.containers.container-image-security
+  - cloud-infrastructure.containers.container-networking
+  - cloud-infrastructure.service-mesh.service-mesh-security

@@ -1,0 +1,274 @@
+# ============================================================
+# AUDIT: Hidden Dependency Detection
+# Category: 32 - Dependency & Supply Chain
+# Subcategory: transitive-dependencies
+# ============================================================
+
+audit:
+  id: "dependency-supply-chain.transitive-dependencies.hidden-dependency-detection"
+  name: "Hidden Dependency Detection Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "dependency-supply-chain"
+  category_number: 32
+  subcategory: "transitive-dependencies"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "dependencies"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit detects hidden dependencies that aren't declared in
+    manifests but are used at runtime. This includes dynamically
+    loaded packages, optional dependencies, and dependencies injected
+    by build tools or runtime environments.
+
+  why_it_matters: |
+    Hidden dependencies create security blind spots. They won't appear
+    in vulnerability scans or license audits. Attackers may exploit
+    hidden dependencies knowing they're less likely to be monitored.
+    Complete visibility requires detecting these invisible deps.
+
+  when_to_run:
+    - "During security audits"
+    - "When build or runtime behaves unexpectedly"
+    - "After adding complex build tools"
+    - "For high-security applications"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+    - type: "build_output"
+      description: "Built application artifacts"
+    - type: "runtime_access"
+      description: "Ability to run application"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Ability to run builds"
+    - "Ability to run application"
+
+discovery:
+  file_patterns:
+    - glob: "**/package.json"
+      purpose: "Find declared dependencies"
+    - glob: "**/*.js"
+      purpose: "Find dynamic imports"
+    - glob: "**/webpack.config.*"
+      purpose: "Find build injections"
+
+knowledge_sources:
+  guides:
+    - id: "dynamic-imports"
+      name: "Dynamic Import Security"
+      url: "https://owasp.org/www-community/attacks/Third_Party_Content"
+
+  standards:
+    - id: "complete-sbom"
+      name: "Complete SBOM Requirements"
+      relevance: "Full dependency enumeration"
+
+tooling:
+  analysis_tools:
+    - tool: "depcheck"
+      purpose: "Find undeclared dependencies"
+    - tool: "deptry"
+      purpose: "Python undeclared dependency detection"
+    - tool: "syft"
+      purpose: "Detect all runtime dependencies"
+
+signals:
+  critical:
+    - id: "DEP-HIDDEN-CRIT-001"
+      signal: "Runtime dependency not in any manifest"
+      evidence_indicators:
+        - "Package required but not declared"
+        - "Dependency relies on global install"
+      explanation: |
+        Undeclared runtime dependencies create unpredictable behavior
+        and security blind spots. Vulnerability scans won't detect
+        issues in these hidden packages.
+      remediation: "Add to manifest or remove usage"
+
+    - id: "DEP-HIDDEN-CRIT-002"
+      signal: "Dynamic require/import of external packages"
+      evidence_indicators:
+        - "require(variable) patterns"
+        - "dynamic import() with runtime strings"
+      remediation: "Audit dynamic imports; consider alternatives"
+
+  high:
+    - id: "DEP-HIDDEN-HIGH-001"
+      signal: "Optional dependency silently used"
+      evidence_indicators:
+        - "optionalDependencies being used"
+        - "No explicit handling of missing optional"
+      remediation: "Document optional deps; handle absence"
+
+    - id: "DEP-HIDDEN-HIGH-002"
+      signal: "Build tool injecting untracked dependencies"
+      evidence_indicators:
+        - "Webpack/Babel injecting polyfills"
+        - "Build output larger than expected"
+      remediation: "Document build-injected deps"
+
+  medium:
+    - id: "DEP-HIDDEN-MED-001"
+      signal: "Peer dependency implicitly used"
+      evidence_indicators:
+        - "Using features from peer dep"
+        - "No explicit import but functionality used"
+      remediation: "Make dependency explicit"
+
+    - id: "DEP-HIDDEN-MED-002"
+      signal: "Development dependency used in production"
+      evidence_indicators:
+        - "Dev dep functionality in prod code"
+        - "Reliance on test utilities"
+      remediation: "Move to production dependencies or remove"
+
+  low:
+    - id: "DEP-HIDDEN-LOW-001"
+      signal: "Node built-in used without awareness"
+      evidence_indicators:
+        - "Using Node built-ins"
+        - "May not work in all environments"
+      remediation: "Document environment requirements"
+
+  positive:
+    - id: "DEP-HIDDEN-POS-001"
+      signal: "All runtime dependencies declared"
+
+    - id: "DEP-HIDDEN-POS-002"
+      signal: "No dynamic dependency loading"
+
+procedure:
+  context:
+    cognitive_mode: "investigative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Run Depcheck"
+      description: "Find undeclared dependencies"
+      commands:
+        - purpose: "Run depcheck"
+          command: "npx depcheck --json 2>/dev/null | jq '.missing' || echo 'depcheck not available'"
+
+    - id: "2"
+      name: "Search for Dynamic Imports"
+      description: "Find dynamic require/import patterns"
+      commands:
+        - purpose: "Find dynamic requires"
+          command: "grep -rE 'require\\([^'\"][^)]+\\)' src/ --include='*.js' --include='*.ts' 2>/dev/null | head -20 || echo 'No dynamic requires found'"
+        - purpose: "Find dynamic imports"
+          command: "grep -rE 'import\\([^'\"][^)]+\\)' src/ --include='*.js' --include='*.ts' 2>/dev/null | head -20 || echo 'No dynamic imports found'"
+
+    - id: "3"
+      name: "Compare Manifest to Runtime"
+      description: "Check what's actually used at runtime"
+      commands:
+        - purpose: "Generate runtime dependency trace"
+          command: "NODE_OPTIONS='--trace-require' node your-app.js 2>&1 | head -100 || echo 'Runtime tracing requires application execution'"
+
+    - id: "4"
+      name: "Analyze Build Output"
+      description: "Check what's in the built application"
+      commands:
+        - purpose: "Check bundle contents"
+          command: "ls -la dist/ build/ 2>/dev/null || echo 'No dist/build directory'"
+        - purpose: "Analyze with source-map-explorer"
+          command: "npx source-map-explorer dist/*.js --json 2>/dev/null | jq 'keys' || echo 'Bundle analysis not available'"
+
+    - id: "5"
+      name: "Check Optional Dependencies"
+      description: "Review optional dependency usage"
+      commands:
+        - purpose: "List optional deps"
+          command: "cat package.json 2>/dev/null | jq '.optionalDependencies // empty' || echo 'No optional deps'"
+
+    - id: "6"
+      name: "Run Syft on Build"
+      description: "Detect all packages in build artifacts"
+      commands:
+        - purpose: "Run syft on dist"
+          command: "syft dist/ 2>/dev/null | head -50 || echo 'syft not available'"
+
+output:
+  deliverables:
+    - type: "hidden_dependency_report"
+      format: "structured"
+      description: "List of hidden/undeclared dependencies"
+
+    - type: "runtime_analysis"
+      format: "structured"
+      description: "Runtime dependency analysis"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Hidden Dependencies Found"
+        - "Dynamic Import Analysis"
+        - "Build Output Analysis"
+        - "Recommendations"
+
+closeout_checklist:
+  - id: "dep-hidden-001"
+    item: "No undeclared runtime dependencies"
+    level: "CRITICAL"
+    verification: "depcheck shows no missing"
+
+  - id: "dep-hidden-002"
+    item: "Dynamic imports audited"
+    level: "REQUIRED"
+    verification: "Dynamic import list reviewed"
+
+  - id: "dep-hidden-003"
+    item: "Build output analyzed"
+    level: "REQUIRED"
+    verification: "syft or equivalent run"
+
+  - id: "dep-hidden-004"
+    item: "Optional deps documented"
+    level: "RECOMMENDED"
+    verification: "Optional usage documented"
+
+governance:
+  applicable_to:
+    archetypes: ["all-software-projects"]
+
+  compliance_mappings:
+    - framework: "SOC 2"
+      control: "CC6.1"
+      description: "Asset visibility"
+    - framework: "SLSA"
+      control: "Build L2"
+      description: "Complete dependency enumeration"
+
+relationships:
+  commonly_combined:
+    - "dependency-supply-chain.dependency-inventory.manifest-completeness"
+  depends_on:
+    - "dependency-supply-chain.transitive-dependencies.transitive-analysis"
+  feeds_into:
+    - "dependency-supply-chain.supply-chain-security.sbom-generation"

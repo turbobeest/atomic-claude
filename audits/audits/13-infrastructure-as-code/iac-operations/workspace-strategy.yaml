@@ -1,0 +1,358 @@
+audit:
+  id: infrastructure-as-code.iac-operations.workspace-strategy
+  name: Workspace Strategy
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: iac-operations
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the strategy for separating environments and
+    managing multiple instances of infrastructure:
+
+    - Terraform CLI workspace usage
+    - Directory-based environment separation
+    - Terragrunt for DRY multi-environment
+    - Terraform Cloud/Enterprise workspace organization
+    - State isolation between environments
+    - Variable management per environment
+
+    The focus is on ensuring proper isolation and manageable multi-
+    environment infrastructure.
+  why_it_matters: |
+    Environment separation strategy affects risk and maintainability:
+
+    - Poor isolation allows dev changes to affect production
+    - Workspace sprawl becomes unmanageable
+    - No strategy leads to inconsistency between environments
+    - State sharing between environments creates coupling
+    - Hard-coded environment values prevent reusability
+
+    A clear workspace strategy enables safe, scalable multi-environment
+    infrastructure management.
+  when_to_run:
+  - When establishing multi-environment infrastructure
+  - When evaluating IaC architecture
+  - After incidents from environment cross-contamination
+  - When scaling infrastructure operations
+prerequisites:
+  required_artifacts:
+  - type: terraform_configuration
+    description: Terraform configurations for multiple environments
+  - type: cicd_configuration
+    description: Pipeline configurations for environment deployment
+  access_requirements:
+  - Read access to Terraform configuration repository
+  - Access to state backend
+discovery:
+  code_patterns:
+  - pattern: terraform\.workspace
+    type: keyword
+    scope: source
+    purpose: Find workspace references
+  - pattern: workspace.*=|select.*workspace
+    type: regex
+    scope: config
+    purpose: Find workspace selection in CI
+  - pattern: terragrunt|terragrunt\.hcl
+    type: keyword
+    scope: config
+    purpose: Detect Terragrunt usage
+  file_patterns:
+  - glob: '**/dev/**/*.tf'
+    purpose: Development environment
+  - glob: '**/staging/**/*.tf'
+    purpose: Staging environment
+  - glob: '**/prod*/**/*.tf'
+    purpose: Production environment
+  - glob: '**/environments/**'
+    purpose: Environment directories
+  - glob: '**/terragrunt.hcl'
+    purpose: Terragrunt configuration
+  - glob: '**/*.tfvars'
+    purpose: Variable files per environment
+knowledge_sources:
+  specifications:
+  - id: terraform-workspaces
+    name: Terraform Workspaces
+    url: https://developer.hashicorp.com/terraform/language/state/workspaces
+    offline_cache: true
+    priority: required
+  guides:
+  - id: terraform-cloud-workspaces
+    name: Terraform Cloud Workspaces
+    url: https://developer.hashicorp.com/terraform/cloud-docs/workspaces
+    offline_cache: true
+  - id: terragrunt-docs
+    name: Terragrunt Documentation
+    url: https://terragrunt.gruntwork.io/docs/
+    offline_cache: true
+  - id: workspace-best-practices
+    name: Workspace Strategy Best Practices
+    url: https://developer.hashicorp.com/terraform/cli/workspaces#when-to-use-multiple-workspaces
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: terraform workspace
+    purpose: Manage CLI workspaces
+    command: terraform workspace list
+  - tool: terragrunt
+    purpose: DRY multi-environment management
+    command: terragrunt run-all plan
+  scripts:
+  - id: workspace-audit
+    language: bash
+    purpose: Audit workspace usage
+    source: inline
+    code: |
+      #!/bin/bash
+      # Audit workspace strategy
+
+      echo "=== terraform.workspace references ==="
+      grep -r 'terraform\.workspace' --include='*.tf' . | head -20
+
+      echo ""
+      echo "=== Environment directories ==="
+      find . -type d \( -name 'dev' -o -name 'staging' -o -name 'prod*' -o -name 'environments' \) | head -10
+
+      echo ""
+      echo "=== Variable files ==="
+      find . -name '*.tfvars' | head -20
+
+      echo ""
+      echo "=== Terragrunt files ==="
+      find . -name 'terragrunt.hcl' | head -10
+signals:
+  critical:
+  - id: IAC-WS-CRIT-001
+    signal: Production and non-production share state backend
+    evidence_pattern: Same S3 bucket and key for all environments
+    explanation: |
+      Shared state between production and non-production creates
+      risk of accidental production changes and state corruption
+      from non-production operations.
+    remediation: |
+      Isolate state per environment:
+      - Use separate state files/keys per environment
+      - Or use separate state buckets per environment
+      - Or use Terraform Cloud workspaces
+  - id: IAC-WS-CRIT-002
+    signal: CLI workspaces used for environment separation (production)
+    evidence_pattern: terraform workspace used for dev/staging/prod
+    explanation: |
+      HashiCorp explicitly recommends against using CLI workspaces
+      for environment separation in production scenarios. Workspaces
+      share the same configuration and backend, creating risk.
+    remediation: |
+      Use directory-based separation or Terraform Cloud workspaces:
+      # Instead of: terraform workspace select prod
+      # Use:
+      environments/
+        dev/
+          main.tf
+          terraform.tfvars
+        prod/
+          main.tf
+          terraform.tfvars
+  high:
+  - id: IAC-WS-HIGH-001
+    signal: Workspace-specific logic in resource configurations
+    evidence_pattern: 'count = terraform.workspace == "prod" ? 1 : 0'
+    explanation: |
+      Workspace conditionals make configurations complex and
+      error-prone. Environment differences should be in variables,
+      not conditionals scattered through resources.
+    remediation: |
+      Use variables for environment differences:
+      variable "instance_count" {
+        default = {
+          dev     = 1
+          staging = 2
+          prod    = 3
+        }
+      }
+      count = var.instance_count[var.environment]
+  - id: IAC-WS-HIGH-002
+    signal: No clear environment separation strategy
+    evidence_pattern: Mix of workspaces, directories, and inline conditionals
+    explanation: |
+      Inconsistent environment management leads to confusion,
+      mistakes, and increased risk. A clear, documented strategy
+      is essential.
+    remediation: |
+      Adopt consistent strategy:
+      1. Directory-based: environments/{dev,staging,prod}/
+      2. Terragrunt: DRY with envcommon/
+      3. Terraform Cloud: Workspace per environment
+  medium:
+  - id: IAC-WS-MED-001
+    signal: Environment variables hardcoded instead of parameterized
+    remediation: |
+      Use tfvars files per environment:
+      environments/
+        dev.tfvars
+        staging.tfvars
+        prod.tfvars
+  - id: IAC-WS-MED-002
+    signal: No naming convention for workspaces/environments
+    remediation: |
+      Establish naming convention:
+      - {project}-{environment}-{region}
+      - Example: myapp-prod-us-east-1
+  low:
+  - id: IAC-WS-LOW-001
+    signal: Workspace strategy not documented
+    remediation: Document environment separation approach in README
+  positive:
+  - id: IAC-WS-POS-001
+    signal: Clear directory-based environment separation
+  - id: IAC-WS-POS-002
+    signal: Terragrunt for DRY multi-environment management
+  - id: IAC-WS-POS-003
+    signal: Separate state backends per environment
+  - id: IAC-WS-POS-004
+    signal: Consistent naming convention across environments
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify environment separation strategy
+    description: |
+      Determine how environments are separated.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for workspace usage
+      command: grep -r 'terraform\.workspace' --include='*.tf' . | head -20
+    - purpose: Find environment directories
+      command: find . -type d \( -name 'dev' -o -name 'staging' -o -name 'prod*' -o -name 'environments'
+        \) | head -10
+    - purpose: Check for Terragrunt
+      command: find . -name 'terragrunt.hcl' | head -10
+    expected_findings:
+    - Environment separation method
+    - Strategy consistency
+  - id: '2'
+    name: Analyze state isolation
+    description: |
+      Check if state is properly isolated per environment.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find backend configurations
+      command: grep -r -A15 'backend' --include='*.tf' . | head -50
+    - purpose: Check for workspace in state key
+      command: grep -r 'terraform\.workspace\|\${' --include='*.tf' . | grep -i 'key\|bucket' | head -10
+    expected_findings:
+    - State isolation status
+    - Backend per environment
+  - id: '3'
+    name: Review environment-specific variables
+    description: |
+      Check how variables differ between environments.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find tfvars files
+      command: find . -name '*.tfvars' | head -20
+    - purpose: Compare variable files
+      command: diff -q */dev.tfvars */prod.tfvars 2>/dev/null || echo 'Files differ or not found'
+    expected_findings:
+    - Variable management approach
+    - Environment-specific configuration
+  - id: '4'
+    name: Check for workspace conditionals
+    description: |
+      Find workspace-based conditionals in resources.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find workspace conditionals
+      command: grep -r 'terraform\.workspace.*?' --include='*.tf' . | head -20
+    - purpose: Find workspace in counts
+      command: grep -r 'count.*workspace\|for_each.*workspace' --include='*.tf' . | head -10
+    expected_findings:
+    - Workspace conditional usage
+    - Complexity from conditionals
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Environment Separation Analysis
+    - State Isolation Review
+    - Variable Management
+    - Recommendations
+  confidence_guidance:
+    high: Full analysis of separation strategy
+    medium: Pattern matching and structure review
+    low: Only file presence confirmed
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-workspaces
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires strategy analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      reason: Critical for production isolation
+closeout_checklist:
+- id: workspace-001
+  item: Production state isolated from non-production
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify separate state files/backends per environment
+  expected: Confirmed by reviewer
+- id: workspace-002
+  item: CLI workspaces not used for prod environment separation
+  level: CRITICAL
+  verification: grep -r 'terraform\.workspace.*prod' --include='*.tf' . | wc -l
+  expected: '0'
+- id: workspace-003
+  item: Consistent environment separation strategy
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify single strategy used throughout
+  expected: Confirmed by reviewer
+- id: workspace-004
+  item: Environment differences in variables not conditionals
+  level: WARNING
+  verification: find . -name '*.tfvars' | wc -l
+  expected: '>1'
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.iac-operations.import-state-management
+  - infrastructure-as-code.cicd-integration.iac-pipeline

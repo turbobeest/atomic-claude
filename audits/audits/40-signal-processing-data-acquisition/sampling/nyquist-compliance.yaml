@@ -1,0 +1,399 @@
+audit:
+  id: signal-processing-data-acquisition.sampling.nyquist-compliance
+  name: Nyquist Compliance Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: sampling
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: hardware-software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit verifies that signal sampling rates comply with the Nyquist-Shannon
+    sampling theorem, which requires sampling frequency to be at least twice the
+    maximum frequency component of the signal. It evaluates:
+    - Sampling rate relative to signal bandwidth
+    - Anti-aliasing filter cutoff frequency alignment
+    - Guard band adequacy between signal and Nyquist frequency
+    - Oversampling ratios and their justification
+    - Dynamic range implications of sampling rate choices
+  why_it_matters: |
+    The Nyquist-Shannon theorem is fundamental to digital signal processing:
+    - Violation causes aliasing where high frequencies fold into lower bands
+    - Aliased signals are indistinguishable from legitimate low-frequency components
+    - No post-processing can recover information lost to aliasing
+    - Practical systems require 2.5-10x oversampling for realizable filters
+    - IEEE 1057 and IEEE 1241 specify proper sampling practices
+
+    Nyquist violations create irreversible data corruption that compromises
+    all downstream analysis, control decisions, and system behavior.
+  when_to_run:
+  - Signal acquisition system design
+  - After changing signal bandwidth requirements
+  - When integrating new sensor types
+  - During system validation and certification
+  - After hardware modifications
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Sampling configuration and ADC driver code
+  - type: signal_specification
+    description: Input signal bandwidth and frequency content documentation
+  - type: filter_design
+    description: Anti-aliasing filter specifications
+  access_requirements:
+  - Read access to signal acquisition code
+  - Access to signal specification documents
+  - Test equipment for spectral analysis
+discovery:
+  code_patterns:
+  - pattern: (sample_rate|sampling_frequency|fs|sps)\s*[=:]\s*\d+
+    type: regex
+    scope: source
+    purpose: Detect sample rate configuration values
+  - pattern: (bandwidth|fmax|max_frequency|freq_max)\s*[=:]\s*\d+
+    type: regex
+    scope: source
+    purpose: Detect signal bandwidth specifications
+  - pattern: (nyquist|anti[_-]?alias|lowpass|lpf)\s*[=:]?
+    type: regex
+    scope: source
+    purpose: Detect Nyquist-related configurations
+  - pattern: (oversample|oversampling_ratio)\s*[=:]\s*\d+
+    type: regex
+    scope: source
+    purpose: Detect oversampling configuration
+  file_patterns:
+  - glob: '**/sampling*.{c,h,cpp,py}'
+    purpose: Sampling configuration files
+  - glob: '**/adc*.{c,h,cpp,py}'
+    purpose: ADC driver files
+  - glob: '**/filter*.{c,h,cpp,py}'
+    purpose: Anti-aliasing filter configuration
+  - glob: '**/config*.{json,yaml,h}'
+    purpose: System configuration files
+knowledge_sources:
+  specifications:
+  - id: nyquist-shannon-theorem
+    name: Nyquist-Shannon Sampling Theorem
+    url: https://en.wikipedia.org/wiki/Nyquist%E2%80%93Shannon_sampling_theorem
+    offline_cache: true
+    priority: required
+  - id: ieee-1057
+    name: IEEE 1057 - Standard for Digitizing Waveform Recorders
+    url: https://standards.ieee.org/standard/1057-2017.html
+    offline_cache: true
+    priority: required
+  - id: ieee-1241
+    name: IEEE 1241 - Standard for ADC Terminology and Test Methods
+    url: https://standards.ieee.org/standard/1241-2010.html
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: ni-sampling-fundamentals
+    name: National Instruments Sampling Fundamentals
+    url: https://www.ni.com/en-us/innovations/white-papers/sampling-theory.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: custom-nyquist-checker
+    purpose: Verify sampling rates against bandwidth specifications
+    offline_capable: true
+  infrastructure_tools:
+  - tool: spectrum-analyzer
+    purpose: Verify signal bandwidth and check for aliasing
+    command: Manual measurement required
+  scripts:
+  - id: nyquist-config-scanner
+    language: bash
+    purpose: Scan for sampling and bandwidth configuration
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Nyquist Compliance Configuration Scan ==="
+      echo "Sample rate configurations:"
+      grep -rniE "(sample_rate|sampling_frequency|fs|sps)\s*[=:]" \
+        --include="*.c" --include="*.h" --include="*.py" \
+        --include="*.cpp" --include="*.json" . 2>/dev/null | head -30
+      echo ""
+      echo "Bandwidth specifications:"
+      grep -rniE "(bandwidth|fmax|max_frequency|cutoff)" \
+        --include="*.c" --include="*.h" --include="*.py" \
+        --include="*.cpp" --include="*.json" . 2>/dev/null | head -30
+signals:
+  critical:
+  - id: NYQ-CRIT-001
+    signal: Sampling rate below 2x maximum signal frequency
+    evidence_indicators:
+    - fs < 2 * fmax in configuration
+    - Aliased frequency components visible in spectrum
+    - No anti-aliasing filter present
+    explanation: |
+      Sampling below the Nyquist rate (fs < 2*fmax) causes aliasing where
+      frequencies above fs/2 fold back into the baseband. This creates
+      phantom signals that cannot be distinguished from legitimate data
+      and corrupts all subsequent analysis.
+    remediation: |
+      - Increase sampling rate to at least 2.5x maximum signal frequency
+      - Implement proper anti-aliasing filter before ADC
+      - Consider sigma-delta ADC with built-in oversampling
+      - Document and verify bandwidth limitations
+    cwe: CWE-682
+  - id: NYQ-CRIT-002
+    signal: Anti-aliasing filter cutoff above Nyquist frequency
+    evidence_indicators:
+    - Filter cutoff > fs/2
+    - Inadequate filter attenuation at Nyquist
+    - Missing anti-aliasing filter in signal path
+    explanation: |
+      The anti-aliasing filter must attenuate all frequencies above fs/2
+      before sampling. A filter cutoff above Nyquist allows high-frequency
+      content to pass through and alias into the sampled signal.
+    remediation: |
+      - Set filter cutoff to 0.4-0.45 * fs for typical applications
+      - Ensure adequate stopband attenuation (>60dB at fs/2)
+      - Use higher-order filters for sharper cutoff
+      - Verify filter response with frequency sweep
+    cwe: CWE-682
+  high:
+  - id: NYQ-HIGH-001
+    signal: Marginal Nyquist compliance without guard band
+    evidence_indicators:
+    - Sampling rate exactly 2x signal bandwidth
+    - No transition band for anti-aliasing filter
+    - Filter order insufficient for transition band
+    explanation: |
+      While theoretically meeting Nyquist, marginal compliance with no
+      guard band requires infinitely sharp filters that don't exist.
+      Practical systems need 20-50% guard band for realizable filters.
+    remediation: |
+      - Increase sampling rate to 2.5-4x signal bandwidth
+      - Allow adequate transition band for filter design
+      - Use oversampling with digital decimation filtering
+      - Document filter requirements and limitations
+  - id: NYQ-HIGH-002
+    signal: Dynamic signal bandwidth exceeds static configuration
+    evidence_indicators:
+    - Signal bandwidth varies but sampling rate is fixed
+    - No bandwidth monitoring or adaptation
+    - Occasional aliasing in acquired data
+    explanation: |
+      If signal bandwidth can exceed the configured maximum, the system
+      may intermittently violate Nyquist conditions, causing sporadic
+      aliasing that is difficult to detect and diagnose.
+    remediation: |
+      - Implement bandwidth monitoring or limiting
+      - Use adaptive sampling rate if bandwidth varies
+      - Configure for worst-case bandwidth
+      - Add aliasing detection algorithms
+  medium:
+  - id: NYQ-MED-001
+    signal: Oversampling ratio not optimized for application
+    evidence_indicators:
+    - Excessive oversampling wasting resources
+    - Insufficient oversampling for decimation filtering
+    - No documented rationale for oversampling ratio
+    explanation: |
+      Oversampling trades sampling rate for relaxed anti-aliasing filter
+      requirements. The ratio should match application needs: higher for
+      high-resolution measurement, lower for bandwidth-limited systems.
+    remediation: |
+      - Document oversampling rationale based on requirements
+      - Balance filter complexity vs. sampling rate overhead
+      - Consider sigma-delta techniques for high oversampling
+      - Verify decimation filter design matches oversampling ratio
+  - id: NYQ-MED-002
+    signal: No spectral verification of Nyquist compliance
+    evidence_indicators:
+    - Sampling parameters not validated against actual signals
+    - No test procedure for aliasing detection
+    - Compliance assumed but not verified
+    explanation: |
+      Configuration-based compliance checking is insufficient. Actual
+      signal content may differ from specifications, and anti-aliasing
+      filter performance may degrade. Spectral verification is essential.
+    remediation: |
+      - Implement spectral analysis test procedures
+      - Verify no energy above Nyquist frequency in sampled data
+      - Test with known signals at band edge
+      - Perform periodic verification during operation
+  low:
+  - id: NYQ-LOW-001
+    signal: Nyquist parameters not documented
+    evidence_indicators:
+    - No documentation of sampling rate rationale
+    - Signal bandwidth not specified
+    - Filter design not documented
+    explanation: |
+      Without documentation, it's impossible to verify Nyquist compliance
+      or maintain the system. Changes may inadvertently violate sampling
+      requirements without detection.
+    remediation: |
+      - Document maximum signal bandwidth
+      - Specify sampling rate and Nyquist margin
+      - Document anti-aliasing filter requirements
+      - Include compliance verification procedures
+  positive:
+  - id: NYQ-POS-001
+    signal: Well-designed oversampling and anti-aliasing system
+    evidence_indicators:
+    - Sampling rate 4x or more above signal bandwidth
+    - Properly designed anti-aliasing filter
+    - Documented Nyquist compliance verification
+  - id: NYQ-POS-002
+    signal: Adaptive sampling with bandwidth monitoring
+    evidence_indicators:
+    - Dynamic bandwidth detection implemented
+    - Sampling rate adjusts to signal content
+    - Aliasing alerts when limits approached
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: signal-engineer
+  steps:
+  - id: '1'
+    name: Configuration Analysis
+    description: |
+      Review sampling rate and bandwidth configurations to verify
+      Nyquist compliance at the design level.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find sample rate configuration
+      command: |
+        grep -rniE "(sample_rate|sampling_frequency|fs)\s*[=:]" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+    - purpose: Find bandwidth specifications
+      command: |
+        grep -rniE "(bandwidth|fmax|max_freq)" \
+          --include="*.c" --include="*.h" --include="*.md" . 2>/dev/null | head -20
+    expected_findings:
+    - Sampling rate values
+    - Signal bandwidth specifications
+    - Nyquist margin calculations
+  - id: '2'
+    name: Anti-Aliasing Filter Review
+    description: |
+      Verify anti-aliasing filter design meets Nyquist requirements.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find filter configuration
+      command: |
+        grep -rniE "(lowpass|anti_alias|cutoff|filter_order)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - Filter cutoff frequency
+    - Filter order and type
+    - Stopband attenuation
+  - id: '3'
+    name: Spectral Verification
+    description: |
+      Verify no aliased components appear in acquired data.
+    duration_estimate: 30 min
+    manual_verification: true
+    expected_findings:
+    - Clean spectrum below Nyquist
+    - No unexpected frequency components
+    - Proper filter roll-off visible
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Nyquist Compliance Analysis
+    - Anti-Aliasing Filter Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Spectral verification performed with documented results
+    medium: Configuration review complete but not verified
+    low: Partial configuration analysis only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: nyquist-shannon-theorem
+      priority: required
+    - source_id: ieee-1057
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Nyquist compliance requires thorough analysis
+    full:
+      included: true
+      priority: 2
+    signal-processing:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: nyq-001
+  item: Sampling rate exceeds 2x maximum signal frequency
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify fs > 2.5 * fmax from specifications
+  expected: Confirmed by reviewer
+- id: nyq-002
+  item: Anti-aliasing filter cutoff below Nyquist frequency
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify filter cutoff < 0.45 * fs
+  expected: Confirmed by reviewer
+- id: nyq-003
+  item: No aliased components in acquired data
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify via spectral analysis
+  expected: Confirmed by reviewer
+- id: nyq-004
+  item: Nyquist compliance documented
+  level: WARNING
+  verification: |
+    grep -rniE "(nyquist|sampling.*bandwidth|anti.?alias)" \
+      --include="*.md" --include="*.txt" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - iot-devices
+    - industrial-control
+    - scientific-instruments
+    - audio-systems
+  compliance_frameworks:
+  - framework: IEEE 1057
+    controls:
+    - Section 4
+    - Section 5
+  - framework: IEEE 1241
+    controls:
+    - Section 6
+relationships:
+  commonly_combined:
+  - signal-processing.sampling.sampling-rate-selection
+  - signal-processing.sampling.anti-aliasing-filter
+  - signal-processing.adc-dac.adc-resolution-adequacy
+  - signal-processing.filtering.filter-design
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

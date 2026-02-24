@@ -1,0 +1,342 @@
+# ============================================================
+# AUDIT: Inappropriate Intimacy Detection
+# ============================================================
+
+audit:
+  id: "code-quality.code-smells.inappropriate-intimacy"
+  name: "Inappropriate Intimacy Detection Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "code-smells"
+
+  tier: "expert"
+  estimated_duration: "45 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Identifies classes that are too involved with each other's internals,
+    accessing private data, calling internal methods, or having excessive
+    bidirectional dependencies. This includes classes that spend more time
+    in each other's internals than managing their own responsibilities.
+
+  why_it_matters: |
+    Inappropriate intimacy creates tight coupling that makes code brittle
+    and hard to change. Changes to one class ripple through intimately
+    coupled classes. It violates encapsulation, makes testing difficult,
+    and often indicates that classes should be merged or responsibilities
+    redistributed.
+
+  when_to_run:
+    - "During architecture reviews"
+    - "When observing coupling issues"
+    - "Before major refactoring"
+    - "When classes change together frequently"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Object-oriented source code"
+
+  access_requirements:
+    - "Read access to source code repository"
+
+discovery:
+  code_patterns:
+    - pattern: "(\\w+)\\._(\\w+)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect access to private members (Python convention)"
+
+    - pattern: "@SuppressWarnings.*\"access\""
+      type: "regex"
+      scope: "source"
+      purpose: "Detect suppressed access warnings"
+
+    - pattern: "friend\\s+class"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect C++ friend class declarations"
+
+    - pattern: "internal|InternalsVisibleTo"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect .NET internal access"
+
+  file_patterns:
+    - glob: "**/*.{java,cs,ts,py,rb,cpp}"
+      purpose: "Object-oriented source files"
+
+knowledge_sources:
+  guides:
+    - id: "fowler-intimacy"
+      name: "Martin Fowler - Inappropriate Intimacy"
+      url: "https://refactoring.guru/smells/inappropriate-intimacy"
+      offline_cache: true
+
+    - id: "fowler-hide-delegate"
+      name: "Martin Fowler - Hide Delegate"
+      url: "https://refactoring.com/catalog/hideDelegate.html"
+      offline_cache: true
+
+    - id: "fowler-move-method"
+      name: "Martin Fowler - Move Method"
+      url: "https://refactoring.com/catalog/moveFunction.html"
+      offline_cache: true
+
+    - id: "refactoring-fowler"
+      name: "Martin Fowler - Refactoring"
+      url: "https://refactoring.com/"
+      offline_cache: false
+
+    - id: "refactoring-catalog"
+      name: "Refactoring Catalog"
+      url: "https://refactoring.com/catalog/"
+      offline_cache: false
+
+    - id: "clean-code"
+      name: "Robert C. Martin - Clean Code"
+      url: "https://www.oreilly.com/library/view/clean-code-a/9780136083238/"
+      offline_cache: false
+
+tooling:
+  static_analysis:
+    - tool: "sonarqube"
+      purpose: "Coupling metrics"
+      offline_capable: false
+    - tool: "jdepend"
+      purpose: "Java package dependency analysis"
+      offline_capable: true
+    - tool: "structure101"
+      purpose: "Architecture and coupling analysis"
+      offline_capable: true
+    - tool: "deptrac"
+      purpose: "PHP/general layer dependency analysis"
+      offline_capable: true
+
+  scripts:
+    - id: "intimacy-scan"
+      language: "bash"
+      purpose: "Find classes with high coupling"
+      source: "inline"
+      code: |
+        # Find imports per file to identify high coupling
+        grep -rn --include="*.{ts,java}" "^import" . 2>/dev/null | cut -d: -f1 | sort | uniq -c | sort -rn | head -20
+
+signals:
+  critical:
+    - id: "CS-INTIM-CRIT-001"
+      signal: "Classes with circular dependencies"
+      evidence_pattern: "class_a.*imports.*class_b && class_b.*imports.*class_a"
+      explanation: |
+        Circular dependencies between classes create tight coupling that
+        makes both classes impossible to understand or change independently.
+      remediation: "Extract interface or mediator to break cycle"
+
+    - id: "CS-INTIM-CRIT-002"
+      signal: "Accessing private implementation details"
+      evidence_pattern: "\\._\\w+|@.*Private.*access|friend\\s+class"
+      explanation: |
+        Direct access to private members bypasses encapsulation and creates
+        fragile coupling to implementation details.
+      remediation: "Add proper public interface or move behavior"
+
+  high:
+    - id: "CS-INTIM-HIGH-001"
+      signal: "Bidirectional associations between classes"
+      evidence_pattern: "class_a.*field.*class_b && class_b.*field.*class_a"
+      explanation: |
+        Bidirectional associations create update synchronization problems
+        and make it unclear which class owns the relationship.
+      remediation: "Make relationship unidirectional or extract association class"
+
+    - id: "CS-INTIM-HIGH-002"
+      signal: "Class calling 5+ methods on another single class"
+      evidence_pattern: "single_class_method_calls > 5"
+      explanation: |
+        Excessive method calls to one class indicate that the calling
+        method may belong in the target class.
+      remediation: "Apply Move Method or Extract Class"
+
+  medium:
+    - id: "CS-INTIM-MED-001"
+      signal: "Classes in different packages/modules with intimate coupling"
+      evidence_pattern: "cross_package.*high_coupling"
+      remediation: "Consider moving classes to same package or reducing coupling"
+
+    - id: "CS-INTIM-MED-002"
+      signal: "Inheritance used for code reuse only"
+      evidence_pattern: "extends.*only_to_reuse_code"
+      remediation: "Prefer composition over inheritance"
+
+  low:
+    - id: "CS-INTIM-LOW-001"
+      signal: "Classes accessing protected members"
+      evidence_pattern: "protected.*access.*outside_hierarchy"
+      remediation: "Review if protected access is appropriate"
+
+  positive:
+    - id: "CS-INTIM-POS-001"
+      signal: "Low coupling metrics between modules"
+      evidence_pattern: "afferent_coupling < threshold"
+    - id: "CS-INTIM-POS-002"
+      signal: "Clean unidirectional dependencies"
+      evidence_pattern: "no_circular_deps"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze Import Dependencies"
+      description: |
+        Map import relationships between classes to identify clusters
+        of high coupling.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Count imports per file"
+          command: |
+            grep -rn --include="*.{ts,java}" "^import" . 2>/dev/null | cut -d: -f1 | sort | uniq -c | sort -rn | head -30
+        - purpose: "Find circular imports"
+          command: |
+            grep -rn --include="*.{ts,java}" "^import.*from" . 2>/dev/null | head -100
+      expected_findings:
+        - "Import counts per file"
+        - "Potential circular dependencies"
+
+    - id: "2"
+      name: "Detect Private Access"
+      description: |
+        Search for patterns indicating access to private or internal
+        members of other classes.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find Python private access"
+          command: |
+            grep -rn --include="*.py" -E "\w+\._\w+" . 2>/dev/null | grep -v "self\._" | head -30
+        - purpose: "Find friend classes"
+          command: |
+            grep -rn --include="*.{cpp,h}" "friend\s+class" . 2>/dev/null
+      expected_findings:
+        - "Private member access"
+        - "Friend declarations"
+
+    - id: "3"
+      name: "Identify Bidirectional Associations"
+      description: |
+        Find classes that reference each other, creating bidirectional
+        coupling.
+      duration_estimate: "10 min"
+      expected_findings:
+        - "Bidirectional class pairs"
+        - "Circular dependency chains"
+
+    - id: "4"
+      name: "Generate Refactoring Plan"
+      description: |
+        Create prioritized list of coupling issues to address with
+        recommended refactoring approaches.
+      duration_estimate: "10 min"
+      expected_findings:
+        - "Priority coupling fixes"
+        - "Recommended patterns"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "class_pair"
+        - "coupling_type"
+        - "severity"
+        - "refactoring_suggestion"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Coupling Analysis"
+        - "Circular Dependencies"
+        - "Refactoring Recommendations"
+
+  confidence_guidance:
+    high: "Clear coupling violation detected"
+    medium: "Coupling pattern suggests issues"
+    low: "May be acceptable design decision"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "fowler-intimacy"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive coupling analysis"
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "intimacy-001"
+    item: "Coupling analysis completed"
+    level: "BLOCKING"
+    verification: |
+      grep -rn --include="*.{ts,java}" "^import" . 2>/dev/null | cut -d: -f1 | sort -u | wc -l
+    expected: "Analysis complete"
+
+  - id: "intimacy-002"
+    item: "No circular dependencies between packages"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review dependency graph for cycles"
+    expected: "Zero circular dependencies"
+
+  - id: "intimacy-003"
+    item: "High coupling cases documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review files with 20+ imports"
+    expected: "All documented"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modularity"]
+
+relationships:
+  commonly_combined:
+    - "code-quality.code-smells.feature-envy"
+    - "code-quality.code-smells.god-class"
+    - "code-quality.maintainability.coupling-cohesion"

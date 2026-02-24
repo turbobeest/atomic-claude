@@ -1,0 +1,254 @@
+audit:
+  id: observability-instrumentation.logging.log-level-configuration
+  name: Log Level Configuration Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: logging
+  tier: expert
+  estimated_duration: 45 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines log level configuration across the application to ensure appropriate
+    verbosity settings for different environments. Reviews how log levels (DEBUG,
+    INFO, WARN, ERROR, FATAL) are configured, whether they can be changed at
+    runtime, and whether environment-specific defaults are properly established.
+  why_it_matters: |
+    Incorrect log level configuration leads to either excessive logging (causing
+    storage costs, performance degradation, and signal-to-noise issues) or
+    insufficient logging (missing critical diagnostic information during incidents).
+    Production systems with DEBUG enabled waste resources and may expose sensitive
+    data, while systems with ERROR-only logging miss valuable context.
+  when_to_run:
+  - Initial application setup and configuration review
+  - Before production deployment
+  - After observability infrastructure changes
+  - When log storage costs increase unexpectedly
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with logging configuration
+  - type: configuration_files
+    description: Environment-specific configuration files
+  access_requirements:
+  - Read access to application codebase
+  - Access to configuration management system
+discovery:
+  code_patterns:
+  - pattern: log\.level|LOG_LEVEL|logLevel|logging\.level
+    type: regex
+    scope: config
+    purpose: Find log level configuration settings
+  - pattern: setLevel|SetLevel|set_level
+    type: regex
+    scope: source
+    purpose: Identify programmatic log level changes
+  - pattern: DEBUG|INFO|WARN|ERROR|FATAL|TRACE
+    type: keyword
+    scope: config
+    purpose: Find hardcoded log level values
+  file_patterns:
+  - glob: '**/logging.{yml,yaml,json,conf,properties}'
+    purpose: Logging configuration files
+  - glob: '**/log4j*.{xml,properties}'
+    purpose: Log4j configuration
+  - glob: '**/logback*.xml'
+    purpose: Logback configuration
+  - glob: '**/.env*'
+    purpose: Environment variables including log levels
+knowledge_sources:
+  guides:
+  - id: twelve-factor-logs
+    name: The Twelve-Factor App - Logs
+    url: https://12factor.net/logs
+    offline_cache: true
+  learning_resources:
+  - id: log-levels-guide
+    title: Effective Logging Practices
+    type: article
+    reference: Industry standard logging level definitions and usage guidelines
+tooling:
+  static_analysis:
+  - tool: grep/ripgrep
+    purpose: Search for log level configurations
+    offline_capable: true
+  scripts:
+  - id: find-log-levels
+    language: bash
+    purpose: Discover log level configurations across codebase
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Searching for log level configurations ==="
+      rg -i "(log.?level|logging.?level)" --type-add 'config:*.{yml,yaml,json,properties,xml,conf}' -t config
+      echo "=== Searching for environment-specific log configs ==="
+      rg "LOG_LEVEL" .env* 2>/dev/null || echo "No .env files found"
+signals:
+  critical:
+  - id: LOG-LEVEL-CRIT-001
+    signal: DEBUG logging enabled in production configuration
+    evidence_pattern: level.*=.*DEBUG|LOG_LEVEL.*=.*DEBUG
+    explanation: |
+      DEBUG level logging in production causes excessive log volume,
+      performance degradation, potential exposure of sensitive data,
+      and significantly increased storage costs.
+    remediation: Set production log level to INFO or WARN minimum
+  high:
+  - id: LOG-LEVEL-HIGH-001
+    signal: No environment-specific log level configuration
+    explanation: Using same log levels across all environments prevents proper debugging in development
+      and causes noise in production
+    remediation: Implement environment-specific logging configuration with appropriate defaults
+  - id: LOG-LEVEL-HIGH-002
+    signal: Log levels hardcoded in source code
+    explanation: Hardcoded log levels prevent runtime adjustment during incidents
+    remediation: Externalize log level configuration to environment variables or config files
+  medium:
+  - id: LOG-LEVEL-MED-001
+    signal: No runtime log level adjustment capability
+    remediation: Implement mechanism to change log levels without restart
+  - id: LOG-LEVEL-MED-002
+    signal: Inconsistent log level naming across services
+    remediation: Standardize on a single log level naming convention
+  low:
+  - id: LOG-LEVEL-LOW-001
+    signal: Missing log level documentation
+  positive:
+  - id: LOG-LEVEL-POS-001
+    signal: Environment-specific log levels properly configured
+  - id: LOG-LEVEL-POS-002
+    signal: Runtime log level adjustment available
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Discover log level configurations
+    description: |
+      Search for all log level configuration patterns across the codebase
+      including configuration files, environment variables, and source code.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find log level settings in config files
+      command: rg -i 'log.*level|level.*log' --type-add 'config:*.{yml,yaml,json,properties,xml,conf}'
+        -t config
+    - purpose: Find environment variable log levels
+      command: rg 'LOG_LEVEL|LOGGING_LEVEL' .
+    expected_findings:
+    - Log level configuration locations
+    - Environment-specific overrides
+  - id: '2'
+    name: Analyze environment-specific configurations
+    description: |
+      Review how log levels differ across development, staging, and production
+      environments. Verify appropriate levels for each environment.
+    duration_estimate: 15 min
+    questions:
+    - What log level is configured for production?
+    - Are development environments using DEBUG or TRACE?
+    - Can log levels be overridden per-service?
+    expected_findings:
+    - Production vs development log level differences
+    - Service-specific log level overrides
+  - id: '3'
+    name: Evaluate runtime adjustment capability
+    description: |
+      Determine if log levels can be changed at runtime without
+      application restart, which is critical for incident response.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find dynamic log level APIs
+      command: rg -i 'setlevel|set_level|changelevel|change_level' .
+    expected_findings:
+    - Runtime log level change mechanisms
+    - Admin endpoints for log level control
+  - id: '4'
+    name: Check for hardcoded levels
+    description: |
+      Identify any log levels hardcoded in source rather than externalized
+      to configuration, which prevents operational flexibility.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find hardcoded log level assignments
+      command: rg 'logger\.setLevel|logging\.setLevel' --type py
+    expected_findings:
+    - Hardcoded log level instances
+    - Configuration-driven log level instances
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Log Level Configuration Map
+    - Environment Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Log level configuration directly observed in config files
+    medium: Log level inferred from code patterns or defaults
+    low: Log level assumed based on framework defaults
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: twelve-factor-logs
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: log-level-001
+  item: Production log level is INFO or higher
+  level: CRITICAL
+  verification: rg -l 'LOG_LEVEL.*=.*(DEBUG|TRACE)' **/prod* && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: log-level-002
+  item: Log levels are externalized to configuration
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm log levels are set via config files or environment variables, not hardcoded
+  expected: Confirmed by reviewer
+- id: log-level-003
+  item: Environment-specific log configurations exist
+  level: WARNING
+  verification: ls -la **/logging*.{yml,yaml,json} 2>/dev/null | wc -l | xargs -I {} test {} -gt 0 &&
+    echo 'PASS' || echo 'FAIL'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.2
+relationships:
+  commonly_combined:
+  - observability-instrumentation.logging.structured-logging
+  - observability-instrumentation.logging.log-retention
+  - observability-instrumentation.logging.sensitive-data-in-logs

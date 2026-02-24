@@ -1,0 +1,323 @@
+# ============================================================
+# AUDIT: Error Response Format Assessment
+# ============================================================
+# Evaluates API error response structure and consistency
+# ============================================================
+
+audit:
+  id: "api-integration.error-handling.error-response-format"
+
+  name: "Error Response Format Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "error-handling"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates API error response format including structure consistency,
+    required fields (error code, message, details), machine-readable codes,
+    human-readable messages, and adherence to standards like RFC 7807
+    (Problem Details for HTTP APIs).
+
+  why_it_matters: |
+    Consistent error formats enable programmatic error handling, reduce
+    integration time, and improve developer experience. Inconsistent or
+    poorly structured errors force consumers to handle special cases,
+    write defensive code, and spend time debugging integration issues.
+
+  when_to_run:
+    - "During API design reviews"
+    - "Before API releases"
+    - "When standardizing error handling"
+    - "After error-related support escalations"
+
+prerequisites:
+  required_artifacts:
+    - type: "api-source"
+      description: "API error handling code"
+    - type: "api-spec"
+      description: "OpenAPI specifications"
+
+  access_requirements:
+    - "Read access to API source code"
+    - "Access to API specifications"
+
+discovery:
+  code_patterns:
+    - pattern: "ErrorResponse|ApiError|ProblemDetail"
+      type: "regex"
+      scope: "source"
+      purpose: "Error response classes"
+    - pattern: "@ExceptionHandler|@ControllerAdvice|ErrorController"
+      type: "regex"
+      scope: "source"
+      purpose: "Exception handlers"
+    - pattern: "application/problem\\+json|RFC.*7807"
+      type: "regex"
+      scope: "source"
+      purpose: "Problem Details format"
+
+  file_patterns:
+    - glob: "**/exceptions/**/*.{java,ts,py}"
+      purpose: "Exception definitions"
+    - glob: "**/errors/**/*.{java,ts,py}"
+      purpose: "Error handling code"
+    - glob: "**/*openapi*.{yaml,yml,json}"
+      purpose: "OpenAPI error schemas"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc-7807"
+      name: "RFC 7807 - Problem Details for HTTP APIs"
+      url: "https://datatracker.ietf.org/doc/html/rfc7807"
+      offline_cache: true
+      priority: "required"
+    - id: "rfc-9457"
+      name: "RFC 9457 - Problem Details (update to 7807)"
+      url: "https://datatracker.ietf.org/doc/html/rfc9457"
+      offline_cache: true
+      priority: "recommended"
+    - id: "owasp-api-security"
+      name: "OWASP API Security Top 10"
+      url: "https://owasp.org/API-Security/"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "api-error-handling"
+      name: "API Error Handling Best Practices"
+      url: "https://cloud.google.com/apis/design/errors"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "spectral"
+      purpose: "Lint OpenAPI error schemas"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "ERROR-CRIT-001"
+      signal: "Stack traces exposed in error responses"
+      evidence_pattern: "stack.*trace|exception.*message|at\\s+\\w+\\.\\w+\\("
+      explanation: |
+        Stack traces in API responses expose internal implementation details,
+        file paths, and potentially sensitive information. This aids attackers
+        in understanding system internals.
+      remediation: "Return generic error messages; log stack traces server-side only"
+
+    - id: "ERROR-CRIT-002"
+      signal: "Inconsistent error response format across endpoints"
+      evidence_pattern: "error.*message|message.*error|err_msg"
+      explanation: |
+        Inconsistent error structures force consumers to handle multiple
+        formats, complicates SDK generation, and increases integration errors.
+      remediation: "Standardize on single error format (recommend RFC 7807)"
+
+  high:
+    - id: "ERROR-HIGH-001"
+      signal: "Missing machine-readable error codes"
+      evidence_indicators:
+        - "Only human-readable messages returned"
+        - "No error code or type field"
+      explanation: |
+        Without machine-readable codes, programmatic error handling requires
+        parsing error messages which are fragile and locale-dependent.
+      remediation: "Include stable error code/type for programmatic handling"
+
+    - id: "ERROR-HIGH-002"
+      signal: "Error response missing required fields"
+      evidence_pattern: "error.*(?!type|code|message)"
+      explanation: |
+        Error responses should include minimum: type/code, message, and
+        correlation ID. Missing fields make debugging and handling difficult.
+      remediation: "Include type, title, status, detail, instance per RFC 7807"
+
+  medium:
+    - id: "ERROR-MED-001"
+      signal: "No correlation/request ID in errors"
+      evidence_indicators:
+        - "Error missing trace ID"
+        - "No request correlation"
+      remediation: "Include request/correlation ID for support debugging"
+
+    - id: "ERROR-MED-002"
+      signal: "Validation errors lack field-level details"
+      evidence_pattern: "validation.*error(?!.*field)"
+      remediation: "Include which fields failed validation and why"
+
+  low:
+    - id: "ERROR-LOW-001"
+      signal: "No error response examples in documentation"
+      remediation: "Document all error response formats with examples"
+
+  positive:
+    - id: "ERROR-POS-001"
+      signal: "RFC 7807 Problem Details format implemented"
+    - id: "ERROR-POS-002"
+      signal: "Consistent error format with machine-readable codes"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Error Response Classes"
+      description: |
+        Find error response classes and exception handlers.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find error response classes"
+          command: "grep -rn 'class.*Error\\|class.*Exception\\|ErrorResponse\\|ApiError' --include='*.java' --include='*.ts' ."
+        - purpose: "Find exception handlers"
+          command: "grep -rn '@ExceptionHandler\\|@ControllerAdvice\\|ErrorHandler' --include='*.java' --include='*.ts' ."
+        - purpose: "Find problem details usage"
+          command: "grep -rn 'ProblemDetail\\|problem\\+json\\|RFC.*7807' --include='*.java' --include='*.ts' ."
+      expected_findings:
+        - "Error response classes"
+        - "Exception handling patterns"
+
+    - id: "2"
+      name: "Analyze Error Structure"
+      description: |
+        Examine the structure of error responses.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find error fields"
+          command: "grep -rn 'errorCode\\|error_code\\|errorMessage\\|error_type' --include='*.java' --include='*.ts' ."
+        - purpose: "Check for required fields"
+          command: "grep -rn 'type\\|title\\|status\\|detail\\|instance' --include='*.java' --include='*.ts' . | grep -i error | head -20"
+        - purpose: "Check OpenAPI error schemas"
+          command: "grep -A20 'Error:\\|ErrorResponse:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null"
+      expected_findings:
+        - "Error structure fields"
+        - "Schema definitions"
+
+    - id: "3"
+      name: "Check for Information Leakage"
+      description: |
+        Verify stack traces and internal details are not exposed.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find stack trace exposure"
+          command: "grep -rn 'printStackTrace\\|getStackTrace\\|stack.*trace' --include='*.java' --include='*.ts' . | grep -v test | head -20"
+        - purpose: "Find exception message exposure"
+          command: "grep -rn 'exception\\.getMessage\\|err\\.message.*response\\|error\\.message' --include='*.java' --include='*.ts' ."
+      expected_findings:
+        - "Stack trace handling"
+        - "Exception message exposure"
+
+    - id: "4"
+      name: "Verify Consistency"
+      description: |
+        Check error format consistency across the API.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find different error patterns"
+          command: "grep -rEo '\"(error|err|message|msg)\":' --include='*.java' --include='*.ts' . | sort | uniq -c | sort -rn"
+        - purpose: "Check centralized handling"
+          command: "grep -rn 'GlobalException\\|centralized.*error\\|error.*interceptor' --include='*.java' --include='*.ts' ."
+      expected_findings:
+        - "Error format variations"
+        - "Centralization level"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Error Format Analysis"
+        - "Security Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Error handling code thoroughly analyzed"
+    medium: "Partial error handling coverage"
+    low: "Limited error handling code found"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "rfc-7807"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed error analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "errfmt-001"
+    item: "No stack traces in error responses"
+    level: "CRITICAL"
+    verification: |
+      if grep -rq 'printStackTrace\|getStackTrace.*response\|stack.*client' --include='*.java' --include='*.ts' . 2>/dev/null | grep -v test | grep -q .; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "errfmt-002"
+    item: "Consistent error response format"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms single error format used across API"
+    expected: "Confirmed by reviewer"
+
+  - id: "errfmt-003"
+    item: "Machine-readable error codes included"
+    level: "BLOCKING"
+    verification: |
+      if grep -rq 'errorCode\|error_code\|error.*type\|code.*:' --include='*.java' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "errfmt-004"
+    item: "Correlation ID in error responses"
+    level: "WARNING"
+    verification: |
+      if grep -rq 'correlationId\|correlation_id\|requestId\|request_id\|traceId' --include='*.java' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["api-service", "microservice", "backend"]
+
+  compliance_frameworks:
+    - framework: "OWASP"
+      controls: ["A01:2021"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.error-handling.http-status-code-usage"
+    - "api-integration.error-handling.error-message-quality"
+    - "api-integration.api-contracts.schema-validation"

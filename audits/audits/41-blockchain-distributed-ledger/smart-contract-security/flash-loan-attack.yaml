@@ -1,0 +1,271 @@
+audit:
+  id: blockchain-distributed-ledger.smart-contract-security.flash-loan-attack
+  name: Flash Loan Attack Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: blockchain-distributed-ledger
+  category_number: 41
+  subcategory: smart-contract-security
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: software
+  default_profiles:
+  - full
+  - blockchain
+  - defi
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates smart contracts for flash loan attack vectors
+    that enable atomic exploitation of DeFi protocols. It examines:
+    - Price oracle manipulation vectors
+    - Governance token flash borrowing
+    - Collateral manipulation attacks
+    - Same-block price dependencies
+    - Multi-protocol attack chains
+    - Callback function exploits
+  why_it_matters: |
+    Flash loans enable capital-free attacks:
+    - Borrow unlimited capital with no collateral
+    - Manipulate prices within single transaction
+    - Exploit governance with borrowed voting power
+    - Chain multiple protocols for complex attacks
+    - Many DeFi hacks use flash loans
+
+    Flash loan resilience is critical for DeFi security.
+  when_to_run:
+  - DeFi protocol development
+  - Pre-deployment audit
+  - Oracle integration
+  - Governance design
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Smart contract source code
+  - type: architecture
+    description: Protocol integration documentation
+  access_requirements:
+  - Access to contract source
+  - Understanding of protocol interactions
+discovery:
+  code_patterns:
+  - pattern: (flashLoan|flashBorrow|callback)
+    type: regex
+    scope: source
+    purpose: Detect flash loan interfaces
+  - pattern: (getReserves|getPrice|spotPrice)
+    type: regex
+    scope: source
+    purpose: Detect price queries
+  - pattern: (balanceOf.*block|snapshot)
+    type: regex
+    scope: source
+    purpose: Detect same-block balance checks
+  file_patterns:
+  - glob: '**/*.sol'
+    purpose: Solidity contracts
+  - glob: '**/oracle/**/*.sol'
+    purpose: Oracle contracts
+knowledge_sources:
+  guides:
+  - id: rekt-flash-loans
+    name: Flash Loan Attack Analysis
+    url: https://rekt.news
+    offline_cache: false
+    priority: recommended
+signals:
+  critical:
+  - id: FLASH-CRIT-001
+    signal: Same-block price manipulation possible
+    evidence_indicators:
+    - Spot price used for value calculation
+    - Price from AMM reserves without protection
+    - No TWAP or oracle aggregation
+    explanation: |
+      Same-block price queries can be manipulated with flash loans.
+      Attacker manipulates pool reserves, triggers price-dependent
+      action, then restores pool state.
+    remediation: |
+      - Use time-weighted average prices (TWAP)
+      - Aggregate prices from multiple sources
+      - Use Chainlink or similar oracle networks
+      - Add price deviation circuit breakers
+    cwe: CWE-20
+  - id: FLASH-CRIT-002
+    signal: Governance vulnerable to flash loan voting
+    evidence_indicators:
+    - Voting power from current balance
+    - No voting snapshot mechanism
+    - Proposals executable in same block
+    explanation: |
+      Flash borrowing governance tokens enables instant voting power
+      acquisition to pass malicious proposals without long-term stake.
+    remediation: |
+      - Use balance snapshots for voting power
+      - Implement voting lockup periods
+      - Add proposal delay/timelock
+      - Consider vote escrow mechanisms
+    cwe: CWE-862
+  high:
+  - id: FLASH-HIGH-001
+    signal: Collateral valuation manipulable
+    evidence_indicators:
+    - Collateral value from manipulable source
+    - Liquidation threshold exploitable
+    - No oracle manipulation protection
+    explanation: |
+      Manipulating collateral valuations enables artificial
+      liquidations or borrowing against inflated collateral.
+    remediation: |
+      - Use manipulation-resistant oracles
+      - Add collateral factor buffers
+      - Implement price banding
+      - Delay liquidation execution
+  - id: FLASH-HIGH-002
+    signal: Callback enables reentrancy-like attacks
+    evidence_indicators:
+    - Flash loan callback allows arbitrary calls
+    - State inconsistent during callback
+    - Callback caller not validated
+    explanation: |
+      Flash loan callbacks execute attacker code mid-transaction,
+      similar to reentrancy. Insufficient validation enables
+      unexpected interactions.
+    remediation: |
+      - Validate callback caller
+      - Ensure consistent state during callback
+      - Limit callback capabilities
+      - Test with malicious callbacks
+  medium:
+  - id: FLASH-MED-001
+    signal: Multi-protocol attack chain possible
+    evidence_indicators:
+    - Composable with other protocols
+    - State readable by external contracts
+    - Attack amplification possible
+    explanation: |
+      Flash loans enable chaining multiple protocol interactions
+      in one transaction, potentially amplifying exploits.
+    remediation: |
+      - Analyze protocol composability risks
+      - Add cross-protocol guards where needed
+      - Monitor for unusual interactions
+      - Design for adversarial composability
+  - id: FLASH-MED-002
+    signal: Reserve ratio manipulable
+    evidence_indicators:
+    - AMM reserves used for calculations
+    - K-constant not verified
+    - LP token value from reserves
+    explanation: |
+      Manipulating AMM reserves affects LP token valuations and
+      any calculations depending on pool state.
+    remediation: |
+      - Verify K-constant for manipulation
+      - Use oracle for LP token pricing
+      - Add manipulation detection
+      - Consider reserve-independent pricing
+  low:
+  - id: FLASH-LOW-001
+    signal: Flash loan attack scenarios not tested
+    evidence_indicators:
+    - No flash loan attack tests
+    - Manipulation scenarios not covered
+    - Integration tests insufficient
+    explanation: |
+      Untested flash loan scenarios may harbor vulnerabilities.
+      Attack simulation reveals weaknesses.
+    remediation: |
+      - Add flash loan attack test cases
+      - Simulate price manipulation
+      - Test governance attacks
+      - Use fuzzing for edge cases
+  positive:
+  - id: FLASH-POS-001
+    signal: Flash loan resilient design
+    evidence_indicators:
+    - TWAP or aggregated oracles
+    - Snapshot-based governance
+    - Manipulation tests included
+procedure:
+  context:
+    cognitive_mode: adversarial
+    ensemble_role: security-auditor
+  steps:
+  - id: '1'
+    name: Flash Loan Vector Analysis
+    description: |
+      Identify flash loan attack vectors.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Find price queries
+      command: |
+        grep -rniE "(getPrice|getReserves|spotPrice|latestAnswer)" \
+          --include="*.sol" . 2>/dev/null | head -30
+    - purpose: Find balance checks
+      command: |
+        grep -rniE "balanceOf|totalSupply" \
+          --include="*.sol" . 2>/dev/null | head -20
+    expected_findings:
+    - Price dependencies
+    - Balance queries
+    - Manipulation vectors
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Flash Loan Analysis
+    - Attack Scenarios
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 1
+    blockchain:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: flash-001
+  item: Price oracles manipulation resistant
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify TWAP or aggregated oracle usage
+  expected: Confirmed by reviewer
+- id: flash-002
+  item: Governance snapshot-based
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify voting power uses snapshots
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - defi
+    - lending
+    - governance
+    - amm
+relationships:
+  commonly_combined:
+  - blockchain.smart-contract-security.oracle-manipulation
+  - blockchain.smart-contract-security.front-running
+  - blockchain.governance.governance-mechanism
+
+# Glossary of domain-specific terms:
+glossary:
+  "timelock": "Governance mechanism requiring delay between proposal and execution"
+  "reentrancy": "Vulnerability where external call allows re-entering function before completion"
+  "oracle": "External data feed providing off-chain information to smart contracts"

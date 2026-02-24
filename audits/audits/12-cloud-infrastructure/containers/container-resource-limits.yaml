@@ -1,0 +1,374 @@
+audit:
+  id: cloud-infrastructure.containers.container-resource-limits
+  name: Container Resource Limits
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: containers
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines container resource allocation including CPU requests and limits,
+    memory requests and limits, ephemeral storage constraints, and resource
+    quota configurations. Evaluates whether resource configurations are
+    appropriate for workload requirements and cluster capacity, and checks
+    for resource contention risks.
+  why_it_matters: |
+    Improper resource limits can cause application instability, node resource
+    exhaustion, and noisy neighbor problems. Missing limits allow containers
+    to consume unbounded resources, potentially causing OOM kills or CPU
+    starvation for other workloads. Overly restrictive limits cause
+    unnecessary throttling and performance degradation.
+  when_to_run:
+  - Before deploying new applications to production
+  - After performance issues or OOM events
+  - During capacity planning exercises
+  - When optimizing cluster resource utilization
+prerequisites:
+  required_artifacts:
+  - type: kubernetes-cluster
+    description: Access to running Kubernetes cluster
+  - type: manifest-files
+    description: Deployment manifests with resource specifications
+  access_requirements:
+  - kubectl access with read permissions
+  - Access to metrics server or monitoring system
+  - Ability to query resource quotas and limit ranges
+discovery:
+  file_patterns:
+  - glob: '**/deployment*.yaml'
+    purpose: Find deployment manifests
+  - glob: '**/pod*.yaml'
+    purpose: Find pod specifications
+  - glob: '**/statefulset*.yaml'
+    purpose: Find StatefulSet configurations
+  - glob: '**/daemonset*.yaml'
+    purpose: Find DaemonSet configurations
+  code_patterns:
+  - pattern: resources:\s*\{\}
+    type: regex
+    scope: config
+    purpose: Detect empty resource blocks
+  - pattern: limits:\s*$
+    type: regex
+    scope: config
+    purpose: Detect limits sections
+  - pattern: requests:\s*$
+    type: regex
+    scope: config
+    purpose: Detect requests sections
+  - pattern: memory:\s*\d+[GMK]i
+    type: regex
+    scope: config
+    purpose: Identify memory specifications
+  metrics_queries:
+  - system: Prometheus
+    query: container_memory_working_set_bytes / container_spec_memory_limit_bytes
+    purpose: Memory utilization vs limits
+    threshold: < 0.8 normal, > 0.9 warning
+  - system: Prometheus
+    query: rate(container_cpu_usage_seconds_total[5m]) / container_spec_cpu_quota * container_spec_cpu_period
+    purpose: CPU utilization vs limits
+    threshold: < 0.8 normal, > 0.9 warning
+knowledge_sources:
+  specifications:
+  - id: k8s-resource-management
+    name: Kubernetes Resource Management
+    url: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    offline_cache: true
+    priority: required
+  - id: cis-kubernetes
+    name: CIS Kubernetes Benchmark
+    url: https://www.cisecurity.org/benchmark/kubernetes
+    offline_cache: true
+    priority: required
+  - id: nsa-kubernetes
+    name: NSA Kubernetes Hardening Guide
+    url: https://media.defense.gov/2022/Aug/29/2003066362/-1/-1/0/CTR_KUBERNETES_HARDENING_GUIDANCE_1.2_20220829.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: k8s-resource-quotas
+    name: Kubernetes Resource Quotas
+    url: https://kubernetes.io/docs/concepts/policy/resource-quotas/
+    offline_cache: true
+  - id: k8s-limit-ranges
+    name: Kubernetes Limit Ranges
+    url: https://kubernetes.io/docs/concepts/policy/limit-range/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: Query resource configurations
+    command: kubectl describe nodes
+  - tool: kubectl-top
+    purpose: View resource consumption
+    command: kubectl top pods -A
+  - tool: metrics-server
+    purpose: Cluster-wide resource metrics
+    command: kubectl top nodes
+  monitoring_queries:
+  - system: Prometheus
+    query: kube_pod_container_resource_limits{resource="memory"}
+    purpose: Get memory limits for all containers
+  - system: Prometheus
+    query: kube_pod_container_resource_requests{resource="cpu"}
+    purpose: Get CPU requests for all containers
+  scripts:
+  - id: resource-audit
+    language: bash
+    purpose: Audit resource configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Pods without resource limits ==="
+      kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].resources.limits == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+      echo "=== Pods without resource requests ==="
+      kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].resources.requests == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+      echo "=== Resource Quotas ==="
+      kubectl get resourcequotas -A
+      echo "=== Limit Ranges ==="
+      kubectl get limitranges -A
+signals:
+  critical:
+  - id: CONTAINER-RES-CRIT-001
+    signal: Production pods without memory limits
+    evidence_pattern: resources.limits.memory not specified
+    explanation: |
+      Containers without memory limits can consume all available
+      node memory, causing OOM kills for other pods and potential
+      node instability.
+    remediation: Set appropriate memory limits based on workload profiling
+  - id: CONTAINER-RES-CRIT-002
+    signal: Resource requests exceed node capacity
+    evidence_pattern: Pod requests > node allocatable resources
+    explanation: |
+      Pods with requests exceeding node capacity will never be
+      scheduled, causing deployment failures.
+    remediation: Adjust requests to fit within node capacity or add larger nodes
+  - id: CONTAINER-RES-CRIT-003
+    signal: No resource quotas on multi-tenant namespaces
+    evidence_pattern: Missing ResourceQuota in shared namespaces
+    explanation: |
+      Without quotas, a single tenant can consume all cluster
+      resources, affecting other tenants.
+    remediation: Implement ResourceQuotas for namespace resource governance
+  high:
+  - id: CONTAINER-RES-HIGH-001
+    signal: Production pods without CPU limits
+    evidence_pattern: resources.limits.cpu not specified
+    explanation: |
+      Containers without CPU limits can consume unbounded CPU,
+      causing throttling and performance degradation for other pods.
+    remediation: Set CPU limits based on expected workload requirements
+  - id: CONTAINER-RES-HIGH-002
+    signal: Memory limits significantly exceed requests
+    evidence_pattern: limits.memory > 2x requests.memory
+    explanation: |
+      Large gaps between requests and limits indicate poor capacity
+      planning and can lead to overcommitment issues.
+    remediation: Right-size requests and limits based on actual usage
+  - id: CONTAINER-RES-HIGH-003
+    signal: Pods frequently OOM killed
+    evidence_pattern: OOMKilled exit reason in pod status
+    explanation: |
+      Frequent OOM kills indicate memory limits are too restrictive
+      or application has a memory leak.
+    remediation: Increase memory limits or investigate memory leaks
+  medium:
+  - id: CONTAINER-RES-MED-001
+    signal: No default LimitRange in namespace
+    evidence_pattern: Missing LimitRange resource
+    remediation: Create LimitRange to set default resource constraints
+  - id: CONTAINER-RES-MED-002
+    signal: CPU throttling detected
+    evidence_pattern: container_cpu_cfs_throttled_periods_total increasing
+    remediation: Review and adjust CPU limits if throttling impacts performance
+  - id: CONTAINER-RES-MED-003
+    signal: Resources significantly underutilized
+    evidence_pattern: Actual usage < 20% of requests consistently
+    remediation: Right-size requests to improve cluster efficiency
+  low:
+  - id: CONTAINER-RES-LOW-001
+    signal: Ephemeral storage limits not set
+    remediation: Set ephemeral-storage limits to prevent disk exhaustion
+  - id: CONTAINER-RES-LOW-002
+    signal: Inconsistent resource specifications across environments
+    remediation: Standardize resource configurations using templates
+  positive:
+  - id: CONTAINER-RES-POS-001
+    signal: All production pods have resource requests and limits
+  - id: CONTAINER-RES-POS-002
+    signal: ResourceQuotas enforced on all namespaces
+  - id: CONTAINER-RES-POS-003
+    signal: Resource utilization within healthy ranges
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory resource configurations
+    description: |
+      Collect resource requests and limits for all pods and containers
+      across the cluster.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Get all pod resource specs
+      command: 'kubectl get pods -A -o json | jq ''.items[] | {namespace: .metadata.namespace, name: .metadata.name,
+        containers: [.spec.containers[] | {name: .name, resources: .resources}]}'''
+    - purpose: List pods without limits
+      command: kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].resources.limits
+        == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+    expected_findings:
+    - Complete inventory of resource configurations
+    - List of pods missing resource specifications
+  - id: '2'
+    name: Analyze resource quotas
+    description: |
+      Review namespace-level resource quotas and limit ranges for
+      proper governance.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Get resource quotas
+      command: kubectl get resourcequotas -A -o wide
+    - purpose: Get limit ranges
+      command: kubectl get limitranges -A -o yaml
+    expected_findings:
+    - Quota coverage assessment
+    - Default limits from LimitRanges
+  - id: '3'
+    name: Measure actual resource usage
+    description: |
+      Compare configured resources against actual utilization to
+      identify right-sizing opportunities.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get current resource usage
+      command: kubectl top pods -A --containers
+    - purpose: Get node capacity and allocations
+      command: kubectl describe nodes | grep -A 10 'Allocated resources'
+    expected_findings:
+    - Current utilization vs configured limits
+    - Overcommitment or underutilization issues
+  - id: '4'
+    name: Review OOM and throttling events
+    description: |
+      Check for OOM kills and CPU throttling indicating resource
+      constraint issues.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find OOM killed pods
+      command: 'kubectl get pods -A -o json | jq ''.items[] | select(.status.containerStatuses[]?.lastState.terminated?.reason
+        == "OOMKilled") | {namespace: .metadata.namespace, name: .metadata.name}'''
+    - purpose: Check events for resource issues
+      command: kubectl get events -A --field-selector reason=FailedScheduling
+    expected_findings:
+    - List of pods with OOM history
+    - Scheduling failures due to resource constraints
+  - id: '5'
+    name: Validate cluster capacity
+    description: |
+      Assess overall cluster capacity and headroom for workload growth.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Node resource summary
+      command: kubectl top nodes
+    - purpose: Cluster-wide resource requests
+      command: kubectl describe nodes | grep -E '(Allocated|allocated)'
+    expected_findings:
+    - Cluster capacity utilization
+    - Available headroom for growth
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Resource Configuration Analysis
+    - Utilization Assessment
+    - Right-sizing Recommendations
+  confidence_guidance:
+    high: Direct kubectl query results, metrics data
+    medium: Derived from configuration analysis
+    low: Inferred from patterns or missing configurations
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: k8s-resource-management
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires live cluster access and metrics
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: container-resource-limits-001
+  item: All production pods have memory limits
+  level: CRITICAL
+  verification: kubectl get pods -n production -o json | jq '[.items[] | select(.spec.containers[].resources.limits.memory
+    == null)] | length' | awk '{print ($1==0)?"PASS":"FAIL"}'
+  expected: PASS
+- id: container-resource-limits-002
+  item: All production pods have CPU requests
+  level: BLOCKING
+  verification: kubectl get pods -n production -o json | jq '[.items[] | select(.spec.containers[].resources.requests.cpu
+    == null)] | length' | awk '{print ($1==0)?"PASS":"FAIL"}'
+  expected: PASS
+- id: container-resource-limits-003
+  item: ResourceQuotas defined for production namespaces
+  level: BLOCKING
+  verification: kubectl get resourcequotas -n production && echo PASS || echo FAIL
+  expected: PASS
+- id: container-resource-limits-004
+  item: No pods currently OOM killed
+  level: WARNING
+  verification: kubectl get pods -A -o json | jq '[.items[] | select(.status.containerStatuses[]?.lastState.terminated?.reason
+    == "OOMKilled")] | length' | awk '{print ($1==0)?"PASS":"FAIL"}'
+  expected: PASS
+- id: container-resource-limits-005
+  item: LimitRange exists for default constraints
+  level: WARNING
+  verification: kubectl get limitranges -A | grep -q . && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - A1.2
+  - framework: ISO27001
+    controls:
+    - A.12.1.3
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.containers.container-orchestration
+  - cloud-infrastructure.containers.container-health-checks
+  - cloud-infrastructure.cloud-cost.unused-resource-detection

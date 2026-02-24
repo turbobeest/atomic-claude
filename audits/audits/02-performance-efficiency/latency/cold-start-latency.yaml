@@ -1,0 +1,349 @@
+# ============================================================
+# COLD START LATENCY AUDIT
+# ============================================================
+# Measures initialization and warmup latency for services.
+
+audit:
+  id: "performance-efficiency.latency.cold-start-latency"
+  name: "Cold Start Latency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "latency"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit measures the latency experienced during service cold starts,
+    including container initialization, runtime startup, dependency
+    injection, connection pool warmup, and cache priming. It examines
+    serverless function cold starts, container startup times, JVM warmup,
+    and the impact of cold starts on user experience.
+
+  why_it_matters: |
+    Cold starts can add seconds to request latency, severely impacting
+    user experience. AWS Lambda cold starts can add 100ms-10s depending
+    on runtime and package size. JVM applications may take minutes to
+    reach optimal performance due to JIT compilation. Understanding
+    and minimizing cold start latency is critical for auto-scaling
+    systems and serverless architectures.
+
+  when_to_run:
+    - "When deploying new serverless functions"
+    - "After container image changes"
+    - "When evaluating auto-scaling behavior"
+    - "During incident investigation for sporadic latency spikes"
+
+prerequisites:
+  required_artifacts:
+    - type: "deployment_config"
+      description: "Access to serverless/container deployment configuration"
+    - type: "metrics_system"
+      description: "Metrics capturing startup times and cold start indicators"
+
+  access_requirements:
+    - "Access to serverless function logs"
+    - "Access to container orchestration metrics"
+    - "Ability to trigger cold starts for testing"
+
+discovery:
+  metrics_queries:
+    - system: "AWS CloudWatch"
+      query: "SELECT AVG(InitDuration) FROM SCHEMA(LambdaInsights, function_name)"
+      purpose: "Measure Lambda initialization duration"
+      threshold: "< 500ms for user-facing functions"
+
+    - system: "Prometheus"
+      query: "container_start_time_seconds - container_created_time_seconds"
+      purpose: "Calculate container startup duration"
+      threshold: "< 30s for most containers"
+
+    - system: "Kubernetes"
+      query: |
+        kube_pod_status_ready_time - kube_pod_created
+      purpose: "Measure pod time to ready"
+      threshold: "< 60s"
+
+  file_patterns:
+    - glob: "**/serverless.yml"
+      purpose: "Review serverless configuration"
+    - glob: "**/Dockerfile"
+      purpose: "Analyze container build for startup optimization"
+
+knowledge_sources:
+  guides:
+    - id: "aws-lambda-cold-start"
+      name: "AWS Lambda Cold Start Optimization"
+      url: "https://docs.aws.amazon.com/lambda/latest/operatorguide/cold-starts.html"
+      offline_cache: true
+
+    - id: "jvm-warmup"
+      name: "JVM Warmup and Performance"
+      url: "https://www.baeldung.com/java-jvm-warmup"
+      offline_cache: true
+
+  papers:
+    - id: "serverless-cold-start-study"
+      title: "Serverless Computing: Cold Start Analysis"
+      url: "https://dl.acm.org/doi/10.1145/3344341.3368798"
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Measure Lambda cold start"
+      command: |
+        # Force cold start by updating function, then invoke
+        aws lambda update-function-configuration --function-name my-function --description "force-cold-start-$(date +%s)"
+        time aws lambda invoke --function-name my-function --log-type Tail output.json
+
+    - tool: "kubectl"
+      purpose: "Measure pod startup time"
+      command: |
+        kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="Ready")].lastTransitionTime}{"\n"}{end}'
+
+    - tool: "docker"
+      purpose: "Measure container startup"
+      command: "time docker run --rm my-image /bin/true"
+
+  monitoring_queries:
+    - system: "CloudWatch"
+      query: |
+        filter @type = "REPORT"
+        | stats avg(@initDuration) as avgColdStart, max(@initDuration) as maxColdStart by bin(1h)
+      purpose: "Lambda cold start trends"
+
+    - system: "Prometheus"
+      query: |
+        histogram_quantile(0.99,
+          sum(rate(process_start_time_seconds_bucket[1h])) by (le, pod)
+        )
+      purpose: "Container startup time percentiles"
+
+signals:
+  critical:
+    - id: "COLD-CRIT-001"
+      signal: "Cold start latency exceeds 10 seconds for user-facing services"
+      evidence_threshold: "init_duration > 10s"
+      explanation: |
+        Cold starts this long will cause request timeouts and severely
+        degrade user experience. Users may see complete failures rather
+        than slow responses. This is unacceptable for any user-facing
+        service.
+      remediation: "Implement provisioned concurrency; optimize initialization; reduce package size"
+
+    - id: "COLD-CRIT-002"
+      signal: "No provisioned concurrency for latency-sensitive serverless functions"
+      evidence_indicators:
+        - "Function configured with 0 provisioned concurrency"
+        - "Cold starts occurring during peak traffic"
+      explanation: |
+        Without provisioned concurrency, every scale-out event exposes
+        users to cold start latency. During traffic spikes, this can
+        affect a significant percentage of requests.
+      remediation: "Configure provisioned concurrency based on traffic patterns"
+
+  high:
+    - id: "COLD-HIGH-001"
+      signal: "JVM-based services not warmed up before receiving traffic"
+      evidence_indicators:
+        - "No readiness probe that waits for warmup"
+        - "First requests to new pods significantly slower"
+      explanation: |
+        JVM applications require JIT compilation to reach optimal
+        performance. Without warmup, early requests experience
+        significantly higher latency.
+      remediation: "Implement warmup endpoints; configure readiness probes appropriately"
+
+    - id: "COLD-HIGH-002"
+      signal: "Container images exceed 1GB uncompressed"
+      evidence_threshold: "image_size > 1GB"
+      explanation: |
+        Large container images take longer to pull and start, directly
+        contributing to cold start latency. Each 100MB adds ~1-5s to
+        cold start on typical infrastructure.
+      remediation: "Use multi-stage builds; minimize dependencies; use slim base images"
+
+  medium:
+    - id: "COLD-MED-001"
+      signal: "No cold start metrics being collected"
+      remediation: "Implement initialization duration tracking"
+
+    - id: "COLD-MED-002"
+      signal: "Connection pools not pre-warmed during startup"
+      remediation: "Initialize database and cache connections during startup sequence"
+
+  low:
+    - id: "COLD-LOW-001"
+      signal: "No documentation of expected cold start times"
+
+  positive:
+    - id: "COLD-POS-001"
+      signal: "Provisioned concurrency configured for all critical functions"
+    - id: "COLD-POS-002"
+      signal: "Container images under 200MB"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Cold Start Surfaces"
+      description: |
+        Map all services and components that can experience cold starts:
+        serverless functions, containers, scaled-to-zero services.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "List Lambda functions"
+          command: "aws lambda list-functions --query 'Functions[].FunctionName'"
+        - purpose: "Check for HPA configurations"
+          command: "kubectl get hpa -A -o jsonpath='{range .items[*]}{.spec.scaleTargetRef.name}{\"\\n\"}{end}'"
+      expected_findings:
+        - "List of services subject to cold starts"
+        - "Current scaling configurations"
+
+    - id: "2"
+      name: "Measure Cold Start Times"
+      description: |
+        Trigger and measure cold starts for identified services to
+        establish baseline latency.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Force Lambda cold start and measure"
+          command: |
+            aws lambda invoke --function-name my-function --log-type Tail /dev/null \
+              --query 'LogResult' --output text | base64 -d | grep "Init Duration"
+        - purpose: "Scale deployment to zero then up"
+          command: |
+            kubectl scale deployment my-app --replicas=0 && \
+            sleep 5 && \
+            kubectl scale deployment my-app --replicas=1 && \
+            kubectl get pods -w
+      expected_findings:
+        - "Cold start duration for each service"
+        - "Components contributing to cold start"
+
+    - id: "3"
+      name: "Analyze Cold Start Breakdown"
+      description: |
+        Break down cold start into components: image pull, container
+        start, runtime init, application init, connection setup.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check Lambda init breakdown"
+          command: |
+            aws logs filter-log-events --log-group-name /aws/lambda/my-function \
+              --filter-pattern "REPORT" --limit 10
+        - purpose: "Check container startup events"
+          command: |
+            kubectl describe pod my-app-xxx | grep -A 20 "Events:"
+      expected_findings:
+        - "Breakdown of cold start phases"
+        - "Optimization opportunities"
+
+    - id: "4"
+      name: "Review Provisioned Capacity"
+      description: |
+        Check configuration for provisioned concurrency, minimum replicas,
+        and warmup strategies.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Check Lambda provisioned concurrency"
+          command: |
+            aws lambda list-provisioned-concurrency-configs --function-name my-function
+        - purpose: "Check HPA minimum replicas"
+          command: |
+            kubectl get hpa -A -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.minReplicas}{"\n"}{end}'
+      expected_findings:
+        - "Provisioned capacity configuration"
+        - "Minimum replica settings"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Cold Start Inventory"
+        - "Latency Measurements"
+        - "Optimization Recommendations"
+
+  confidence_guidance:
+    high: "Measurements from production with multiple cold start samples"
+    medium: "Single cold start measurements per service"
+    low: "Estimates based on configuration review"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-lambda-cold-start"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires triggering cold starts and runtime measurements"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "cold-start-001"
+    item: "Cold start latency under 5 seconds for user-facing services"
+    level: "CRITICAL"
+    verification: |
+      aws logs filter-log-events --log-group-name /aws/lambda/my-function \
+        --filter-pattern "Init Duration" --limit 1 | \
+        jq '.events[0].message | capture("Init Duration: (?<ms>[0-9.]+) ms") | .ms | tonumber < 5000'
+    expected: "true"
+
+  - id: "cold-start-002"
+    item: "Provisioned concurrency configured for critical functions"
+    level: "BLOCKING"
+    verification: |
+      aws lambda get-provisioned-concurrency-config --function-name critical-function \
+        --query 'RequestedProvisionedConcurrentExecutions > 0' 2>/dev/null || echo "false"
+    expected: "true"
+
+  - id: "cold-start-003"
+    item: "Container images optimized for fast startup"
+    level: "WARNING"
+    verification: |
+      docker images --format '{{.Size}}' my-image | grep -qE '^[0-9]+MB$' && echo PASS || echo FAIL
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["serverless", "auto-scaling", "containerized"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.latency.end-to-end-latency"
+    - "performance-efficiency.resource-utilization.container-sizing"

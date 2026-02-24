@@ -1,0 +1,329 @@
+# ============================================================
+# AUDIT: Relationship Design
+# ============================================================
+# Evaluates the design and implementation of relationships between
+# entities including cardinality, referential integrity, and cascades.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-design.relationship-design"
+
+  name: "Relationship Design"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-design"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates the design and implementation of relationships
+    between database entities. It examines cardinality accuracy, referential
+    integrity constraints, cascade behaviors, and junction table design
+    for many-to-many relationships. The audit identifies orphan risks,
+    cascade dangers, and relationship modeling errors.
+
+  why_it_matters: |
+    Poorly designed relationships cause data integrity issues that are
+    difficult to recover from. Missing foreign keys allow orphaned records,
+    improper cascades can delete critical data, and incorrect cardinality
+    creates application bugs. Relationship design errors often have
+    cascading impacts across the entire system.
+
+  when_to_run:
+    - "During database schema design"
+    - "Before implementing delete functionality"
+    - "When data integrity issues are discovered"
+    - "After adding new entity relationships"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-schema"
+      description: "Complete schema with relationship definitions"
+    - type: "entity-relationship-diagram"
+      description: "ER diagram or relationship documentation"
+
+  access_requirements:
+    - "Read access to database schemas and migrations"
+    - "Access to ORM model definitions"
+    - "Database admin access for constraint verification"
+
+discovery:
+  code_patterns:
+    - pattern: "FOREIGN KEY|REFERENCES"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify foreign key constraints"
+    - pattern: "ON DELETE|ON UPDATE"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify cascade behaviors"
+    - pattern: "@ManyToOne|@OneToMany|@ManyToMany|belongsTo|hasMany"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify ORM relationship definitions"
+
+  file_patterns:
+    - glob: "**/migrations/**/*.sql"
+      purpose: "Database migration files"
+    - glob: "**/models/**/*"
+      purpose: "ORM model definitions"
+    - glob: "**/entities/**/*"
+      purpose: "Entity class definitions"
+
+knowledge_sources:
+  specifications:
+    - id: "sql-standard-fk"
+      name: "SQL Standard - Referential Integrity"
+      url: "https://en.wikipedia.org/wiki/Referential_integrity"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "postgres-fk-guide"
+      name: "PostgreSQL Foreign Key Constraints"
+      url: "https://www.postgresql.org/docs/current/ddl-constraints.html"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "schema-analyzer"
+      purpose: "Analyze relationship patterns and integrity"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "PostgreSQL constraint inspection"
+      command: "psql -c \"SELECT conname, contype FROM pg_constraint WHERE contype = 'f';\""
+    - tool: "mysql"
+      purpose: "MySQL foreign key inspection"
+      command: "mysql -e 'SELECT * FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL'"
+
+signals:
+  critical:
+    - id: "REL-CRIT-001"
+      signal: "Missing foreign key constraints on relationship columns"
+      evidence_pattern: "Columns named *_id without REFERENCES constraint"
+      explanation: |
+        Foreign key columns without constraints allow orphaned records.
+        The database cannot enforce referential integrity, leading to
+        dangling references and data corruption over time.
+      remediation: "Add FOREIGN KEY constraints to all relationship columns"
+
+    - id: "REL-CRIT-002"
+      signal: "CASCADE DELETE on critical data relationships"
+      evidence_pattern: "ON DELETE CASCADE on tables containing irreplaceable data"
+      explanation: |
+        Cascade delete on critical data can cause catastrophic data loss.
+        Deleting a parent record cascades to delete all related records,
+        potentially removing years of historical data.
+      remediation: "Use ON DELETE RESTRICT or ON DELETE SET NULL for critical data; implement soft delete"
+
+  high:
+    - id: "REL-HIGH-001"
+      signal: "Incorrect cardinality in relationship definitions"
+      evidence_pattern: "OneToMany where ManyToMany is needed or vice versa"
+      explanation: |
+        Incorrect cardinality causes application bugs when the actual
+        data doesn't match the model. OneToMany relationships that should
+        be ManyToMany will lose data when multiple associations are needed.
+      remediation: "Review business requirements and correct relationship cardinality"
+
+    - id: "REL-HIGH-002"
+      signal: "Many-to-many relationships without junction tables"
+      evidence_pattern: "Array columns or comma-separated IDs for relationships"
+      explanation: |
+        Storing many-to-many relationships without proper junction tables
+        prevents efficient querying, makes updates complex, and loses
+        the ability to store relationship metadata.
+      remediation: "Create proper junction tables with foreign keys to both entities"
+
+  medium:
+    - id: "REL-MED-001"
+      signal: "Inconsistent cascade behavior across similar relationships"
+      evidence_pattern: "Mixed ON DELETE behaviors for same relationship types"
+      remediation: "Standardize cascade behaviors based on relationship semantics"
+
+    - id: "REL-MED-002"
+      signal: "Missing indexes on foreign key columns"
+      evidence_pattern: "FOREIGN KEY columns without corresponding index"
+      remediation: "Add indexes to foreign key columns for join performance"
+
+  low:
+    - id: "REL-LOW-001"
+      signal: "Self-referential relationships without cycle prevention"
+
+  positive:
+    - id: "REL-POS-001"
+      signal: "Well-defined relationships with appropriate constraints"
+    - id: "REL-POS-002"
+      signal: "Junction tables with additional relationship metadata"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Relationship Discovery"
+      description: |
+        Identify all relationships in the schema including foreign keys,
+        ORM mappings, and implicit relationships.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find foreign key definitions"
+          command: "grep -riE 'FOREIGN KEY|REFERENCES' --include='*.sql' . 2>/dev/null | head -50"
+        - purpose: "Find ORM relationship annotations"
+          command: "grep -riE '@(ManyToOne|OneToMany|ManyToMany|OneToOne)|belongsTo|hasMany|hasOne|references' --include='*.ts' --include='*.py' --include='*.java' --include='*.prisma' . 2>/dev/null | head -50"
+        - purpose: "Find columns with _id suffix (potential relationships)"
+          command: "grep -riE '[a-z]+_id\\s+(INT|INTEGER|BIGINT|UUID)' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+
+      expected_findings:
+        - "Complete relationship inventory"
+        - "Potential missing foreign key constraints"
+
+    - id: "2"
+      name: "Cascade Behavior Analysis"
+      description: |
+        Analyze cascade behaviors to identify dangerous delete
+        or update cascades that could cause data loss.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find cascade definitions"
+          command: "grep -riE 'ON DELETE|ON UPDATE' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+        - purpose: "Find ORM cascade options"
+          command: "grep -riE 'cascade.*=|onDelete|onUpdate' --include='*.ts' --include='*.py' --include='*.java' --include='*.prisma' . 2>/dev/null | head -40"
+
+      expected_findings:
+        - "Cascade behavior inventory"
+        - "Potentially dangerous cascades"
+
+    - id: "3"
+      name: "Junction Table Analysis"
+      description: |
+        Review many-to-many relationship implementations for
+        proper junction table design.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find junction tables"
+          command: "grep -riE 'CREATE TABLE.*_.*_|@@map.*_' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -30"
+        - purpose: "Find ManyToMany annotations"
+          command: "grep -riE '@ManyToMany|many.*to.*many' --include='*.ts' --include='*.java' --include='*.prisma' . 2>/dev/null | head -30"
+        - purpose: "Find array/JSON relationship storage (anti-pattern)"
+          command: "grep -riE 'ARRAY|\\[\\]|JSON.*ids|_ids\\s+TEXT' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Junction table quality assessment"
+        - "Array-based relationships (anti-pattern)"
+
+    - id: "4"
+      name: "Referential Integrity Verification"
+      description: |
+        Verify that all relationship columns have proper
+        referential integrity constraints.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find ID columns that might need constraints"
+          command: "grep -riE '\\w+_id\\s+(INT|INTEGER|BIGINT|UUID|VARCHAR)' --include='*.sql' . 2>/dev/null | head -50"
+        - purpose: "Compare against foreign key constraints"
+          command: "grep -riE 'FOREIGN KEY.*\\(\\w+_id\\)|REFERENCES' --include='*.sql' . 2>/dev/null | head -50"
+
+      expected_findings:
+        - "ID columns with constraints vs without"
+        - "Referential integrity gaps"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Relationship Inventory"
+        - "Cascade Analysis"
+        - "Integrity Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct schema evidence of missing constraints or dangerous cascades"
+    medium: "Patterns suggest issues, verification recommended"
+    low: "Potential issues based on naming conventions"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "sql-standard-fk"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed relationship analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "rel-001"
+    item: "All relationships identified and documented"
+    level: "CRITICAL"
+    verification: "grep -riE 'FOREIGN KEY|REFERENCES|@ManyToOne|belongsTo' --include='*.sql' --include='*.ts' --include='*.prisma' . 2>/dev/null | wc -l | xargs -I{} echo PASS"
+    expected: "PASS"
+
+  - id: "rel-002"
+    item: "Cascade behaviors reviewed for safety"
+    level: "BLOCKING"
+    verification: "grep -riE 'ON DELETE CASCADE' --include='*.sql' --include='*.prisma' . 2>/dev/null | wc -l | xargs -I{} echo PASS"
+    expected: "PASS"
+
+  - id: "rel-003"
+    item: "Foreign key constraints present on relationship columns"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify all *_id columns have corresponding FOREIGN KEY constraints"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Data Integrity Standards"
+      controls: ["DI-001", "DI-002"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-design.normalization-appropriateness"
+    - "data-state-management.schema-design.index-design"

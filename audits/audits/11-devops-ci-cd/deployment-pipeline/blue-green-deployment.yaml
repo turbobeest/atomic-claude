@@ -1,0 +1,356 @@
+# ============================================================
+# AUDIT: Blue-Green Deployment
+# ============================================================
+# Evaluates blue-green deployment implementation and practices
+
+audit:
+  id: "devops-ci-cd.deployment-pipeline.blue-green-deployment"
+  name: "Blue-Green Deployment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "deployment-pipeline"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines blue-green deployment implementation including environment
+    setup, traffic switching mechanism, database handling, verification
+    procedures, and rollback capability. Assesses whether blue-green
+    provides effective zero-downtime deployment with instant rollback.
+
+  why_it_matters: |
+    Blue-green deployments enable instant rollback by maintaining two
+    identical production environments. Traffic switches atomically from
+    one to the other, providing true zero-downtime deployments. However,
+    improper implementation can lead to data inconsistencies, resource
+    waste, or incomplete rollback capability.
+
+  when_to_run:
+    - "When implementing blue-green capability"
+    - "Before critical releases"
+    - "After deployment incidents"
+    - "Quarterly deployment strategy review"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_configuration"
+      description: "Blue-green environment configuration"
+    - type: "deployment_scripts"
+      description: "Deployment and traffic switching automation"
+
+  access_requirements:
+    - "Infrastructure configuration access"
+    - "Load balancer/DNS configuration"
+    - "Database architecture documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "blue.*green|activeService|previewService"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify blue-green configuration"
+
+    - pattern: "BlueGreen|setWeight|promote"
+      type: "regex"
+      scope: "config"
+      purpose: "Argo Rollouts blue-green configuration"
+
+  file_patterns:
+    - glob: "**/rollout*.yaml"
+      purpose: "Argo Rollouts definitions"
+
+    - glob: "**/ingress*.yaml"
+      purpose: "Ingress routing configuration"
+
+    - glob: "**/service*.yaml"
+      purpose: "Service definitions for traffic routing"
+
+knowledge_sources:
+  guides:
+    - id: "argo-bluegreen"
+      name: "Argo Rollouts Blue-Green Strategy"
+      url: "https://argoproj.github.io/argo-rollouts/features/bluegreen/"
+      offline_cache: true
+
+    - id: "aws-bluegreen"
+      name: "AWS Blue-Green Deployments"
+      url: "https://docs.aws.amazon.com/whitepapers/latest/blue-green-deployments/welcome.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Check rollout and service status"
+      command: "kubectl argo rollouts get rollout NAME"
+
+    - tool: "aws"
+      purpose: "AWS blue-green deployment status"
+      command: "aws deploy get-deployment"
+
+  scripts:
+    - id: "check-bluegreen-config"
+      language: "bash"
+      purpose: "Identify blue-green deployment configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        if grep -rE 'blueGreen|activeService|previewService' k8s/ 2>/dev/null | head -1; then
+          echo "PASS: Blue-green configuration found"
+        else
+          echo "INFO: No blue-green configuration found"
+        fi
+
+signals:
+  critical:
+    - id: "CICD-BLUEGREEN-CRIT-001"
+      signal: "Blue and green environments not truly identical"
+      evidence_pattern: "Configuration drift between blue and green"
+      explanation: |
+        If blue and green environments differ, switching between them
+        changes more than just the application version, making it
+        impossible to isolate deployment issues.
+      remediation: "Use infrastructure as code to ensure identical environments"
+
+    - id: "CICD-BLUEGREEN-CRIT-002"
+      signal: "Database schema changes prevent rollback"
+      evidence_pattern: "Destructive migrations deployed with application"
+      explanation: |
+        Blue-green enables instant application rollback, but if database
+        changes are incompatible with the previous version, rollback
+        will fail or cause data issues.
+      remediation: "Ensure database changes are backward-compatible or use expand-contract pattern"
+
+  high:
+    - id: "CICD-BLUEGREEN-HIGH-001"
+      signal: "No pre-traffic verification of green environment"
+      evidence_pattern: "Traffic switched without testing green environment"
+      explanation: |
+        Switching traffic to green without verification means discovering
+        issues under production traffic, negating blue-green benefits.
+      remediation: "Implement smoke tests on green before traffic switch"
+
+    - id: "CICD-BLUEGREEN-HIGH-002"
+      signal: "Old environment terminated before verification period"
+      evidence_pattern: "Immediate scale-down of blue after switch"
+      explanation: |
+        If blue is terminated immediately after switching to green,
+        rollback capability is lost. A bake period is needed to
+        validate the new deployment.
+      remediation: "Maintain old environment for rollback window (e.g., 1 hour)"
+
+  medium:
+    - id: "CICD-BLUEGREEN-MED-001"
+      signal: "Session affinity not handled during switch"
+      evidence_pattern: "Active sessions lost during traffic switch"
+      remediation: "Implement session draining or externalized sessions"
+
+    - id: "CICD-BLUEGREEN-MED-002"
+      signal: "DNS-based switching with long TTL"
+      evidence_pattern: "DNS TTL > 60 seconds for traffic switching"
+      remediation: "Use load balancer switching or reduce DNS TTL"
+
+  low:
+    - id: "CICD-BLUEGREEN-LOW-001"
+      signal: "Resource costs of maintaining two environments not tracked"
+
+    - id: "CICD-BLUEGREEN-LOW-002"
+      signal: "No automated cleanup of old environment after verification"
+
+  positive:
+    - id: "CICD-BLUEGREEN-POS-001"
+      signal: "Instant traffic switch with tested rollback capability"
+
+    - id: "CICD-BLUEGREEN-POS-002"
+      signal: "Pre-traffic testing on preview environment"
+
+    - id: "CICD-BLUEGREEN-POS-003"
+      signal: "Database changes designed for backward compatibility"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify blue-green implementation"
+      description: |
+        Determine the blue-green deployment mechanism in use
+        and how environments are defined.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for Argo Rollouts blue-green"
+          command: |
+            grep -rE 'blueGreen|activeService|previewService' k8s/ --include='*.yaml' 2>/dev/null | head -10
+
+        - purpose: "Check for separate environment definitions"
+          command: |
+            find . -name '*blue*' -o -name '*green*' 2>/dev/null | head -10
+
+      expected_findings:
+        - "Blue-green implementation identification"
+
+    - id: "2"
+      name: "Verify environment parity"
+      description: |
+        Confirm that blue and green environments are truly
+        identical except for application version.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Compare environment configurations"
+          command: |
+            # This would require environment-specific analysis
+            echo "Verify blue and green infrastructure configurations match"
+
+      expected_findings:
+        - "Environment parity assessment"
+
+    - id: "3"
+      name: "Analyze traffic switching"
+      description: |
+        Review how traffic is switched between environments
+        and how quickly rollback can occur.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check traffic switching mechanism"
+          command: |
+            grep -rE 'setWeight|promote|activeService' k8s/ --include='*.yaml' 2>/dev/null
+
+      expected_findings:
+        - "Traffic switching mechanism assessment"
+
+    - id: "4"
+      name: "Review database handling"
+      description: |
+        Assess how database schema changes are handled in
+        blue-green deployments.
+      duration_estimate: "20 min"
+
+      questions:
+        - "Are migrations backward-compatible?"
+        - "Is expand-contract pattern used for schema changes?"
+        - "Can the old version work with the new schema?"
+
+      expected_findings:
+        - "Database migration compatibility assessment"
+
+    - id: "5"
+      name: "Test rollback capability"
+      description: |
+        Verify that rollback actually works by reviewing
+        procedures and past incidents.
+      duration_estimate: "15 min"
+
+      questions:
+        - "How quickly can traffic be switched back?"
+        - "Has rollback been tested recently?"
+        - "What is the bake period before old environment is removed?"
+
+      expected_findings:
+        - "Rollback capability assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Blue-Green Implementation Review"
+        - "Environment Parity Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full blue-green configuration reviewed with rollback test"
+    medium: "Configuration reviewed without rollback verification"
+    low: "Based on configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "argo-bluegreen"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed environment analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "blue-green-deployment-001"
+    item: "Blue-green deployment configured"
+    level: "CRITICAL"
+    verification: |
+      grep -rE 'blueGreen|activeService|previewService' k8s/ --include='*.yaml' 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "blue-green-deployment-002"
+    item: "Environments are identical (IaC verified)"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify both environments use same IaC with only version differences"
+    expected: "Confirmed by reviewer"
+
+  - id: "blue-green-deployment-003"
+    item: "Pre-traffic verification configured"
+    level: "BLOCKING"
+    verification: |
+      grep -rE 'prePromotionAnalysis|previewService' k8s/ --include='*.yaml' 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "blue-green-deployment-004"
+    item: "Old environment retained for rollback window"
+    level: "WARNING"
+    verification: |
+      grep -rE 'scaleDownDelaySeconds|autoPromotionSeconds' k8s/ --include='*.yaml' 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "DORA"
+      controls: ["Time to Restore Service", "Change Failure Rate"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.deployment-pipeline.canary-deployment"
+    - "devops-ci-cd.deployment-pipeline.rollback-capability"
+    - "devops-ci-cd.deployment-pipeline.deployment-verification"

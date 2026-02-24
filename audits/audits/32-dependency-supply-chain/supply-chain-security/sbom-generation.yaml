@@ -1,0 +1,255 @@
+audit:
+  id: dependency-supply-chain.supply-chain-security.sbom-generation
+  name: SBOM Generation Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: supply-chain-security
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: dependencies
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates the generation and management of Software Bill
+    of Materials (SBOM) for the project. SBOMs provide a complete inventory
+    of all software components, enabling vulnerability tracking, license
+    compliance, and supply chain transparency.
+  why_it_matters: |
+    SBOMs are increasingly required by regulations (Executive Order 14028)
+    and customers. They enable rapid response to vulnerabilities (like
+    Log4Shell) by immediately identifying affected components. Without
+    SBOMs, determining exposure to new CVEs is time-consuming and error-prone.
+  when_to_run:
+  - As part of release process
+  - When SBOM requirements are mandated
+  - During security assessments
+  - For supply chain compliance
+prerequisites:
+  required_artifacts:
+  - type: dependency_manifest
+    description: package.json, requirements.txt, etc.
+  - type: lock_file
+    description: Lock files for accurate component versions
+  access_requirements:
+  - Read access to all project files
+  - SBOM generation tools
+discovery:
+  file_patterns:
+  - glob: '**/package.json'
+    purpose: Find npm components
+  - glob: '**/requirements.txt'
+    purpose: Find Python components
+  - glob: '**/go.mod'
+    purpose: Find Go components
+  - glob: '**/sbom*.json'
+    purpose: Find existing SBOMs
+  - glob: '**/*-bom*.json'
+    purpose: Find CycloneDX BOMs
+knowledge_sources:
+  guides:
+  - id: ntia-sbom
+    name: NTIA SBOM Minimum Elements
+    url: https://www.ntia.gov/page/software-bill-materials
+  - id: cisa-sbom
+    name: CISA SBOM Guidance
+    url: https://www.cisa.gov/sbom
+  standards:
+  - id: cyclonedx
+    name: CycloneDX SBOM Standard
+    relevance: SBOM format standard
+  - id: spdx
+    name: SPDX SBOM Standard
+    relevance: Alternative SBOM format
+tooling:
+  analysis_tools:
+  - tool: syft
+    purpose: Generate SBOMs from multiple sources
+  - tool: cyclonedx-cli
+    purpose: CycloneDX SBOM generation
+  - tool: spdx-sbom-generator
+    purpose: SPDX format SBOM generation
+  - tool: trivy
+    purpose: SBOM generation with vulnerability correlation
+  - tool: cdxgen
+    purpose: CycloneDX generator for multiple ecosystems
+signals:
+  critical:
+  - id: DEP-SBOM-CRIT-001
+    signal: No SBOM generation capability
+    evidence_indicators:
+    - No SBOM tools configured
+    - Unable to produce SBOM on demand
+    explanation: |
+      Without SBOM capability, organizations cannot respond quickly
+      to vulnerability disclosures or meet growing regulatory and
+      customer requirements for supply chain transparency.
+    remediation: Implement SBOM generation tooling immediately
+  - id: DEP-SBOM-CRIT-002
+    signal: SBOM missing critical component information
+    evidence_indicators:
+    - SBOM lacks version information
+    - Major components not included
+    remediation: Fix SBOM generation to include all required data
+  high:
+  - id: DEP-SBOM-HIGH-001
+    signal: SBOM not generated as part of build
+    evidence_indicators:
+    - Manual SBOM generation only
+    - SBOM not in CI/CD pipeline
+    remediation: Integrate SBOM generation into build process
+  - id: DEP-SBOM-HIGH-002
+    signal: SBOM format not standardized
+    evidence_indicators:
+    - Non-standard SBOM format
+    - Cannot be consumed by tools
+    remediation: Generate SBOM in CycloneDX or SPDX format
+  medium:
+  - id: DEP-SBOM-MED-001
+    signal: SBOM doesn't include all NTIA minimum elements
+    evidence_indicators:
+    - Missing supplier information
+    - Missing component relationships
+    remediation: Enhance SBOM to include all required elements
+  - id: DEP-SBOM-MED-002
+    signal: Container base image not in SBOM
+    evidence_indicators:
+    - Only application dependencies in SBOM
+    - OS packages missing
+    remediation: Include container and OS components in SBOM
+  low:
+  - id: DEP-SBOM-LOW-001
+    signal: SBOM not published with releases
+    evidence_indicators:
+    - SBOM generated but not distributed
+    - Customers cannot access SBOM
+    remediation: Include SBOM in release artifacts
+  positive:
+  - id: DEP-SBOM-POS-001
+    signal: Complete SBOM generated automatically
+  - id: DEP-SBOM-POS-002
+    signal: SBOM includes all NTIA minimum elements
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Check for Existing SBOM
+    description: Look for existing SBOM files
+    commands:
+    - purpose: Find SBOM files
+      command: find . -name '*sbom*' -o -name '*bom*' 2>/dev/null | grep -E '\.(json|xml|spdx)$' | grep
+        -v node_modules | head -10
+  - id: '2'
+    name: Generate SBOM with Syft
+    description: Create SBOM using Syft
+    commands:
+    - purpose: Generate CycloneDX SBOM
+      command: syft . -o cyclonedx-json 2>/dev/null | head -100 || echo 'syft not available'
+    - purpose: Generate SPDX SBOM
+      command: syft . -o spdx-json 2>/dev/null | head -100 || echo 'syft SPDX not available'
+  - id: '3'
+    name: Generate SBOM with cdxgen
+    description: Alternative SBOM generation
+    commands:
+    - purpose: Generate with cdxgen
+      command: 'npx @cyclonedx/cdxgen -o sbom.json 2>/dev/null && echo ''SBOM generated: sbom.json'' ||
+        echo ''cdxgen not available'''
+  - id: '4'
+    name: Validate SBOM Content
+    description: Verify SBOM has required information
+    commands:
+    - purpose: Check SBOM component count
+      command: cat sbom.json 2>/dev/null | jq '.components | length' || echo 'Could not validate SBOM'
+    - purpose: Check for version information
+      command: cat sbom.json 2>/dev/null | jq '.components[0:5] | .[].version' || echo 'Version check
+        not available'
+  - id: '5'
+    name: Check NTIA Minimum Elements
+    description: Verify SBOM completeness per NTIA
+    commands:
+    - purpose: Generate NTIA checklist
+      command: |-
+        echo 'NTIA Minimum Elements Checklist:
+
+        [ ] Supplier Name
+        [ ] Component Name
+        [ ] Version String
+        [ ] Unique Identifier (PURL/CPE)
+        [ ] Dependency Relationships
+        [ ] Author of SBOM Data
+        [ ] Timestamp'
+  - id: '6'
+    name: Check Build Integration
+    description: Verify SBOM in CI/CD
+    commands:
+    - purpose: Check for SBOM in CI
+      command: grep -rE '(syft|cyclonedx|sbom|cdxgen)' .github/workflows/ 2>/dev/null || echo 'No SBOM
+        generation in GitHub Actions'
+output:
+  deliverables:
+  - type: sbom
+    format: cyclonedx
+    description: Generated Software Bill of Materials
+  - type: sbom_assessment
+    format: structured
+    description: Evaluation of SBOM completeness
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - SBOM Generation Capability
+    - Content Analysis
+    - NTIA Compliance
+    - Recommendations
+closeout_checklist:
+- id: dep-sbom-001
+  item: SBOM can be generated on demand
+  level: CRITICAL
+  verification: syft or cdxgen produces SBOM
+- id: dep-sbom-002
+  item: SBOM uses standard format
+  level: REQUIRED
+  verification: CycloneDX or SPDX format
+- id: dep-sbom-003
+  item: SBOM integrated in build
+  level: REQUIRED
+  verification: CI includes SBOM generation
+- id: dep-sbom-004
+  item: SBOM includes NTIA minimum elements
+  level: RECOMMENDED
+  verification: Checklist complete
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: EO 14028
+    control: Section 4
+    description: SBOM requirements for federal software
+  - framework: SOC 2
+    control: CC6.1
+    description: Asset inventory
+  - framework: NIST CSF
+    control: ID.AM-1
+    description: Asset inventory
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.dependency-inventory.dependency-enumeration
+  depends_on:
+  - dependency-supply-chain.dependency-inventory.dependency-enumeration
+  feeds_into:
+  - compliance-legal.supply-chain-compliance

@@ -1,0 +1,456 @@
+audit:
+  id: security-trust.network-security.ddos-protection
+  name: DDoS Protection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: network-security
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines DDoS (Distributed Denial of Service) protection
+    mechanisms across network and application layers. It evaluates rate
+    limiting configurations, WAF rules, CDN protections, traffic scrubbing
+    capabilities, and incident response procedures. The audit covers both
+    volumetric attacks (Layer 3/4) and application-layer attacks (Layer 7).
+  why_it_matters: |
+    DDoS attacks can render services unavailable, causing significant business
+    impact and revenue loss. Application-layer attacks are increasingly
+    sophisticated and difficult to distinguish from legitimate traffic.
+    Without proper protections, a single attack can overwhelm infrastructure
+    and affect all users. NIST SP 800-228 emphasizes DDoS mitigation as
+    essential for API protection.
+  when_to_run:
+  - Initial security assessment
+  - Before launching public services
+  - After traffic pattern changes
+  - Following DDoS incident
+  - Annual security review
+prerequisites:
+  required_artifacts:
+  - type: infrastructure_inventory
+    description: List of public-facing services and endpoints
+  - type: network_diagram
+    description: Network architecture showing DDoS protection placement
+  - type: traffic_baseline
+    description: Normal traffic patterns and volumes
+  access_requirements:
+  - WAF management console access
+  - CDN configuration access
+  - Load balancer configuration access
+  - Cloud DDoS protection console access
+discovery:
+  code_patterns:
+  - pattern: rate.?limit|throttl|burst.?limit
+    type: regex
+    scope: config
+    purpose: Identify rate limiting configurations
+  - pattern: waf|cloud.?armor|shield|cloudflare
+    type: regex
+    scope: config
+    purpose: Identify WAF and DDoS protection services
+  - pattern: connection.?limit|max.?connections|client.?body.?size
+    type: regex
+    scope: config
+    purpose: Identify connection limits and request size limits
+  file_patterns:
+  - glob: '**/nginx.conf'
+    purpose: Nginx rate limiting configuration
+  - glob: '**/haproxy.cfg'
+    purpose: HAProxy connection limits
+  - glob: '**/waf-rules*.json'
+    purpose: WAF rule definitions
+  - glob: '**/cloudformation*.yaml'
+    purpose: AWS Shield/WAF configurations
+knowledge_sources:
+  specifications:
+  - id: nist-sp-800-228
+    name: NIST SP 800-228 - Guidelines for API Protection
+    url: https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-228.pdf
+    offline_cache: true
+    priority: required
+  - id: nsa-network-infrastructure
+    name: NSA Network Infrastructure Security Guide
+    url: https://media.defense.gov/2022/Jun/15/2003018261/-1/-1/0/CTR_NSA_NETWORK_INFRASTRUCTURE_SECURITY_GUIDE_20220615.PDF
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-ddos-resiliency
+    name: AWS Best Practices for DDoS Resiliency
+    url: https://docs.aws.amazon.com/whitepapers/latest/aws-best-practices-ddos-resiliency/
+    offline_cache: true
+  - id: cloudflare-rate-limiting
+    name: Cloudflare Rate Limiting Best Practices
+    url: https://developers.cloudflare.com/waf/rate-limiting-rules/best-practices/
+    offline_cache: true
+  - id: owasp-dos-prevention
+    name: OWASP Denial of Service Prevention Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: aws-cli
+    purpose: Check AWS Shield and WAF configurations
+    command: aws shield describe-protection --resource-arn arn:aws:elasticloadbalancing:...
+  - tool: gcloud
+    purpose: Check Google Cloud Armor policies
+    command: gcloud compute security-policies list
+  - tool: ab
+    purpose: Load testing to verify rate limits
+    command: ab -n 1000 -c 100 https://target/endpoint
+  scripts:
+  - id: rate-limit-test
+    language: bash
+    purpose: Test rate limiting effectiveness
+    source: inline
+    code: |
+      #!/bin/bash
+      # Test rate limiting by sending rapid requests
+      for i in {1..200}; do
+        curl -s -o /dev/null -w "%{http_code}\n" https://target/api/endpoint
+      done | sort | uniq -c
+signals:
+  critical:
+  - id: DDOS-CRIT-001
+    signal: No DDoS protection for public endpoints
+    cwe_id: CWE-770
+    evidence_indicators:
+    - Direct exposure to internet without CDN/WAF
+    - No cloud DDoS protection enabled
+    - Public IPs directly attached to application servers
+    explanation: |
+      Public endpoints without DDoS protection can be overwhelmed by
+      volumetric attacks. Even small botnets can generate enough traffic
+      to saturate unprotected infrastructure.
+    remediation: Deploy CDN with DDoS protection or cloud-native DDoS protection service
+  - id: DDOS-CRIT-002
+    signal: No rate limiting on authentication endpoints
+    cwe_id: CWE-307
+    evidence_indicators:
+    - Login endpoint accepts unlimited requests
+    - No account lockout mechanism
+    - Password reset without throttling
+    explanation: |
+      Authentication endpoints without rate limiting enable brute force
+      and credential stuffing attacks. These are primary targets for
+      automated attacks.
+    remediation: Implement rate limiting on all authentication endpoints (e.g., 5 requests per minute
+      per IP)
+  - id: DDOS-CRIT-003
+    signal: No request size limits configured
+    cwe_id: CWE-400
+    evidence_indicators:
+    - client_max_body_size not configured
+    - No payload size validation
+    - Unlimited request headers accepted
+    explanation: |
+      Without request size limits, attackers can exhaust server resources
+      with large payloads. This enables both memory exhaustion and slow
+      loris style attacks.
+    remediation: Configure appropriate request size limits for body, headers, and URIs
+  high:
+  - id: DDOS-HIGH-001
+    signal: Rate limits too permissive
+    cwe_id: CWE-770
+    evidence_indicators:
+    - Rate limits above 1000 requests per second per IP
+    - No differentiation between endpoints
+    - Rate limits easily bypassed by IP rotation
+    explanation: |
+      Overly permissive rate limits fail to protect against application-
+      layer attacks. Rate limits should be based on normal traffic patterns
+      with appropriate margins.
+    remediation: Implement layered rate limits based on baseline traffic analysis
+  - id: DDOS-HIGH-002
+    signal: No geographic filtering capability
+    cwe_id: CWE-770
+    evidence_indicators:
+    - Cannot block traffic by country
+    - No geo-based rate limiting
+    - Attack traffic from unexpected regions unfiltered
+    explanation: |
+      Geographic filtering allows rapid response to attacks originating
+      from regions where the service has no legitimate users.
+    remediation: Enable geographic filtering capability in WAF or CDN
+  - id: DDOS-HIGH-003
+    signal: No automated threat response
+    cwe_id: CWE-770
+    evidence_indicators:
+    - Manual intervention required for all attacks
+    - No auto-scaling for traffic spikes
+    - No automatic IP blocking for suspicious patterns
+    explanation: |
+      Manual response to DDoS attacks is too slow. Automated detection
+      and response is essential for rapid mitigation.
+    remediation: Configure automated response rules and auto-scaling policies
+  - id: DDOS-HIGH-004
+    signal: WAF in detection-only mode
+    cwe_id: CWE-770
+    evidence_pattern: mode.*detect|log.?only|monitor
+    explanation: |
+      WAF rules in detection-only mode log attacks but don't block them.
+      This provides no protection during actual attacks.
+    remediation: Enable blocking mode for validated WAF rules
+  medium:
+  - id: DDOS-MED-001
+    signal: No connection limits configured
+    evidence_pattern: max.?connections.*unlimited|worker_connections.*65535
+    explanation: |
+      Without connection limits, attackers can exhaust connection pools
+      and prevent legitimate users from connecting.
+    remediation: Configure reasonable connection limits per IP and globally
+  - id: DDOS-MED-002
+    signal: Missing bot management
+    evidence_indicators:
+    - No bot detection mechanism
+    - No CAPTCHA integration
+    - No JavaScript challenge capability
+    explanation: |
+      Most application-layer attacks use automated bots. Without bot
+      management, distinguishing attack traffic from legitimate traffic
+      is difficult.
+    remediation: Implement bot detection with CAPTCHA or JavaScript challenges
+  - id: DDOS-MED-003
+    signal: No DDoS runbook or playbook
+    evidence_indicators:
+    - No documented incident response for DDoS
+    - Escalation paths unclear
+    - No practice drills conducted
+    explanation: |
+      Without documented procedures, response to attacks is ad-hoc and
+      slower than necessary.
+    remediation: Create and regularly test DDoS incident response runbook
+  low:
+  - id: DDOS-LOW-001
+    signal: Rate limit response missing Retry-After header
+    evidence_indicators:
+    - 429 responses don't include Retry-After
+    - Clients cannot determine backoff period
+    explanation: |
+      The Retry-After header helps legitimate clients implement proper
+      backoff behavior when rate limited.
+    remediation: Include Retry-After header in 429 rate limit responses
+  positive:
+  - id: DDOS-POS-001
+    signal: Layered DDoS protection implemented
+    explanation: Multiple layers of protection (CDN, WAF, origin) provides defense in depth
+  - id: DDOS-POS-002
+    signal: Automated threat response configured
+    explanation: Automatic blocking and scaling enables rapid response to attacks
+  - id: DDOS-POS-003
+    signal: Traffic baseline established with anomaly detection
+    explanation: Baseline-aware detection improves accuracy of threat identification
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Public Endpoints
+    description: |
+      Identify all public-facing endpoints that require DDoS protection
+      including web applications, APIs, and network services.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List AWS public-facing resources
+      command: aws elbv2 describe-load-balancers --query 'LoadBalancers[?Scheme==`internet-facing`]'
+    - purpose: List CloudFront distributions
+      command: aws cloudfront list-distributions
+    expected_findings:
+    - Complete inventory of public endpoints
+    - Identification of protection coverage gaps
+  - id: '2'
+    name: Review DDoS Protection Services
+    description: |
+      Verify that DDoS protection services are enabled and properly
+      configured for all public endpoints.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check AWS Shield subscription
+      command: aws shield describe-subscription
+    - purpose: List Shield protections
+      command: aws shield list-protections
+    - purpose: Check Cloud Armor policies
+      command: gcloud compute security-policies list
+    expected_findings:
+    - DDoS protection coverage status
+    - Service tier (standard vs advanced)
+  - id: '3'
+    name: Analyze Rate Limiting Configuration
+    description: |
+      Review rate limiting rules across all layers including CDN, WAF,
+      load balancer, and application.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List AWS WAF rate-based rules
+      command: aws wafv2 list-web-acls --scope REGIONAL
+    - purpose: Check nginx rate limiting
+      command: grep -rn 'limit_req' /etc/nginx/
+    - purpose: Check API Gateway throttling
+      command: aws apigateway get-usage-plans
+    expected_findings:
+    - Rate limit thresholds for each layer
+    - Coverage gaps in rate limiting
+  - id: '4'
+    name: Test Rate Limiting Effectiveness
+    description: |
+      Perform controlled testing to verify rate limits are working as
+      configured and blocking excessive requests.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test authentication endpoint rate limit
+      command: for i in {1..100}; do curl -s -o /dev/null -w '%{http_code}\n' https://target/login; done
+        | grep 429 | wc -l
+    - purpose: Load test API endpoint
+      command: ab -n 500 -c 50 https://target/api/endpoint 2>&1 | grep 'Non-2xx'
+    expected_findings:
+    - Verification that rate limits trigger
+    - Threshold accuracy assessment
+  - id: '5'
+    name: Review WAF Rules
+    description: |
+      Examine WAF rule configurations for application-layer attack
+      protection and OWASP coverage.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List WAF managed rule groups
+      command: aws wafv2 list-available-managed-rule-groups --scope REGIONAL
+    - purpose: Check rule actions (block vs count)
+      command: aws wafv2 get-web-acl --name NAME --scope REGIONAL --id ID
+    expected_findings:
+    - WAF rule coverage assessment
+    - Rules in detection vs blocking mode
+  - id: '6'
+    name: Verify Infrastructure Limits
+    description: |
+      Check request size limits, connection limits, and timeout
+      configurations that prevent resource exhaustion.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check nginx client limits
+      command: grep -E 'client_max_body_size|client_header_buffer_size|large_client_header_buffers' /etc/nginx/nginx.conf
+    - purpose: Check connection timeouts
+      command: grep -E 'timeout|keepalive' /etc/nginx/nginx.conf
+    expected_findings:
+    - Request size limit configurations
+    - Connection and timeout settings
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Protection Coverage Assessment
+    - Rate Limiting Analysis
+    - Risk Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct testing verifies protection mechanisms, configuration reviewed
+    medium: Configuration reviewed without load testing
+    low: Based on documentation and interviews only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: nist-sp-800-228
+      priority: required
+    - source_id: owasp-dos-prevention
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: DDoS audit requires comprehensive testing and analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ddos-001
+  item: DDoS protection enabled for all public endpoints
+  level: CRITICAL
+  verification: aws shield list-protections 2>/dev/null | jq '.Protections | length' | grep -q '^[1-9]'
+    && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: ddos-002
+  item: Rate limiting configured on authentication endpoints
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test login endpoint with rapid requests to verify rate limiting triggers
+  expected: Confirmed by reviewer
+- id: ddos-003
+  item: Request size limits configured
+  level: CRITICAL
+  verification: grep -q 'client_max_body_size' /etc/nginx/nginx.conf && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: ddos-004
+  item: WAF rules in blocking mode
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify WAF rules are set to BLOCK action, not COUNT
+  expected: Confirmed by reviewer
+- id: ddos-005
+  item: Connection limits configured
+  level: WARNING
+  verification: grep -qE 'limit_conn|max_connections' /etc/nginx/nginx.conf && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: ddos-006
+  item: DDoS incident response runbook exists
+  level: WARNING
+  verification: manual
+  verification_notes: Verify documented DDoS response procedures exist
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-4
+    - PR.PT-4
+  - framework: SOC2
+    controls:
+    - CC6.1
+    - A1.2
+  - framework: ISO27001
+    controls:
+    - A.13.1.3
+relationships:
+  commonly_combined:
+  - security-trust.network-security.firewall-rules
+  - security-trust.application-security.security-headers
+  - security-trust.network-security.egress-control

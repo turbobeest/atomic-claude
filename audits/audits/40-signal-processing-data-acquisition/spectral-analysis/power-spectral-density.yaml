@@ -1,0 +1,260 @@
+audit:
+  id: signal-processing-data-acquisition.spectral-analysis.power-spectral-density
+  name: Power Spectral Density Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: spectral-analysis
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates power spectral density estimation methods
+    for accurate spectral power measurements. It examines:
+    - PSD estimation method selection (periodogram, Welch, etc.)
+    - Scaling and normalization for proper units
+    - Variance reduction through averaging
+    - Resolution vs. variance trade-off
+    - Proper handling of one-sided vs. two-sided spectra
+    - Integration to obtain band power
+  why_it_matters: |
+    PSD characterizes signal power distribution over frequency:
+    - Correct scaling produces proper units (V^2/Hz or dB/Hz)
+    - Averaging reduces variance but requires more data
+    - Welch method balances resolution and variance
+    - One-sided spectrum requires 2x factor for real signals
+    - Integration gives band power for compliance testing
+
+    Incorrect PSD estimation corrupts noise characterization,
+    signal power measurements, and compliance assessments.
+  when_to_run:
+  - Noise characterization systems
+  - EMC/compliance testing
+  - Signal power measurement
+  - Spectrum analyzer applications
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: PSD estimation implementation
+  - type: requirements
+    description: Power measurement requirements
+  - type: calibration_data
+    description: Reference power measurements
+  access_requirements:
+  - Access to PSD code
+  - Reference standards
+  - Calibration capability
+discovery:
+  code_patterns:
+  - pattern: (psd|PSD|power_spectral|welch|periodogram)
+    type: regex
+    scope: source
+    purpose: Detect PSD estimation
+  - pattern: (spectral_density|power_density|v2_per_hz)
+    type: regex
+    scope: source
+    purpose: Detect density calculations
+  - pattern: (one_sided|two_sided|onesided)
+    type: regex
+    scope: source
+    purpose: Detect spectrum type handling
+  file_patterns:
+  - glob: '**/psd*.{c,h,cpp,py}'
+    purpose: PSD files
+  - glob: '**/spectrum*.{c,h,cpp,py}'
+    purpose: Spectral analysis files
+  - glob: '**/welch*.{c,h,cpp,py}'
+    purpose: Welch method files
+knowledge_sources:
+  specifications:
+  - id: welch-method
+    name: Welch PSD Estimation Method
+    url: https://en.wikipedia.org/wiki/Welch%27s_method
+    offline_cache: true
+    priority: required
+  guides:
+  - id: scipy-welch
+    name: SciPy Welch Documentation
+    url: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.welch.html
+    offline_cache: true
+signals:
+  critical:
+  - id: PSD-CRIT-001
+    signal: PSD scaling incorrect giving wrong units
+    evidence_indicators:
+    - Units don't match expected (V^2/Hz)
+    - Reference signal gives wrong power
+    - Parseval's theorem not satisfied
+    explanation: |
+      PSD must be scaled to have units of power/Hz. Incorrect
+      scaling makes measurements meaningless and incomparable.
+      Reference calibration verifies correct scaling.
+    remediation: |
+      - Verify scaling formula includes fs and N
+      - Account for window normalization
+      - Calibrate with known power signal
+      - Verify Parseval's theorem
+    cwe: CWE-682
+  - id: PSD-CRIT-002
+    signal: One-sided/two-sided handling incorrect
+    evidence_indicators:
+    - Factor of 2 error in power
+    - DC and Nyquist bins handled wrong
+    - Real signal spectrum not doubled
+    explanation: |
+      One-sided PSD for real signals must double power from
+      positive frequencies (except DC and Nyquist). Incorrect
+      handling causes 3dB power errors.
+    remediation: |
+      - Double positive frequency bins for one-sided
+      - Don't double DC and Nyquist bins
+      - Document one-sided vs. two-sided convention
+      - Verify total power matches time domain
+  high:
+  - id: PSD-HIGH-001
+    signal: High variance from single periodogram
+    evidence_indicators:
+    - Large variation between estimates
+    - No averaging implemented
+    - Variance ~100% of expected value
+    explanation: |
+      Single periodogram has variance equal to expected value
+      (100% standard error). Welch averaging reduces variance
+      proportional to number of segments.
+    remediation: |
+      - Use Welch method with multiple segments
+      - Accept resolution/variance trade-off
+      - Document variance and confidence
+      - Consider Bartlett or WOSA methods
+  medium:
+  - id: PSD-MED-001
+    signal: Window correction not applied
+    evidence_indicators:
+    - Window power not compensated
+    - ENBW not calculated
+    - Power measurements incorrect
+    explanation: |
+      Windows affect power measurement. Energy gain correction
+      ensures correct total power; ENBW correction gives proper
+      density scaling. Both may be needed.
+    remediation: |
+      - Apply appropriate window correction
+      - Calculate and use ENBW
+      - Verify power with known signal
+      - Document correction factors
+  low:
+  - id: PSD-LOW-001
+    signal: PSD units not documented
+    evidence_indicators:
+    - Units not specified in output
+    - Scaling factors not recorded
+    - Conversion to dB not explained
+    explanation: |
+      Undocumented PSD makes interpretation difficult.
+      Units, scaling, and dB reference must be clear
+      for meaningful measurements.
+    remediation: |
+      - Document output units (V^2/Hz, dBV/Hz, etc.)
+      - Specify dB reference if used
+      - Record scaling factors
+      - Include in output metadata
+  positive:
+  - id: PSD-POS-001
+    signal: Well-calibrated PSD estimation
+    evidence_indicators:
+    - Correct scaling verified
+    - Welch averaging for variance control
+    - Calibrated with known reference
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: measurement-engineer
+  steps:
+  - id: '1'
+    name: PSD Implementation Review
+    description: |
+      Review PSD estimation implementation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find PSD implementation
+      command: |
+        grep -rniE "(psd|welch|periodogram|spectral_density)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - PSD method
+    - Scaling factors
+    - Averaging configuration
+  - id: '2'
+    name: Calibration Verification
+    description: |
+      Verify PSD calibration with known signal.
+    duration_estimate: 30 min
+    manual_verification: true
+    expected_findings:
+    - Reference signal power
+    - Measured vs. expected
+    - Unit verification
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - PSD Method Analysis
+    - Calibration Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: psd-001
+  item: PSD scaling produces correct units
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify against known power reference
+  expected: Confirmed by reviewer
+- id: psd-002
+  item: One-sided/two-sided handling correct
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify factor of 2 handling
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - signal-processing
+    - scientific-instruments
+    - emc-testing
+relationships:
+  commonly_combined:
+  - signal-processing.spectral-analysis.fft-implementation
+  - signal-processing.spectral-analysis.windowing-function
+  - signal-processing.signal-conditioning.noise-reduction
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

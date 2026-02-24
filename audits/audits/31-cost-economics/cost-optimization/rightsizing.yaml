@@ -1,0 +1,339 @@
+audit:
+  id: cost-economics.cost-optimization.rightsizing
+  name: Rightsizing Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: cost-optimization
+  tier: expert
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit identifies compute and storage resources that are
+    over-provisioned relative to their actual utilization. It analyzes
+    CPU, memory, storage, and network utilization patterns to recommend
+    appropriate sizing that maintains performance while reducing costs.
+  why_it_matters: |
+    Over-provisioned resources are one of the largest sources of cloud
+    waste. The FinOps Foundation estimates that 30-40% of cloud resources
+    are oversized. Rightsizing can achieve 20-30% cost reduction without
+    impacting application performance when done correctly.
+  when_to_run:
+  - Monthly optimization review
+  - After workload changes or migrations
+  - Before Reserved Instance purchases
+  - During capacity planning cycles
+prerequisites:
+  required_artifacts:
+  - type: utilization-metrics
+    description: At least 14 days of resource utilization data
+  - type: resource-inventory
+    description: List of all compute and storage resources
+  - type: performance-requirements
+    description: SLAs and performance thresholds
+  access_requirements:
+  - Read access to CloudWatch, Azure Monitor, or Stackdriver
+  - Access to AWS Compute Optimizer or equivalent
+  - Access to resource configuration details
+  - Access to cost data by resource
+discovery:
+  metrics_queries:
+  - provider: AWS
+    service: CloudWatch
+    metrics:
+    - CPUUtilization
+    - MemoryUtilization
+    - NetworkIn/NetworkOut
+    - DiskReadBytes/DiskWriteBytes
+    period: 14 days minimum
+  - provider: AWS
+    service: Compute Optimizer
+    purpose: ML-based rightsizing recommendations
+  resource_types:
+  - type: EC2 instances
+    optimization_potential: High
+  - type: RDS instances
+    optimization_potential: High
+  - type: EBS volumes
+    optimization_potential: Medium
+  - type: Lambda memory
+    optimization_potential: Medium
+  - type: Kubernetes pods
+    optimization_potential: High
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: aws-compute-optimizer
+    name: AWS Compute Optimizer Documentation
+    url: https://docs.aws.amazon.com/compute-optimizer/latest/ug/what-is-compute-optimizer.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: finops-rightsizing
+    name: FinOps - Rightsizing
+    url: https://www.finops.org/framework/capabilities/rightsizing/
+    offline_cache: true
+  - id: aws-well-architected-cost
+    name: AWS Well-Architected - Cost Optimization Pillar
+    url: https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/welcome.html
+    offline_cache: true
+tooling:
+  cloud_native_tools:
+  - tool: AWS Compute Optimizer
+    purpose: EC2, Lambda, EBS rightsizing recommendations
+    command: aws compute-optimizer get-ec2-instance-recommendations
+  - tool: AWS Cost Explorer Rightsizing
+    purpose: EC2 rightsizing based on cost and utilization
+  - tool: Azure Advisor
+    purpose: VM rightsizing recommendations
+  - tool: GCP Recommender
+    purpose: VM machine type recommendations
+  third_party_tools:
+  - tool: Kubecost
+    purpose: Kubernetes resource rightsizing
+  - tool: CloudHealth
+    purpose: Multi-cloud rightsizing analysis
+  - tool: Spot.io
+    purpose: Continuous rightsizing automation
+signals:
+  critical:
+  - id: RIGHT-CRIT-001
+    signal: Production instances consistently under 10% CPU utilization
+    evidence_threshold: avg_cpu_14d < 10% for large instances
+    explanation: |
+      Large instances with very low utilization represent significant
+      waste. A large instance at 10% utilization could often be replaced
+      by an instance 4-5x smaller at substantial cost savings.
+    remediation: Downsize instances or consolidate workloads
+  high:
+  - id: RIGHT-HIGH-001
+    signal: Compute Optimizer recommendations not actioned for 60+ days
+    evidence_threshold: recommendation_age > 60 days
+    explanation: |
+      When rightsizing recommendations exist but are not implemented,
+      the organization is knowingly paying for unused capacity.
+    remediation: Implement or document exceptions for recommendations
+  - id: RIGHT-HIGH-002
+    signal: Memory consistently over-provisioned by 50%+
+    evidence_threshold: max_memory_14d < 50% of allocated
+    explanation: |
+      Memory-based instance sizing often leads to over-provisioning.
+      If peak memory usage is below 50%, smaller instances may be
+      appropriate.
+    remediation: Evaluate memory-optimized vs general purpose instances
+  medium:
+  - id: RIGHT-MED-001
+    signal: EBS volumes over-provisioned for IOPS
+    evidence_pattern: Provisioned IOPS >> actual IOPS usage
+    remediation: Switch to gp3 or reduce provisioned IOPS
+  - id: RIGHT-MED-002
+    signal: Lambda functions over-provisioned for memory
+    evidence_pattern: Lambda memory usage << allocated memory
+    remediation: Use AWS Lambda Power Tuning to optimize
+  low:
+  - id: RIGHT-LOW-001
+    signal: No automated rightsizing process
+    evidence_pattern: Manual review only, no continuous optimization
+    remediation: Implement automated rightsizing workflows
+  positive:
+  - id: RIGHT-POS-001
+    signal: Resources sized within 20% of actual utilization
+  - id: RIGHT-POS-002
+    signal: Continuous rightsizing process with regular reviews
+  - id: RIGHT-POS-003
+    signal: Rightsizing integrated into deployment pipelines
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Gather utilization data
+    description: |
+      Collect CPU, memory, network, and storage utilization metrics
+      for all compute resources over at least 14 days.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get EC2 rightsizing recommendations
+      command: |
+        aws compute-optimizer get-ec2-instance-recommendations \
+          --output json > ec2-recommendations.json
+    - purpose: Get Lambda recommendations
+      command: |
+        aws compute-optimizer get-lambda-function-recommendations \
+          --output json > lambda-recommendations.json
+    expected_findings:
+    - Utilization baseline by resource
+    - Peak utilization patterns
+  - id: '2'
+    name: Analyze rightsizing recommendations
+    description: |
+      Review cloud provider rightsizing recommendations and validate
+      against actual utilization patterns.
+    duration_estimate: 60 min
+    expected_findings:
+    - Recommended instance types
+    - Estimated savings
+    - Risk assessment
+  - id: '3'
+    name: Identify additional candidates
+    description: |
+      Look beyond automated recommendations for resources that may
+      be candidates for rightsizing but not flagged by tools.
+    duration_estimate: 45 min
+    expected_findings:
+    - Additional candidates identified
+    - Custom analysis results
+  - id: '4'
+    name: Calculate savings potential
+    description: |
+      Quantify the cost savings from implementing rightsizing
+      recommendations.
+    duration_estimate: 30 min
+    expected_findings:
+    - Total savings opportunity
+    - Savings by resource type
+    - Priority ranking
+  - id: '5'
+    name: Assess implementation risk
+    description: |
+      Evaluate the risk of performance impact from rightsizing
+      and identify resources requiring careful testing.
+    duration_estimate: 30 min
+    expected_findings:
+    - Risk assessment by resource
+    - Testing requirements
+    - Rollback procedures
+  - id: '6'
+    name: Create implementation plan
+    description: |
+      Develop a prioritized plan for implementing rightsizing
+      recommendations with appropriate testing.
+    duration_estimate: 30 min
+    expected_findings:
+    - Implementation roadmap
+    - Testing plan
+    - Success metrics
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Rightsizing Opportunities
+    - Savings Analysis
+    - Risk Assessment
+    - Implementation Recommendations
+  - type: metrics_dashboard
+    metrics:
+    - Total rightsizing savings potential
+    - Resources by utilization tier
+    - Recommendation age distribution
+    - Implementation progress
+  confidence_guidance:
+    high: 14+ days utilization data with Compute Optimizer analysis
+    medium: 7-14 days data or partial Compute Optimizer coverage
+    low: Less than 7 days data or manual analysis only
+offline:
+  capability: minimal
+  cache_manifest:
+    knowledge:
+    - source_id: finops-rightsizing
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+      reduced_scope: Top 20 largest resources only
+    full:
+      included: true
+      priority: 1
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: right-001
+  item: All rightsizing recommendations reviewed
+  level: CRITICAL
+  verification: manual
+  expected: 100% reviewed
+- id: right-002
+  item: Savings opportunity quantified
+  level: BLOCKING
+  verification: automated
+  expected: Savings documented
+- id: right-003
+  item: Implementation plan created
+  level: WARNING
+  verification: manual
+  expected: Plan documented with timeline
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - hybrid
+    - enterprise
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Rightsizing
+    - Workload Optimization
+  - framework: AWS Well-Architected
+    controls:
+    - COST-05
+    - COST-06
+relationships:
+  commonly_combined:
+  - cost-economics.resource-efficiency.utilization-analysis
+  - cost-economics.cost-optimization.reserved-instances
+  - cost-economics.cost-visibility.unit-cost-tracking
+
+  # Multi-cloud rightsizing commands:
+  # AWS:
+  #   aws compute-optimizer get-ec2-instance-recommendations --region ${REGION}
+  #   aws ce get-rightsizing-recommendation --service EC2
+  # Azure:
+  #   az advisor recommendation list --category Cost
+  #   az monitor metrics list --resource ${RESOURCE_ID} --metric "Percentage CPU"
+  # GCP:
+  #   gcloud recommender recommendations list --recommender=google.compute.instance.MachineTypeRecommender
+  #   gcloud compute instances describe ${INSTANCE} --format="value(machineType)"
+  # Kubernetes:
+  #   kubectl top pods --all-namespaces
+  #   kubectl get vpa --all-namespaces

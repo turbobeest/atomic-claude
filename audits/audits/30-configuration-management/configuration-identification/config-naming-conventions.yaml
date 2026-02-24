@@ -1,0 +1,431 @@
+audit:
+  id: configuration-management.configuration-identification.config-naming-conventions
+  name: Configuration Naming Conventions Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: configuration-management
+  category_number: 30
+  subcategory: configuration-identification
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines naming conventions applied to configuration items
+    across the software stack. It evaluates:
+    - Consistency of configuration file naming patterns
+    - Environment variable naming standards (SCREAMING_SNAKE_CASE)
+    - Configuration key naming conventions
+    - Namespace and prefix usage for grouping
+    - Naming clarity and self-documentation
+    - Avoidance of ambiguous or conflicting names
+    - Alignment with industry conventions
+  why_it_matters: |
+    Consistent configuration naming is essential for maintainability:
+    - 12-factor app Factor III recommends strict separation of config,
+      which requires clear naming to identify configuration sources
+    - Inconsistent naming increases cognitive load and error risk
+    - Ambiguous names lead to misconfiguration incidents
+    - Automated discovery and validation depend on predictable naming
+    - Clear naming enables self-documenting configuration
+    - Teams can onboard faster with consistent conventions
+    - Duplicate or conflicting names cause runtime errors
+  when_to_run:
+  - During codebase standardization initiatives
+  - After team or project mergers
+  - When establishing configuration management practices
+  - During code review process improvements
+  - Before major refactoring efforts
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with configuration
+  - type: documentation
+    description: Existing naming convention documentation if any
+  access_requirements:
+  - Read access to all source code repositories
+  - Access to CI/CD pipeline configurations
+discovery:
+  code_patterns:
+  - pattern: '[a-z]+_[a-z]+|[a-z]+[A-Z]'
+    type: regex
+    scope: env_vars
+    purpose: Detect non-SCREAMING_SNAKE_CASE env vars
+  - pattern: ^[A-Z][A-Z0-9_]*$
+    type: regex
+    scope: env_vars
+    purpose: Detect proper SCREAMING_SNAKE_CASE
+  - pattern: \w+\.\w+\.\w+
+    type: regex
+    scope: config
+    purpose: Detect hierarchical config keys
+  - pattern: (config|conf|cfg|settings|options)[-_.]
+    type: regex
+    scope: files
+    purpose: Detect configuration file prefixes
+  - pattern: (DB_|DATABASE_|MYSQL_|POSTGRES_)
+    type: regex
+    scope: env_vars
+    purpose: Detect database config naming variations
+  - pattern: (API_KEY|APIKEY|api_key|apiKey)
+    type: regex
+    scope: source
+    purpose: Detect API key naming inconsistencies
+  file_patterns:
+  - glob: '**/*.env*'
+    purpose: Environment variable files
+  - glob: '**/config/**'
+    purpose: Configuration directories
+  - glob: '**/*config*.{yaml,yml,json,toml}'
+    purpose: Configuration files
+  - glob: '**/settings*.{py,js,ts}'
+    purpose: Settings modules
+knowledge_sources:
+  specifications:
+  - id: 12factor-config
+    name: '12-Factor App: Factor III - Config'
+    url: https://12factor.net/config
+    offline_cache: true
+    priority: required
+  - id: posix-env
+    name: POSIX Environment Variable Conventions
+    url: https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap08.html
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: google-style-env
+    name: Google Style Guide - Environment Variables
+    url: https://google.github.io/styleguide/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: eslint
+    purpose: Validate JavaScript/TypeScript config naming
+    offline_capable: true
+  - tool: custom-naming-checker
+    purpose: Check configuration naming conventions
+    offline_capable: true
+  scripts:
+  - id: naming-convention-audit
+    language: bash
+    purpose: Audit configuration naming patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Configuration Naming Audit ==="
+      echo ""
+      echo "=== Environment Variable Naming ==="
+      grep -rhoE "[A-Za-z_][A-Za-z0-9_]*=" .env* 2>/dev/null | \
+        sed 's/=//' | sort | uniq -c | sort -rn | head -30
+      echo ""
+      echo "=== Non-Standard Env Var Names ==="
+      grep -rhoE "process\.env\.[a-z][a-zA-Z0-9_]*" --include="*.js" --include="*.ts" . 2>/dev/null | \
+        sed 's/process\.env\.//' | sort | uniq
+      echo ""
+      echo "=== Config File Naming Patterns ==="
+      find . -type f \( -name "*config*" -o -name "*settings*" \) \
+        -not -path "*/node_modules/*" 2>/dev/null | head -30
+signals:
+  critical:
+  - id: CNAM-CRIT-001
+    signal: Environment variables use inconsistent casing
+    evidence_pattern: process\.env\.[a-z]|ENV\[['"][a-z]
+    explanation: |
+      Environment variables should use SCREAMING_SNAKE_CASE by POSIX
+      convention. Mixed casing causes confusion, potential conflicts,
+      and makes automated validation difficult. Some platforms are
+      case-sensitive, leading to subtle deployment bugs.
+    remediation: |
+      - Standardize all env vars to SCREAMING_SNAKE_CASE
+      - Update all references in code
+      - Document naming convention in contributing guide
+      - Add linting rules to enforce convention
+    cwe: CWE-1078
+  high:
+  - id: CNAM-HIGH-001
+    signal: Duplicate configuration keys with different prefixes
+    evidence_indicators:
+    - DB_HOST and DATABASE_HOST both present
+    - API_KEY and APIKEY both used
+    - Same setting with multiple names
+    explanation: |
+      Duplicate configurations with different names create confusion
+      about which value takes precedence. This often leads to using
+      outdated values or inconsistent behavior across environments.
+    remediation: |
+      - Identify all duplicate configurations
+      - Choose canonical names for each setting
+      - Create migration plan to consolidate
+      - Add validation to prevent duplicates
+  - id: CNAM-HIGH-002
+    signal: Configuration names lack clear purpose indication
+    evidence_indicators:
+    - Generic names like CONFIG_1, SETTING_A
+    - Abbreviated names without documentation
+    - Names that don't indicate affected component
+    explanation: |
+      Configuration names should be self-documenting. Unclear names
+      increase misconfiguration risk and make troubleshooting difficult.
+      New team members cannot understand configuration purpose.
+    remediation: |
+      - Rename ambiguous configurations descriptively
+      - Use component prefixes (DATABASE_, CACHE_, AUTH_)
+      - Document naming conventions
+      - Include purpose in name where possible
+  - id: CNAM-HIGH-003
+    signal: No namespace or prefix strategy for configurations
+    evidence_indicators:
+    - Flat configuration without grouping
+    - No service or component prefixes
+    - Configurations from different services mixed
+    explanation: |
+      Without namespacing, configurations become difficult to manage
+      at scale. Conflicts between services increase, and it becomes
+      impossible to identify which service owns which configuration.
+    remediation: |
+      - Define prefix strategy (SERVICE_COMPONENT_SETTING)
+      - Group related configurations with common prefix
+      - Document namespace ownership
+      - Implement prefix validation
+  medium:
+  - id: CNAM-MED-001
+    signal: Inconsistent configuration file naming across projects
+    evidence_indicators:
+    - Mix of config.yaml, settings.yaml, application.yaml
+    - Different file extensions for same purpose
+    - No standard configuration file structure
+    explanation: |
+      Inconsistent file naming makes automated discovery unreliable
+      and increases cognitive load when working across projects.
+      Standardization enables tooling and improves developer experience.
+    remediation: |
+      - Define standard configuration file names
+      - Create project templates with correct naming
+      - Document file naming conventions
+      - Add CI validation for file naming
+  - id: CNAM-MED-002
+    signal: Configuration keys use mixed separator styles
+    evidence_indicators:
+    - Mix of dot.notation and snake_case
+    - Inconsistent separators (_, -, .)
+    - CamelCase mixed with snake_case
+    explanation: |
+      Mixed separator styles create parsing inconsistencies and make
+      configuration search unreliable. Some frameworks handle
+      separators differently, potentially causing silent failures.
+    remediation: |
+      - Choose single separator style per context
+      - Environment vars: SCREAMING_SNAKE_CASE
+      - Config files: consistent dot.notation or snake_case
+      - Document and enforce chosen conventions
+  - id: CNAM-MED-003
+    signal: Boolean configuration naming is ambiguous
+    evidence_indicators:
+    - Names like FEATURE instead of FEATURE_ENABLED
+    - DEBUG without clear on/off indication
+    - Unclear if value should be true/false or 1/0
+    explanation: |
+      Boolean configurations should clearly indicate they are toggles.
+      Ambiguous names lead to confusion about expected values and
+      make configuration documentation harder to write.
+    remediation: |
+      - Use ENABLED/DISABLED suffix for feature flags
+      - Use IS_ or HAS_ prefix where appropriate
+      - Document expected boolean values
+      - Standardize true/false vs 1/0 usage
+  low:
+  - id: CNAM-LOW-001
+    signal: Configuration names excessively long
+    evidence_indicators:
+    - Names exceeding 50 characters
+    - Redundant words in names
+    - Over-qualified names
+    explanation: |
+      While descriptive names are good, excessively long names reduce
+      readability and are prone to typos. Balance clarity with brevity.
+    remediation: |
+      - Use standard abbreviations consistently
+      - Remove redundant qualifiers
+      - Keep names under 40 characters where possible
+      - Document abbreviations used
+  positive:
+  - id: CNAM-POS-001
+    signal: Consistent naming conventions across codebase
+    evidence_indicators:
+    - All env vars use SCREAMING_SNAKE_CASE
+    - Clear namespace prefixes used
+    - Self-documenting configuration names
+  - id: CNAM-POS-002
+    signal: Naming conventions documented and enforced
+    evidence_indicators:
+    - Convention documentation exists
+    - Linting rules enforce naming
+    - CI validates naming standards
+procedure:
+  context:
+    cognitive_mode: methodical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Environment Variable Naming Analysis
+    description: |
+      Analyze environment variable naming patterns for consistency
+      and adherence to SCREAMING_SNAKE_CASE convention.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Extract environment variable names
+      command: |
+        grep -rhoE "process\.env\.[A-Za-z_][A-Za-z0-9_]*" \
+          --include="*.js" --include="*.ts" . 2>/dev/null | \
+          sed 's/process\.env\.//' | sort | uniq -c | sort -rn | head -50
+    - purpose: Find non-standard env var casing
+      command: |
+        grep -rhoE "process\.env\.[a-z][a-zA-Z0-9_]*" \
+          --include="*.js" --include="*.ts" . 2>/dev/null | \
+          sed 's/process\.env\.//' | sort | uniq
+    - purpose: Check .env files for naming patterns
+      command: |
+        cat .env* 2>/dev/null | grep -E "^[A-Za-z]" | cut -d= -f1 | sort | uniq
+    expected_findings:
+    - Environment variable naming patterns
+    - Non-compliant variable names
+    - Naming consistency assessment
+  - id: '2'
+    name: Configuration Key Naming Analysis
+    description: |
+      Analyze configuration file key naming for consistency and clarity.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Extract YAML configuration keys
+      command: |
+        find . \( find . -name "*.yaml" -o -name "*.yml" \) | \
+          xargs grep -h "^[a-zA-Z]" 2>/dev/null | \
+          cut -d: -f1 | sort | uniq -c | sort -rn | head -50
+    - purpose: Find JSON configuration keys
+      command: |
+        find . -name "*.json" -path "*/config/*" | \
+          xargs grep -hoE '"[a-zA-Z][a-zA-Z0-9_-]*":' 2>/dev/null | \
+          tr -d '":' | sort | uniq -c | sort -rn | head -50
+    expected_findings:
+    - Configuration key patterns
+    - Naming consistency in config files
+    - Separator style usage
+  - id: '3'
+    name: Namespace and Prefix Analysis
+    description: |
+      Evaluate namespace and prefix usage for configuration grouping.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Analyze configuration prefixes
+      command: |
+        grep -rhoE "^[A-Z]+_" .env* 2>/dev/null | sort | uniq -c | sort -rn | head -30
+    - purpose: Find ungrouped configurations
+      command: |
+        grep -rhoE "^[A-Z]+=" .env* 2>/dev/null | \
+          grep -v "_" | sort | uniq
+    expected_findings:
+    - Prefix usage patterns
+    - Namespace organization
+    - Ungrouped configurations
+  - id: '4'
+    name: Duplicate and Conflicting Names
+    description: |
+      Identify duplicate or conflicting configuration names.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find potential duplicate configs
+      command: |
+        grep -rhoE "(DB|DATABASE|MYSQL|POSTGRES)_[A-Z_]+" \
+          --include="*.env*" --include="*.yaml" . 2>/dev/null | sort | uniq
+    - purpose: Find similar named configurations
+      command: |
+        grep -rhoE "[A-Z]+_(HOST|URL|PORT|USER|PASS)" \
+          --include="*.env*" . 2>/dev/null | sort | uniq
+    expected_findings:
+    - Duplicate configurations identified
+    - Naming conflicts documented
+    - Consolidation opportunities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Naming Convention Analysis
+    - Compliance Assessment
+    - Recommendations
+  - type: naming_standards_doc
+    format: markdown
+    description: Proposed naming convention standards
+  confidence_guidance:
+    high: Naming patterns directly observed and counted
+    medium: Patterns inferred from limited samples
+    low: Naming assessment requires manual review
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: 12factor-config
+      priority: required
+    - source_id: posix-env
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: cnam-001
+  item: Environment variables use SCREAMING_SNAKE_CASE
+  level: BLOCKING
+  verification: |
+    grep -rhoE "process\.env\.[a-z]" --include="*.js" --include="*.ts" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -eq 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cnam-002
+  item: Naming conventions documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify naming convention documentation exists
+  expected: Confirmed by reviewer
+- id: cnam-003
+  item: No duplicate configuration names
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify no duplicate configs with different prefixes
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: 12-Factor App
+    controls:
+    - Factor III
+  - framework: CMMI
+    controls:
+    - CM SP 1.1
+relationships:
+  commonly_combined:
+  - configuration-management.configuration-identification.config-discovery
+  - configuration-management.configuration-control.change-control

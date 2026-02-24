@@ -1,0 +1,290 @@
+audit:
+  id: reliability-resilience.error-handling.error-propagation
+  name: Error Propagation Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: error-handling
+  tier: phd
+  estimated_duration: 3-5 hours  # median: 4h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes how errors propagate across system boundaries including
+    service layers, API boundaries, microservices, and user interfaces.
+    Examines error wrapping patterns, context preservation, error
+    transformation at boundaries, and the flow of error information
+    from origin to final handling point.
+  why_it_matters: |
+    Poor error propagation leads to lost debugging context, confusing
+    error messages for users and operators, security information leaks,
+    and inability to trace issues across distributed systems. When errors
+    lose context as they propagate, teams spend exponentially more time
+    debugging. Conversely, leaking internal errors can expose security
+    vulnerabilities.
+  when_to_run:
+  - Architecture reviews
+  - After adding new service boundaries
+  - When debugging difficult production issues
+  - API design reviews
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Full application source code including all services
+  - type: architecture_docs
+    description: System architecture showing service boundaries
+  access_requirements:
+  - Read access to all service repositories
+  - API documentation or OpenAPI specs
+discovery:
+  code_patterns:
+  - pattern: throw new.*\(.*\.getMessage\(\)
+    type: regex
+    scope: source
+    purpose: Find errors losing original exception context
+  - pattern: return.*error|return.*Error|return.*err
+    type: regex
+    scope: source
+    purpose: Find error return patterns for analysis
+  - pattern: wrap|Wrap|WithMessage|Annotate|Cause
+    type: regex
+    scope: source
+    purpose: Find error wrapping patterns
+  - pattern: InternalServerError|500|internal error
+    type: regex
+    scope: source
+    purpose: Find generic error responses that may hide context
+  - pattern: grpc\.Code|status\.Code
+    type: regex
+    scope: source
+    purpose: Find gRPC error code usage
+  file_patterns:
+  - glob: '**/controller/**/*.{java,ts,go,py}'
+    purpose: API controllers handling error responses
+  - glob: '**/api/**/*.{java,ts,go,py}'
+    purpose: API layer error handling
+  - glob: '**/service/**/*.{java,ts,go,py}'
+    purpose: Service layer error propagation
+  - glob: '**/middleware/**/*.{java,ts,go,py}'
+    purpose: Middleware error handling
+  - glob: '**/errors/**/*.{java,ts,go,py}'
+    purpose: Custom error definitions
+knowledge_sources:
+  guides:
+  - id: go-errors
+    name: Go Error Handling and Wrapping
+    url: https://go.dev/blog/go1.13-errors
+    offline_cache: true
+  - id: grpc-errors
+    name: gRPC Error Handling
+    url: https://grpc.io/docs/guides/error/
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  learning_resources:
+  - id: release-it
+    title: Release It! - Stability Patterns
+    type: book
+    reference: 'ISBN: 978-1680502398'
+tooling:
+  static_analysis:
+  - tool: errorlint
+    purpose: Go error wrapping analysis
+    offline_capable: true
+  - tool: SonarQube
+    purpose: Cross-language error flow analysis
+    offline_capable: false
+  scripts:
+  - id: trace-error-propagation
+    language: bash
+    purpose: Find error handling at layer boundaries
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Controller/Handler Error Returns ==="
+      grep -rn "return.*[Ee]rror\|throw\|raise" --include="*Controller*" --include="*Handler*" . 2>/dev/null | head -50
+      echo ""
+      echo "=== Service Layer Error Handling ==="
+      grep -rn "return.*[Ee]rror\|throw\|raise" --include="*Service*" . 2>/dev/null | head -50
+      echo ""
+      echo "=== Error Wrapping Patterns ==="
+      grep -rn "wrap\|Wrap\|WithMessage\|WithStack" . 2>/dev/null | head -30
+signals:
+  critical:
+  - id: PROP-CRIT-001
+    signal: Internal error details exposed in API responses
+    evidence_pattern: response.*exception\.getMessage|response.*err\.Error\(\)
+    explanation: |
+      Exposing internal error details in API responses can leak
+      sensitive information about system internals, database schemas,
+      file paths, or stack traces that attackers can exploit.
+    remediation: Transform errors at API boundary to safe, user-facing messages while logging full details
+      internally
+  - id: PROP-CRIT-002
+    signal: Error context completely lost at service boundary
+    evidence_pattern: catch.*throw new.*\(".*"\)|except.*raise.*\(".*"\)
+    explanation: |
+      Creating new exceptions without preserving the original cause
+      makes it impossible to trace the root cause of failures.
+    remediation: Always chain or wrap original errors when re-throwing
+  high:
+  - id: PROP-HIGH-001
+    signal: Generic error returned from API hiding specific failures
+    evidence_pattern: return.*InternalServerError|return.*500
+    explanation: |
+      Returning generic errors for all failures makes debugging
+      impossible and provides no actionable information to callers.
+    remediation: Map internal errors to appropriate error codes/types while preserving safe context
+  - id: PROP-HIGH-002
+    signal: Error codes not standardized across services
+    explanation: |
+      Inconsistent error codes across services makes it difficult
+      to build reliable error handling in clients.
+    remediation: Establish standardized error code taxonomy across all services
+  medium:
+  - id: PROP-MED-001
+    signal: Error messages contain technical jargon for user-facing errors
+    remediation: Create user-friendly error messages at UI boundary
+  - id: PROP-MED-002
+    signal: Missing correlation IDs in propagated errors
+    remediation: Include correlation/trace IDs in all error responses
+  low:
+  - id: PROP-LOW-001
+    signal: Inconsistent error message formatting
+  positive:
+  - id: PROP-POS-001
+    signal: Structured error responses with error codes and trace IDs
+  - id: PROP-POS-002
+    signal: Clear error transformation at each layer boundary
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map system boundaries
+    description: |
+      Identify all layer and service boundaries where errors must
+      be handled or transformed. Document the error flow path.
+    duration_estimate: 45 min
+    expected_findings:
+    - List of system boundaries
+    - Expected error transformation points
+  - id: '2'
+    name: Analyze API error responses
+    description: |
+      Review how errors are returned from APIs. Check for information
+      leakage, proper error codes, and inclusion of trace IDs.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Find API error response patterns
+      command: grep -rn 'HttpStatus\|status.*[45][0-9][0-9]\|statusCode' --include='*.java' --include='*.ts'
+        --include='*.go' .
+    expected_findings:
+    - Error response structures
+    - Information leakage risks
+  - id: '3'
+    name: Review error wrapping patterns
+    description: |
+      Check how errors are wrapped and propagated between layers.
+      Verify context preservation and proper cause chaining.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Find error wrapping usage
+      command: grep -rn 'wrap\|Wrap\|cause\|Cause\|initCause' --include='*.java' --include='*.go' --include='*.py'
+        .
+    expected_findings:
+    - Error wrapping patterns in use
+    - Context loss points
+  - id: '4'
+    name: Verify error code standardization
+    description: |
+      Check for standardized error codes across services and
+      appropriate mapping at service boundaries.
+    duration_estimate: 45 min
+    expected_findings:
+    - Error code definitions
+    - Consistency across services
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Error Flow Analysis
+    - Information Leakage Findings
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence of poor propagation patterns
+    medium: Pattern suggests potential issues
+    low: Indirect indicators requiring runtime verification
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: go-errors
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough cross-layer analysis
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: error-propagation-001
+  item: No raw exception messages in API responses
+  level: CRITICAL
+  verification: grep -rn '\.getMessage()\|err\.Error()' --include='*Controller*' --include='*Handler*'
+    . 2>/dev/null | grep -i 'response\|return' | wc -l | xargs -I{} sh -c 'if [ {} -eq 0 ]; then echo
+    PASS; else echo FAIL; fi'
+  expected: PASS
+- id: error-propagation-002
+  item: Error wrapping preserves original cause
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review error wrapping to ensure cause chaining is used
+  expected: Confirmed by reviewer
+- id: error-propagation-003
+  item: Standardized error response format exists
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify error response schema is documented and consistently used
+  expected: Confirmed by reviewer
+- id: error-propagation-004
+  item: Correlation IDs included in error responses
+  level: WARNING
+  verification: grep -rn 'correlationId\|correlation_id\|traceId\|trace_id\|requestId\|request_id' --include='*.java'
+    --include='*.ts' --include='*.go' . 2>/dev/null | wc -l | xargs -I{} sh -c 'if [ {} -gt 0 ]; then
+    echo PASS; else echo FAIL; fi'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP
+    controls:
+    - A01:2021-Broken Access Control
+relationships:
+  commonly_combined:
+  - reliability-resilience.error-handling.exception-handling
+  - reliability-resilience.error-handling.error-logging
+  - reliability-resilience.error-handling.user-facing-error-message

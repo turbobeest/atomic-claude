@@ -1,0 +1,384 @@
+# ============================================================
+# AUDIT: Service Granularity Assessment
+# ============================================================
+# Evaluates whether services are appropriately sized - not too
+# large (mini-monoliths) or too small (nanoservices).
+# ============================================================
+
+audit:
+  id: "architecture-design.system-decomposition.service-granularity"
+  name: "Service Granularity Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "system-decomposition"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "architecture"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit assesses whether services are appropriately granular for
+    the system's needs. It identifies services that are too large
+    (distributed monoliths) or too small (nanoservices), evaluating
+    the balance between autonomy, operational overhead, and cohesion.
+
+  why_it_matters: |
+    Wrong service granularity causes:
+    - Too large: Deployment coupling, team coordination overhead
+    - Too small: Operational complexity, network overhead, data consistency issues
+    - Both: Reduced development velocity and increased cost
+    Right-sizing services enables independent deployment while avoiding
+    distributed system complexity where not needed.
+
+  when_to_run:
+    - "During microservice architecture design"
+    - "When splitting monoliths"
+    - "When service boundaries feel wrong"
+    - "When operational overhead seems excessive"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Service source code"
+    - type: "api_definitions"
+      description: "Service API contracts"
+    - type: "deployment_configuration"
+      description: "Deployment and infrastructure config"
+
+  access_requirements:
+    - "Read access to all service repositories"
+    - "Access to deployment configurations"
+
+discovery:
+  code_patterns:
+    - pattern: "@RestController|@GrpcService|@WebService"
+      type: "regex"
+      scope: "source"
+      purpose: "Find service endpoints"
+
+    - pattern: "RestTemplate|WebClient|FeignClient"
+      type: "regex"
+      scope: "source"
+      purpose: "Find inter-service calls"
+
+  file_patterns:
+    - glob: "**/openapi.yaml"
+      purpose: "REST API definitions"
+    - glob: "**/*.proto"
+      purpose: "gRPC service definitions"
+    - glob: "**/docker-compose.yaml"
+      purpose: "Service composition"
+    - glob: "**/deployment.yaml"
+      purpose: "Kubernetes deployments"
+
+knowledge_sources:
+  specifications:
+    - id: "microservices-io"
+      name: "Microservices Patterns"
+      url: "https://microservices.io/patterns/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "service-decomposition"
+      name: "How to Decompose a Monolith"
+      url: "https://martinfowler.com/articles/break-monolith-into-microservices.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "building-microservices"
+      title: "Building Microservices"
+      type: "book"
+      reference: "Sam Newman - 2nd Edition"
+
+    - id: "microservices-patterns-book"
+      title: "Microservices Patterns"
+      type: "book"
+      reference: "Chris Richardson"
+
+    - id: "ddd-evans"
+      title: "Domain-Driven Design"
+      type: "book"
+      reference: "Eric Evans"
+
+tooling:
+  static_analysis:
+    - tool: "Structure101"
+      purpose: "Analyze service dependencies and size"
+      offline_capable: true
+
+    - tool: "Spectral"
+      purpose: "Analyze OpenAPI service definitions"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Analyze service deployments"
+      command: "kubectl get services -A"
+
+  scripts:
+    - id: "service-granularity"
+      language: "bash"
+      purpose: "Assess service sizes and dependencies"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Service Code Sizes ==="
+        for d in $(find . -name 'docker-compose.yaml' -o -name 'Dockerfile' | xargs dirname | sort | uniq); do
+          echo "$d: $(find $d -name '*.java' -o -name '*.ts' | wc -l) files"
+        done | head -20
+
+        echo "=== API Endpoint Counts ==="
+        for f in $(find . -name 'openapi.yaml'); do
+          echo "$(dirname $f): $(grep -c '^  /' $f 2>/dev/null) endpoints"
+        done | head -20
+
+signals:
+  critical:
+    - id: "GRAN-CRIT-001"
+      signal: "Distributed monolith - large service that should be split"
+      evidence_pattern: "Service has >50 API endpoints, >100 database tables, 3+ bounded contexts"
+      explanation: |
+        A distributed monolith has microservice deployment overhead without
+        the benefits. It requires coordinated deployments and has high
+        internal complexity.
+      remediation: "Identify bounded contexts; extract as separate services incrementally"
+
+    - id: "GRAN-CRIT-002"
+      signal: "Excessive synchronous dependencies (>5 services per request)"
+      evidence_pattern: "Request chain spans 6+ services synchronously"
+      explanation: |
+        Long synchronous chains create latency multiplication, failure
+        cascades, and distributed transaction challenges. Services are
+        too fine-grained.
+      remediation: "Consolidate related services; use async where possible"
+
+  high:
+    - id: "GRAN-HIGH-001"
+      signal: "Nanoservice - service with only 1-2 endpoints"
+      evidence_pattern: "Service exists for single function like email sending"
+      explanation: |
+        Extremely small services create operational overhead without
+        proportional benefit. Each service needs monitoring, deployment,
+        and infrastructure.
+      remediation: "Consolidate into parent service unless truly cross-cutting"
+
+    - id: "GRAN-HIGH-002"
+      signal: "Service with high afferent coupling (many dependents)"
+      evidence_pattern: "Service called by >10 other services"
+      explanation: |
+        A service with many dependents may be too important to be this
+        small, or may have too broad a responsibility.
+      remediation: "Review if service should be library, or if callers should be merged"
+
+  medium:
+    - id: "GRAN-MED-001"
+      signal: "Service spans multiple deployment units"
+      evidence_pattern: "Single logical service split across multiple deployables"
+      remediation: "Merge into single deployment unless scale requires separation"
+
+    - id: "GRAN-MED-002"
+      signal: "Service API surface inconsistent with responsibility"
+      evidence_pattern: "UserService has 50 endpoints; OrderService has 5"
+      remediation: "Review if large service should split; if small should merge"
+
+  low:
+    - id: "GRAN-LOW-001"
+      signal: "Service size varies significantly from team norms"
+      remediation: "Document size guidelines; align with team capacity"
+
+  positive:
+    - id: "GRAN-POS-001"
+      signal: "Service size matches team capacity (2-pizza team)"
+    - id: "GRAN-POS-002"
+      signal: "Service deployable independently"
+    - id: "GRAN-POS-003"
+      signal: "Minimal synchronous dependencies"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory services and sizes"
+      description: |
+        Create catalog of all services with size metrics
+        (code lines, endpoints, tables).
+      duration_estimate: "35 min"
+      commands:
+        - purpose: "Count code per service"
+          command: "for d in $(find . -name 'Dockerfile' -exec dirname {} \\; | sort | uniq); do echo \"$d: $(find $d -name '*.java' -o -name '*.ts' 2>/dev/null | xargs wc -l 2>/dev/null | tail -1)\"; done | head -20"
+        - purpose: "Count API endpoints"
+          command: "for f in $(find . -name 'openapi.yaml'); do echo \"$(dirname $f): $(grep -c '^  /' $f 2>/dev/null) endpoints\"; done"
+      expected_findings:
+        - "Service inventory with sizes"
+        - "Size distribution"
+
+    - id: "2"
+      name: "Map service dependencies"
+      description: |
+        Identify inter-service dependencies and communication
+        patterns.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find HTTP clients"
+          command: "grep -rn 'RestTemplate\\|WebClient\\|FeignClient' --include='*.java' | cut -d: -f1 | sort | uniq -c | sort -rn | head -20"
+        - purpose: "Find service calls"
+          command: "grep -rn 'http://.*-service\\|https://.*-service' --include='*.java' --include='*.yaml' | head -30"
+      expected_findings:
+        - "Service dependency graph"
+        - "Call chain lengths"
+
+    - id: "3"
+      name: "Identify nanoservices"
+      description: |
+        Find services that are too small to justify their
+        operational overhead.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find small services"
+          command: "for f in $(find . -name 'openapi.yaml'); do count=$(grep -c '^  /' $f 2>/dev/null); [ \"$count\" -lt 5 ] && echo \"$(dirname $f): $count endpoints\"; done"
+      expected_findings:
+        - "Candidate nanoservices"
+        - "Consolidation opportunities"
+
+    - id: "4"
+      name: "Identify distributed monoliths"
+      description: |
+        Find services that are too large and should potentially
+        be split.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find large services"
+          command: "for f in $(find . -name 'openapi.yaml'); do count=$(grep -c '^  /' $f 2>/dev/null); [ \"$count\" -gt 30 ] && echo \"$(dirname $f): $count endpoints\"; done"
+        - purpose: "Find multi-domain services"
+          command: "find . -name 'pom.xml' -exec dirname {} \\; | while read d; do domains=$(find $d -type d -name 'domain' -exec find {} -type d \\; 2>/dev/null | wc -l); [ $domains -gt 2 ] && echo \"$d: $domains domains\"; done | head -10"
+      expected_findings:
+        - "Candidate distributed monoliths"
+        - "Split opportunities"
+
+    - id: "5"
+      name: "Develop granularity recommendations"
+      description: |
+        Based on findings, recommend service merges, splits,
+        or boundary adjustments.
+      duration_estimate: "30 min"
+      questions:
+        - "Which services should be consolidated?"
+        - "Which services should be split?"
+        - "What are the right bounded context boundaries?"
+      expected_findings:
+        - "Granularity recommendations"
+        - "Migration approach"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "service_matrix"
+      format: "tabular"
+      sections:
+        - "Service Name"
+        - "Code Size"
+        - "Endpoint Count"
+        - "Dependencies"
+        - "Assessment"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Granularity Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear metrics indicate wrong size"
+    medium: "Size seems off based on heuristics"
+    low: "Potential concern requiring domain knowledge"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "microservices-io"
+        priority: "required"
+      - source_id: "service-decomposition"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive service analysis"
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "gran-001"
+    item: "No distributed monoliths (>50 endpoints per service)"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Large services have split plan or justification"
+    expected: "Confirmed by reviewer"
+
+  - id: "gran-002"
+    item: "No nanoservices without justification"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Small services have consolidation plan or justification"
+    expected: "Confirmed by reviewer"
+
+  - id: "gran-003"
+    item: "Request chains <= 3 synchronous hops"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Long chains documented with async migration plan"
+    expected: "Confirmed by reviewer"
+
+  - id: "gran-004"
+    item: "Service sizes documented with rationale"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "ADRs explain granularity decisions"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["microservices", "distributed"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Scalability"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.cohesion.service-cohesion"
+    - "architecture-design.system-decomposition.component-responsibility"
+    - "architecture-design.coupling.tight-coupling-detection"

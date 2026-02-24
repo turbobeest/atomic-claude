@@ -1,0 +1,364 @@
+audit:
+  id: reliability-resilience.fault-tolerance.bulkhead-pattern
+  name: Bulkhead Pattern Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: fault-tolerance
+  tier: phd
+  estimated_duration: 2.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: architecture
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates the implementation of bulkhead patterns across the
+    system architecture. Named after ship compartments that prevent flooding
+    from sinking the entire vessel, bulkheads in software isolate components
+    so that failure in one area cannot cascade to others. The audit examines
+    thread pool isolation, resource partitioning, service segregation, and
+    failure domain boundaries.
+  why_it_matters: |
+    Without bulkheads, a single slow or failing component can exhaust shared
+    resources (threads, connections, memory) and cascade into system-wide
+    failure. A slow third-party API consuming all threads blocks unrelated
+    functionality. Bulkheads contain failures within defined boundaries,
+    allowing the rest of the system to continue operating. Netflix credits
+    bulkheads as a key pattern enabling their 99.99% availability.
+  when_to_run:
+  - During architecture design reviews
+  - When adding new external dependencies
+  - After incidents involving cascading failures
+  - During reliability improvement initiatives
+prerequisites:
+  required_artifacts:
+  - type: architecture-docs
+    description: System architecture and component documentation
+  - type: source-code
+    description: Application source code for pattern analysis
+  access_requirements:
+  - Read access to application source code
+  - Access to thread pool configurations
+  - Access to connection pool settings
+  - Access to container resource configurations
+discovery:
+  code_patterns:
+  - pattern: '@Bulkhead|BulkheadConfig|bulkhead'
+    type: regex
+    scope: source
+    purpose: Resilience4j or Hystrix bulkhead annotations
+  - pattern: ThreadPoolExecutor|ExecutorService|thread.*pool
+    type: regex
+    scope: source
+    purpose: Custom thread pool implementations
+  - pattern: Semaphore|semaphore.*permits
+    type: regex
+    scope: source
+    purpose: Semaphore-based bulkheads
+  - pattern: maxConcurrentCalls|maxWaitDuration
+    type: regex
+    scope: config
+    purpose: Bulkhead configuration parameters
+  - pattern: isolationStrategy|THREAD|SEMAPHORE
+    type: regex
+    scope: source
+    purpose: Isolation strategy selection
+  file_patterns:
+  - glob: '**/src/**/*.{java,go,py,ts,js}'
+    purpose: Application source code
+  - glob: '**/config/**/*.{yaml,json,properties}'
+    purpose: Bulkhead configurations
+  - glob: '**/k8s/**/*.yaml'
+    purpose: Container resource configurations
+knowledge_sources:
+  specifications:
+  - id: resilience4j-bulkhead
+    name: Resilience4j Bulkhead Guide
+    url: https://resilience4j.readme.io/docs/bulkhead
+    offline_cache: true
+    priority: required
+  guides:
+  - id: netflix-bulkhead
+    name: Netflix Hystrix Bulkhead Pattern
+    url: https://github.com/Netflix/Hystrix/wiki/How-it-Works#isolation
+    offline_cache: true
+  - id: azure-bulkhead
+    name: Azure Bulkhead Pattern
+    url: https://learn.microsoft.com/en-us/azure/architecture/patterns/bulkhead
+    offline_cache: true
+  - id: aws-isolation
+    name: AWS Cell-Based Architecture
+    url: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/plan-for-disaster-recovery-dr.html
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  - id: sre-book
+    name: Site Reliability Engineering
+    url: https://sre.google/sre-book/table-of-contents/
+    offline_cache: true
+  learning_resources:
+  - id: release-it
+    title: Release It! Second Edition
+    type: book
+    reference: 'ISBN 978-1680502398 - Chapter 5: Bulkheads'
+tooling:
+  static_analysis:
+  - tool: grep-analysis
+    purpose: Find bulkhead patterns in code
+    offline_capable: true
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: Check container resource limits
+    command: 'kubectl get pods -A -o json | jq ''.items[] | {name: .metadata.name, limits: .spec.containers[].resources.limits}'''
+  - tool: jconsole
+    purpose: Monitor thread pool usage
+    command: jconsole (connect to JMX port)
+  monitoring_queries:
+  - system: Prometheus
+    query: executor_pool_size_threads
+    purpose: Thread pool sizes
+  - system: Prometheus
+    query: executor_queued_tasks
+    purpose: Queue depth indicating saturation
+signals:
+  critical:
+  - id: BULK-CRIT-001
+    signal: Single shared thread pool for all external calls
+    evidence_pattern: common.*pool|shared.*executor|ForkJoinPool.commonPool
+    explanation: |
+      Using a shared thread pool for all external calls means one slow
+      dependency can exhaust all threads and block unrelated functionality.
+      A slow payment API blocks product catalog requests. Each external
+      dependency should have its own isolated thread pool.
+    remediation: Create dedicated thread pools for each external dependency with appropriate sizing
+  - id: BULK-CRIT-002
+    signal: No resource limits on containers handling external traffic
+    evidence_pattern: resources.*limits.*null|no.*resource.*limits
+    explanation: |
+      Containers without resource limits can consume unbounded CPU and
+      memory, affecting other containers on the same node. This breaks
+      the isolation that containers should provide. All production
+      containers must have resource limits.
+    remediation: Configure CPU and memory limits for all production containers
+  high:
+  - id: BULK-HIGH-001
+    signal: Database connection pool shared across all features
+    evidence_pattern: single.*connection.*pool|shared.*datasource
+    explanation: |
+      A single connection pool means one slow query type can exhaust
+      connections and block all database access. Consider separate pools
+      for different workload types (OLTP, analytics, background jobs).
+    remediation: Partition connection pools by workload type or criticality
+  - id: BULK-HIGH-002
+    signal: Thread pool sized too large allowing resource exhaustion
+    evidence_pattern: pool.*size.*1000|max.*threads.*unlimited
+    explanation: |
+      Oversized thread pools defeat the purpose of bulkheads. Each thread
+      consumes memory and context switching overhead. Large pools can
+      exhaust system resources. Size pools based on workload needs.
+    remediation: Right-size thread pools based on Little's Law and measured latency
+  - id: BULK-HIGH-003
+    signal: No timeout on bulkhead wait
+    evidence_pattern: maxWaitDuration.*0|waitForever|block.*indefinitely
+    explanation: |
+      Bulkheads without wait timeouts cause threads to block indefinitely
+      when the bulkhead is full. This consumes calling threads and can
+      cascade the problem. Always configure maximum wait durations.
+    remediation: Configure maxWaitDuration with appropriate timeout values
+  medium:
+  - id: BULK-MED-001
+    signal: Bulkhead limits not aligned with downstream capacity
+    explanation: |
+      Bulkhead limits should match what downstream services can handle.
+      A bulkhead allowing 100 concurrent calls to a service that handles
+      only 50 wastes resources and causes downstream overload.
+    remediation: Align bulkhead limits with downstream capacity through load testing
+  - id: BULK-MED-002
+    signal: No metrics on bulkhead saturation
+    explanation: |
+      Without metrics, bulkhead saturation goes unnoticed. Monitoring
+      concurrent call counts and rejection rates helps identify capacity
+      issues and tune configurations.
+    remediation: Implement metrics for bulkhead concurrent calls and rejections
+  - id: BULK-MED-003
+    signal: Bulkhead rejections not handled gracefully
+    explanation: |
+      When bulkheads reject calls, the application should handle this
+      gracefully with fallbacks rather than exposing raw exceptions to users.
+    remediation: Implement fallback handling for bulkhead rejections
+  low:
+  - id: BULK-LOW-001
+    signal: Bulkhead configurations not documented
+    explanation: |
+      Documenting bulkhead boundaries and sizing rationale helps with
+      maintenance and incident response.
+  positive:
+  - id: BULK-POS-001
+    signal: Dedicated thread pools per external dependency
+  - id: BULK-POS-002
+    signal: Container resource limits configured appropriately
+  - id: BULK-POS-003
+    signal: Bulkhead metrics and alerting in place
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify isolation boundaries
+    description: |
+      Map where isolation boundaries exist or should exist in the
+      system architecture.
+    duration_estimate: 30 min
+    questions:
+    - What external dependencies does the system have?
+    - What workload types exist (real-time, batch, admin)?
+    - Where are shared resources used?
+    expected_findings:
+    - Dependency inventory
+    - Workload categorization
+  - id: '2'
+    name: Audit thread pool configurations
+    description: |
+      Review thread pool implementations for external calls and
+      internal processing.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find thread pool configurations
+      command: |
+        grep -r "ThreadPoolExecutor\|ExecutorService\|@Bulkhead" --include="*.java" --include="*.go" --include="*.py" src/
+    - purpose: Find Resilience4j bulkhead configs
+      command: |
+        grep -r "bulkhead\|maxConcurrentCalls\|maxWaitDuration" --include="*.yaml" --include="*.properties" config/
+    expected_findings:
+    - Thread pool inventory
+    - Bulkhead configurations
+  - id: '3'
+    name: Review container resource isolation
+    description: |
+      Verify that containers have appropriate resource limits to
+      prevent noisy neighbor effects.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check pod resource limits
+      command: |
+        kubectl get pods -A -o json | jq '.items[] | {name: .metadata.name, namespace: .metadata.namespace, limits: .spec.containers[].resources.limits}'
+    - purpose: Find pods without limits
+      command: |
+        kubectl get pods -A -o json | jq '.items[] | select(.spec.containers[].resources.limits == null) | {name: .metadata.name, namespace: .metadata.namespace}'
+    expected_findings:
+    - Resource limit coverage
+    - Pods missing limits
+  - id: '4'
+    name: Analyze connection pool partitioning
+    description: |
+      Review database and service connection pool configurations
+      for workload isolation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find connection pool configurations
+      command: |
+        grep -r "connectionPool\|pool.*size\|maxConnections" --include="*.yaml" --include="*.properties" --include="*.json" config/
+    questions:
+    - Are connection pools shared or partitioned?
+    - Are different workloads isolated?
+    expected_findings:
+    - Connection pool architecture
+    - Isolation gaps
+  - id: '5'
+    name: Verify bulkhead effectiveness
+    description: |
+      Validate that bulkheads actually contain failures through
+      testing or historical analysis.
+    duration_estimate: 30 min
+    questions:
+    - Have bulkheads been tested under failure conditions?
+    - Do monitoring dashboards show bulkhead metrics?
+    - Have recent incidents demonstrated bulkhead effectiveness?
+    expected_findings:
+    - Bulkhead validation status
+    - Testing gaps
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Isolation Boundary Map
+    - Thread Pool Analysis
+    - Container Resource Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Bulkheads tested under simulated failure
+    medium: Configuration review with metrics analysis
+    low: Configuration review only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: resilience4j-bulkhead
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: bulk-001
+  item: Dedicated thread pools for each external dependency
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify separate thread pools exist for each third-party API
+  expected: Confirmed by reviewer
+- id: bulk-002
+  item: All production containers have resource limits
+  level: CRITICAL
+  verification: |
+    kubectl get pods -A -o json | jq '[.items[] | select(.spec.containers[].resources.limits == null)] | length'
+  expected: '0'
+- id: bulk-003
+  item: Bulkhead timeout configured for all external calls
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify maxWaitDuration is configured for all bulkheads
+  expected: Confirmed by reviewer
+- id: bulk-004
+  item: Bulkhead metrics available in monitoring
+  level: WARNING
+  verification: manual
+  verification_notes: Verify bulkhead.concurrent.calls metrics are exposed
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.fault-tolerance.circuit-breaker
+  - reliability-resilience.fault-tolerance.timeout-configuration
+  - reliability-resilience.fault-tolerance.graceful-degradation

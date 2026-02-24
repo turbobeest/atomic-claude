@@ -1,0 +1,308 @@
+audit:
+  id: cost-economics.resource-efficiency.container-efficiency
+  name: Container Efficiency Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: resource-efficiency
+  tier: expert
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines container resource efficiency in Kubernetes
+    and other container orchestration platforms. It evaluates CPU
+    and memory requests/limits, actual vs allocated resources, pod
+    density, and cluster-level resource efficiency.
+  why_it_matters: |
+    Container environments often have significant inefficiency due to
+    over-provisioned requests, poorly configured limits, and low pod
+    density. Studies show average container utilization is only 30-40%
+    of requested resources. Improving container efficiency can reduce
+    costs by 30-50% while maintaining application performance.
+  when_to_run:
+  - Monthly container efficiency review
+  - After deploying new services
+  - When cluster costs are high
+  - Before cluster scaling decisions
+prerequisites:
+  required_artifacts:
+  - type: k8s-access
+    description: Kubernetes cluster access with read permissions
+  - type: metrics-server
+    description: Metrics server or Prometheus for utilization data
+  - type: resource-configs
+    description: Deployment resource configurations
+  access_requirements:
+  - kubectl read access to cluster
+  - Access to Prometheus/Metrics Server
+  - Access to deployment configurations
+discovery:
+  efficiency_dimensions:
+  - dimension: Resource requests vs actual
+    metric: actual_usage / requested
+    target: '> 60%'
+  - dimension: Request to limit ratio
+    metric: request / limit
+    target: '> 50%'
+  - dimension: Pod density
+    metric: pods_per_node
+    target: Maximize within limits
+  - dimension: Cluster utilization
+    metric: allocated / capacity
+    target: 60-80%
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: k8s-resource-management
+    name: Kubernetes Resource Management
+    url: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: kubecost-efficiency
+    name: Kubecost Container Efficiency
+    url: https://www.kubecost.com/kubernetes-cost-optimization/
+    offline_cache: true
+  - id: finops-k8s
+    name: FinOps for Kubernetes
+    url: https://www.finops.org/framework/
+    offline_cache: true
+tooling:
+  kubernetes_tools:
+  - tool: kubectl
+    purpose: Resource configuration and metrics
+    command: kubectl top pods --all-namespaces
+  - tool: Kubecost
+    purpose: Kubernetes cost visibility and efficiency
+  - tool: Goldilocks
+    purpose: VPA-based recommendations
+  - tool: Prometheus
+    purpose: Historical metrics for analysis
+  commands:
+  - purpose: Get pod resource requests and limits
+    command: |
+      kubectl get pods -A -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.containers[*].resources.requests.cpu}{"\t"}{.spec.containers[*].resources.requests.memory}{"\n"}{end}'
+  - purpose: Get VPA recommendations
+    command: kubectl get vpa -A -o yaml
+signals:
+  critical:
+  - id: CONT-CRIT-001
+    signal: Average resource utilization below 30% of requests
+    evidence_threshold: avg_utilization < 30% of requests
+    explanation: |
+      When containers consistently use less than 30% of their
+      requested resources, the cluster is significantly over-
+      provisioned. This wastes 70% or more of allocated capacity.
+    remediation: Rightsize container requests based on actual usage
+  - id: CONT-CRIT-002
+    signal: No resource requests or limits defined
+    evidence_pattern: Containers without resource specifications
+    explanation: |
+      Containers without requests allow unbounded resource
+      consumption and make capacity planning impossible. Without
+      limits, a single runaway container can impact others.
+    remediation: Define appropriate requests and limits for all containers
+  high:
+  - id: CONT-HIGH-001
+    signal: Request to actual usage ratio exceeds 3:1
+    evidence_threshold: request / actual > 3
+    explanation: |
+      When requests are more than 3x actual usage, significant
+      over-provisioning exists. This prevents efficient bin-packing
+      and wastes cluster capacity.
+    remediation: Reduce requests closer to actual usage (with headroom)
+  - id: CONT-HIGH-002
+    signal: CPU limits causing throttling
+    evidence_pattern: CPU throttling detected in containers
+    explanation: |
+      CPU limits that cause throttling harm application performance.
+      Consider removing CPU limits or setting them higher than
+      requests to allow bursting.
+    remediation: Adjust or remove CPU limits causing throttling
+  medium:
+  - id: CONT-MED-001
+    signal: VPA recommendations not implemented
+    evidence_pattern: Significant delta from VPA suggestions
+    remediation: Review and implement VPA recommendations
+  - id: CONT-MED-002
+    signal: Low pod density on nodes
+    evidence_threshold: pods_per_node < optimal_density
+    remediation: Review resource requests to improve bin-packing
+  low:
+  - id: CONT-LOW-001
+    signal: No automation for container rightsizing
+    evidence_pattern: Manual resource specification only
+    remediation: Implement VPA or similar automation
+  positive:
+  - id: CONT-POS-001
+    signal: Resource requests within 50% of actual usage
+  - id: CONT-POS-002
+    signal: VPA enabled for continuous optimization
+  - id: CONT-POS-003
+    signal: High cluster utilization with healthy pods
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Collect container metrics
+    description: |
+      Gather CPU and memory utilization metrics for all containers
+      over at least 7 days.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get current pod resource usage
+      command: kubectl top pods --all-namespaces --sort-by=cpu
+    - purpose: Get resource requests
+      command: |
+        kubectl get pods -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,CPU_REQ:.spec.containers[*].resources.requests.cpu,MEM_REQ:.spec.containers[*].resources.requests.memory'
+    expected_findings:
+    - Utilization by container
+    - Request vs actual comparison
+  - id: '2'
+    name: Analyze request efficiency
+    description: |
+      Compare actual resource usage to requests to identify
+      over-provisioned containers.
+    duration_estimate: 60 min
+    expected_findings:
+    - Over-provisioned containers
+    - Request efficiency metrics
+  - id: '3'
+    name: Review VPA recommendations
+    description: |
+      If VPA is deployed, review recommendations for resource
+      adjustments.
+    duration_estimate: 30 min
+    expected_findings:
+    - VPA recommendations
+    - Implementation candidates
+  - id: '4'
+    name: Assess cluster utilization
+    description: |
+      Evaluate overall cluster resource utilization and identify
+      node-level inefficiencies.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check node resource allocation
+      command: kubectl describe nodes | grep -A 5 'Allocated resources'
+    expected_findings:
+    - Cluster utilization metrics
+    - Node-level analysis
+  - id: '5'
+    name: Calculate optimization potential
+    description: |
+      Quantify potential savings from container rightsizing and
+      improved efficiency.
+    duration_estimate: 30 min
+    expected_findings:
+    - Savings potential
+    - Priority recommendations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Container Efficiency Analysis
+    - Request vs Actual Analysis
+    - Cluster Utilization
+    - Recommendations
+  - type: metrics_dashboard
+    metrics:
+    - Average request efficiency
+    - Containers by efficiency tier
+    - Cluster utilization
+    - Potential savings
+  confidence_guidance:
+    high: 7+ days metrics with VPA analysis
+    medium: Point-in-time metrics
+    low: Limited metrics coverage
+offline:
+  capability: minimal
+  cache_manifest:
+    knowledge:
+    - source_id: k8s-resource-management
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+      reduced_scope: High-cost namespaces only
+    full:
+      included: true
+      priority: 1
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cont-001
+  item: All containers have resource requests
+  level: CRITICAL
+  verification: automated
+  expected: 100% coverage
+- id: cont-002
+  item: Request efficiency above 50%
+  level: BLOCKING
+  verification: automated
+  expected: efficiency >= 50%
+- id: cont-003
+  item: Rightsizing plan created
+  level: WARNING
+  verification: manual
+  expected: Plan documented
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - kubernetes
+    - container-based
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Workload Optimization
+  - framework: AWS Well-Architected
+    controls:
+    - COST-05
+relationships:
+  commonly_combined:
+  - cost-economics.resource-efficiency.utilization-analysis
+  - cost-economics.cost-optimization.rightsizing
+  - cost-economics.cost-visibility.unit-cost-tracking

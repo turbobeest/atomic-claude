@@ -1,0 +1,273 @@
+# ============================================================
+# AUDIT: License Compatibility
+# Category: 32 - Dependency & Supply Chain
+# Subcategory: license-compliance
+# ============================================================
+
+audit:
+  id: "dependency-supply-chain.license-compliance.license-compatibility"
+  name: "License Compatibility Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "dependency-supply-chain"
+  category_number: 32
+  subcategory: "license-compliance"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "requires_discovery"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "dependencies"
+
+  default_profiles:
+    - "full"
+    - "legal"
+
+  blocks_phase: true
+  parallelizable: true
+
+description:
+  what: |
+    This audit analyzes whether the licenses of all dependencies are
+    compatible with each other and with the project's intended license
+    and distribution model. It identifies potential license conflicts
+    that could prevent legal distribution.
+
+  why_it_matters: |
+    Incompatible licenses can make software legally undistributable.
+    For example, GPL dependencies in proprietary software create
+    obligations that may be unacceptable. License conflicts between
+    dependencies can also create impossible-to-satisfy requirements.
+
+  when_to_run:
+    - "Before choosing project license"
+    - "Before adding dependencies with strong copyleft"
+    - "Before releasing software"
+    - "During legal review"
+
+prerequisites:
+  required_artifacts:
+    - type: "license_inventory"
+      description: "Complete list of dependency licenses"
+    - type: "project_license"
+      description: "Intended license for the project"
+
+  access_requirements:
+    - "Access to license information"
+    - "Understanding of distribution model"
+
+discovery:
+  file_patterns:
+    - glob: "**/LICENSE*"
+      purpose: "Find project license"
+    - glob: "**/package.json"
+      purpose: "Find project and dependency licenses"
+
+knowledge_sources:
+  guides:
+    - id: "license-compatibility"
+      name: "License Compatibility Matrix"
+      url: "https://www.gnu.org/licenses/license-compatibility.html"
+
+    - id: "fossa-compatibility"
+      name: "FOSSA License Compatibility"
+      url: "https://fossa.com/learn/license-compliance"
+
+  standards:
+    - id: "fsf-license-list"
+      name: "FSF License List"
+      relevance: "GPL compatibility information"
+
+tooling:
+  analysis_tools:
+    - tool: "fossa"
+      purpose: "Commercial license compatibility analysis"
+    - tool: "license-checker"
+      purpose: "Identify problematic licenses"
+    - tool: "scancode-toolkit"
+      purpose: "Deep license analysis"
+
+signals:
+  critical:
+    - id: "DEP-COMPAT-CRIT-001"
+      signal: "GPL-licensed dependency in proprietary project"
+      evidence_indicators:
+        - "GPL/AGPL dependency in closed-source project"
+        - "Copyleft license in SaaS without source disclosure"
+      explanation: |
+        GPL requires derivative works to also be GPL. Including GPL
+        code in proprietary software violates the license unless the
+        entire work is released under GPL.
+      remediation: "Remove GPL dependency, find alternative, or release under GPL"
+
+    - id: "DEP-COMPAT-CRIT-002"
+      signal: "Incompatible licenses in same binary"
+      evidence_indicators:
+        - "GPL-2.0-only and Apache-2.0 in same binary (incompatible)"
+        - "Multiple licenses with conflicting terms"
+      remediation: "Resolve conflicts; may require removing dependencies"
+
+  high:
+    - id: "DEP-COMPAT-HIGH-001"
+      signal: "LGPL dependency linked statically"
+      evidence_indicators:
+        - "LGPL library statically linked"
+        - "No ability to relink with different version"
+      remediation: "Use dynamic linking or provide relinking capability"
+
+    - id: "DEP-COMPAT-HIGH-002"
+      signal: "AGPL dependency in networked service"
+      evidence_indicators:
+        - "AGPL code used in web service"
+        - "Source code not made available to users"
+      remediation: "Ensure AGPL compliance or remove dependency"
+
+  medium:
+    - id: "DEP-COMPAT-MED-001"
+      signal: "Attribution requirements not met"
+      evidence_indicators:
+        - "Apache/BSD dependencies without NOTICE file"
+        - "Required attributions missing from distribution"
+      remediation: "Add required attributions and notices"
+
+    - id: "DEP-COMPAT-MED-002"
+      signal: "Dual-licensed dependency choice not documented"
+      evidence_indicators:
+        - "Package offers MIT/GPL choice"
+        - "Selected license not specified"
+      remediation: "Document which license option is chosen"
+
+  low:
+    - id: "DEP-COMPAT-LOW-001"
+      signal: "Minor license terms inconsistency"
+      evidence_indicators:
+        - "Minor wording differences"
+        - "Non-material clause differences"
+      remediation: "Document for completeness"
+
+  positive:
+    - id: "DEP-COMPAT-POS-001"
+      signal: "All licenses compatible with project license"
+
+    - id: "DEP-COMPAT-POS-002"
+      signal: "License obligations clearly documented"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "legal-auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Project License"
+      description: "Determine the project's license"
+      commands:
+        - purpose: "Read project license file"
+          command: "cat LICENSE 2>/dev/null | head -30 || echo 'No LICENSE file found'"
+        - purpose: "Check package.json license"
+          command: "cat package.json 2>/dev/null | jq -r '.license' || echo 'No package.json'"
+
+    - id: "2"
+      name: "Identify Copyleft Licenses"
+      description: "Find dependencies with copyleft licenses"
+      commands:
+        - purpose: "Find GPL licenses"
+          command: "npx license-checker 2>/dev/null | grep -iE '(GPL|AGPL|LGPL)' || echo 'No GPL licenses found or tool unavailable'"
+
+    - id: "3"
+      name: "Check for License Policy Violations"
+      description: "Compare against allowed licenses"
+      commands:
+        - purpose: "Check against excluded licenses"
+          command: "npx license-checker --excludeLicenses 'GPL;AGPL' 2>/dev/null || echo 'License exclusion check not available'"
+        - purpose: "Check only production deps"
+          command: "npx license-checker --production --summary 2>/dev/null || echo 'Production license check not available'"
+
+    - id: "4"
+      name: "Analyze Compatibility Matrix"
+      description: "Check licenses for mutual compatibility"
+      commands:
+        - purpose: "Generate compatibility notes"
+          command: "echo 'License Compatibility Quick Reference:\n\nMIT/ISC/BSD-3 -> Compatible with almost everything\nApache-2.0 -> Compatible with GPLv3, not GPLv2\nGPL-2.0-only -> Incompatible with Apache-2.0, GPL-3.0\nGPL-3.0 -> Compatible with Apache-2.0\nAGPL-3.0 -> Network copyleft; affects SaaS\nLGPL -> Copyleft for library only; dynamic linking OK'"
+
+    - id: "5"
+      name: "Document Distribution Model"
+      description: "Clarify how software will be distributed"
+      commands:
+        - purpose: "Generate distribution questions"
+          command: "echo 'Distribution Model Assessment:\n\n1. Is the software distributed as binary? [ ] Yes [ ] No\n2. Is the software distributed as source? [ ] Yes [ ] No\n3. Is it a SaaS/web service only? [ ] Yes [ ] No\n4. Is it proprietary/closed-source? [ ] Yes [ ] No\n5. Is it open-source? [ ] Yes [ ] No\n\nCopyleft obligations typically apply only on distribution.'"
+
+    - id: "6"
+      name: "Create Compliance Report"
+      description: "Document compatibility findings"
+      commands:
+        - purpose: "Generate report template"
+          command: "echo 'License Compatibility Report:\n\nProject License: [LICENSE]\nDistribution Model: [MODEL]\n\nCompatible Licenses Found:\n- MIT (count)\n- Apache-2.0 (count)\n\nPotentially Problematic:\n- [LICENSE] - [PACKAGE] - [ISSUE]\n\nCompliance Actions Required:\n1. [Action]'"
+
+output:
+  deliverables:
+    - type: "compatibility_analysis"
+      format: "structured"
+      description: "Analysis of license compatibility"
+
+    - type: "compliance_issues"
+      format: "list"
+      description: "Identified compatibility problems"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Project License Context"
+        - "Compatibility Analysis"
+        - "Required Actions"
+        - "Legal Recommendations"
+
+closeout_checklist:
+  - id: "dep-compat-001"
+    item: "No incompatible copyleft licenses present"
+    level: "CRITICAL"
+    verification: "GPL/AGPL check complete"
+
+  - id: "dep-compat-002"
+    item: "All licenses compatible with distribution model"
+    level: "CRITICAL"
+    verification: "Distribution analysis complete"
+
+  - id: "dep-compat-003"
+    item: "Attribution requirements documented"
+    level: "REQUIRED"
+    verification: "Required notices identified"
+
+  - id: "dep-compat-004"
+    item: "Legal review completed for edge cases"
+    level: "RECOMMENDED"
+    verification: "Legal signoff obtained"
+
+governance:
+  applicable_to:
+    archetypes: ["all-software-projects"]
+
+  compliance_mappings:
+    - framework: "SOC 2"
+      control: "CC6.1"
+      description: "Legal compliance"
+    - framework: "ISO 27001"
+      control: "A.18.1.2"
+      description: "Intellectual property rights"
+
+relationships:
+  commonly_combined:
+    - "dependency-supply-chain.license-compliance.license-detection"
+  depends_on:
+    - "dependency-supply-chain.license-compliance.license-detection"
+  feeds_into:
+    - "compliance-legal.intellectual-property"

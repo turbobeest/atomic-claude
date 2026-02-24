@@ -1,0 +1,304 @@
+# ============================================================
+# AUDIT: Service Discovery Audit
+# Category: Scalability & Capacity > Horizontal Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.horizontal-scaling.service-discovery"
+  name: "Service Discovery Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "horizontal-scaling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates service discovery mechanisms that enable horizontally scaled
+    instances to be found and load-balanced. Reviews DNS-based discovery,
+    service mesh integration, health check integration, and registration/
+    deregistration timing during scaling events.
+
+  why_it_matters: |
+    Without proper service discovery, new instances aren't utilized and
+    removed instances continue receiving traffic. Stale discovery data
+    causes connection failures; slow registration delays scale-out benefit.
+    Service discovery is the glue that makes horizontal scaling work.
+
+  when_to_run:
+    - "When implementing service mesh"
+    - "After changing load balancer configuration"
+    - "During scaling behavior debugging"
+    - "After service communication issues"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Service discovery and load balancing configuration"
+    - type: "network_config"
+      description: "DNS and service mesh configuration"
+
+  access_requirements:
+    - "Kubernetes/cloud infrastructure access"
+    - "Service mesh control plane access"
+    - "DNS/load balancer configuration access"
+
+discovery:
+  code_patterns:
+    - pattern: "(Service|Endpoint|ServiceEntry|VirtualService)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect Kubernetes/Istio service definitions"
+
+    - pattern: "(consul|eureka|etcd|zookeeper)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect external service discovery systems"
+
+    - pattern: "(healthCheck|health.*path|livenessProbe|readinessProbe)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect health check configuration"
+
+  file_patterns:
+    - glob: "**/k8s/**/service*.yaml"
+      purpose: "Kubernetes service definitions"
+    - glob: "**/istio/**/*.yaml"
+      purpose: "Istio service mesh configuration"
+    - glob: "**/consul/*.json"
+      purpose: "Consul configuration"
+
+knowledge_sources:
+  guides:
+    - id: "k8s-services"
+      name: "Kubernetes Services"
+      url: "https://kubernetes.io/docs/concepts/services-networking/service/"
+      offline_cache: true
+
+    - id: "istio-traffic"
+      name: "Istio Traffic Management"
+      url: "https://istio.io/latest/docs/concepts/traffic-management/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Inspect service endpoints"
+      command: "kubectl get endpoints"
+
+    - tool: "istioctl"
+      purpose: "Analyze Istio service mesh"
+      command: "istioctl analyze"
+
+    - tool: "dig/nslookup"
+      purpose: "Test DNS-based service discovery"
+      command: "dig +short <service>.<namespace>.svc.cluster.local"
+
+  scripts:
+    - id: "discovery-health-checker"
+      language: "bash"
+      purpose: "Verify service discovery health"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        SVC=$1
+        NAMESPACE=$2
+        echo "=== Service Endpoints ==="
+        kubectl get endpoints $SVC -n $NAMESPACE
+        echo "=== DNS Resolution ==="
+        kubectl run dns-test --rm -i --restart=Never --image=busybox -- nslookup $SVC.$NAMESPACE.svc.cluster.local
+        echo "=== Endpoint Health ==="
+        kubectl get pods -n $NAMESPACE -l app=$SVC -o wide
+
+signals:
+  critical:
+    - id: "DISC-CRIT-001"
+      signal: "Hardcoded service endpoints instead of discovery"
+      evidence_pattern: "http://[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+|endpoint.*=.*\"\\d+\\.\\d+"
+      explanation: |
+        Hardcoded IP addresses bypass service discovery, making it impossible
+        to add or remove instances dynamically. Scaling becomes manual.
+      remediation: "Use service names and let Kubernetes/service mesh handle discovery"
+
+    - id: "DISC-CRIT-002"
+      signal: "No health checks for service endpoints"
+      evidence_indicators:
+        - "Service without readinessProbe"
+        - "Load balancer without health checks"
+      explanation: |
+        Without health checks, traffic routes to unhealthy instances,
+        causing request failures that could be avoided.
+      remediation: "Configure readiness probes and load balancer health checks"
+
+  high:
+    - id: "DISC-HIGH-001"
+      signal: "DNS TTL too high for dynamic scaling"
+      evidence_pattern: "ttl.*[3-9][0-9][0-9]|ttl.*[0-9][0-9][0-9][0-9]"
+      explanation: |
+        High DNS TTL causes clients to cache stale endpoints, sending
+        traffic to removed instances after scale-in.
+      remediation: "Set low DNS TTL (30-60s) or use service mesh for immediate updates"
+
+    - id: "DISC-HIGH-002"
+      signal: "Service registration delay on startup"
+      evidence_indicators:
+        - "Long initialDelaySeconds before readiness probe"
+        - "Manual service registration in code"
+      explanation: |
+        Delayed registration means new instances aren't utilized immediately
+        after scaling, reducing scaling effectiveness.
+      remediation: "Minimize startup time and use automatic registration via readiness probes"
+
+  medium:
+    - id: "DISC-MED-001"
+      signal: "Client-side load balancing without health awareness"
+      evidence_pattern: "ribbon|LoadBalancerClient.*random|round.*robin"
+      remediation: "Configure client-side load balancers to use health-aware selection"
+
+  positive:
+    - id: "DISC-POS-001"
+      signal: "Service mesh with automatic discovery and health checks"
+      evidence_pattern: "istio|linkerd|envoy.*sidecar"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory service discovery mechanisms"
+      description: |
+        Identify all service discovery mechanisms in use including
+        Kubernetes services, service mesh, and external systems.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List Kubernetes services"
+          command: "kubectl get services -A"
+        - purpose: "Check for service mesh"
+          command: "kubectl get pods -A -l 'istio-injection=enabled' || kubectl get pods -A | grep linkerd"
+      expected_findings:
+        - "Complete inventory of discovery mechanisms"
+        - "Service mesh presence and configuration"
+
+    - id: "2"
+      name: "Analyze health check integration"
+      description: |
+        Verify that health checks are properly integrated with service
+        discovery to prevent routing to unhealthy instances.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Check readiness probes"
+          command: "rg 'readinessProbe' --type yaml -A 10"
+        - purpose: "Verify endpoint health"
+          command: "kubectl get endpoints -A -o wide"
+      expected_findings:
+        - "Health check configuration per service"
+        - "Endpoint health status"
+
+    - id: "3"
+      name: "Test discovery responsiveness"
+      description: |
+        Verify that service discovery updates quickly during scaling
+        events to route traffic appropriately.
+      duration_estimate: "30 min"
+      questions:
+        - "How quickly do new instances appear in endpoints?"
+        - "How quickly are removed instances deregistered?"
+        - "Is DNS TTL appropriate for scaling dynamics?"
+      expected_findings:
+        - "Discovery update timing"
+        - "TTL configuration assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Service Discovery Inventory"
+        - "Health Check Integration"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct verification of discovery behavior"
+    medium: "Configuration analysis without runtime testing"
+    low: "Partial configuration review"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-services"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "service-discovery-001"
+    item: "No hardcoded IP addresses for service communication"
+    level: "CRITICAL"
+    verification: "rg '[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+' --type yaml --type properties | grep -v localhost || echo 'PASS'"
+    expected: "PASS or only expected IPs"
+
+  - id: "service-discovery-002"
+    item: "Health checks integrated with service discovery"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify all services have readiness probes"
+    expected: "All services have health checks"
+
+  - id: "service-discovery-003"
+    item: "Appropriate DNS TTL or service mesh in use"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check DNS TTL is <= 60s or service mesh handles discovery"
+    expected: "Low TTL or service mesh configured"
+
+governance:
+  applicable_to:
+    archetypes: ["web-service", "api-service", "microservice", "distributed-system"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["REL-6", "REL-7"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.horizontal-scaling.scale-out-speed"
+    - "scalability-capacity.horizontal-scaling.instance-homogeneity"

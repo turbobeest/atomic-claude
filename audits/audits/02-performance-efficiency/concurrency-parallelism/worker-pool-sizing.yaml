@@ -1,0 +1,343 @@
+# ============================================================
+# WORKER POOL SIZING AUDIT
+# ============================================================
+# Evaluates thread/worker pool configurations for optimal
+# performance given workload characteristics.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.concurrency-parallelism.worker-pool-sizing"
+  name: "Worker Pool Sizing Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "concurrency-parallelism"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes thread pool, goroutine pool, and worker pool configurations to
+    ensure they are appropriately sized for the workload. Examines pool size
+    relative to CPU cores, queue depth, timeout settings, and rejection policies.
+    Considers whether workloads are CPU-bound, I/O-bound, or mixed.
+
+  why_it_matters: |
+    Incorrectly sized worker pools cause performance problems. Undersized pools
+    leave resources idle and increase latency. Oversized pools waste memory,
+    cause excessive context switching, and can exhaust system resources. The
+    optimal size depends on workload characteristics.
+
+  when_to_run:
+    - "When configuring thread pools for production"
+    - "When experiencing high latency under load"
+    - "When CPU utilization is unexpectedly low or high"
+    - "After changing workload characteristics"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code with worker pool configurations"
+    - type: "runtime_metrics"
+      description: "Pool utilization metrics (optional but recommended)"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Access to monitoring dashboards (optional)"
+
+discovery:
+  code_patterns:
+    - pattern: "ThreadPoolExecutor|ExecutorService|newFixedThreadPool"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Java thread pool configurations"
+
+    - pattern: "GOMAXPROCS|runtime\\.NumCPU"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Go runtime configuration"
+
+    - pattern: "Pool|pool_size|workers|num_workers|max_workers"
+      type: "regex"
+      scope: "source"
+      purpose: "Find pool size configurations"
+
+    - pattern: "semaphore|Semaphore|buffered.*chan"
+      type: "regex"
+      scope: "source"
+      purpose: "Find concurrency limiters"
+
+  file_patterns:
+    - glob: "**/*.java"
+      purpose: "Java source files"
+    - glob: "**/*.go"
+      purpose: "Go source files"
+    - glob: "**/*.py"
+      purpose: "Python source files"
+    - glob: "**/application.yml"
+      purpose: "Spring configuration"
+    - glob: "**/*.properties"
+      purpose: "Java properties"
+
+knowledge_sources:
+  guides:
+    - id: "java-thread-pools"
+      name: "Java ThreadPoolExecutor Configuration"
+      url: "https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ThreadPoolExecutor.html"
+      offline_cache: true
+
+    - id: "go-concurrency"
+      name: "Go Concurrency Patterns"
+      url: "https://go.dev/blog/pipelines"
+      offline_cache: true
+
+  learning_resources:
+    - id: "little-law"
+      title: "Little's Law and Capacity Planning"
+      type: "article"
+      reference: "https://en.wikipedia.org/wiki/Little%27s_law"
+
+tooling:
+  static_analysis:
+    - tool: "grep"
+      purpose: "Find pool configurations in code"
+      offline_capable: true
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "jvm_threads_current{state='runnable'}"
+      purpose: "Active thread count"
+      threshold: "Should match expected pool utilization"
+
+    - system: "Prometheus"
+      query: "executor_queue_remaining_tasks"
+      purpose: "Queue depth monitoring"
+      threshold: "Should not be consistently full"
+
+  scripts:
+    - id: "analyze-pool-config"
+      language: "bash"
+      purpose: "Extract pool configurations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find thread pool configurations
+        grep -rn "pool.*size\|ThreadPool\|Executor" --include="*.java" --include="*.yml" .
+        # Find Go worker patterns
+        grep -rn "runtime.NumCPU\|make.*chan.*int\)" --include="*.go" .
+
+signals:
+  critical:
+    - id: "POOL-CRIT-001"
+      signal: "Unbounded thread pool"
+      evidence_pattern: "newCachedThreadPool|Executors\\.newCachedThreadPool"
+      explanation: |
+        Cached thread pools create unlimited threads. Under load spikes, this
+        can create thousands of threads, exhausting memory and causing the
+        system to thrash or crash.
+      remediation: "Use bounded ThreadPoolExecutor with explicit maxPoolSize"
+
+    - id: "POOL-CRIT-002"
+      signal: "Pool size hardcoded to small fixed value"
+      evidence_pattern: "newFixedThreadPool\\([1-4]\\)|pool_size.*=.*[1-4]"
+      explanation: |
+        Small fixed pool sizes severely limit concurrency regardless of
+        available resources. The system cannot scale even when capacity exists.
+      remediation: "Size based on Runtime.availableProcessors() or configuration"
+
+  high:
+    - id: "POOL-HIGH-001"
+      signal: "CPU-bound pool sized larger than cores"
+      evidence_pattern: "pool.*size.*>.*cores|ThreadPool.*1000"
+      explanation: |
+        For CPU-bound work, more threads than cores causes excessive context
+        switching overhead. Optimal size is approximately cores + 1.
+      remediation: "Size CPU-bound pools to number of cores"
+
+    - id: "POOL-HIGH-002"
+      signal: "I/O-bound pool sized to core count"
+      evidence_pattern: "pool.*=.*Runtime.*availableProcessors.*http|io.*pool.*=.*cpu"
+      explanation: |
+        I/O-bound work can benefit from more threads than cores because
+        threads spend time waiting. Sizing to cores underutilizes capacity.
+      remediation: "Size I/O pools based on cores * (1 + wait_time/compute_time)"
+
+    - id: "POOL-HIGH-003"
+      signal: "No queue or unbounded queue"
+      evidence_pattern: "LinkedBlockingQueue\\(\\)|newFixedThreadPool(?!.*bounded)"
+      explanation: |
+        Unbounded queues allow unlimited work accumulation, leading to memory
+        exhaustion and increasing latency as queue grows.
+      remediation: "Use bounded queues with appropriate rejection policy"
+
+  medium:
+    - id: "POOL-MED-001"
+      signal: "Default rejection policy (abort)"
+      evidence_pattern: "ThreadPoolExecutor(?!.*RejectedExecutionHandler)"
+      remediation: "Configure CallerRunsPolicy or custom handler for graceful degradation"
+
+    - id: "POOL-MED-002"
+      signal: "No thread naming"
+      evidence_pattern: "ThreadPoolExecutor(?!.*ThreadFactory)"
+      remediation: "Use custom ThreadFactory with descriptive names for debugging"
+
+  low:
+    - id: "POOL-LOW-001"
+      signal: "Keep-alive time too long for bursty workloads"
+      evidence_pattern: "keepAliveTime.*HOURS|keepAlive.*3600"
+      remediation: "Use shorter keep-alive for bursty workloads to release resources"
+
+  positive:
+    - id: "POOL-POS-001"
+      signal: "Pool size derived from system capacity"
+      evidence_pattern: "Runtime.*availableProcessors|runtime\\.NumCPU"
+
+    - id: "POOL-POS-002"
+      signal: "Bounded queue with rejection policy"
+      evidence_pattern: "ArrayBlockingQueue|CallerRunsPolicy"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory worker pools"
+      description: |
+        Find all thread/worker pool configurations in the codebase.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find Java ExecutorService usage"
+          command: "grep -rn 'ExecutorService\\|ThreadPool\\|Executor' --include='*.java' ."
+        - purpose: "Find pool configurations in YAML"
+          command: "grep -rn 'pool\\|thread\\|worker' --include='*.yml' --include='*.yaml' ."
+      expected_findings:
+        - "All pool configurations"
+        - "Pool sizing parameters"
+
+    - id: "2"
+      name: "Classify workload types"
+      description: |
+        For each pool, determine if the work is CPU-bound, I/O-bound, or mixed.
+      duration_estimate: "25 min"
+      questions:
+        - "What operations does this pool execute?"
+        - "Is work compute-heavy or waiting-heavy?"
+        - "What are typical operation durations?"
+      expected_findings:
+        - "Workload classification per pool"
+        - "Optimal sizing strategy per pool"
+
+    - id: "3"
+      name: "Validate pool sizes"
+      description: |
+        Compare configured sizes against recommendations for workload type.
+      duration_estimate: "20 min"
+      questions:
+        - "CPU-bound: Is size close to core count?"
+        - "I/O-bound: Does size account for wait time?"
+        - "Are queues bounded appropriately?"
+      expected_findings:
+        - "Sizing analysis per pool"
+        - "Optimization opportunities"
+
+    - id: "4"
+      name: "Check runtime behavior"
+      description: |
+        If possible, examine pool metrics under load.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "JVM thread dump"
+          command: "jcmd <pid> Thread.print"
+        - purpose: "Go goroutine count"
+          command: "curl localhost:6060/debug/pprof/goroutine?debug=1"
+      expected_findings:
+        - "Actual thread utilization"
+        - "Queue depths"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Pool Configuration Analysis"
+        - "Sizing Recommendations"
+
+  confidence_guidance:
+    high: "Metrics show pool exhaustion or wasted capacity"
+    medium: "Configuration suggests suboptimal sizing"
+    low: "Potential improvement based on workload analysis"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "java-thread-pools"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires workload analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "pool-sizing-001"
+    item: "All pools bounded with explicit max size"
+    level: "CRITICAL"
+    verification: "grep -rn 'newCachedThreadPool' --include='*.java' . | wc -l"
+    expected: "0"
+
+  - id: "pool-sizing-002"
+    item: "Pool sizes appropriate for workload type"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "CPU-bound pools sized to cores, I/O pools sized higher"
+    expected: "Confirmed by reviewer"
+
+  - id: "pool-sizing-003"
+    item: "Queues are bounded"
+    level: "CRITICAL"
+    verification: "grep -rn 'LinkedBlockingQueue()' --include='*.java' . | wc -l"
+    expected: "0"
+
+governance:
+  applicable_to:
+    archetypes: ["api", "service"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.concurrency-parallelism.context-switching-overhead"
+    - "performance-efficiency.concurrency-parallelism.backpressure-handling"

@@ -1,0 +1,474 @@
+audit:
+  id: security-trust.input-validation.xml-xxe-injection
+  name: XML/XXE Injection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit examines the codebase for XML External Entity (XXE) injection
+    vulnerabilities (CWE-611). It identifies XML parsers that allow external
+    entity processing, DTD loading, and XInclude, which can lead to file
+    disclosure, SSRF, and denial of service attacks.
+  why_it_matters: |
+    XXE is ranked in OWASP Top 10 (A04). It allows attackers to read arbitrary
+    files from the server, perform Server-Side Request Forgery (SSRF), scan
+    internal ports, execute denial of service attacks (Billion Laughs), and
+    potentially achieve remote code execution. Many XML parsers enable dangerous
+    features by default.
+  when_to_run:
+  - Initial security audit of XML-processing applications
+  - Code review for XML handling changes
+  - Before production deployment
+  - When integrating XML-based APIs (SOAP, etc.)
+  - When accepting user-uploaded XML content
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code with XML parsing functionality
+  access_requirements:
+  - Read access to source code repositories
+discovery:
+  code_patterns:
+  - pattern: xml\.etree|ElementTree|lxml\.etree|minidom|xml\.dom|xml\.sax
+    type: regex
+    scope: source
+    purpose: Detect Python XML library usage
+  - pattern: defusedxml
+    type: regex
+    scope: source
+    purpose: Detect defusedxml (safe library) usage
+  - pattern: DocumentBuilderFactory|SAXParserFactory|XMLInputFactory|TransformerFactory
+    type: regex
+    scope: source
+    purpose: Detect Java XML parser factories
+  - pattern: XMLReader|SAXBuilder|SAXParser|DocumentBuilder
+    type: regex
+    scope: source
+    purpose: Detect Java XML parsers
+  - pattern: setFeature|setProperty|FEATURE_SECURE_PROCESSING
+    type: regex
+    scope: source
+    purpose: Detect Java XML security configuration
+  - pattern: xml2js|fast-xml-parser|xmldom|libxmljs|sax|xml-js
+    type: regex
+    scope: source
+    purpose: Detect Node.js XML library usage
+  - pattern: simplexml_load|DOMDocument|XMLReader|xml_parse|libxml
+    type: regex
+    scope: source
+    purpose: Detect PHP XML functions
+  - pattern: libxml_disable_entity_loader
+    type: regex
+    scope: source
+    purpose: Detect PHP XXE mitigation (positive)
+  - pattern: XmlDocument|XmlReader|XDocument|XElement|XmlTextReader
+    type: regex
+    scope: source
+    purpose: Detect .NET XML classes
+  - pattern: XmlResolver|DtdProcessing|ProhibitDtd
+    type: regex
+    scope: source
+    purpose: Detect .NET XML security settings
+  - pattern: <!DOCTYPE|<!ENTITY|SYSTEM|PUBLIC
+    type: regex
+    scope: source
+    purpose: Detect DTD declarations (may indicate testing or vulnerability)
+  - pattern: XInclude|xi:include
+    type: regex
+    scope: source
+    purpose: Detect XInclude usage (potential XXE vector)
+  - pattern: disallow-doctype-decl|DISALLOW_DOCTYPE_DECL
+    type: regex
+    scope: source
+    purpose: Detect DOCTYPE disabling (positive)
+  - pattern: resolve_entities\s*=\s*False|no_network\s*=\s*True
+    type: regex
+    scope: source
+    purpose: Detect lxml safe configuration (positive)
+  file_patterns:
+  - glob: '**/*xml*.py'
+    purpose: Python XML modules
+  - glob: '**/*xml*.java'
+    purpose: Java XML modules
+  - glob: '**/*parser*.py'
+    purpose: Parser modules
+  - glob: '**/*soap*.py'
+    purpose: SOAP modules
+  - glob: '**/*.xml'
+    purpose: XML configuration files
+knowledge_sources:
+  specifications:
+  - id: cwe-611
+    name: 'CWE-611: Improper Restriction of XML External Entity Reference'
+    url: https://cwe.mitre.org/data/definitions/611.html
+    offline_cache: true
+    priority: required
+  - id: cwe-776
+    name: 'CWE-776: Improper Restriction of Recursive Entity References in DTDs'
+    url: https://cwe.mitre.org/data/definitions/776.html
+    offline_cache: true
+    priority: recommended
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-xxe
+    name: OWASP XML External Entity (XXE) Processing
+    url: https://owasp.org/www-community/vulnerabilities/XML_External_Entity_(XXE)_Processing
+    offline_cache: true
+  - id: owasp-xxe-prevention
+    name: OWASP XML External Entity Prevention Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect XXE patterns
+    offline_capable: true
+  - tool: bandit
+    purpose: Python security linting including XXE
+    offline_capable: true
+  - tool: find-sec-bugs
+    purpose: Java security scanner with XXE detection
+    offline_capable: true
+  scripts:
+  - id: detect-xxe
+    language: bash
+    purpose: Detect potential XXE vulnerabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== XXE Vulnerability Detection ==="
+
+      echo "--- Python XML library usage ---"
+      grep -rn --include="*.py" -E "(xml\.etree|ElementTree|lxml|minidom)" . 2>/dev/null | head -20
+
+      echo "--- Python defusedxml (safe) ---"
+      grep -rn --include="*.py" "defusedxml" . 2>/dev/null | head -10
+
+      echo "--- Java XML parsers ---"
+      grep -rn --include="*.java" -E "(DocumentBuilderFactory|SAXParserFactory|XMLInputFactory)" . 2>/dev/null | head -20
+
+      echo "--- Java secure configuration ---"
+      grep -rn --include="*.java" -E "(setFeature|DISALLOW_DOCTYPE|FEATURE_SECURE)" . 2>/dev/null | head -20
+
+      echo "--- PHP XML functions ---"
+      grep -rn --include="*.php" -E "(simplexml_load|DOMDocument|XMLReader)" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: XXE-CRIT-001
+    signal: XML parser without DTD/entity restrictions
+    cwe: CWE-611
+    evidence_pattern: (DocumentBuilderFactory|SAXParserFactory)\.newInstance\(\)(?!.*setFeature)
+    explanation: |
+      Java XML parsers are vulnerable to XXE by default. Without explicitly
+      disabling DOCTYPE declarations and external entities, attackers can
+      include malicious entities like:
+      <!ENTITY xxe SYSTEM "file:///etc/passwd">
+    remediation: |
+      Disable DTDs completely (safest):
+      factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+      Or disable external entities:
+      factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+      factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+  - id: XXE-CRIT-002
+    signal: Python lxml without safe configuration
+    cwe: CWE-611
+    evidence_pattern: lxml\.etree\.parse|etree\.fromstring(?!.*resolve_entities\s*=\s*False)
+    explanation: |
+      lxml can process external entities by default. Without disabling
+      entity resolution, attackers can read files or perform SSRF.
+    remediation: |
+      Use safe parsing options:
+      parser = etree.XMLParser(resolve_entities=False, no_network=True)
+      tree = etree.parse(xml_file, parser)
+      Or use defusedxml library which is safe by default.
+  - id: XXE-CRIT-003
+    signal: Python xml.etree/minidom with untrusted input
+    cwe: CWE-611
+    evidence_pattern: (xml\.etree|ElementTree|minidom)\.parse.*request|fromstring.*user
+    explanation: |
+      Python's standard library XML parsers (xml.etree, minidom) are
+      vulnerable to various XML attacks. While some XXE protections
+      exist, billion laughs and other attacks are possible.
+    remediation: |
+      Replace standard library parsers with defusedxml:
+      import defusedxml.ElementTree as ET
+      tree = ET.parse(xml_file)
+      defusedxml is safe by default.
+  - id: XXE-CRIT-004
+    signal: User-uploaded XML processed without validation
+    cwe: CWE-611
+    evidence_pattern: upload.*xml.*parse|parse.*request\.files|xml.*file.*user
+    explanation: |
+      Processing user-uploaded XML is extremely dangerous. Attackers have
+      full control over the XML content including DOCTYPE declarations
+      and entity definitions.
+    remediation: |
+      Use defusedxml (Python) or equivalent safe parsers.
+      Consider using JSON instead of XML for user data.
+      If XML is required, validate against a strict schema after safe parsing.
+  high:
+  - id: XXE-HIGH-001
+    signal: PHP XML without entity loader disabled
+    cwe: CWE-611
+    evidence_pattern: (simplexml_load|DOMDocument)(?!.*libxml_disable_entity_loader)
+    explanation: |
+      PHP < 8.0 is vulnerable to XXE by default. The entity loader must
+      be explicitly disabled before parsing untrusted XML.
+    remediation: |
+      For PHP < 8.0:
+      libxml_disable_entity_loader(true);
+      $dom = new DOMDocument();
+      $dom->loadXML($xml);
+      PHP 8.0+ is safe by default.
+  - id: XXE-HIGH-002
+    signal: .NET XmlDocument with default settings
+    cwe: CWE-611
+    evidence_pattern: XmlDocument\(\)(?!.*XmlResolver\s*=\s*null)
+    explanation: |
+      .NET Framework < 4.5.2 XmlDocument is vulnerable by default.
+      XmlResolver must be set to null to prevent XXE.
+    remediation: |
+      XmlDocument doc = new XmlDocument();
+      doc.XmlResolver = null;
+      doc.LoadXml(xml);
+      .NET 4.5.2+ and .NET Core are safer by default.
+  - id: XXE-HIGH-003
+    signal: XInclude enabled
+    cwe: CWE-611
+    evidence_pattern: XInclude|xi:include|FEATURE.*xinclude
+    explanation: |
+      XInclude can be used as an XXE vector even when standard external
+      entities are disabled.
+    remediation: |
+      Disable XInclude processing:
+      factory.setFeature("http://apache.org/xml/features/xinclude", false);
+  medium:
+  - id: XXE-MED-001
+    signal: SOAP library without XXE protection
+    cwe: CWE-611
+    evidence_pattern: (suds|zeep|SOAPpy)(?!.*defusedxml)
+    explanation: |
+      SOAP libraries often parse XML internally. Without proper configuration,
+      they may be vulnerable to XXE in SOAP messages.
+    remediation: |
+      Use SOAP libraries with XXE protection or configure underlying
+      XML parser safely. Test SOAP endpoints for XXE vulnerability.
+  - id: XXE-MED-002
+    signal: XML schema validation with DTD loading
+    cwe: CWE-611
+    evidence_pattern: Schema|DTD|validation.*xml
+    explanation: |
+      Schema validation that loads external DTDs can be exploited for
+      XXE or SSRF.
+    remediation: |
+      Use local copies of schemas. Disable network access during validation.
+      Consider schema-less validation approaches.
+  low:
+  - id: XXE-LOW-001
+    signal: DOCTYPE in XML files
+    evidence_pattern: <!DOCTYPE
+    explanation: |
+      DOCTYPE declarations in XML files may indicate legitimate schema
+      references or potential injection points.
+    remediation: |
+      Review DOCTYPE declarations. Remove if not needed.
+      Ensure parser is configured to ignore or reject DOCTYPEs.
+  positive:
+  - id: XXE-POS-001
+    signal: defusedxml library in use
+    evidence_pattern: defusedxml|from\s+defusedxml|import\s+defusedxml
+    explanation: |
+      defusedxml is a drop-in replacement for Python standard library
+      XML parsers that is secure by default.
+  - id: XXE-POS-002
+    signal: DOCTYPE disallowed in Java parser
+    evidence_pattern: disallow-doctype-decl.*true|DISALLOW_DOCTYPE_DECL
+    explanation: |
+      Disabling DOCTYPE declarations is the safest way to prevent XXE.
+  - id: XXE-POS-003
+    signal: External entities disabled
+    evidence_pattern: external-general-entities.*false|external-parameter-entities.*false
+    explanation: |
+      External entity processing is explicitly disabled.
+  - id: XXE-POS-004
+    signal: lxml configured safely
+    evidence_pattern: resolve_entities\s*=\s*False|no_network\s*=\s*True
+    explanation: |
+      lxml is configured with safe options that prevent XXE.
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find all XML parsing
+    description: |
+      Identify all locations where XML is parsed.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find XML library usage
+      command: |
+        grep -rn --include="*.py" --include="*.java" --include="*.php" --include="*.cs" \
+          -E "(xml|XML|etree|ElementTree|DOM|SAX)" . 2>/dev/null | head -50
+    expected_findings:
+    - Inventory of XML parsing operations
+    - Classification by parser type
+  - id: '2'
+    name: Check parser configuration
+    description: |
+      Verify that XML parsers are configured securely.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find secure configuration patterns
+      command: |
+        grep -rn --include="*.py" --include="*.java" \
+          -E "(defusedxml|setFeature|resolve_entities|XmlResolver)" . 2>/dev/null | head -30
+    - purpose: Find vulnerable patterns
+      command: |
+        grep -rn --include="*.py" --include="*.java" \
+          -E "(DocumentBuilderFactory\.newInstance|SAXParserFactory\.newInstance|etree\.parse)" . 2>/dev/null | head -30
+    expected_findings:
+    - Parser security configuration status
+    - Vulnerable parsers identified
+  - id: '3'
+    name: Identify user-controlled XML input
+    description: |
+      Find where user-supplied XML is processed.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find XML from user input
+      command: |
+        grep -rn --include="*.py" --include="*.java" --include="*.php" \
+          -E "(request|upload|user|input).*xml|xml.*(request|upload)" . 2>/dev/null | head -30
+    expected_findings:
+    - User input paths to XML parsing
+    - Risk assessment for each path
+  - id: '4'
+    name: Run static analysis
+    description: |
+      Execute security-focused static analysis for XXE.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Run Semgrep XXE rules
+      command: |
+        semgrep --config=p/xxe . 2>/dev/null | head -100 || echo "Semgrep not available"
+    - purpose: Run Bandit for Python
+      command: |
+        bandit -r . -f json 2>/dev/null | jq '.results[] | select(.test_id | contains("B313") or contains("B314") or contains("B318") or contains("B320"))' | head -50 || echo "Bandit not available"
+    expected_findings:
+    - Static analysis XXE findings
+    - Additional patterns from tooling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - XXE Vulnerabilities
+    - Parser Configuration Assessment
+    - Remediation Roadmap
+  confidence_guidance:
+    high: Direct evidence of vulnerable XML parser with user input
+    medium: XML parsing without visible security configuration
+    low: XML code present, needs detailed configuration review
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-611
+      priority: required
+    - source_id: owasp-xxe-prevention
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: XXE is less common, not needed in quick scan
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: xxe-001
+  item: Python uses defusedxml for XML parsing
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.py" "defusedxml" . 2>/dev/null && echo "PASS" || \
+    ! grep -rn --include="*.py" "xml\.etree\|ElementTree\|minidom" . 2>/dev/null && echo "NO_XML" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: xxe-002
+  item: Java XML parsers have DOCTYPE disabled
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.java" "disallow-doctype-decl.*true" . 2>/dev/null && echo "PASS" || \
+    ! grep -rn --include="*.java" "DocumentBuilderFactory\|SAXParser" . 2>/dev/null && echo "NO_XML" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: xxe-003
+  item: lxml configured with resolve_entities=False
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.py" "resolve_entities.*False" . 2>/dev/null && echo "PASS" || \
+    ! grep -rn --include="*.py" "lxml\.etree" . 2>/dev/null && echo "NO_LXML" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: xxe-004
+  item: No user XML processed without safe parser
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" "xml\.etree.*request\|ElementTree.*user" . 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A04:2017 - XML External Entities
+  - framework: CWE
+    controls:
+    - CWE-611
+    - CWE-776
+  - framework: SANS Top 25
+    controls:
+    - CWE-611
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.sql-injection
+  - security-trust.input-validation.path-traversal
+  - security-trust.application-security.ssrf

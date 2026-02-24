@@ -1,0 +1,378 @@
+# ============================================================
+# AUDIT: Prefetching Strategy Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.network-efficiency.prefetching-strategy"
+  name: "Prefetching Strategy Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "network-efficiency"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates resource prefetching and preloading strategies across the
+    application. Analyzes use of link rel=prefetch, rel=preload, rel=preconnect,
+    rel=dns-prefetch, and speculative loading patterns. Reviews route-based
+    prefetching in SPAs and intelligent data prefetching based on user behavior.
+
+  why_it_matters: |
+    Prefetching eliminates wait time for subsequent navigations by loading
+    resources during idle time. Proper preconnect/dns-prefetch eliminates
+    100-300ms of connection overhead. Studies show prefetching can reduce
+    perceived page load time by 30-50%. However, over-aggressive prefetching
+    wastes bandwidth and can hurt performance on slow connections.
+
+  when_to_run:
+    - "UX optimization initiatives"
+    - "After navigation flow changes"
+    - "Performance budget reviews"
+    - "Mobile experience optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "codebase"
+      description: "Frontend application source code"
+    - type: "build_output"
+      description: "Generated HTML for link tag analysis"
+
+  access_requirements:
+    - "Frontend source code"
+    - "Build output or production HTML"
+    - "Network monitoring for prefetch verification"
+
+discovery:
+  code_patterns:
+    - pattern: "rel=[\"']prefetch[\"']|rel=[\"']preload[\"']"
+      type: "regex"
+      scope: "source"
+      purpose: "Find prefetch/preload link tags"
+    - pattern: "rel=[\"']preconnect[\"']|rel=[\"']dns-prefetch[\"']"
+      type: "regex"
+      scope: "source"
+      purpose: "Find connection hints"
+    - pattern: "prefetch|Prefetch|PREFETCH"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find prefetch logic in JavaScript"
+
+  file_patterns:
+    - glob: "**/index.html"
+      purpose: "Main HTML document link tags"
+    - glob: "**/_document.{tsx,jsx}"
+      purpose: "Next.js document component"
+    - glob: "**/router*.{ts,js}"
+      purpose: "Router configuration for route prefetching"
+
+knowledge_sources:
+  specifications:
+    - id: "resource-hints"
+      name: "W3C Resource Hints Specification"
+      url: "https://www.w3.org/TR/resource-hints/"
+      offline_cache: true
+      priority: "required"
+    - id: "preload"
+      name: "W3C Preload Specification"
+      url: "https://www.w3.org/TR/preload/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "chrome-preload"
+      name: "Chrome Preload Documentation"
+      url: "https://developer.chrome.com/docs/web-platform/preload"
+      offline_cache: true
+    - id: "nextjs-prefetch"
+      name: "Next.js Link Prefetching"
+      url: "https://nextjs.org/docs/pages/api-reference/components/link#prefetch"
+      offline_cache: true
+
+  learning_resources:
+    - id: "web-perf-calendar"
+      title: "Web Performance Calendar - Prefetching Resources"
+      type: "article"
+      reference: "https://calendar.perfplanet.com/"
+
+tooling:
+  static_analysis:
+    - tool: "lighthouse"
+      purpose: "Audit preload/prefetch usage"
+      offline_capable: false
+
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Verify Link headers and HTML link tags"
+      command: "curl -sI https://example.com | grep -i link"
+
+  scripts:
+    - id: "prefetch-analyzer"
+      language: "bash"
+      purpose: "Analyze prefetch configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL="$1"
+        echo "=== Prefetch Analysis for $URL ==="
+
+        # HTTP Link headers
+        echo -e "\n--- HTTP Link Headers ---"
+        curl -sI "$URL" | grep -i '^link'
+
+        # HTML link tags
+        echo -e "\n--- HTML Link Tags ---"
+        curl -s "$URL" | grep -oE '<link[^>]*(prefetch|preload|preconnect|dns-prefetch)[^>]*>'
+
+        # External domains
+        echo -e "\n--- External Domains (preconnect candidates) ---"
+        curl -s "$URL" | grep -oE 'https?://[^/\"]+' | sort -u | grep -v "$(echo $URL | grep -oE 'https?://[^/]+')"
+
+signals:
+  critical:
+    - id: "PREFETCH-CRIT-001"
+      signal: "Critical resources not preloaded causing render blocking"
+      evidence_pattern: "Key CSS/fonts discovered late in page parse"
+      explanation: |
+        Resources critical to initial render (above-the-fold CSS, fonts,
+        hero images) should be preloaded to start downloading immediately.
+        Without preload, these resources aren't discovered until the parser
+        reaches their reference, delaying render by hundreds of milliseconds.
+      remediation: "Add <link rel='preload'> for critical CSS, fonts, and above-fold images"
+
+    - id: "PREFETCH-CRIT-002"
+      signal: "No preconnect for critical third-party origins"
+      evidence_pattern: "External API/CDN domains without preconnect hint"
+      explanation: |
+        Each new origin requires DNS lookup, TCP connection, and TLS handshake
+        (100-300ms total). Preconnect performs this work early while the main
+        page loads. Missing preconnect for critical third parties delays
+        their resources significantly.
+      remediation: "Add <link rel='preconnect' href='https://critical-third-party.com'>"
+
+  high:
+    - id: "PREFETCH-HIGH-001"
+      signal: "SPA routes not prefetched on hover/intersection"
+      evidence_pattern: "No router prefetching configured"
+      explanation: |
+        Modern SPA frameworks support prefetching route chunks on hover or
+        when links enter viewport. This makes navigation feel instant.
+        Without prefetching, users experience loading delays on every
+        navigation.
+      remediation: "Enable router prefetching (Next.js Link prefetch, React Router lazy prefetch)"
+
+    - id: "PREFETCH-HIGH-002"
+      signal: "Over-aggressive prefetching on page load"
+      evidence_pattern: "Many prefetch requests firing on initial load"
+      explanation: |
+        Prefetching everything immediately competes with critical resources
+        for bandwidth and can hurt initial load performance. Prefetching
+        should be deferred to idle time and prioritized by likely navigation.
+      remediation: "Use requestIdleCallback or Intersection Observer for prefetch timing"
+
+  medium:
+    - id: "PREFETCH-MED-001"
+      signal: "Prefetched resources not used within session"
+      evidence_pattern: "High prefetch cache eviction rate"
+      remediation: "Analyze navigation patterns and prefetch only likely destinations"
+
+    - id: "PREFETCH-MED-002"
+      signal: "No data-saver mode consideration"
+      evidence_pattern: "Prefetching continues on metered connections"
+      remediation: "Check navigator.connection.saveData and reduce prefetching accordingly"
+
+  low:
+    - id: "PREFETCH-LOW-001"
+      signal: "Speculation Rules API not utilized"
+
+  positive:
+    - id: "PREFETCH-POS-001"
+      signal: "Critical resources preloaded with proper priority"
+    - id: "PREFETCH-POS-002"
+      signal: "Preconnect configured for all critical third parties"
+    - id: "PREFETCH-POS-003"
+      signal: "Route prefetching on hover/intersection"
+    - id: "PREFETCH-POS-004"
+      signal: "Data-saver mode respected"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Audit HTML Link Tags"
+      description: |
+        Examine the HTML document for preload, prefetch, preconnect,
+        and dns-prefetch link tags.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Extract link tags from HTML"
+          command: "curl -s https://example.com | grep -oE '<link[^>]*rel=[\"'][^\"']+[\"'][^>]*>'"
+        - purpose: "Check HTTP Link headers"
+          command: "curl -sI https://example.com | grep -i '^link'"
+        - purpose: "Count each hint type"
+          command: "curl -s https://example.com | grep -oE 'rel=\"(preload|prefetch|preconnect|dns-prefetch)\"' | sort | uniq -c"
+
+      expected_findings:
+        - "Preload for critical resources"
+        - "Preconnect for third-party origins"
+        - "Dns-prefetch for secondary domains"
+
+    - id: "2"
+      name: "Identify Critical Resources"
+      description: |
+        Determine which resources are critical to initial render
+        and verify they're being preloaded.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find render-blocking resources"
+          command: "curl -s https://example.com | grep -oE '<link[^>]*stylesheet[^>]*>' | head -5"
+        - purpose: "Find fonts used"
+          command: "curl -s https://example.com | grep -oE 'fonts\\.[^\"]+\\.woff2?'"
+        - purpose: "Check if fonts are preloaded"
+          command: "curl -s https://example.com | grep -E 'preload.*font|font.*preload'"
+
+      expected_findings:
+        - "Critical CSS preloaded"
+        - "Web fonts preloaded with crossorigin"
+
+    - id: "3"
+      name: "Analyze Third-Party Origins"
+      description: |
+        Identify third-party domains used by the page and verify
+        preconnect hints are configured for critical ones.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "List external domains"
+          command: "curl -s https://example.com | grep -oE 'https?://[^/\"]+' | sort -u | head -20"
+        - purpose: "Check preconnect coverage"
+          command: "curl -s https://example.com | grep -oE 'preconnect[^>]*href=\"[^\"]+\"' | grep -oE 'https?://[^\"]+'"
+
+      expected_findings:
+        - "Critical third parties have preconnect"
+        - "CDN, analytics, API domains covered"
+
+    - id: "4"
+      name: "Review SPA Route Prefetching"
+      description: |
+        For single-page applications, verify route chunk prefetching
+        is configured appropriately.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check Next.js Link prefetch"
+          command: "grep -rn 'prefetch' --include='*.tsx' --include='*.jsx' src/ | grep -i link"
+        - purpose: "Find lazy/dynamic imports"
+          command: "grep -rn 'React.lazy\\|dynamic(' --include='*.tsx' --include='*.jsx' src/"
+        - purpose: "Check router prefetch config"
+          command: "grep -rn 'prefetch' --include='*.ts' --include='*.js' src/router/ 2>/dev/null"
+
+      expected_findings:
+        - "Route prefetching enabled"
+        - "Lazy loading for non-critical routes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Preload Analysis"
+        - "Preconnect Coverage"
+        - "Route Prefetching"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct HTML/header inspection"
+    medium: "Code pattern analysis"
+    low: "Behavioral inference"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "resource-hints"
+        priority: "required"
+      - source_id: "preload"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "Prefetch audit is quick and impactful"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "prefetch-001"
+    item: "Critical fonts preloaded"
+    level: "CRITICAL"
+    verification: |
+      FONTS=$(curl -s https://example.com | grep -c 'preload.*font\|rel="preload".*as="font"')
+      if [ "$FONTS" -gt 0 ]; then echo "PASS: $FONTS font preloads"; else echo "FAIL: No font preloads"; fi
+    expected: "PASS"
+
+  - id: "prefetch-002"
+    item: "Preconnect configured for third-party origins"
+    level: "BLOCKING"
+    verification: |
+      PRECONN=$(curl -s https://example.com | grep -c 'rel="preconnect"')
+      if [ "$PRECONN" -gt 0 ]; then echo "PASS: $PRECONN preconnects"; else echo "FAIL: No preconnects"; fi
+    expected: "PASS"
+
+  - id: "prefetch-003"
+    item: "DNS prefetch for secondary domains"
+    level: "WARNING"
+    verification: |
+      DNS=$(curl -s https://example.com | grep -c 'dns-prefetch')
+      if [ "$DNS" -gt 0 ]; then echo "PASS: $DNS dns-prefetch hints"; else echo "FAIL: No dns-prefetch"; fi
+    expected: "PASS"
+
+  - id: "prefetch-004"
+    item: "Critical CSS preloaded"
+    level: "BLOCKING"
+    verification: |
+      CSS=$(curl -s https://example.com | grep -cE 'preload.*style|rel="preload".*as="style"')
+      if [ "$CSS" -gt 0 ]; then echo "PASS"; else echo "FAIL: Critical CSS not preloaded"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.network-efficiency.dns-resolution"
+    - "performance-efficiency.frontend-performance.critical-rendering-path"

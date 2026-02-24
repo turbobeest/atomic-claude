@@ -1,0 +1,377 @@
+audit:
+  id: infrastructure-as-code.iac-structure.file-structure
+  name: IaC File Structure
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: iac-structure
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the file and directory structure of Infrastructure
+    as Code repositories. It evaluates organization patterns, file naming,
+    separation of concerns, and adherence to tool-specific conventions.
+
+    Key areas examined:
+    - Standard file organization (main.tf, variables.tf, outputs.tf)
+    - Directory hierarchy and module layout
+    - Environment separation patterns
+    - Configuration file placement
+    - Backend configuration organization
+    - Provider configuration structure
+  why_it_matters: |
+    Proper file structure enables:
+    - Navigation: Developers can quickly find relevant configurations
+    - Maintenance: Changes are localized and predictable
+    - Reviews: Code reviews are efficient with consistent structure
+    - Automation: CI/CD pipelines can reliably target correct files
+    - Onboarding: New team members understand code organization
+
+    Poor structure leads to confusion, missed configurations during reviews,
+    difficult refactoring, and increased risk of errors.
+  when_to_run:
+  - During repository setup review
+  - When establishing IaC standards
+  - Before repository restructuring
+  - During periodic codebase assessments
+prerequisites:
+  required_artifacts:
+  - type: iac_repository
+    description: Access to infrastructure code repository
+  access_requirements:
+  - Read access to IaC repository
+discovery:
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform configuration files
+  - glob: '**/main.tf'
+    purpose: Main Terraform configuration
+  - glob: '**/variables.tf'
+    purpose: Variable definitions
+  - glob: '**/outputs.tf'
+    purpose: Output definitions
+  - glob: '**/providers.tf'
+    purpose: Provider configurations
+  - glob: '**/backend.tf'
+    purpose: Backend configurations
+  - glob: '**/versions.tf'
+    purpose: Version constraints
+  - glob: '**/locals.tf'
+    purpose: Local value definitions
+  - glob: '**/data.tf'
+    purpose: Data source definitions
+  - glob: '**/terraform.tfvars'
+    purpose: Variable value files
+  - glob: '**/*.tfvars'
+    purpose: Environment-specific variables
+  - glob: '**/Pulumi.yaml'
+    purpose: Pulumi project configuration
+  - glob: '**/terragrunt.hcl'
+    purpose: Terragrunt configuration
+knowledge_sources:
+  guides:
+  - id: terraform-structure
+    name: Terraform Module Structure
+    url: https://developer.hashicorp.com/terraform/language/modules/develop/structure
+    offline_cache: true
+  - id: terraform-style
+    name: Terraform Style Guide
+    url: https://developer.hashicorp.com/terraform/language/style
+    offline_cache: true
+  - id: google-terraform-structure
+    name: Google Cloud Terraform Project Structure
+    url: https://cloud.google.com/docs/terraform/best-practices-for-terraform#project-structure
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: terraform fmt
+    purpose: Check file formatting consistency
+    offline_capable: true
+  - tool: tflint
+    purpose: Lint for structural issues
+    offline_capable: true
+  scripts:
+  - id: structure-analyzer
+    language: bash
+    purpose: Analyze Terraform file structure
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== File Type Distribution ==="
+      find . -name '*.tf' -exec basename {} \; | sort | uniq -c | sort -rn
+
+      echo ""
+      echo "=== Directory Depth Analysis ==="
+      find . -name '*.tf' -printf '%h\n' | awk -F/ '{print NF-1}' | sort | uniq -c
+
+      echo ""
+      echo "=== Module Structure Check ==="
+      for dir in $(find . -name 'main.tf' -exec dirname {} \;); do
+        echo "Module: $dir"
+        ls -1 "$dir"/*.tf 2>/dev/null | xargs -I{} basename {} | sort
+        echo "---"
+      done
+signals:
+  critical:
+  - id: IAC-FILE-CRIT-001
+    signal: Terraform state files committed to repository
+    evidence_pattern: \.tfstate
+    explanation: |
+      State files contain sensitive information including resource IDs,
+      secrets, and potentially credentials. Committing them to version
+      control is a severe security risk.
+    remediation: Add *.tfstate and *.tfstate.* to .gitignore; use remote state backend
+  - id: IAC-FILE-CRIT-002
+    signal: Variable value files with secrets committed
+    evidence_pattern: (password|secret|key|token)\s*=\s*"[^$]
+    explanation: |
+      .tfvars files with sensitive values in version control expose
+      credentials to anyone with repository access.
+    remediation: Use environment variables, secret managers, or .gitignored local tfvars
+  high:
+  - id: IAC-FILE-HIGH-001
+    signal: No clear separation between environments
+    evidence_indicators:
+    - Single directory with mixed environment configurations
+    - Environment logic scattered across files
+    explanation: |
+      Without clear environment separation, there's high risk of
+      applying changes to wrong environments.
+    remediation: Use separate directories or workspaces per environment
+  - id: IAC-FILE-HIGH-002
+    signal: Monolithic configuration files
+    evidence_indicators:
+    - Single file with >500 lines
+    - All resources in main.tf
+    explanation: |
+      Large monolithic files are difficult to review, understand, and
+      maintain. They increase merge conflict likelihood.
+    remediation: Split configuration by resource type or logical grouping
+  - id: IAC-FILE-HIGH-003
+    signal: Missing required configuration files
+    evidence_indicators:
+    - No variables.tf when variables are used
+    - No outputs.tf when values should be exported
+    - No versions.tf for provider constraints
+    explanation: |
+      Missing standard files breaks convention expectations and
+      makes code harder to navigate.
+    remediation: 'Create standard files even if minimal: main.tf, variables.tf, outputs.tf, versions.tf'
+  medium:
+  - id: IAC-FILE-MED-001
+    signal: Inconsistent file organization across modules
+    evidence_indicators:
+    - Some modules have separate files, others are monolithic
+    - Inconsistent file naming patterns
+    remediation: Standardize file structure across all modules
+  - id: IAC-FILE-MED-002
+    signal: Deep directory nesting (>4 levels)
+    evidence_pattern: modules/.*/modules/.*/modules/.*/modules/
+    remediation: Flatten hierarchy to improve navigation and reduce complexity
+  - id: IAC-FILE-MED-003
+    signal: Configuration mixed with application code
+    evidence_indicators:
+    - Terraform files in application directories
+    - No dedicated infrastructure directory
+    remediation: Separate infrastructure code into dedicated directory or repository
+  low:
+  - id: IAC-FILE-LOW-001
+    signal: Non-standard file names
+    evidence_indicators:
+    - Files not matching main.tf, variables.tf pattern
+    - Custom naming without clear convention
+    remediation: Follow Terraform conventions or document custom naming scheme
+  - id: IAC-FILE-LOW-002
+    signal: Empty configuration files
+    evidence_indicators:
+    - Files with only comments
+    - Placeholder files without content
+    remediation: Remove empty files or add meaningful content
+  positive:
+  - id: IAC-FILE-POS-001
+    signal: Standard module structure implemented
+    evidence_indicators:
+    - Consistent main.tf, variables.tf, outputs.tf pattern
+    - Clear environment separation
+  - id: IAC-FILE-POS-002
+    signal: README files in all modules
+    evidence_indicators:
+    - README.md in module directories
+    - Examples directory present
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: File Distribution Analysis
+    description: |
+      Analyze the distribution and organization of Terraform
+      files across the repository.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Count files by type
+      command: find . -name '*.tf' -exec basename {} \; | sort | uniq -c | sort -rn
+    - purpose: Find large files
+      command: find . -name '*.tf' -exec wc -l {} \; | sort -rn | head -10
+    - purpose: List all Terraform directories
+      command: find . -name '*.tf' -exec dirname {} \; | sort -u
+    expected_findings:
+    - File type distribution
+    - Oversized files requiring splitting
+    - Directory structure overview
+  - id: '2'
+    name: Standard Files Check
+    description: |
+      Verify presence of standard Terraform files in all
+      configuration directories.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find directories with main.tf
+      command: find . -name 'main.tf' -exec dirname {} \;
+    - purpose: Check for variables.tf presence
+      command: 'for dir in $(find . -name ''main.tf'' -exec dirname {} \;); do if [ ! -f "$dir/variables.tf"
+        ]; then echo "Missing variables.tf: $dir"; fi; done'
+    - purpose: Check for outputs.tf presence
+      command: 'for dir in $(find . -name ''main.tf'' -exec dirname {} \;); do if [ ! -f "$dir/outputs.tf"
+        ]; then echo "Missing outputs.tf: $dir"; fi; done'
+    - purpose: Check for versions.tf presence
+      command: 'for dir in $(find . -name ''main.tf'' -exec dirname {} \;); do if [ ! -f "$dir/versions.tf"
+        ]; then echo "Missing versions.tf: $dir"; fi; done'
+    expected_findings:
+    - Directories with complete file structure
+    - Missing standard files
+    - File structure consistency
+  - id: '3'
+    name: Security File Check
+    description: |
+      Verify no sensitive files are committed to the repository.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check for state files
+      command: find . -name '*.tfstate' -o -name '*.tfstate.*'
+    - purpose: Check .gitignore for Terraform
+      command: 'cat .gitignore 2>/dev/null | grep -E ''\.(tfstate|tfvars)'' || echo ''WARNING: No Terraform
+        patterns in .gitignore'''
+    - purpose: Scan for potential secrets in tfvars
+      command: grep -rEn '(password|secret|key|token)\s*=' --include='*.tfvars' 2>/dev/null | head -10
+    expected_findings:
+    - State file presence (should be none)
+    - Gitignore configuration
+    - Potential secrets in variable files
+  - id: '4'
+    name: Environment Structure Review
+    description: |
+      Assess how environments are organized and separated
+      in the repository structure.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Identify environment directories
+      command: find . -type d \( -name 'prod*' -o -name 'staging*' -o -name 'dev*' -o -name 'environments'
+        \) | head -20
+    - purpose: Check for workspace files
+      command: find . -name 'terraform.tfvars' -o -name '*.auto.tfvars' | head -20
+    - purpose: Check for Terragrunt environment structure
+      command: find . -name 'terragrunt.hcl' | head -20
+    expected_findings:
+    - Environment separation pattern
+    - Variable file organization
+    - Terragrunt usage
+  - id: '5'
+    name: Module Directory Structure
+    description: |
+      Evaluate the organization of reusable modules and
+      their internal structure.
+    duration_estimate: 10 min
+    commands:
+    - purpose: List module directories
+      command: find . -path '*/modules/*' -name 'main.tf' -exec dirname {} \; | sort
+    - purpose: Check module completeness
+      command: for dir in $(find . -path '*/modules/*' -name 'main.tf' -exec dirname {} \;); do echo "===
+        $dir ==="; ls -1 "$dir" | head -10; done
+    - purpose: Check for README in modules
+      command: 'for dir in $(find . -path ''*/modules/*'' -name ''main.tf'' -exec dirname {} \;); do if
+        [ ! -f "$dir/README.md" ]; then echo "Missing README: $dir"; fi; done'
+    expected_findings:
+    - Module organization
+    - Module documentation presence
+    - Module structure consistency
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - File Structure Analysis
+    - Security Findings
+    - Recommendations
+    - Proposed Standard Structure
+  confidence_guidance:
+    high: Direct file system analysis
+    medium: Structure inference from patterns
+    low: Incomplete analysis due to access limitations
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-structure
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+      reason: File structure can be quickly assessed
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: file-001
+  item: No state files in repository
+  level: CRITICAL
+  verification: find . -name '*.tfstate' -o -name '*.tfstate.*' | wc -l | xargs -I{} test {} -eq 0 &&
+    echo PASS || echo FAIL
+  expected: PASS
+- id: file-002
+  item: Terraform patterns in .gitignore
+  level: CRITICAL
+  verification: grep -E '\*\.tfstate|\*\.tfvars' .gitignore >/dev/null 2>&1 && echo PASS || echo FAIL
+  expected: PASS
+- id: file-003
+  item: No monolithic files over 500 lines
+  level: BLOCKING
+  verification: 'find . -name ''*.tf'' -exec wc -l {} \; | awk ''$1 > 500 {count++} END {print (count>0)
+    ? "FAIL" : "PASS"}'''
+  expected: PASS
+- id: file-004
+  item: All modules have standard file structure
+  level: WARNING
+  verification: missing=0; for dir in $(find . -path '*/modules/*' -name 'main.tf' -exec dirname {} \;);
+    do for f in variables.tf outputs.tf; do if [ ! -f "$dir/$f" ]; then missing=$((missing+1)); fi; done;
+    done; test $missing -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.iac-structure.naming-convention
+  - infrastructure-as-code.iac-structure.module-organization

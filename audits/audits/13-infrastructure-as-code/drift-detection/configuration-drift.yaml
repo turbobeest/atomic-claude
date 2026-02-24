@@ -1,0 +1,405 @@
+audit:
+  id: infrastructure-as-code.drift-detection.configuration-drift
+  name: IaC Configuration Drift
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: drift-detection
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit identifies and analyzes configuration drift between the
+    desired state defined in Infrastructure as Code and the actual state
+    of deployed infrastructure. It examines discrepancies, their origins,
+    and their security and operational implications.
+
+    Key areas examined:
+    - Resource attribute differences between IaC and reality
+    - Orphaned resources not managed by IaC
+    - Resource modifications made outside of IaC
+    - Drift patterns and frequency
+    - Impact assessment of discovered drift
+    - Drift source attribution
+  why_it_matters: |
+    Configuration drift undermines the core value proposition of IaC:
+    - Predictability: What's deployed differs from what's defined
+    - Security: Manual changes may introduce vulnerabilities
+    - Compliance: Audit trails become incomplete
+    - Recovery: Disaster recovery may not reflect reality
+    - Automation: CI/CD pipelines may fail or cause outages
+
+    Drift detection enables:
+    - Proactive security posture management
+    - Configuration compliance verification
+    - Operational awareness and control
+    - Accurate disaster recovery planning
+  when_to_run:
+  - On a scheduled basis (daily/weekly)
+  - Before major deployments
+  - After security incidents
+  - During compliance audits
+prerequisites:
+  required_artifacts:
+  - type: iac_repository
+    description: Access to infrastructure code
+  - type: cloud_access
+    description: Read access to cloud provider APIs
+  - type: terraform_state
+    description: Access to current Terraform state
+  access_requirements:
+  - Read access to IaC repositories
+  - Cloud provider read-only access
+  - State backend read access
+  - terraform plan permissions
+discovery:
+  code_patterns:
+  - pattern: terraform\s+plan
+    type: keyword
+    scope: config
+    purpose: Find plan execution configurations
+  - pattern: lifecycle\s*\{[^}]*ignore_changes
+    type: regex
+    scope: config
+    purpose: Identify resources with ignored drift
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform configuration files
+  - glob: '**/.terraform.lock.hcl'
+    purpose: Provider lock files
+  metrics_queries:
+  - system: Terraform Cloud
+    query: Plan output with changes detected
+    purpose: Identify drift from TFC runs
+    threshold: Any resource changes in refresh
+knowledge_sources:
+  specifications:
+  - id: terraform-refresh
+    name: Terraform Refresh
+    url: https://developer.hashicorp.com/terraform/cli/commands/refresh
+    offline_cache: true
+    priority: required
+  - id: terraform-plan
+    name: Terraform Plan
+    url: https://developer.hashicorp.com/terraform/cli/commands/plan
+    offline_cache: true
+    priority: required
+  guides:
+  - id: drift-management
+    name: Managing Drift in Terraform
+    url: https://developer.hashicorp.com/terraform/tutorials/state/resource-drift
+    offline_cache: true
+  - id: aws-config
+    name: AWS Config for Drift Detection
+    url: https://docs.aws.amazon.com/config/latest/developerguide/config-concepts.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: terraform plan -refresh-only
+    purpose: Detect drift without making changes
+    offline_capable: false
+  - tool: driftctl
+    purpose: Comprehensive drift detection tool
+    offline_capable: false
+  - tool: terratag
+    purpose: Tag management and drift detection
+    offline_capable: false
+  infrastructure_tools:
+  - tool: terraform plan
+    purpose: Identify configuration drift
+    command: terraform plan -refresh-only -detailed-exitcode
+  - tool: terraform show
+    purpose: Display current state
+    command: terraform show -json
+  - tool: driftctl scan
+    purpose: Scan for unmanaged resources
+    command: driftctl scan --from tfstate:// --output json://drift.json
+  scripts:
+  - id: drift-analyzer
+    language: bash
+    purpose: Analyze terraform plan output for drift
+    source: inline
+    code: |
+      #!/bin/bash
+      # Run terraform plan and capture output
+      terraform plan -refresh-only -no-color 2>&1 | tee plan.out
+
+      # Count drift indicators
+      echo "=== Drift Summary ==="
+      echo "Resources with changes: $(grep -c '~ ' plan.out || echo 0)"
+      echo "Resources to be created: $(grep -c '+ ' plan.out || echo 0)"
+      echo "Resources to be destroyed: $(grep -c '- ' plan.out || echo 0)"
+signals:
+  critical:
+  - id: IAC-DRIFT-CRIT-001
+    signal: Security group rules modified outside IaC
+    evidence_indicators:
+    - Ingress rules added manually
+    - Egress rules changed
+    - Security group associations modified
+    explanation: |
+      Manual security group changes can introduce vulnerabilities that
+      bypass security review processes. These changes may allow
+      unauthorized access or expose services to the internet.
+    remediation: Revert to IaC-defined state; implement drift alerts for security resources
+  - id: IAC-DRIFT-CRIT-002
+    signal: IAM policies modified outside IaC
+    evidence_indicators:
+    - Policy statements added manually
+    - Role trust relationships changed
+    - Permission boundaries modified
+    explanation: |
+      IAM drift can introduce privilege escalation vulnerabilities or
+      unauthorized access paths that circumvent security controls.
+    remediation: Audit manual IAM changes; restore IaC-defined policies
+  - id: IAC-DRIFT-CRIT-003
+    signal: Encryption settings disabled or weakened
+    evidence_indicators:
+    - Encryption disabled on storage
+    - TLS settings downgraded
+    - KMS keys changed
+    explanation: |
+      Weakened encryption exposes data to unauthorized access and
+      violates compliance requirements.
+    remediation: Immediately restore encryption settings; investigate cause
+  high:
+  - id: IAC-DRIFT-HIGH-001
+    signal: Orphaned resources not managed by IaC
+    evidence_indicators:
+    - Resources exist in cloud but not in state
+    - Resources created manually
+    explanation: |
+      Orphaned resources create security blind spots, cost waste, and
+      operational confusion as they fall outside change management.
+    remediation: Import orphaned resources into Terraform or delete if unnecessary
+  - id: IAC-DRIFT-HIGH-002
+    signal: Network configuration drift
+    evidence_indicators:
+    - Route tables modified
+    - NAT gateway changes
+    - VPC peering modifications
+    explanation: |
+      Network drift can create unintended connectivity, expose internal
+      services, or break application communication.
+    remediation: Review and reconcile network configuration with IaC definitions
+  - id: IAC-DRIFT-HIGH-003
+    signal: Persistent drift requiring ignore_changes
+    evidence_pattern: ignore_changes\s*=\s*\[[^\]]*\]
+    explanation: |
+      Heavy use of ignore_changes indicates fundamental issues with
+      resource management that mask ongoing drift.
+    remediation: Investigate why drift occurs; fix root cause instead of ignoring
+  medium:
+  - id: IAC-DRIFT-MED-001
+    signal: Tag drift detected
+    evidence_indicators:
+    - Tags added or removed manually
+    - Tag values modified
+    remediation: Restore tags from IaC; enable tag policies
+  - id: IAC-DRIFT-MED-002
+    signal: Instance metadata drift
+    evidence_indicators:
+    - Instance types changed
+    - AMI updates applied manually
+    remediation: Update IaC to reflect desired state; apply via IaC
+  - id: IAC-DRIFT-MED-003
+    signal: Scaling configuration drift
+    evidence_indicators:
+    - Auto-scaling parameters modified
+    - Capacity limits changed
+    remediation: Reconcile scaling configuration with IaC
+  low:
+  - id: IAC-DRIFT-LOW-001
+    signal: Description or annotation drift
+    evidence_indicators:
+    - Resource descriptions changed
+    - Comments modified
+    remediation: Update IaC descriptions to match
+  positive:
+  - id: IAC-DRIFT-POS-001
+    signal: No configuration drift detected
+    evidence_indicators:
+    - terraform plan shows no changes
+    - driftctl reports zero drift
+  - id: IAC-DRIFT-POS-002
+    signal: Automated drift detection and alerting
+    evidence_indicators:
+    - Scheduled drift detection runs
+    - Alerts on drift detection
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Terraform Refresh and Plan
+    description: |
+      Run terraform plan with refresh to detect drift between
+      state and actual infrastructure.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Initialize terraform
+      command: terraform init -backend=true
+    - purpose: Run refresh-only plan
+      command: terraform plan -refresh-only -detailed-exitcode -out=drift.plan
+    - purpose: Show plan output
+      command: terraform show -json drift.plan > drift.json
+    expected_findings:
+    - Resources with attribute drift
+    - Resources requiring recreation
+    - No changes (desired outcome)
+  - id: '2'
+    name: Unmanaged Resource Detection
+    description: |
+      Identify resources that exist in the cloud but are not
+      managed by Terraform.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Run driftctl scan
+      command: driftctl scan --from tfstate+s3://BUCKET/PATH --output json://unmanaged.json 2>/dev/null
+        || echo 'driftctl not available'
+    - purpose: List state resources
+      command: terraform state list | wc -l
+    expected_findings:
+    - Unmanaged resources
+    - Coverage metrics
+    - Resource categories not in IaC
+  - id: '3'
+    name: Security-Critical Drift Analysis
+    description: |
+      Focus on drift in security-critical resources like
+      IAM, security groups, and encryption.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Check security group drift
+      command: terraform plan -refresh-only | grep -A10 'aws_security_group'
+    - purpose: Check IAM drift
+      command: terraform plan -refresh-only | grep -A10 'aws_iam'
+    - purpose: Check encryption drift
+      command: terraform plan -refresh-only | grep -A10 'kms\|encryption'
+    expected_findings:
+    - Security group modifications
+    - IAM policy changes
+    - Encryption setting drift
+  - id: '4'
+    name: Drift Pattern Analysis
+    description: |
+      Analyze drift patterns to identify root causes and
+      systemic issues.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find ignore_changes usage
+      command: grep -rn 'ignore_changes' --include='*.tf'
+    - purpose: Identify frequently drifting resources
+      command: grep -E '^\s*~' drift.plan 2>/dev/null | sort | uniq -c | sort -rn | head -20
+    expected_findings:
+    - Ignore_changes patterns
+    - Frequently drifting resources
+    - Drift root causes
+  - id: '5'
+    name: Remediation Planning
+    description: |
+      Develop remediation plan for detected drift including
+      prioritization and approach.
+    duration_estimate: 15 min
+    questions:
+    - What is the security impact of detected drift?
+    - Should drift be reconciled by updating IaC or infrastructure?
+    - What process changes prevent future drift?
+    expected_findings:
+    - Prioritized drift remediation list
+    - Recommended approach per resource
+    - Process improvement opportunities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Drift Inventory
+    - Security Impact Assessment
+    - Root Cause Analysis
+    - Remediation Plan
+  confidence_guidance:
+    high: Direct comparison via terraform plan
+    medium: Inferred from partial plan output
+    low: Based on naming or pattern matching
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-refresh
+      priority: required
+    - source_id: drift-management
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Drift detection requires runtime access
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+      reason: Security-critical drift detection
+closeout_checklist:
+- id: drift-001
+  item: No security group drift detected
+  level: CRITICAL
+  verification: terraform plan -refresh-only | grep -E 'aws_security_group.*will be' | wc -l | xargs -I{}
+    test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: drift-002
+  item: No IAM policy drift detected
+  level: CRITICAL
+  verification: terraform plan -refresh-only | grep -E 'aws_iam.*will be' | wc -l | xargs -I{} test {}
+    -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: drift-003
+  item: All orphaned resources documented
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review driftctl output; document all unmanaged resources
+  expected: Confirmed by reviewer
+- id: drift-004
+  item: Drift remediation plan created
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify prioritized remediation plan exists for all critical drift
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.8
+    - CC7.1
+  - framework: CIS Controls
+    controls:
+    - Control 1
+    - Control 4
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.drift-detection.drift-detection-process
+  - infrastructure-as-code.drift-detection.manual-change-detection

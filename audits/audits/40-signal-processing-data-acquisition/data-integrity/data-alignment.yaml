@@ -1,0 +1,238 @@
+audit:
+  id: signal-processing-data-acquisition.data-integrity.data-alignment
+  name: Data Alignment Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: data-integrity
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates data alignment for signal data handling.
+    It examines:
+    - Memory alignment for efficient access
+    - Structure packing and padding
+    - Endianness handling
+    - Sample frame alignment
+    - Buffer boundary alignment
+    - Cross-platform portability
+  why_it_matters: |
+    Data alignment affects correctness and performance:
+    - Misaligned access causes faults on some architectures
+    - Unaligned access is slower even when allowed
+    - Wrong endianness corrupts multi-byte values
+    - Frame misalignment corrupts channel demultiplexing
+    - Portability requires explicit alignment handling
+
+    Alignment errors cause data corruption that may appear
+    as noise or intermittent measurement errors.
+  when_to_run:
+  - Signal processing system development
+  - Cross-platform porting
+  - Performance optimization
+  - Data corruption investigation
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Data handling code
+  - type: data_format
+    description: Data format specification
+  access_requirements:
+  - Access to data handling code
+  - Target platform documentation
+discovery:
+  code_patterns:
+  - pattern: (align|ALIGN|packed|__attribute__|pragma)
+    type: regex
+    scope: source
+    purpose: Detect alignment directives
+  - pattern: (endian|swap|byte_order|ntoh|hton)
+    type: regex
+    scope: source
+    purpose: Detect endianness handling
+  - pattern: (memcpy|memmove).*\&
+    type: regex
+    scope: source
+    purpose: Detect potential unaligned access
+  file_patterns:
+  - glob: '**/*data*.{c,h,cpp}'
+    purpose: Data handling files
+  - glob: '**/*buffer*.{c,h,cpp}'
+    purpose: Buffer management files
+  - glob: '**/*packet*.{c,h,cpp}'
+    purpose: Packet handling files
+signals:
+  critical:
+  - id: ALIGN-CRIT-001
+    signal: Unaligned access causing faults or corruption
+    evidence_indicators:
+    - Bus error or alignment fault
+    - Data corruption on strict-alignment platform
+    - Direct cast to multi-byte pointer
+    explanation: |
+      Unaligned access to multi-byte values causes hardware
+      faults on some architectures (ARM, SPARC) or silent
+      corruption on others. Direct casts are particularly risky.
+    remediation: |
+      - Use memcpy for potentially unaligned data
+      - Ensure buffer allocation is aligned
+      - Avoid direct pointer casts
+      - Use packed structures with care
+    cwe: CWE-188
+  - id: ALIGN-CRIT-002
+    signal: Endianness not handled correctly
+    evidence_indicators:
+    - Multi-byte values corrupted on different platform
+    - No byte swapping for network/file data
+    - Endianness assumed but not verified
+    explanation: |
+      Different platforms use different byte orders. Data
+      exchanged between big-endian and little-endian systems
+      requires explicit conversion.
+    remediation: |
+      - Use explicit byte order conversion
+      - Document data format endianness
+      - Use portable serialization
+      - Test on both endianness types
+    cwe: CWE-188
+  high:
+  - id: ALIGN-HIGH-001
+    signal: Structure packing causing portability issues
+    evidence_indicators:
+    - Different sizeof on different platforms
+    - Padding assumptions violated
+    - Binary data format depends on compiler
+    explanation: |
+      Compilers add padding to structures for alignment.
+      Without explicit packing, binary formats are not
+      portable between platforms or compilers.
+    remediation: |
+      - Use pragma pack or attribute packed
+      - Define explicit padding fields
+      - Document size and alignment requirements
+      - Verify structure size at compile time
+  medium:
+  - id: ALIGN-MED-001
+    signal: Sample frame boundaries not maintained
+    evidence_indicators:
+    - Multi-channel data split across boundaries
+    - Partial samples at buffer edges
+    - Channel interleaving disrupted
+    explanation: |
+      Multi-channel interleaved data must be processed in
+      complete frames. Partial frames cause channel
+      misalignment and data corruption.
+    remediation: |
+      - Ensure buffers hold complete frames
+      - Track frame boundaries
+      - Handle partial frames explicitly
+      - Document frame size requirements
+  low:
+  - id: ALIGN-LOW-001
+    signal: Alignment requirements not documented
+    evidence_indicators:
+    - No alignment specification
+    - Assumptions not explicit
+    - Portability unknown
+    explanation: |
+      Undocumented alignment makes portability and
+      maintenance difficult. Requirements should be
+      explicit in data format documentation.
+    remediation: |
+      - Document alignment requirements
+      - Specify endianness explicitly
+      - Note structure packing
+      - Include in data format specification
+  positive:
+  - id: ALIGN-POS-001
+    signal: Proper alignment handling
+    evidence_indicators:
+    - Explicit alignment directives
+    - Endianness handled
+    - Portable code
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: systems-programmer
+  steps:
+  - id: '1'
+    name: Alignment Review
+    description: |
+      Review data alignment handling.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find alignment handling
+      command: |
+        grep -rniE "(align|packed|endian|swap)" \
+          --include="*.c" --include="*.h" . 2>/dev/null | head -30
+    expected_findings:
+    - Alignment directives
+    - Endianness handling
+    - Structure packing
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Alignment Analysis
+    - Portability Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: align-001
+  item: Multi-byte access properly aligned
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify no direct casts to unaligned pointers
+  expected: Confirmed by reviewer
+- id: align-002
+  item: Endianness handled
+  level: BLOCKING
+  verification: |
+    grep -rniE "(endian|swap|ntoh|hton)" \
+      --include="*.c" --include="*.h" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "N/A"
+  expected: PASS or N/A
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - data-acquisition
+    - cross-platform
+relationships:
+  commonly_combined:
+  - signal-processing.data-integrity.buffer-management
+  - signal-processing.data-integrity.checksum-crc
+  - code-quality.memory-management.buffer-handling
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

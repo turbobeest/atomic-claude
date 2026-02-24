@@ -1,0 +1,262 @@
+audit:
+  id: observability-instrumentation.distributed-tracing.span-context-propagation
+  name: Span Context Propagation Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: distributed-tracing
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines trace context propagation mechanisms across all service boundaries
+    including HTTP headers (W3C Trace Context, B3), message queues, gRPC metadata,
+    and async processing to ensure trace continuity throughout request flows.
+  why_it_matters: |
+    Broken context propagation fragments traces into disconnected segments,
+    making it impossible to understand complete request flows. Each break in
+    the trace chain creates a new root span, destroying the end-to-end view
+    essential for debugging distributed systems.
+  when_to_run:
+  - New service integration
+  - After framework or middleware upgrades
+  - When traces appear fragmented
+  - Message queue implementation changes
+prerequisites:
+  required_artifacts:
+  - type: service_inventory
+    description: List of all services and their communication patterns
+  - type: tracing_backend
+    description: Access to trace visualization
+  access_requirements:
+  - Service-to-service communication logs
+  - Message queue configuration
+  - Application instrumentation code
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: count by (service) (traces_spans_total{parent_id=''})
+    purpose: Count root spans per service
+    threshold: Only entry services should have root spans
+  - system: Jaeger
+    query: traces with single-span services
+    purpose: Identify broken propagation
+    threshold: No unexpected single-span traces
+  code_patterns:
+  - pattern: traceparent|tracestate|x-b3-traceid|uber-trace-id
+    type: regex
+    scope: source
+    purpose: Identify context header handling
+  - pattern: inject|extract|propagator|TextMapPropagator
+    type: regex
+    scope: source
+    purpose: Identify propagation implementation
+  file_patterns:
+  - glob: '**/middleware/*.{py,rb,js,ts,java,go}'
+    purpose: HTTP middleware for context propagation
+  - glob: '**/interceptor*.{py,rb,js,ts,java,go}'
+    purpose: gRPC interceptors
+  - glob: '**/messaging/*.{py,rb,js,ts,java,go}'
+    purpose: Message queue handlers
+knowledge_sources:
+  specifications:
+  - id: w3c-trace-context
+    name: W3C Trace Context Specification
+    url: https://www.w3.org/TR/trace-context/
+    offline_cache: true
+    priority: required
+  - id: b3-propagation
+    name: B3 Propagation Specification
+    url: https://github.com/openzipkin/b3-propagation
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: otel-context-propagation
+    name: OpenTelemetry Context Propagation
+    url: https://opentelemetry.io/docs/concepts/context-propagation/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Test context propagation
+    command: 'curl -v -H ''traceparent: 00-{trace-id}-{span-id}-01'' http://service/endpoint'
+  - tool: jaeger-query
+    purpose: Find fragmented traces
+    command: curl -s 'http://jaeger:16686/api/traces?service=api&limit=100' | jq '[.data[].spans | length]
+      | map(select(. == 1)) | length'
+  monitoring_queries:
+  - system: Prometheus
+    query: count(traces_spans_total{parent_id=''}) by (service)
+    purpose: Identify services creating unexpected root spans
+signals:
+  critical:
+  - id: SPAN-PROP-CRIT-001
+    signal: Internal services creating root spans
+    evidence_pattern: Backend services with parent_id='' spans
+    explanation: |
+      Internal services should never create root spans as they always
+      receive requests from other services. Root spans indicate broken
+      context propagation, fragmenting traces at service boundaries.
+    remediation: Implement context extraction in HTTP/gRPC middleware
+  - id: SPAN-PROP-CRIT-002
+    signal: Message queue breaks trace context
+    evidence_pattern: Async workers creating new traces for queued messages
+    explanation: |
+      Message queues often break trace context as headers aren't automatically
+      propagated. This fragments request flows that involve async processing.
+    remediation: Inject trace context into message headers and extract in consumers
+  high:
+  - id: SPAN-PROP-HIGH-001
+    signal: Multiple propagation formats causing conflicts
+    evidence_pattern: Mixed B3 and W3C headers creating duplicate traces
+    explanation: |
+      Using multiple propagation formats without proper priority handling
+      can create duplicate or conflicting traces.
+    remediation: Standardize on W3C Trace Context with B3 fallback
+  - id: SPAN-PROP-HIGH-002
+    signal: Context not propagated to external services
+    evidence_pattern: External API calls missing trace headers
+    explanation: |
+      Calls to external services without context propagation create
+      gaps in traces when those services are also instrumented.
+    remediation: Add context injection to all HTTP client calls
+  medium:
+  - id: SPAN-PROP-MED-001
+    signal: Baggage items not propagated
+    evidence_pattern: Request metadata lost at service boundaries
+    remediation: Configure baggage propagation for required metadata
+  - id: SPAN-PROP-MED-002
+    signal: Scheduled jobs creating orphan traces
+    evidence_pattern: Cron jobs without trace linkage to triggering events
+    remediation: Consider synthetic parent spans for scheduled work
+  low:
+  - id: SPAN-PROP-LOW-001
+    signal: Trace state not utilized
+    remediation: Implement tracestate for vendor-specific data
+  positive:
+  - id: SPAN-PROP-POS-001
+    signal: Complete context propagation across all boundaries
+    evidence_pattern: No unexpected root spans in internal services
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map service communication patterns
+    description: |
+      Document all service-to-service communication including HTTP,
+      gRPC, message queues, and event streams.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Identify HTTP clients
+      command: grep -r 'HttpClient\|requests\.\|axios\|fetch' /app/src/
+    - purpose: Find queue producers
+      command: grep -r 'publish\|produce\|sendMessage' /app/src/
+    expected_findings:
+    - Communication pattern inventory
+    - Integration points list
+  - id: '2'
+    name: Verify HTTP propagation
+    description: |
+      Test that trace context headers are properly injected and
+      extracted in HTTP communication between services.
+    duration_estimate: 40 min
+    commands:
+    - purpose: Test propagation with trace header
+      command: 'curl -v -H ''traceparent: 00-12345678901234567890123456789012-1234567890123456-01'' http://api/test
+        2>&1 | grep -i traceparent'
+    - purpose: Check for root spans in dependent service
+      command: curl -s 'http://jaeger:16686/api/traces?traceID=12345678901234567890123456789012' | jq
+        '.data[0].spans | map(select(.references | length == 0)) | length'
+    expected_findings:
+    - Header propagation verification
+    - Context extraction confirmation
+  - id: '3'
+    name: Verify async propagation
+    description: |
+      Test that trace context is properly propagated through message
+      queues, event streams, and other async communication.
+    duration_estimate: 40 min
+    commands:
+    - purpose: Check message headers in queue
+      command: kafkacat -b kafka:9092 -t events -C -c 1 -o end | jq '.headers'
+    expected_findings:
+    - Queue message context verification
+    - Async trace continuity
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Propagation Analysis
+    - Boundary Inventory
+    - Gap Remediation Plan
+  confidence_guidance:
+    high: Runtime testing with synthetic traces
+    medium: Code review of propagation implementation
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: w3c-trace-context
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime propagation testing
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: span-prop-001
+  item: HTTP context propagation verified
+  level: CRITICAL
+  verification: manual
+  expected: Trace headers propagate through HTTP calls
+- id: span-prop-002
+  item: Message queue propagation verified
+  level: CRITICAL
+  verification: manual
+  expected: Trace context in queue messages
+- id: span-prop-003
+  item: No unexpected root spans in internal services
+  level: BLOCKING
+  verification: curl -s 'http://jaeger:16686/api/traces?service=internal-svc&limit=100' | jq '[.data[].spans[]
+    | select(.references | length == 0)] | length == 0'
+  expected: 'true'
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Distributed Tracing
+relationships:
+  commonly_combined:
+  - observability-instrumentation.distributed-tracing.trace-coverage
+  - observability-instrumentation.distributed-tracing.trace-error-flagging
+  - observability-instrumentation.distributed-tracing.service-map-accuracy

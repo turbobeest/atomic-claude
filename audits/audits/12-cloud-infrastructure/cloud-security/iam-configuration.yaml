@@ -1,0 +1,396 @@
+# ============================================================
+# AUDIT FILE: IAM Configuration
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.cloud-security.iam-configuration"
+  name: "IAM Configuration"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "cloud-security"
+
+  tier: "expert"
+  estimated_duration: "3-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates cloud Identity and Access Management (IAM) configuration
+    including user accounts, service accounts, roles, policies, permissions,
+    MFA enforcement, access key management, and privilege escalation paths.
+    Examines AWS IAM, GCP IAM, Azure AD, or equivalent identity systems
+    for proper security posture.
+
+  why_it_matters: |
+    IAM is the foundation of cloud security. Misconfigured permissions enable
+    unauthorized access, data breaches, and privilege escalation. Excessive
+    permissions violate least-privilege principles, while weak authentication
+    allows account compromise. IAM issues are among the most common causes
+    of cloud security incidents.
+
+  when_to_run:
+    - "Regular security audits (quarterly minimum)"
+    - "After organizational changes or new team members"
+    - "Before compliance assessments"
+    - "After security incidents involving access"
+
+prerequisites:
+  required_artifacts:
+    - type: "cloud-account"
+      description: "Access to cloud account IAM configuration"
+    - type: "iam-policies"
+      description: "IAM policies and role definitions"
+
+  access_requirements:
+    - "IAM read permissions to list users, roles, policies"
+    - "Access to audit logs for IAM activities"
+    - "Permission to analyze policy documents"
+
+discovery:
+  file_patterns:
+    - glob: "**/iam-policy*.json"
+      purpose: "IAM policy documents"
+    - glob: "**/role*.json"
+      purpose: "Role definitions"
+    - glob: "**/*-policy.yaml"
+      purpose: "Policy configurations"
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Infrastructure as code IAM definitions"
+
+  code_patterns:
+    - pattern: "\"Effect\":\\s*\"Allow\".*\"Action\":\\s*\"\\*\""
+      type: "regex"
+      scope: "config"
+      purpose: "Detect overly permissive allow-all actions"
+    - pattern: "\"Resource\":\\s*\"\\*\""
+      type: "regex"
+      scope: "config"
+      purpose: "Detect wildcard resource permissions"
+    - pattern: "iam:PassRole"
+      type: "keyword"
+      scope: "config"
+      purpose: "Detect privilege escalation capability"
+
+knowledge_sources:
+  specifications:
+    - id: "aws-iam-best"
+      name: "AWS IAM Best Practices"
+      url: "https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html"
+      offline_cache: true
+      priority: "required"
+    - id: "cis-aws"
+      name: "CIS AWS Foundations Benchmark"
+      url: "https://www.cisecurity.org/benchmark/amazon_web_services"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "aws-security-hub"
+      name: "AWS Security Hub IAM Checks"
+      url: "https://docs.aws.amazon.com/securityhub/latest/userguide/iam-controls.html"
+      offline_cache: true
+    - id: "gcp-iam"
+      name: "GCP IAM Best Practices"
+      url: "https://cloud.google.com/iam/docs/using-iam-securely"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Query AWS IAM configuration"
+      command: "aws iam list-users"
+    - tool: "gcloud"
+      purpose: "Query GCP IAM configuration"
+      command: "gcloud iam roles list"
+    - tool: "az-cli"
+      purpose: "Query Azure AD/IAM"
+      command: "az ad user list"
+    - tool: "prowler"
+      purpose: "Cloud security assessment"
+      command: "prowler aws --service iam"
+    - tool: "ScoutSuite"
+      purpose: "Multi-cloud security auditing"
+      command: "scout aws --services iam"
+
+  scripts:
+    - id: "iam-audit"
+      language: "bash"
+      purpose: "Basic IAM audit for AWS"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Users without MFA ==="
+        aws iam list-users --query 'Users[*].UserName' --output text | while read user; do
+          mfa=$(aws iam list-mfa-devices --user-name $user --query 'MFADevices' --output text)
+          if [ -z "$mfa" ]; then echo "  $user: No MFA"; fi
+        done
+        echo "=== Access Keys Older Than 90 Days ==="
+        aws iam list-users --query 'Users[*].UserName' --output text | while read user; do
+          aws iam list-access-keys --user-name $user --query "AccessKeyMetadata[?CreateDate<='$(date -d '90 days ago' +%Y-%m-%d)'].{User:'$user',KeyId:AccessKeyId,Created:CreateDate}"
+        done
+
+signals:
+  critical:
+    - id: "IAM-CRIT-001"
+      signal: "Root account used for regular operations"
+      evidence_pattern: "API calls from root account in CloudTrail"
+      explanation: |
+        Root accounts have unrestricted access and should only be used
+        for initial setup and emergency access. Regular use creates
+        significant security risk.
+      remediation: "Create IAM users for all operations, secure root with MFA and alerts"
+    - id: "IAM-CRIT-002"
+      signal: "IAM users without MFA"
+      evidence_pattern: "Users with console access but no MFA device"
+      explanation: |
+        Without MFA, compromised passwords provide immediate account
+        access. This is a fundamental security control.
+      remediation: "Enforce MFA for all IAM users with console access"
+    - id: "IAM-CRIT-003"
+      signal: "Overly permissive policies (Action: * or Resource: *)"
+      evidence_pattern: "Policies granting all actions or all resources"
+      explanation: |
+        Wildcard permissions violate least-privilege and can enable
+        unauthorized access to sensitive resources.
+      remediation: "Scope policies to specific actions and resources needed"
+
+  high:
+    - id: "IAM-HIGH-001"
+      signal: "Access keys older than 90 days"
+      evidence_pattern: "Access key creation date > 90 days"
+      explanation: |
+        Old access keys increase the risk of compromise going undetected.
+        Regular rotation limits exposure window.
+      remediation: "Implement access key rotation policy"
+    - id: "IAM-HIGH-002"
+      signal: "Inactive IAM users"
+      evidence_pattern: "Users with no activity for > 90 days"
+      explanation: |
+        Inactive accounts may be forgotten but still provide attack
+        surface. They should be disabled or removed.
+      remediation: "Remove or disable inactive users"
+    - id: "IAM-HIGH-003"
+      signal: "Privilege escalation paths exist"
+      evidence_pattern: "iam:PassRole + ec2:RunInstances or lambda:CreateFunction"
+      explanation: |
+        Certain permission combinations allow users to escalate their
+        privileges by assuming other roles.
+      remediation: "Restrict PassRole to specific roles, limit creation permissions"
+
+  medium:
+    - id: "IAM-MED-001"
+      signal: "Direct user policy attachments"
+      evidence_pattern: "Policies attached directly to users instead of groups"
+      remediation: "Use groups for permission assignment to simplify management"
+    - id: "IAM-MED-002"
+      signal: "Service accounts with console access"
+      evidence_pattern: "Service accounts with password enabled"
+      remediation: "Disable console access for service accounts"
+    - id: "IAM-MED-003"
+      signal: "Cross-account access not restricted"
+      evidence_pattern: "Trust policies with broad Principal access"
+      remediation: "Restrict cross-account access to specific accounts and roles"
+
+  low:
+    - id: "IAM-LOW-001"
+      signal: "No password policy enforced"
+      remediation: "Configure password policy with complexity requirements"
+    - id: "IAM-LOW-002"
+      signal: "IAM access analyzer not enabled"
+      remediation: "Enable IAM Access Analyzer for external access detection"
+
+  positive:
+    - id: "IAM-POS-001"
+      signal: "MFA enforced for all users"
+    - id: "IAM-POS-002"
+      signal: "Least-privilege policies in use"
+    - id: "IAM-POS-003"
+      signal: "Regular access key rotation implemented"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory IAM entities"
+      description: |
+        Collect all IAM users, roles, groups, and policies for analysis.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List users"
+          command: "aws iam list-users --query 'Users[*].[UserName,CreateDate,PasswordLastUsed]' --output table"
+        - purpose: "List roles"
+          command: "aws iam list-roles --query 'Roles[*].[RoleName,CreateDate]' --output table"
+        - purpose: "List policies"
+          command: "aws iam list-policies --scope Local --query 'Policies[*].[PolicyName,AttachmentCount]' --output table"
+      expected_findings:
+        - "Complete IAM inventory"
+        - "User and role counts"
+
+    - id: "2"
+      name: "Analyze authentication configuration"
+      description: |
+        Review MFA status, password policies, and authentication settings.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check MFA status"
+          command: "aws iam get-account-summary --query 'SummaryMap.{Users:Users,MFADevices:MFADevices}'"
+        - purpose: "Get password policy"
+          command: "aws iam get-account-password-policy"
+        - purpose: "Check root MFA"
+          command: "aws iam get-account-summary --query 'SummaryMap.AccountMFAEnabled'"
+      expected_findings:
+        - "MFA adoption rate"
+        - "Password policy configuration"
+
+    - id: "3"
+      name: "Review access keys"
+      description: |
+        Examine access key age, usage, and rotation practices.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "List all access keys with age"
+          command: "aws iam list-users --query 'Users[*].UserName' --output text | xargs -I {} aws iam list-access-keys --user-name {} --query 'AccessKeyMetadata[*].[UserName,AccessKeyId,Status,CreateDate]' --output table"
+        - purpose: "Get credential report"
+          command: "aws iam generate-credential-report && aws iam get-credential-report --query Content --output text | base64 -d"
+      expected_findings:
+        - "Access key inventory"
+        - "Keys requiring rotation"
+
+    - id: "4"
+      name: "Analyze policies for over-permission"
+      description: |
+        Review policy documents for overly permissive statements.
+      duration_estimate: "40 min"
+      commands:
+        - purpose: "Get policy details"
+          command: "aws iam list-policies --scope Local --query 'Policies[*].Arn' --output text | xargs -I {} aws iam get-policy-version --policy-arn {} --version-id $(aws iam get-policy --policy-arn {} --query 'Policy.DefaultVersionId' --output text)"
+        - purpose: "Find admin policies"
+          command: "aws iam list-entities-for-policy --policy-arn arn:aws:iam::aws:policy/AdministratorAccess"
+      expected_findings:
+        - "Overly permissive policies"
+        - "Admin access distribution"
+
+    - id: "5"
+      name: "Check for privilege escalation paths"
+      description: |
+        Identify permission combinations that enable privilege escalation.
+      duration_estimate: "35 min"
+      commands:
+        - purpose: "Check PassRole permissions"
+          command: "aws iam simulate-principal-policy --policy-source-arn <user-arn> --action-names iam:PassRole"
+      expected_findings:
+        - "Privilege escalation risks"
+        - "Role assumption paths"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Authentication Assessment"
+        - "Permission Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct IAM query results, policy analysis"
+    medium: "Inferred from partial data or patterns"
+    low: "Based on missing configurations"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-iam-best"
+        priority: "required"
+      - source_id: "cis-aws"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive IAM analysis"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "iam-configuration-001"
+    item: "Root account has MFA enabled"
+    level: "CRITICAL"
+    verification: "aws iam get-account-summary --query 'SummaryMap.AccountMFAEnabled' | awk '{print ($1==1)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "iam-configuration-002"
+    item: "All IAM users have MFA"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Compare user count to MFA device count in credential report"
+    expected: "Confirmed by reviewer"
+  - id: "iam-configuration-003"
+    item: "No wildcard resource permissions"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review policies for Resource: * with sensitive actions"
+    expected: "Confirmed by reviewer"
+  - id: "iam-configuration-004"
+    item: "Access keys rotated within 90 days"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check credential report for key ages"
+    expected: "Confirmed by reviewer"
+  - id: "iam-configuration-005"
+    item: "No inactive users"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Check for users with no activity > 90 days"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC6.2", "CC6.3"]
+    - framework: "PCI-DSS"
+      controls: ["7.1", "7.2", "8.1", "8.2", "8.3"]
+    - framework: "HIPAA"
+      controls: ["164.312(a)(1)", "164.312(d)"]
+    - framework: "CIS"
+      controls: ["1.1-1.22"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.cloud-security.cloud-audit-logging"
+    - "cloud-infrastructure.cloud-security.security-monitoring"
+    - "cloud-infrastructure.cloud-security.compliance-controls"

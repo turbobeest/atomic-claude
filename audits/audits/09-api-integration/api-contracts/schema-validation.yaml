@@ -1,0 +1,327 @@
+# ============================================================
+# AUDIT: Schema Validation Assessment
+# ============================================================
+# Evaluates API request/response schema validation implementation
+# ============================================================
+
+audit:
+  id: "api-integration.api-contracts.schema-validation"
+
+  name: "Schema Validation Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "api-contracts"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates schema validation implementation for API requests and responses.
+    Examines JSON Schema validation, input sanitization, type coercion,
+    required field enforcement, and validation error handling. Covers both
+    request validation (security) and response validation (contract compliance).
+
+  why_it_matters: |
+    Schema validation is the first line of defense against malformed input,
+    injection attacks, and type confusion. Without proper validation, APIs
+    accept invalid data leading to application errors, security vulnerabilities,
+    and data corruption. Response validation ensures contract compliance.
+
+  when_to_run:
+    - "During security assessments"
+    - "Before API releases"
+    - "When adding new endpoints"
+    - "After schema changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "api-source"
+      description: "API handler implementations"
+    - type: "schema-definitions"
+      description: "JSON Schema or validation schema definitions"
+
+  access_requirements:
+    - "Read access to API source code"
+    - "Read access to schema definitions"
+
+discovery:
+  code_patterns:
+    - pattern: "@Valid|@Validated|@NotNull|@NotBlank|@Size"
+      type: "regex"
+      scope: "source"
+      purpose: "Java Bean Validation annotations"
+    - pattern: "Joi\\.|yup\\.|zod\\.|ajv\\."
+      type: "regex"
+      scope: "source"
+      purpose: "JavaScript validation libraries"
+    - pattern: "pydantic|marshmallow|cerberus"
+      type: "regex"
+      scope: "source"
+      purpose: "Python validation libraries"
+    - pattern: "JSONSchema|jsonschema|json-schema"
+      type: "regex"
+      scope: "source"
+      purpose: "JSON Schema validation"
+
+  file_patterns:
+    - glob: "**/validators/**/*.{java,ts,py}"
+      purpose: "Validation implementations"
+    - glob: "**/schemas/**/*.json"
+      purpose: "JSON Schema files"
+    - glob: "**/dto/**/*.{java,ts,py}"
+      purpose: "DTO with validation annotations"
+
+knowledge_sources:
+  specifications:
+    - id: "json-schema"
+      name: "JSON Schema Specification"
+      url: "https://json-schema.org/specification"
+      offline_cache: true
+      priority: "required"
+    - id: "openapi-spec"
+      name: "OpenAPI Specification"
+      url: "https://spec.openapis.org/oas/latest.html"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "owasp-input-validation"
+      name: "OWASP Input Validation Cheat Sheet"
+      url: "https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "spectral"
+      purpose: "Validate OpenAPI schema definitions"
+      offline_capable: true
+    - tool: "ajv-cli"
+      purpose: "Validate JSON Schema"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "SCHEMA-CRIT-001"
+      signal: "API endpoints without any input validation"
+      evidence_pattern: "@RequestBody(?!.*@Valid)|body:.*(?!validate)"
+      explanation: |
+        Endpoints accepting request bodies without validation are vulnerable
+        to injection attacks, type confusion, and data corruption. Attackers
+        can send malicious payloads that bypass business logic.
+      remediation: "Add validation annotations or middleware to all endpoints"
+
+    - id: "SCHEMA-CRIT-002"
+      signal: "Validation errors expose internal details"
+      evidence_pattern: "stack.*trace|internal.*error|exception.*message"
+      explanation: |
+        Detailed validation error messages can expose internal implementation
+        details, field names, and system information useful for attacks.
+      remediation: "Return generic validation errors without internal details"
+
+  high:
+    - id: "SCHEMA-HIGH-001"
+      signal: "Missing required field validation"
+      evidence_pattern: "required.*false|optional.*true"
+      explanation: |
+        Not enforcing required fields allows incomplete data that causes
+        NullPointerExceptions and business logic failures downstream.
+      remediation: "Mark required fields and enforce at validation layer"
+
+    - id: "SCHEMA-HIGH-002"
+      signal: "No string length limits on text inputs"
+      evidence_pattern: "type.*string(?!.*maxLength|@Size)"
+      explanation: |
+        Unbounded string inputs enable denial of service through memory
+        exhaustion and can overflow database columns.
+      remediation: "Add maxLength constraints to all string fields"
+
+  medium:
+    - id: "SCHEMA-MED-001"
+      signal: "No format validation for special types"
+      evidence_indicators:
+        - "Email fields without email format validation"
+        - "URL fields without URL validation"
+        - "Date fields without date format validation"
+      remediation: "Add format validation for email, URL, date, UUID fields"
+
+    - id: "SCHEMA-MED-002"
+      signal: "Response bodies not validated against schema"
+      evidence_indicators:
+        - "No response validation middleware"
+        - "Responses returned without schema check"
+      remediation: "Implement response validation in development/staging"
+
+  low:
+    - id: "SCHEMA-LOW-001"
+      signal: "Inconsistent validation error format"
+      remediation: "Standardize validation error response structure"
+
+  positive:
+    - id: "SCHEMA-POS-001"
+      signal: "Comprehensive validation on all endpoints"
+    - id: "SCHEMA-POS-002"
+      signal: "Custom validation for business rules"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Validation Frameworks"
+      description: |
+        Determine what validation libraries/frameworks are in use.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find Java validation"
+          command: "grep -rn 'javax.validation\\|jakarta.validation\\|@Valid' --include='*.java' ."
+        - purpose: "Find JS validation libraries"
+          command: "grep -rn 'joi\\|yup\\|zod\\|ajv\\|class-validator' --include='*.ts' --include='*.js' ."
+        - purpose: "Find Python validation"
+          command: "grep -rn 'pydantic\\|marshmallow\\|cerberus\\|voluptuous' --include='*.py' ."
+      expected_findings:
+        - "Validation frameworks in use"
+        - "Validation library imports"
+
+    - id: "2"
+      name: "Check Endpoint Validation Coverage"
+      description: |
+        Verify that all endpoints have input validation.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find endpoints with @Valid"
+          command: "grep -rn '@RequestBody.*@Valid\\|@Valid.*@RequestBody' --include='*.java' ."
+        - purpose: "Find endpoints without validation"
+          command: "grep -rn '@RequestBody' --include='*.java' . | grep -v '@Valid'"
+        - purpose: "Check Express validation middleware"
+          command: "grep -rn 'validate\\|validateRequest\\|checkSchema' --include='*.ts' --include='*.js' ."
+      expected_findings:
+        - "Validated vs unvalidated endpoints"
+        - "Validation middleware usage"
+
+    - id: "3"
+      name: "Analyze Validation Rules"
+      description: |
+        Examine the thoroughness of validation rules.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find constraint annotations"
+          command: "grep -rn '@NotNull\\|@NotBlank\\|@Size\\|@Pattern\\|@Email\\|@Min\\|@Max' --include='*.java' ."
+        - purpose: "Find schema definitions"
+          command: "grep -rn 'type.*string\\|type.*number\\|type.*boolean\\|maxLength\\|minLength\\|pattern' --include='*.json' --include='*.yaml' ."
+        - purpose: "Check for custom validators"
+          command: "grep -rn 'Validator\\|validate\\|isValid' --include='*.java' --include='*.ts' . | grep -i custom"
+      expected_findings:
+        - "Validation rule coverage"
+        - "Custom validation logic"
+
+    - id: "4"
+      name: "Review Error Handling"
+      description: |
+        Check how validation errors are reported.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find validation exception handlers"
+          command: "grep -rn 'MethodArgumentNotValidException\\|ValidationException\\|ConstraintViolation' --include='*.java' ."
+        - purpose: "Check error response format"
+          command: "grep -rn 'validationError\\|fieldError\\|errors:' --include='*.java' --include='*.ts' ."
+      expected_findings:
+        - "Error handling patterns"
+        - "Error response structure"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Validation Coverage"
+        - "Security Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear validation patterns identified"
+    medium: "Partial validation coverage found"
+    low: "Limited validation artifacts found"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "json-schema"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed code analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "schema-001"
+    item: "All endpoints have input validation"
+    level: "CRITICAL"
+    verification: |
+      unvalidated=$(grep -rn '@RequestBody' --include='*.java' . 2>/dev/null | grep -v '@Valid' | wc -l); if [ "$unvalidated" -eq 0 ]; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "schema-002"
+    item: "String fields have length constraints"
+    level: "BLOCKING"
+    verification: |
+      if grep -rq '@Size\|maxLength\|max.*length' --include='*.java' --include='*.ts' --include='*.json' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "schema-003"
+    item: "Validation errors do not expose internal details"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms error responses are sanitized"
+    expected: "Confirmed by reviewer"
+
+  - id: "schema-004"
+    item: "Format validation for special types (email, URL, etc)"
+    level: "WARNING"
+    verification: |
+      if grep -rq '@Email\|@URL\|format.*email\|format.*uri' --include='*.java' --include='*.json' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["api-service", "microservice", "backend"]
+
+  compliance_frameworks:
+    - framework: "OWASP"
+      controls: ["A03:2021"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.api-contracts.request-response-schema"
+    - "api-integration.error-handling.error-response-format"

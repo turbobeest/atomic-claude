@@ -1,0 +1,380 @@
+# ============================================================
+# AUDIT: Metric Label Design
+# ============================================================
+# Category: 05 - Observability & Instrumentation
+# Subcategory: Metrics
+# ============================================================
+
+audit:
+  id: "observability-instrumentation.metrics.metric-label-design"
+  name: "Metric Label Design Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "observability-instrumentation"
+  category_number: 5
+  subcategory: "metrics"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the design and consistency of metric labels (dimensions) across
+    the observability infrastructure. This audit examines label naming conventions,
+    value consistency, cardinality implications, and whether labels enable the
+    queries needed for debugging, alerting, and dashboarding. It identifies
+    missing labels, redundant labels, and label design anti-patterns.
+
+  why_it_matters: |
+    Labels determine what questions you can answer with your metrics. Poor label
+    design leads to inability to filter or group data meaningfully, forces
+    expensive workarounds, and creates cardinality explosions. Missing labels
+    mean critical debug dimensions are unavailable during incidents. Inconsistent
+    labels break cross-service queries and dashboards. This is foundational to
+    metrics utility.
+
+  when_to_run:
+    - "New service instrumentation design"
+    - "Cross-team metric standardization"
+    - "After incident revealing label gaps"
+    - "Cardinality optimization review"
+
+prerequisites:
+  required_artifacts:
+    - type: "metrics-system"
+      description: "Access to metrics with labels"
+    - type: "source-code"
+      description: "Metric definition code for label review"
+
+  access_requirements:
+    - "Metrics platform query access"
+    - "Source code repository access"
+
+discovery:
+  code_patterns:
+    - pattern: "WithLabelValues|Labels\\{|labels="
+      type: "regex"
+      scope: "source"
+      purpose: "Find label usage patterns"
+    - pattern: "ConstLabels|constLabels"
+      type: "regex"
+      scope: "source"
+      purpose: "Find constant label definitions"
+    - pattern: "LabelNames|label_names"
+      type: "regex"
+      scope: "source"
+      purpose: "Find label schema definitions"
+
+  file_patterns:
+    - glob: "**/metrics.go"
+      purpose: "Go metrics with label definitions"
+    - glob: "**/prometheus.yaml"
+      purpose: "Recording rules showing label usage"
+
+  metrics_queries:
+    - system: "Prometheus"
+      query: "group by (__name__) ({__name__=~\".+\"})"
+      purpose: "Get all metric names"
+      threshold: "Review label consistency"
+    - system: "Prometheus"
+      query: "count by (job) (up)"
+      purpose: "Check job label consistency"
+      threshold: "All services use consistent job labels"
+
+knowledge_sources:
+  specifications:
+    - id: "prometheus-labels"
+      name: "Prometheus Labels Best Practices"
+      url: "https://prometheus.io/docs/practices/naming/#labels"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "label-guide"
+      name: "Effective Prometheus Labeling"
+      url: "https://www.robustperception.io/target-labels-are-for-life-not-just-for-christmas"
+      offline_cache: true
+    - id: "cardinality-labels"
+      name: "Labels and Cardinality"
+      url: "https://www.robustperception.io/cardinality-is-key"
+      offline_cache: true
+
+tooling:
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        # Find metrics with specific label
+        count by (__name__) ({service=~".+"})
+      purpose: "Check service label presence"
+    - system: "Prometheus"
+      query: |
+        # Find unique label values
+        count(count by (status_code) (http_requests_total))
+      purpose: "Check label cardinality"
+    - system: "Prometheus"
+      query: |
+        # Find metrics missing common labels
+        count by (__name__) ({job!~".+"})
+      purpose: "Identify metrics without job label"
+
+  scripts:
+    - id: "label-consistency-check"
+      language: "python"
+      purpose: "Check label consistency across metrics"
+      source: "inline"
+      code: |
+        import requests
+        from collections import defaultdict
+
+        def check_label_consistency(prometheus_url, expected_labels):
+            """
+            Verify that common labels exist across all metrics
+            """
+            # Get all metric names
+            response = requests.get(f'{prometheus_url}/api/v1/label/__name__/values')
+            metrics = response.json()['data']
+
+            issues = []
+            for metric in metrics:
+                # Check each expected label
+                for label in expected_labels:
+                    query = f'{metric}{{{label}=~".+"}}'
+                    result = requests.get(f'{prometheus_url}/api/v1/query', params={'query': query})
+                    if not result.json()['data']['result']:
+                        issues.append(f"{metric} missing label: {label}")
+
+            return issues
+
+signals:
+  critical:
+    - id: "LABEL-CRIT-001"
+      signal: "High-cardinality unbounded label"
+      evidence_pattern: "Label containing user_id, request_id, IP address, or URL path"
+      explanation: |
+        Unbounded labels create cardinality explosions that can crash the
+        metrics system. A single label with millions of unique values creates
+        millions of time series.
+      remediation: "Remove unbounded labels or bucket into finite categories"
+
+    - id: "LABEL-CRIT-002"
+      signal: "Missing critical dimension for debugging"
+      evidence_pattern: "Cannot filter errors by endpoint or error type"
+      explanation: |
+        If you cannot filter metrics by the dimensions needed during incidents,
+        you'll be forced to search logs or fly blind. Critical debug dimensions
+        must be labels.
+      remediation: "Add labels for endpoint, error_type, and other debug dimensions"
+
+  high:
+    - id: "LABEL-HIGH-001"
+      signal: "Inconsistent label names across services"
+      evidence_pattern: "service vs svc, endpoint vs path, status vs status_code"
+      explanation: |
+        Inconsistent naming breaks cross-service queries, dashboards, and
+        aggregations. Teams cannot create unified views across the fleet.
+      remediation: "Standardize label names across all services"
+
+    - id: "LABEL-HIGH-002"
+      signal: "Label values not normalized"
+      evidence_pattern: "Mixed case, trailing spaces, inconsistent formats"
+      explanation: |
+        Non-normalized values create duplicate time series and break
+        aggregation. 'GET', 'get', and 'Get' are three different series.
+      remediation: "Normalize label values at instrumentation time"
+
+  medium:
+    - id: "LABEL-MED-001"
+      signal: "Redundant labels providing same information"
+      evidence_pattern: "Both service and service_name labels present"
+      remediation: "Remove redundant labels to reduce cardinality"
+
+    - id: "LABEL-MED-002"
+      signal: "Missing environment or deployment labels"
+      evidence_pattern: "Cannot distinguish prod from staging metrics"
+      remediation: "Add environment, cluster, region labels via service discovery"
+
+    - id: "LABEL-MED-003"
+      signal: "Label values too granular"
+      evidence_pattern: "Full URL path as label instead of route pattern"
+      remediation: "Use route patterns or endpoint categories instead of full paths"
+
+  low:
+    - id: "LABEL-LOW-001"
+      signal: "Label documentation missing"
+      remediation: "Document label schema and valid values"
+
+  positive:
+    - id: "LABEL-POS-001"
+      signal: "Consistent label schema across service fleet"
+    - id: "LABEL-POS-002"
+      signal: "Label allowlists enforced at instrumentation"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory label schema"
+      description: |
+        Document all labels in use across the metrics system,
+        their purposes, and value patterns.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Get all label names"
+          command: "curl -s 'http://prometheus:9090/api/v1/labels' | jq '.data'"
+        - purpose: "Get label values sample"
+          command: "curl -s 'http://prometheus:9090/api/v1/label/service/values' | jq '.data'"
+      expected_findings:
+        - "Complete label inventory"
+        - "Label value patterns"
+
+    - id: "2"
+      name: "Check for unbounded labels"
+      description: |
+        Identify labels with high or unbounded cardinality that could
+        cause system issues.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Count unique values per label"
+          command: "curl -s 'http://prometheus:9090/api/v1/label/__name__/values' | jq '.data | length'"
+      expected_findings:
+        - "High-cardinality labels identified"
+        - "Unbounded label sources"
+
+    - id: "3"
+      name: "Evaluate label consistency"
+      description: |
+        Check that label names and values are consistent across services
+        and metrics.
+      duration_estimate: "45 min"
+      questions:
+        - "Do all services use the same label names?"
+        - "Are label values normalized consistently?"
+        - "Can metrics be aggregated across services?"
+      expected_findings:
+        - "Inconsistency list"
+        - "Normalization issues"
+
+    - id: "4"
+      name: "Validate debug dimensions"
+      description: |
+        Verify that labels enable the filtering needed during incident
+        investigation.
+      duration_estimate: "30 min"
+      questions:
+        - "Can you filter by endpoint?"
+        - "Can you filter by error type?"
+        - "Can you filter by customer/tenant?"
+      expected_findings:
+        - "Missing debug dimensions"
+        - "Recommended new labels"
+
+    - id: "5"
+      name: "Review label code patterns"
+      description: |
+        Examine source code to understand how labels are being set
+        and if there are risks of cardinality issues.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find dynamic label patterns"
+          command: "grep -rn 'WithLabelValues' --include='*.go' /path/to/services"
+      expected_findings:
+        - "Dynamic label generation risks"
+        - "Label validation patterns"
+
+output:
+  deliverables:
+    - type: "label_schema"
+      format: "structured"
+      description: "Documented label schema with purposes"
+
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Label Schema Analysis"
+        - "Consistency Issues"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Runtime analysis and code review combined"
+    medium: "Runtime analysis only"
+    low: "Code review without runtime validation"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "prometheus-labels"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed label analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "label-001"
+    item: "No unbounded high-cardinality labels"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm no user_id, request_id, or URL path labels"
+    expected: "Confirmed by reviewer"
+
+  - id: "label-002"
+    item: "Consistent label names across services"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify label naming consistency"
+    expected: "Confirmed by reviewer"
+
+  - id: "label-003"
+    item: "Critical debug dimensions available as labels"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm endpoint, error_type, and status labels exist"
+    expected: "Confirmed by reviewer"
+
+  - id: "label-004"
+    item: "Label schema documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Check for label documentation"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "observability-instrumentation.metrics.metric-cardinality"
+    - "observability-instrumentation.metrics.metric-naming-convention"
+    - "observability-instrumentation.metrics.custom-metric-coverage"

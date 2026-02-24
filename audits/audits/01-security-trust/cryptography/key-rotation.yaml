@@ -1,0 +1,516 @@
+audit:
+  id: security-trust.cryptography.key-rotation
+  name: Key Rotation Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: cryptography
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the codebase and infrastructure for proper implementation
+    of cryptographic key rotation policies and mechanisms. It verifies that keys
+    have defined cryptoperiods, rotation procedures are implemented and tested,
+    and that key lifecycle management follows NIST SP 800-57 guidelines.
+  why_it_matters: |
+    Keys that are never rotated accumulate risk over time. The longer a key is
+    in use, the more data it protects, the more likely it is to be compromised,
+    and the greater the impact of any breach. Key rotation limits the exposure
+    window and is required by compliance frameworks like PCI DSS. Without proper
+    rotation, a single key compromise can expose years of sensitive data.
+  when_to_run:
+  - Initial security audit of cryptographic implementation
+  - Annual compliance review
+  - After any suspected key compromise
+  - When implementing new encryption features
+  - During cryptographic infrastructure changes
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code with cryptographic key handling
+  - type: configuration
+    description: Key management configuration files
+  - type: documentation
+    description: Key rotation policy documents if available
+  access_requirements:
+  - Read access to source code repositories
+  - Access to key management infrastructure documentation
+  - Access to KMS/HSM configuration (if applicable)
+discovery:
+  code_patterns:
+  - pattern: (key|Key|KEY)\s*[=:]\s*["'][A-Za-z0-9+/=]{16,}["']
+    type: regex
+    scope: source
+    purpose: Detect hard-coded keys that cannot be rotated
+  - pattern: (secret|Secret|SECRET)\s*[=:]\s*["'][A-Za-z0-9+/=]{8,}["']
+    type: regex
+    scope: source
+    purpose: Detect hard-coded secrets that cannot be rotated
+  - pattern: (key_version|keyVersion|KEY_VERSION|key_id|keyId)
+    type: regex
+    scope: source
+    purpose: Detect key versioning support (enables rotation)
+  - pattern: (key_expir|keyExpir|KEY_EXPIR|validUntil|valid_until|notAfter)
+    type: regex
+    scope: source
+    purpose: Detect key expiration handling
+  - pattern: (KMS|kms|KeyManagement|keyManagement|aws.kms|google.cloud.kms|azure.keyvault)
+    type: regex
+    scope: source
+    purpose: Detect KMS usage which typically supports rotation
+  - pattern: (rotate|Rotate|ROTATE).*(key|Key|KEY)
+    type: regex
+    scope: source
+    purpose: Detect key rotation functions
+  - pattern: (os\.environ|process\.env|getenv).*[Kk]ey
+    type: regex
+    scope: source
+    purpose: Detect externalized keys (can be rotated without code changes)
+  file_patterns:
+  - glob: '**/*key*.py'
+    purpose: Python key management modules
+  - glob: '**/*crypto*.py'
+    purpose: Python cryptography modules
+  - glob: '**/*encrypt*.py'
+    purpose: Python encryption modules
+  - glob: '**/kms/**'
+    purpose: KMS configuration directories
+  - glob: '**/*.pem'
+    purpose: Certificate/key files
+  - glob: '**/*.key'
+    purpose: Key files
+  - glob: '**/secrets*.yaml'
+    purpose: Secrets configuration
+  - glob: '**/vault*.yaml'
+    purpose: Vault configuration
+  documents_to_review:
+  - type: Key rotation policy
+    purpose: Verify documented rotation procedures and schedules
+  - type: Runbook
+    purpose: Verify operational key rotation procedures
+  - type: Incident response plan
+    purpose: Verify emergency key rotation procedures
+knowledge_sources:
+  specifications:
+  - id: nist-sp-800-57-pt1
+    name: 'NIST SP 800-57 Part 1 Rev. 5: Recommendation for Key Management - General'
+    url: https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-57pt1r5.pdf
+    offline_cache: true
+    priority: required
+  - id: nist-sp-800-57-pt2
+    name: 'NIST SP 800-57 Part 2 Rev. 1: Best Practices for Key Management Organizations'
+    url: https://csrc.nist.gov/pubs/sp/800/57/pt2/r1/final
+    offline_cache: true
+    priority: recommended
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-key-management
+    name: OWASP Key Management Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Key_Management_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-crypto-storage
+    name: OWASP Cryptographic Storage Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-secrets-management
+    name: OWASP Secrets Management Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
+    offline_cache: true
+  - id: cwe-321
+    name: 'CWE-321: Use of Hard-coded Cryptographic Key'
+    url: https://cwe.mitre.org/data/definitions/321.html
+    offline_cache: true
+  - id: cwe-798
+    name: 'CWE-798: Use of Hard-coded Credentials'
+    url: https://cwe.mitre.org/data/definitions/798.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect hard-coded keys and missing rotation patterns
+    offline_capable: true
+  - tool: trufflehog
+    purpose: Scan for secrets and hard-coded keys
+    offline_capable: true
+  - tool: gitleaks
+    purpose: Detect secrets committed to git history
+    offline_capable: true
+  infrastructure_tools:
+  - tool: aws-cli
+    purpose: Query AWS KMS key rotation status
+    command: aws kms get-key-rotation-status --key-id <key-id>
+  - tool: gcloud
+    purpose: Query GCP KMS key rotation configuration
+    command: gcloud kms keys describe <key-name> --keyring=<keyring> --location=<location>
+  - tool: az
+    purpose: Query Azure Key Vault key rotation
+    command: az keyvault key show --vault-name <vault-name> --name <key-name>
+  scripts:
+  - id: detect-hardcoded-keys
+    language: bash
+    purpose: Detect hard-coded cryptographic keys
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Hard-coded Key Detection ==="
+
+      # Look for hex/base64 key patterns
+      echo "--- Potential hard-coded keys ---"
+      grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.go" \
+        -E "(key|KEY|Key)\s*[=:]\s*[\"'][A-Fa-f0-9]{32,}[\"']" . 2>/dev/null || echo "None found"
+
+      # Look for base64 encoded keys
+      echo "--- Base64 encoded secrets ---"
+      grep -rn --include="*.py" --include="*.js" --include="*.java" \
+        -E "[\"'][A-Za-z0-9+/]{40,}={0,2}[\"']" . 2>/dev/null | head -20 || echo "None found"
+signals:
+  critical:
+  - id: KEYROT-CRIT-001
+    signal: Hard-coded cryptographic key in source code
+    cwe: CWE-321
+    evidence_pattern: (encryption_key|ENCRYPTION_KEY|aes_key|AES_KEY|secret_key|SECRET_KEY)\s*[=:]\s*["'][A-Za-z0-9+/=]{16,}["']
+    explanation: |
+      Hard-coded keys cannot be rotated without deploying new code. This violates
+      the principle of key rotation and creates a permanent vulnerability. If the
+      code is ever leaked or decompiled, all data encrypted with this key is
+      compromised with no way to recover.
+    remediation: |
+      Move keys to external configuration (environment variables, KMS, secrets
+      manager). Implement key versioning to support rotation. Never commit keys
+      to source code repositories.
+  - id: KEYROT-CRIT-002
+    signal: No key rotation mechanism implemented
+    cwe: CWE-320
+    evidence_indicators:
+    - No key versioning in encryption/decryption code
+    - No rotation procedures in documentation
+    - Single key used since initial deployment
+    explanation: |
+      Without a rotation mechanism, keys accumulate risk over time. If the key
+      is ever compromised, there's no way to limit the damage or recover
+      gracefully. This also means compliance requirements cannot be met.
+    remediation: |
+      Implement key versioning in encryption routines. Store key metadata
+      including version, creation date, and expiration. Build rotation
+      procedures that can decrypt with old keys and encrypt with new keys.
+  - id: KEYROT-CRIT-003
+    signal: Keys committed to git repository
+    cwe: CWE-540
+    evidence_pattern: git log.*\.(pem|key|p12|pfx)|trufflehog|gitleaks.*found
+    explanation: |
+      Keys in git history are effectively permanent. Even if removed from
+      current files, they exist in history and can be extracted. Anyone with
+      repository access (including former employees, leaked backups) can
+      recover these keys.
+    remediation: |
+      Use git-filter-branch or BFG Repo Cleaner to remove keys from history.
+      Immediately rotate any keys that were committed. Implement pre-commit
+      hooks to prevent future key commits.
+  high:
+  - id: KEYROT-HIGH-001
+    signal: Keys older than cryptoperiod without rotation
+    cwe: CWE-324
+    evidence_indicators:
+    - Key creation date > 1-2 years ago
+    - No rotation events in logs
+    - Single key version in use
+    explanation: |
+      NIST recommends cryptoperiods of 1-2 years for most key types. Keys
+      used beyond their cryptoperiod have accumulated more risk than intended
+      and may be using algorithms that are now considered weak.
+    remediation: |
+      Rotate keys that have exceeded their cryptoperiod. Implement automated
+      rotation to prevent future violations. Document cryptoperiod policies
+      for each key type.
+  - id: KEYROT-HIGH-002
+    signal: No automated key rotation for cloud KMS
+    evidence_pattern: KMS.*RotationEnabled.*false|automatic_rotation.*disabled
+    explanation: |
+      Cloud KMS services offer automatic key rotation but it may not be
+      enabled. Manual rotation is error-prone and often neglected.
+    remediation: |
+      Enable automatic key rotation in AWS KMS, GCP KMS, or Azure Key Vault.
+      Set rotation period according to NIST guidelines (typically annual).
+  - id: KEYROT-HIGH-003
+    signal: Same key used for multiple purposes
+    cwe: CWE-320
+    evidence_pattern: (encryption|signing|auth).*(key|KEY).*same|shared.*key
+    explanation: |
+      NIST requires key separation - each key should serve a single purpose.
+      Using one key for encryption and signing, for example, can weaken both
+      operations and complicates rotation.
+    remediation: |
+      Implement separate keys for each cryptographic purpose. Document key
+      purposes and ensure they don't overlap. Plan rotation schedules
+      independently for each key.
+  medium:
+  - id: KEYROT-MED-001
+    signal: No key expiration tracking
+    cwe: CWE-324
+    evidence_pattern: key.*expir|validUntil|notAfter
+    explanation: |
+      Without expiration tracking, there's no way to know when keys should
+      be rotated. This leads to keys being used indefinitely.
+    remediation: |
+      Add expiration metadata to all keys. Implement alerts for approaching
+      expiration. Build dashboards showing key age and rotation status.
+  - id: KEYROT-MED-002
+    signal: Rotation procedure not tested
+    evidence_indicators:
+    - No rotation runbook
+    - No rotation test results
+    - No rotation drill records
+    explanation: |
+      Untested rotation procedures will fail when needed most - during a
+      security incident. Teams need practice to rotate keys quickly under
+      pressure.
+    remediation: |
+      Document rotation procedures. Test rotation in staging environment.
+      Run rotation drills at least annually. Track rotation time metrics.
+  - id: KEYROT-MED-003
+    signal: No emergency rotation procedure
+    evidence_indicators:
+    - No documented emergency rotation process
+    - No after-hours rotation capability
+    - No pre-generated backup keys
+    explanation: |
+      When a key is compromised, rotation must happen immediately. Without
+      emergency procedures, response time will be extended, increasing
+      the window of exposure.
+    remediation: |
+      Document emergency rotation procedures. Ensure 24/7 rotation capability.
+      Consider pre-staging backup keys that can be activated quickly.
+  low:
+  - id: KEYROT-LOW-001
+    signal: Rotation logs not retained
+    explanation: |
+      Without rotation logs, it's impossible to audit key lifecycle or
+      investigate potential compromises.
+    remediation: |
+      Enable and retain key rotation audit logs. Ensure logs capture
+      who rotated, when, and the key versions involved.
+  positive:
+  - id: KEYROT-POS-001
+    signal: Automated key rotation implemented
+    evidence_pattern: (auto.*rotat|rotation.*schedul|cron.*rotat)
+    explanation: |
+      Automated rotation ensures consistent key lifecycle management
+      without relying on manual processes.
+  - id: KEYROT-POS-002
+    signal: Key versioning properly implemented
+    evidence_pattern: (key_version|keyVersion|version.*key)
+    explanation: |
+      Key versioning enables smooth rotation - new data uses new keys
+      while old data can still be decrypted with previous versions.
+  - id: KEYROT-POS-003
+    signal: KMS with automatic rotation enabled
+    evidence_pattern: RotationEnabled.*true|automatic_rotation.*true
+    explanation: |
+      Cloud KMS with automatic rotation provides enterprise-grade key
+      management with minimal operational overhead.
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify all cryptographic keys
+    description: |
+      Create an inventory of all cryptographic keys used by the application,
+      including encryption keys, signing keys, API keys, and certificates.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find key-related code
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.go" \
+          -E "(key|Key|KEY|secret|Secret|SECRET|encrypt|decrypt)" . 2>/dev/null | head -100
+    - purpose: Find key files
+      command: |
+        find . -name "*.pem" -o -name "*.key" -o -name "*.p12" -o -name "*.pfx" 2>/dev/null
+    expected_findings:
+    - Inventory of all cryptographic keys
+    - Classification by key type and purpose
+  - id: '2'
+    name: Check for hard-coded keys
+    description: |
+      Search for keys embedded directly in source code, which cannot be
+      rotated without code deployment.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Detect hard-coded keys
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.go" \
+          -E "(key|secret)\s*[=:]\s*[\"'][A-Za-z0-9+/=]{20,}[\"']" . 2>/dev/null
+    - purpose: Run trufflehog
+      command: |
+        trufflehog filesystem . --only-verified 2>/dev/null || echo "trufflehog not installed"
+    expected_findings:
+    - List of hard-coded keys
+    - Assessment of rotation capability
+  - id: '3'
+    name: Verify key versioning implementation
+    description: |
+      Check if the codebase supports key versioning, which is essential
+      for rotation without data loss.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find key versioning code
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.java" \
+          -E "(key_version|keyVersion|version.*key|key.*version)" . 2>/dev/null
+    expected_findings:
+    - Confirmation of key versioning support
+    - Gaps in versioning implementation
+  - id: '4'
+    name: Check KMS rotation configuration
+    description: |
+      If using cloud KMS, verify automatic rotation is enabled.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check AWS KMS rotation
+      command: |
+        aws kms list-keys --query 'Keys[*].KeyId' 2>/dev/null | \
+          xargs -I {} aws kms get-key-rotation-status --key-id {} 2>/dev/null || echo "AWS CLI not configured"
+    - purpose: Check GCP KMS rotation
+      command: |
+        gcloud kms keys list --location=global --keyring=default --format="table(name,rotationPeriod,nextRotationTime)" 2>/dev/null || echo "gcloud not configured"
+    expected_findings:
+    - KMS rotation status for all keys
+    - Identification of keys without automatic rotation
+  - id: '5'
+    name: Review rotation documentation
+    description: |
+      Verify that rotation procedures are documented and have been tested.
+    duration_estimate: 30 min
+    questions:
+    - Does a key rotation policy exist?
+    - Are rotation procedures documented?
+    - When was the last rotation drill?
+    - Is there an emergency rotation procedure?
+    expected_findings:
+    - Assessment of rotation documentation
+    - Gaps in operational readiness
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Key Inventory
+    - Hard-coded Keys Found
+    - Rotation Capability Assessment
+    - Compliance Status
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence of hard-coded keys or missing rotation configuration
+    medium: Rotation mechanisms exist but completeness unclear
+    low: Potential issues based on patterns, needs documentation review
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: nist-sp-800-57-pt1
+      priority: required
+    - source_id: owasp-key-management
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires infrastructure access and documentation review
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: keyrot-001
+  item: No hard-coded cryptographic keys in source code
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.go" \
+      -E "(encryption_key|secret_key|aes_key)\s*[=:]\s*[\"'][A-Za-z0-9+/=]{16,}[\"']" . 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: keyrot-002
+  item: Key versioning implemented in encryption modules
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.py" --include="*.js" --include="*.java" \
+      -E "(key_version|keyVersion)" . 2>/dev/null && echo "PASS" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: keyrot-003
+  item: KMS automatic rotation enabled
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify rotation is enabled in cloud KMS console or via CLI
+  expected: Confirmed by reviewer
+- id: keyrot-004
+  item: Key rotation procedure documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify rotation runbook exists and has been tested
+  expected: Confirmed by reviewer
+- id: keyrot-005
+  item: No keys in git history
+  level: CRITICAL
+  verification: |
+    ! git log -p --all 2>/dev/null | grep -E "(BEGIN (RSA |EC |)PRIVATE KEY|api_key|secret_key)\s*[=:]\s*[\"']" && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST SP 800-57
+    controls:
+    - Part 1
+    - Part 2
+  - framework: PCI DSS
+    controls:
+    - '3.5'
+    - '3.6'
+    - 3.6.4
+  - framework: CWE
+    controls:
+    - CWE-321
+    - CWE-324
+    - CWE-320
+    - CWE-798
+  - framework: OWASP Top 10
+    controls:
+    - A02:2021 - Cryptographic Failures
+  - framework: ISO 27001
+    controls:
+    - A.10.1.2
+relationships:
+  commonly_combined:
+  - security-trust.cryptography.random-number-generation
+  - security-trust.cryptography.hsm-kms-usage
+  - security-trust.secrets-management.secrets-storage

@@ -1,0 +1,357 @@
+audit:
+  id: code-quality.idioms.framework-best-practice
+  name: Framework Best Practice Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: idioms
+  tier: phd
+  estimated_duration: 90 minutes
+  completeness: requires_discovery
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates whether the codebase follows established best practices for the
+    frameworks in use. This includes React patterns (hooks, component composition),
+    Django/Flask patterns (middleware, blueprints), Express patterns (middleware,
+    error handling), and framework-specific security considerations.
+  why_it_matters: |
+    Frameworks provide patterns that have been battle-tested at scale. Deviating
+    from these patterns often leads to bugs, performance issues, and security
+    vulnerabilities. Framework anti-patterns also make code harder for new team
+    members to understand and maintain.
+  when_to_run:
+  - During code reviews
+  - Framework version upgrades
+  - Performance optimization initiatives
+  - Security audits
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  - type: dependency_manifest
+    description: Package manifest to identify frameworks
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: useState.*useEffect.*useState
+    type: regex
+    scope: source
+    purpose: Detect potential React hook rule violations
+  - pattern: componentWillMount|componentWillReceiveProps
+    type: regex
+    scope: source
+    purpose: Detect deprecated React lifecycle methods
+  - pattern: app\.use\(.*\)(?!.*next)
+    type: regex
+    scope: source
+    purpose: Detect Express middleware without next()
+  - pattern: request\.GET\[|request\.POST\[
+    type: regex
+    scope: source
+    purpose: Detect unsafe request parameter access
+  file_patterns:
+  - glob: '**/*.{jsx,tsx}'
+    purpose: React component files
+  - glob: '**/views.py'
+    purpose: Django views
+  - glob: '**/routes/**/*.{js,ts}'
+    purpose: Express route files
+knowledge_sources:
+  guides:
+  - id: react-docs
+    name: React Official Documentation
+    url: https://react.dev/
+    offline_cache: true
+  - id: django-docs
+    name: Django Documentation
+    url: https://docs.djangoproject.com/
+    offline_cache: true
+  - id: express-practices
+    name: Express.js Best Practices
+    url: https://expressjs.com/en/advanced/best-practice-security.html
+    offline_cache: true
+  - id: design-patterns-gof
+    name: 'Design Patterns: Elements of Reusable Object-Oriented Software'
+    url: https://www.oreilly.com/library/view/design-patterns-elements/0201633612/
+    offline_cache: false
+  - id: effective-java
+    name: Effective Java
+    url: https://www.oreilly.com/library/view/effective-java-3rd/9780134686097/
+    offline_cache: false
+  learning_resources:
+  - id: react-patterns
+    title: React Design Patterns
+    type: article
+    reference: https://patterns.dev/
+tooling:
+  static_analysis:
+  - tool: eslint-plugin-react-hooks
+    purpose: React hooks rule enforcement
+    offline_capable: true
+  - tool: eslint-plugin-react
+    purpose: React best practice enforcement
+    offline_capable: true
+  - tool: pylint-django
+    purpose: Django best practice checking
+    offline_capable: true
+  - tool: eslint-plugin-security
+    purpose: Express security best practices
+    offline_capable: true
+  scripts:
+  - id: framework-scan
+    language: bash
+    purpose: Detect framework anti-patterns
+    source: inline
+    code: |
+      echo "=== React Anti-Pattern Detection ==="
+      grep -rn "componentWillMount\|componentWillReceiveProps\|componentWillUpdate" \
+        --include="*.jsx" --include="*.tsx" . 2>/dev/null | head -20
+
+      echo "=== Express Anti-Pattern Detection ==="
+      grep -rn "app\.use.*function.*{" --include="*.js" --include="*.ts" . 2>/dev/null | \
+        grep -v "next" | head -20
+signals:
+  critical:
+  - id: FWBP-CRIT-001
+    signal: React hooks called conditionally or in loops
+    evidence_pattern: if.*useState|for.*useEffect|while.*use
+    explanation: |
+      React hooks must be called in the same order on every render.
+      Conditional or looped hook calls cause state corruption and crashes.
+    remediation: Move hooks to top level of component, use conditional logic inside effects
+  - id: FWBP-CRIT-002
+    signal: Express error handler doesn't handle async errors
+    evidence_pattern: app\.use.*err.*req.*res.*\{(?!.*try)
+    explanation: |
+      Unhandled async errors in Express crash the server. All async
+      routes and middleware must properly catch and forward errors.
+    remediation: Use express-async-errors or wrap handlers with try/catch
+  - id: FWBP-CRIT-003
+    signal: Django raw SQL without parameterization
+    evidence_pattern: raw\s*\(.*%.*%|execute\(.*\+.*\+|cursor\.execute\(f
+    explanation: |
+      Raw SQL with string formatting creates SQL injection vulnerabilities.
+      Django ORM and parameterized queries prevent this.
+    remediation: Use Django ORM or parameterized queries with %s placeholders
+  high:
+  - id: FWBP-HIGH-001
+    signal: Deprecated React lifecycle methods in use
+    evidence_pattern: componentWillMount|componentWillReceiveProps|componentWillUpdate
+    explanation: |
+      These lifecycle methods are deprecated and will be removed. They also
+      cause issues with concurrent mode and server-side rendering.
+    remediation: Migrate to getDerivedStateFromProps, componentDidMount, useEffect
+  - id: FWBP-HIGH-002
+    signal: Direct DOM manipulation in React components
+    evidence_pattern: document\.getElementById|document\.querySelector|innerHTML
+    explanation: |
+      Direct DOM manipulation bypasses React's virtual DOM, causing state
+      inconsistencies, memory leaks, and rendering bugs.
+    remediation: Use refs for DOM access, state for rendering control
+  - id: FWBP-HIGH-003
+    signal: Express middleware without error handling
+    evidence_pattern: app\.use\(.*\).*(?!next\(err\))
+    explanation: |
+      Middleware that doesn't call next(err) on errors silently swallows
+      failures, making debugging difficult.
+    remediation: Always call next(err) in catch blocks
+  medium:
+  - id: FWBP-MED-001
+    signal: React component prop drilling through many levels
+    evidence_pattern: props\.\w+\.\w+\.\w+
+    remediation: Use React Context or state management for deeply shared state
+  - id: FWBP-MED-002
+    signal: Django views mixing business logic with presentation
+    evidence_pattern: def.*request.*:\s*.*if.*save\(\)
+    remediation: Use service layer pattern, fat models, or Django REST framework serializers
+  - id: FWBP-MED-003
+    signal: Express routes with business logic
+    evidence_pattern: router\.(get|post).*\{[^}]{500,}
+    remediation: Extract business logic to service/controller layer
+  low:
+  - id: FWBP-LOW-001
+    signal: React inline function definitions in render
+    evidence_pattern: onClick=\{\(\)\s*=>
+    remediation: Use useCallback for stable function references
+  - id: FWBP-LOW-002
+    signal: Not using Django class-based views for CRUD
+    evidence_pattern: def.*request.*:\s*if.*method.*POST
+    remediation: Consider class-based views for standard CRUD operations
+  positive:
+  - id: FWBP-POS-001
+    signal: Consistent use of React hooks following rules
+    evidence_pattern: hooks at component top level, useCallback/useMemo properly
+  - id: FWBP-POS-002
+    signal: Proper Express middleware chain structure
+    evidence_pattern: next() calls, error middleware at end
+  - id: FWBP-POS-003
+    signal: Django ORM used exclusively for queries
+    evidence_pattern: No raw SQL, proper queryset usage
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Frameworks in Use
+    description: |
+      Analyze dependencies to determine which frameworks are used and
+      their versions.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check package.json for frontend frameworks
+      command: |
+        cat package.json 2>/dev/null | grep -E "react|vue|angular|express|fastify|nest"
+    - purpose: Check Python requirements for backend frameworks
+      command: |
+        cat requirements.txt pyproject.toml 2>/dev/null | grep -iE "django|flask|fastapi"
+    expected_findings:
+    - Framework inventory with versions
+    - Primary framework identification
+  - id: '2'
+    name: Run Framework-Specific Linting
+    description: |
+      Execute appropriate linting tools for detected frameworks.
+    duration_estimate: 20 min
+    commands:
+    - purpose: ESLint with React plugin
+      command: |
+        npx eslint --plugin react --plugin react-hooks --ext .jsx,.tsx . 2>/dev/null || echo "React ESLint not configured"
+    - purpose: Pylint with Django plugin
+      command: |
+        pylint --load-plugins pylint_django **/*.py 2>/dev/null || echo "Django pylint not available"
+    expected_findings:
+    - Framework rule violations
+    - Deprecated API usage
+  - id: '3'
+    name: Scan for React Anti-Patterns
+    description: |
+      If React is detected, scan for common React anti-patterns.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find deprecated lifecycle methods
+      command: |
+        grep -rn "componentWillMount\|componentWillReceiveProps" \
+          --include="*.jsx" --include="*.tsx" . 2>/dev/null | head -30
+    - purpose: Find direct DOM manipulation
+      command: |
+        grep -rn "document\\.getElementById\|document\\.querySelector" \
+          --include="*.jsx" --include="*.tsx" . 2>/dev/null | head -30
+    - purpose: Check hook call patterns
+      command: |
+        grep -rn "if.*use[A-Z]\|for.*use[A-Z]" \
+          --include="*.jsx" --include="*.tsx" . 2>/dev/null | head -20
+    expected_findings:
+    - Deprecated method locations
+    - DOM manipulation instances
+    - Potential hook violations
+  - id: '4'
+    name: Scan for Backend Framework Anti-Patterns
+    description: |
+      Scan for Express, Django, or Flask anti-patterns as appropriate.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find Django raw SQL
+      command: |
+        grep -rn "\.raw\s*(\|cursor\.execute" --include="*.py" . 2>/dev/null | head -30
+    - purpose: Find Express error handling issues
+      command: |
+        grep -rn "app\.use.*err" --include="*.js" --include="*.ts" . 2>/dev/null | head -20
+    expected_findings:
+    - Security-sensitive anti-patterns
+    - Error handling gaps
+  - id: '5'
+    name: Compile and Prioritize Findings
+    description: |
+      Aggregate findings and prioritize by severity and fix complexity.
+    duration_estimate: 20 min
+    expected_findings:
+    - Prioritized finding list
+    - Remediation recommendations
+    - Effort estimates
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - framework_violations
+    - deprecated_api_usage
+    - security_concerns
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Framework-Specific Findings
+    - Security Implications
+    - Remediation Roadmap
+  confidence_guidance:
+    high: Linter-verified or clearly documented anti-pattern
+    medium: Pattern match requiring context evaluation
+    low: Style preference or minor deviation
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: react-docs
+      priority: recommended
+    - source_id: django-docs
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires framework-specific deep analysis
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: fwbp-001
+  item: Frameworks identified and versioned
+  level: BLOCKING
+  verification: Package manifests analyzed
+  expected: Complete framework inventory
+- id: fwbp-002
+  item: No critical framework violations
+  level: CRITICAL
+  verification: Hook rules, SQL injection checks completed
+  expected: Zero critical violations
+- id: fwbp-003
+  item: Deprecated APIs documented
+  level: WARNING
+  verification: All deprecated API usage listed
+  expected: Migration plan for deprecated APIs
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP
+    controls:
+    - Injection
+    - Security Misconfiguration
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+    - Security
+relationships:
+  commonly_combined:
+  - code-quality.idioms.idiomatic-code
+  - code-quality.idioms.deprecated-api-usage
+  - security.code.injection-prevention

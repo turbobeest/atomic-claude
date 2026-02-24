@@ -1,0 +1,356 @@
+audit:
+  id: observability-instrumentation.debug-troubleshooting.heap-dump-capability
+  name: Heap Dump Capability Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: debug-troubleshooting
+  tier: phd
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses the ability to capture heap dumps from production
+    applications for memory analysis. Evaluates heap dump triggers,
+    storage capabilities, analysis tooling, and safety of heap
+    dump operations. Reviews automated heap dump on OOM and
+    manual trigger mechanisms.
+  why_it_matters: |
+    Lack of heap dump capability causes:
+    - Inability to diagnose memory leaks
+    - Extended outages from OOM events without root cause
+    - Repeated OOM incidents from unresolved issues
+    - Guesswork in memory optimization
+    - Lost debugging opportunities when OOM occurs
+    - Extended incident resolution times
+  when_to_run:
+  - After OOM incidents without captured dumps
+  - During observability capability reviews
+  - When introducing memory-intensive services
+  - After platform migrations
+prerequisites:
+  required_artifacts:
+  - type: application_access
+    description: Access to running application instances
+  - type: storage_access
+    description: Storage location for heap dumps
+  optional_artifacts:
+  - type: heap_dump_procedures
+    description: Documented heap dump procedures
+  - type: analysis_tools
+    description: Heap analysis tools (Eclipse MAT, VisualVM, etc.)
+  access_requirements:
+  - Application runtime access
+  - JMX or equivalent management interface
+  - Storage for heap dump files
+discovery:
+  code_patterns:
+  - pattern: HeapDumpOnOutOfMemoryError|XX:HeapDumpPath
+    type: regex
+    scope: config
+    purpose: Find JVM heap dump configuration
+  - pattern: (heapdump|memorydump|heap.*dump)
+    type: regex
+    scope: config
+    purpose: Find heap dump configuration
+  file_patterns:
+  - glob: '**/*.hprof'
+    purpose: Existing heap dump files
+  - glob: '**/jvm-opts*'
+    purpose: JVM options configuration
+knowledge_sources:
+  guides:
+  - id: java-heap-dumps
+    name: Java Heap Dump Analysis
+    url: https://docs.oracle.com/javase/8/docs/technotes/guides/troubleshoot/memleaks002.html
+    offline_cache: true
+    priority: required
+  - id: kubernetes-heap-dumps
+    name: Capturing Heap Dumps in Kubernetes
+    url: https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/
+    offline_cache: true
+    priority: recommended
+  learning_resources:
+  - id: eclipse-mat
+    title: Eclipse Memory Analyzer Documentation
+    type: article
+    reference: https://www.eclipse.org/mat/
+tooling:
+  infrastructure_tools:
+  - tool: jmap
+    purpose: Generate JVM heap dumps
+    command: jmap -dump:format=b,file=/tmp/heap.hprof $PID
+  - tool: jcmd
+    purpose: JVM diagnostic commands
+    command: jcmd $PID GC.heap_dump /tmp/heap.hprof
+  - tool: Eclipse MAT
+    purpose: Heap dump analysis
+    offline_capable: true
+  - tool: VisualVM
+    purpose: JVM monitoring and heap analysis
+  - tool: kubectl
+    purpose: Execute heap dump in Kubernetes
+    command: kubectl exec $POD -- jmap -dump:format=b,file=/tmp/heap.hprof 1
+  scripts:
+  - id: heap-dump-capability-check
+    language: bash
+    purpose: Check heap dump capability
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check heap dump capability
+
+      echo "=== Heap Dump Capability Check ==="
+
+      # Check JVM options for HeapDumpOnOutOfMemoryError
+      echo ""
+      echo "Checking JVM heap dump configuration:"
+
+      # For Kubernetes
+      if command -v kubectl &> /dev/null; then
+        echo "Kubernetes pods with OOM heap dump:"
+        kubectl get pods -A -o json | jq -r '
+          .items[] |
+          select(.spec.containers[].env[]?.name == "JAVA_OPTS" or
+                 .spec.containers[].args[]? | contains("HeapDumpOnOutOfMemoryError")) |
+          "\(.metadata.namespace)/\(.metadata.name)"'
+      fi
+
+      # Check for heap dump storage
+      echo ""
+      echo "Checking heap dump storage:"
+      if kubectl get pvc -A | grep -qi "heap\|dump"; then
+        echo "  Dedicated heap dump storage found"
+      else
+        echo "  No dedicated heap dump storage detected"
+      fi
+
+      # Check for Go pprof heap endpoint
+      echo ""
+      echo "Checking Go heap dump capability:"
+      echo "  Endpoint: /debug/pprof/heap"
+signals:
+  critical:
+  - id: HEAPDUMP-CRIT-001
+    signal: HeapDumpOnOutOfMemoryError not enabled for JVM
+    evidence_indicators:
+    - No -XX:+HeapDumpOnOutOfMemoryError flag
+    - OOM events without captured dumps
+    explanation: |
+      When OOM occurs, the heap state at that moment is crucial
+      for diagnosis. Without automatic heap dump on OOM, this
+      evidence is lost and the root cause cannot be determined.
+    remediation: |
+      Add to JVM options:
+      -XX:+HeapDumpOnOutOfMemoryError
+      -XX:HeapDumpPath=/path/to/dumps/
+      Ensure dump path has sufficient storage.
+  - id: HEAPDUMP-CRIT-002
+    signal: No heap dump storage in ephemeral environments
+    evidence_indicators:
+    - Kubernetes pods without persistent volume for dumps
+    - Heap dumps lost when container restarts
+    explanation: |
+      In container environments, local storage is ephemeral.
+      Heap dumps stored locally are lost when the container
+      crashes or restarts after OOM.
+    remediation: |
+      - Mount persistent volume for heap dump storage
+      - Configure sidecar to upload dumps to object storage
+      - Use emptyDir with sufficient size and monitor
+  high:
+  - id: HEAPDUMP-HIGH-001
+    signal: Cannot trigger heap dump manually
+    explanation: |
+      Manual heap dump capability is needed to capture memory
+      state before conditions change or during investigation.
+    remediation: |
+      Ensure jmap/jcmd accessible or enable JMX for remote dump.
+      For Kubernetes, ensure exec access to pods.
+  - id: HEAPDUMP-HIGH-002
+    signal: Insufficient storage for heap dumps
+    explanation: |
+      Heap dumps can be as large as the heap itself. Insufficient
+      storage prevents capture or causes incomplete dumps.
+    remediation: |
+      Provision storage at least 2x max heap size for dumps.
+      Implement rotation for old dump files.
+  medium:
+  - id: HEAPDUMP-MED-001
+    signal: No heap analysis tools available
+    remediation: |
+      Ensure team has access to heap analysis tools like
+      Eclipse MAT, VisualVM, or cloud-based analyzers.
+  - id: HEAPDUMP-MED-002
+    signal: Heap dump procedures not documented
+    remediation: |
+      Document heap dump capture procedures for each service type
+      including Kubernetes-specific instructions.
+  - id: HEAPDUMP-MED-003
+    signal: Heap dump transfer from production not established
+    remediation: |
+      Establish secure procedure to transfer large heap dumps
+      from production to analysis environments.
+  low:
+  - id: HEAPDUMP-LOW-001
+    signal: No heap dump rotation policy
+    remediation: |
+      Implement cleanup of old heap dumps to prevent
+      storage exhaustion.
+  positive:
+  - id: HEAPDUMP-POS-001
+    signal: HeapDumpOnOutOfMemoryError enabled with persistent storage
+  - id: HEAPDUMP-POS-002
+    signal: Automated heap dump upload to object storage
+  - id: HEAPDUMP-POS-003
+    signal: Documented heap dump analysis procedures
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: JVM Configuration Review
+    description: |
+      Review JVM configurations for heap dump settings.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for heap dump JVM flags
+      command: kubectl get pods -A -o json | jq '.items[].spec.containers[].env[] | select(.name | contains("JAVA"))'
+    expected_findings:
+    - HeapDumpOnOutOfMemoryError status
+    - HeapDumpPath configuration
+  - id: '2'
+    name: Storage Assessment
+    description: |
+      Verify adequate storage exists for heap dumps.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check heap dump storage
+      command: kubectl get pvc -A | grep -i heap
+    - purpose: Check available disk space
+      command: kubectl exec $POD -- df -h /path/to/dumps
+    expected_findings:
+    - Storage availability
+    - Storage capacity vs heap size
+  - id: '3'
+    name: Manual Dump Capability Test
+    description: |
+      Verify ability to trigger heap dumps manually.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Test jcmd availability
+      command: kubectl exec $POD -- jcmd 1 help
+    - purpose: Test heap dump trigger
+      command: kubectl exec $POD -- jcmd 1 GC.heap_info
+    expected_findings:
+    - Manual dump capability
+    - Required permissions
+  - id: '4'
+    name: Analysis Tooling Review
+    description: |
+      Verify team has access to heap analysis tools.
+    duration_estimate: 20 min
+    questions:
+    - What heap analysis tools are available?
+    - How are heap dumps transferred for analysis?
+    - Are procedures documented?
+    expected_findings:
+    - Available analysis tools
+    - Transfer procedures
+output:
+  deliverables:
+  - type: heap_dump_capability_assessment
+    format: structured
+    description: Analysis of heap dump capabilities
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Configuration Status
+    - Storage Assessment
+    - Analysis Tooling
+    - Recommendations
+  confidence_guidance:
+    high: Direct capability testing
+    medium: Configuration analysis
+    low: Documentation review
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: java-heap-dumps
+      priority: required
+  degradation:
+  - feature: Live heap dump testing
+    impact: Cannot verify actual capability
+    mitigation: Review configuration and documentation
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime testing
+    full:
+      included: true
+      priority: 15
+    production:
+      included: true
+      priority: 13
+closeout_checklist:
+- id: heapdump-001
+  item: HeapDumpOnOutOfMemoryError enabled for JVM services
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify JVM flag presence in deployment config
+  expected: Confirmed by reviewer
+- id: heapdump-002
+  item: Heap dump storage persistent and adequate
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify PVC or persistent storage for dumps
+  expected: Confirmed by reviewer
+- id: heapdump-003
+  item: Manual heap dump capability available
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify jcmd or jmap accessible
+  expected: Confirmed by reviewer
+- id: heapdump-004
+  item: Heap analysis tools available to team
+  level: WARNING
+  verification: manual
+  verification_notes: Verify access to Eclipse MAT or equivalent
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    platforms:
+    - jvm
+    - kubernetes
+    - vm
+  compliance_frameworks:
+  - framework: Internal Standards
+    controls:
+    - Memory Debugging Capability
+relationships:
+  commonly_combined:
+  - observability-instrumentation.debug-troubleshooting.thread-dump-capability
+  - observability-instrumentation.debug-troubleshooting.profiling-capability
+  - observability-instrumentation.metrics.jvm-metrics

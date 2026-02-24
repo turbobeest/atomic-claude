@@ -1,0 +1,314 @@
+audit:
+  id: signal-processing-data-acquisition.adc-dac.adc-linearity
+  name: ADC Linearity Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: adc-dac
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: hardware
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates ADC linearity characteristics that affect
+    measurement accuracy and signal fidelity. It examines:
+    - Integral Non-Linearity (INL) specification and measurement
+    - Differential Non-Linearity (DNL) specification and measurement
+    - Missing codes and monotonicity
+    - Linearity calibration and correction
+    - Temperature effects on linearity
+    - Impact of linearity errors on measurements
+  why_it_matters: |
+    ADC linearity directly affects measurement accuracy:
+    - INL causes static errors in absolute measurements
+    - DNL causes variable quantization step sizes
+    - DNL > 1 LSB indicates missing codes
+    - Linearity errors add to total measurement uncertainty
+    - IEEE 1241 defines INL and DNL measurement methods
+    - High-precision applications may require linearity calibration
+
+    Without adequate linearity, ADC output does not accurately
+    represent input signal amplitude, corrupting measurements.
+  when_to_run:
+  - ADC selection and evaluation
+  - Precision measurement system design
+  - System calibration development
+  - Production testing setup
+  - Accuracy certification
+prerequisites:
+  required_artifacts:
+  - type: adc_datasheet
+    description: ADC specifications including INL and DNL
+  - type: requirements
+    description: Linearity requirements for application
+  - type: calibration_data
+    description: Linearity calibration data if applicable
+  access_requirements:
+  - Access to ADC specifications
+  - Test equipment for linearity measurement
+  - Precision reference source
+discovery:
+  code_patterns:
+  - pattern: (inl|INL|integral.*nonlinear)
+    type: regex
+    scope: source
+    purpose: Detect INL handling
+  - pattern: (dnl|DNL|differential.*nonlinear)
+    type: regex
+    scope: source
+    purpose: Detect DNL handling
+  - pattern: (linearity|linear)_(cal|calibrat|correct)
+    type: regex
+    scope: source
+    purpose: Detect linearity calibration
+  - pattern: (adc|ADC)_(cal|calibrat|correct)
+    type: regex
+    scope: source
+    purpose: Detect ADC calibration
+  file_patterns:
+  - glob: '**/adc*.{c,h,cpp,py}'
+    purpose: ADC driver files
+  - glob: '**/calibrat*.{c,h,cpp,py,json}'
+    purpose: Calibration files
+  - glob: '**/linearity*.{c,h,json}'
+    purpose: Linearity correction files
+knowledge_sources:
+  specifications:
+  - id: ieee-1241-linearity
+    name: IEEE 1241 - ADC Linearity Testing
+    url: https://standards.ieee.org/standard/1241-2010.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: maxim-inl-dnl
+    name: Maxim INL/DNL Application Note
+    url: https://www.maximintegrated.com/en/design/technical-documents/tutorials/7/748.html
+    offline_cache: true
+  - id: ti-adc-testing
+    name: Texas Instruments ADC Testing Guide
+    url: https://www.ti.com/lit/an/slaa587/slaa587.pdf
+    offline_cache: true
+signals:
+  critical:
+  - id: LIN-CRIT-001
+    signal: INL exceeds application tolerance
+    evidence_indicators:
+    - INL specification > measurement accuracy requirement
+    - Static measurement errors exceed budget
+    - No INL calibration or correction
+    explanation: |
+      INL causes static measurement errors proportional to its
+      magnitude. An INL of 1 LSB causes up to 1 LSB error in
+      measurements. For precision applications, INL must be
+      within the accuracy budget.
+    remediation: |
+      - Select ADC with INL meeting requirements
+      - Implement INL calibration and correction
+      - Use oversampling to reduce INL effects
+      - Account for INL in measurement uncertainty
+    cwe: CWE-682
+  - id: LIN-CRIT-002
+    signal: DNL indicates missing codes
+    evidence_indicators:
+    - DNL > 1 LSB at some codes
+    - Histogram shows missing code bins
+    - Non-monotonic ADC output
+    explanation: |
+      DNL > 1 LSB means some codes are missing or appear extra often.
+      Missing codes create gaps in quantization that lose information.
+      For monotonic ADC, DNL must be > -1 LSB at all codes.
+    remediation: |
+      - Select ADC with no missing codes (DNL > -1 LSB guaranteed)
+      - Use dithering to spread codes
+      - Implement interpolation for missing codes
+      - Consider higher-resolution ADC with adequate codes
+    cwe: CWE-682
+  high:
+  - id: LIN-HIGH-001
+    signal: Linearity calibration not implemented
+    evidence_indicators:
+    - INL exceeds requirements without calibration
+    - No linearity correction table or algorithm
+    - Raw ADC data used directly
+    explanation: |
+      Many ADCs have linearity errors that can be calibrated out.
+      Without calibration, INL errors directly affect measurements.
+      Calibration can improve effective linearity significantly.
+    remediation: |
+      - Implement INL calibration lookup table
+      - Use piecewise linear correction
+      - Calibrate using precision reference
+      - Recalibrate periodically or with temperature
+  - id: LIN-HIGH-002
+    signal: Temperature affects linearity without compensation
+    evidence_indicators:
+    - ADC linearity degrades with temperature
+    - No temperature compensation implemented
+    - Calibration valid only at single temperature
+    explanation: |
+      ADC linearity can vary significantly with temperature.
+      Calibration at one temperature may not be valid across
+      the operating range without compensation.
+    remediation: |
+      - Characterize linearity vs. temperature
+      - Implement temperature-dependent calibration
+      - Use temperature-stable ADC if critical
+      - Limit operating temperature range if needed
+  medium:
+  - id: LIN-MED-001
+    signal: Linearity not verified in actual system
+    evidence_indicators:
+    - Only datasheet specifications used
+    - No system-level linearity measurement
+    - PCB effects not characterized
+    explanation: |
+      Datasheet linearity may not reflect system performance.
+      PCB layout, power supply noise, and signal conditioning
+      can degrade linearity beyond datasheet specifications.
+    remediation: |
+      - Measure linearity in actual system
+      - Verify against datasheet specifications
+      - Characterize system-specific effects
+      - Document system linearity performance
+  - id: LIN-MED-002
+    signal: Linearity effects not included in uncertainty analysis
+    evidence_indicators:
+    - Error budget missing INL contribution
+    - Measurement uncertainty underestimated
+    - Linearity assumed perfect
+    explanation: |
+      INL and DNL contribute to measurement uncertainty and must
+      be included in error analysis. Ignoring them leads to
+      underestimated measurement uncertainty.
+    remediation: |
+      - Include INL in uncertainty calculation
+      - Account for DNL statistical effects
+      - Add linearity terms to error budget
+      - Document linearity contribution to uncertainty
+  low:
+  - id: LIN-LOW-001
+    signal: Linearity specifications not documented
+    evidence_indicators:
+    - No record of ADC linearity specifications
+    - INL/DNL not in system documentation
+    - Linearity requirements not specified
+    explanation: |
+      Without documented linearity specifications, system accuracy
+      cannot be verified. Component substitutions may inadvertently
+      degrade linearity without detection.
+    remediation: |
+      - Document ADC INL and DNL specifications
+      - Record linearity requirements
+      - Include linearity in component specifications
+      - Add linearity to verification procedures
+  positive:
+  - id: LIN-POS-001
+    signal: Well-characterized linearity with calibration
+    evidence_indicators:
+    - INL/DNL measured and documented
+    - Calibration implemented if needed
+    - Linearity included in uncertainty analysis
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: measurement-engineer
+  steps:
+  - id: '1'
+    name: Linearity Specification Review
+    description: |
+      Review ADC linearity specifications against requirements.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find linearity configuration
+      command: |
+        grep -rniE "(inl|dnl|linear)" \
+          --include="*.c" --include="*.h" --include="*.md" . 2>/dev/null | head -20
+    expected_findings:
+    - INL/DNL specifications
+    - Linearity requirements
+    - Calibration implementation
+  - id: '2'
+    name: Calibration Implementation Review
+    description: |
+      Review linearity calibration implementation if present.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find calibration code
+      command: |
+        grep -rniE "(adc|ADC).*(cal|calibrat|correct)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - Calibration tables or algorithms
+    - Calibration procedure
+    - Temperature compensation
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Linearity Analysis
+    - Calibration Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: lin-001
+  item: ADC INL meets application requirements
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify INL specification is within accuracy budget
+  expected: Confirmed by reviewer
+- id: lin-002
+  item: No missing codes (DNL > -1 LSB)
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify DNL specification guarantees no missing codes
+  expected: Confirmed by reviewer
+- id: lin-003
+  item: Linearity calibration implemented if needed
+  level: WARNING
+  verification: |
+    grep -rniE "(linear|adc).*(cal|correct)" \
+      --include="*.c" --include="*.h" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "N/A"
+  expected: PASS or N/A
+governance:
+  applicable_to:
+    archetypes:
+    - scientific-instruments
+    - industrial-control
+    - precision-measurement
+relationships:
+  commonly_combined:
+  - signal-processing.adc-dac.adc-resolution-adequacy
+  - signal-processing.adc-dac.reference-voltage-stability
+  - signal-processing.algorithm-verification.numerical-precision
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

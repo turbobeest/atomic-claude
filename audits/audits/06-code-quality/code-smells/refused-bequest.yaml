@@ -1,0 +1,340 @@
+# ============================================================
+# AUDIT: Refused Bequest Detection
+# ============================================================
+
+audit:
+  id: "code-quality.code-smells.refused-bequest"
+  name: "Refused Bequest Detection Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "code-smells"
+
+  tier: "expert"
+  estimated_duration: "40 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Identifies subclasses that inherit from a parent class but don't use or
+    actively refuse inherited behavior. This includes subclasses that override
+    methods to throw NotImplementedException, leave inherited methods unused,
+    or only use a small fraction of the parent's interface.
+
+  why_it_matters: |
+    Refused bequest indicates improper use of inheritance, violating the
+    Liskov Substitution Principle. It suggests the class hierarchy is wrong -
+    perhaps composition should be used instead of inheritance, or a different
+    abstraction is needed. It confuses developers about what the subclass
+    actually supports.
+
+  when_to_run:
+    - "During design reviews"
+    - "When extending class hierarchies"
+    - "Refactoring to composition"
+    - "Architecture assessments"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Object-oriented source code with inheritance"
+
+  access_requirements:
+    - "Read access to source code repository"
+
+discovery:
+  code_patterns:
+    - pattern: "throw\\s+new\\s+(NotImplementedException|UnsupportedOperationException)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect explicitly refused methods"
+
+    - pattern: "raise\\s+NotImplementedError"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect Python refused methods"
+
+    - pattern: "@Override\\s*.*throw"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect overridden methods that throw"
+
+    - pattern: "extends\\s+\\w+.*\\{[^}]{0,500}\\}"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect small subclasses"
+
+  file_patterns:
+    - glob: "**/*.{java,cs,ts,py,rb,cpp}"
+      purpose: "Object-oriented source files"
+
+knowledge_sources:
+  guides:
+    - id: "fowler-refused-bequest"
+      name: "Martin Fowler - Refused Bequest"
+      url: "https://refactoring.guru/smells/refused-bequest"
+      offline_cache: true
+
+    - id: "liskov-principle"
+      name: "Liskov Substitution Principle"
+      url: "https://en.wikipedia.org/wiki/Liskov_substitution_principle"
+      offline_cache: true
+
+    - id: "fowler-replace-inheritance"
+      name: "Martin Fowler - Replace Inheritance with Delegation"
+      url: "https://refactoring.com/catalog/replaceSuperclassWithDelegate.html"
+      offline_cache: true
+
+    - id: "refactoring-fowler"
+      name: "Martin Fowler - Refactoring"
+      url: "https://refactoring.com/"
+      offline_cache: false
+
+    - id: "refactoring-catalog"
+      name: "Refactoring Catalog"
+      url: "https://refactoring.com/catalog/"
+      offline_cache: false
+
+    - id: "clean-code"
+      name: "Robert C. Martin - Clean Code"
+      url: "https://www.oreilly.com/library/view/clean-code-a/9780136083238/"
+      offline_cache: false
+
+tooling:
+  static_analysis:
+    - tool: "sonarqube"
+      purpose: "Inheritance smell detection"
+      offline_capable: false
+    - tool: "pmd"
+      purpose: "Java inheritance rules"
+      offline_capable: true
+    - tool: "pylint"
+      purpose: "Python inheritance analysis"
+      offline_capable: true
+
+  scripts:
+    - id: "refused-bequest-scan"
+      language: "bash"
+      purpose: "Find classes throwing NotImplemented exceptions"
+      source: "inline"
+      code: |
+        # Find NotImplementedException patterns
+        grep -rn --include="*.{ts,java,cs}" -E "throw.*(NotImplemented|UnsupportedOperation)" . 2>/dev/null | head -50
+
+signals:
+  critical:
+    - id: "CS-BEQUEST-CRIT-001"
+      signal: "Subclass throws NotImplementedException for parent interface methods"
+      evidence_pattern: "@Override.*throw.*NotImplemented|override.*throw.*NotSupported"
+      explanation: |
+        Overriding methods only to throw exceptions violates LSP and makes
+        the class hierarchy misleading and dangerous to use polymorphically.
+      remediation: "Reconsider hierarchy - use composition or extract interface"
+
+    - id: "CS-BEQUEST-CRIT-002"
+      signal: "Multiple inherited methods marked unsupported in same class"
+      evidence_pattern: "class.*NotImplemented.*NotImplemented.*NotImplemented"
+      explanation: |
+        Multiple refused methods indicate the inheritance relationship
+        is fundamentally wrong and needs redesign.
+      remediation: "Replace inheritance with composition"
+
+  high:
+    - id: "CS-BEQUEST-HIGH-001"
+      signal: "Subclass uses less than 30% of parent's interface"
+      evidence_pattern: "used_parent_methods / total_parent_methods < 0.3"
+      explanation: |
+        Low utilization of parent interface suggests inheritance for
+        code reuse rather than true IS-A relationship.
+      remediation: "Extract used functionality to delegation pattern"
+
+    - id: "CS-BEQUEST-HIGH-002"
+      signal: "Empty override methods"
+      evidence_pattern: "@Override\\s*\\w+\\s*\\(\\)\\s*\\{\\s*\\}"
+      explanation: |
+        Empty overrides that do nothing indicate the method doesn't
+        apply to the subclass.
+      remediation: "Consider interface segregation"
+
+  medium:
+    - id: "CS-BEQUEST-MED-001"
+      signal: "Subclass only uses parent for code inheritance (no IS-A)"
+      evidence_pattern: "extends.*utility|extends.*helper"
+      remediation: "Consider static utilities or composition"
+
+    - id: "CS-BEQUEST-MED-002"
+      signal: "Override to change return type"
+      evidence_pattern: "@Override.*different_return_type"
+      remediation: "Review if hierarchy is appropriate"
+
+  low:
+    - id: "CS-BEQUEST-LOW-001"
+      signal: "Small subclass with few overrides"
+      evidence_pattern: "subclass_methods < 3"
+      remediation: "May be appropriate, review context"
+
+  positive:
+    - id: "CS-BEQUEST-POS-001"
+      signal: "Subclasses use full parent interface"
+      evidence_pattern: "used_parent_methods >= 80%"
+    - id: "CS-BEQUEST-POS-002"
+      signal: "Composition used over inheritance where appropriate"
+      evidence_pattern: "composition_pattern"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Find NotImplemented Exceptions"
+      description: |
+        Search for methods that explicitly throw NotImplementedException
+        or similar to refuse inherited behavior.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find NotImplementedException"
+          command: |
+            grep -rn --include="*.{ts,java,cs}" -E "throw\s+(new\s+)?(NotImplemented|UnsupportedOperation)" . 2>/dev/null | head -50
+        - purpose: "Find Python NotImplementedError"
+          command: |
+            grep -rn --include="*.py" "raise NotImplementedError" . 2>/dev/null | head -50
+      expected_findings:
+        - "Methods refusing inherited behavior"
+        - "Classes with multiple refusals"
+
+    - id: "2"
+      name: "Analyze Inheritance Utilization"
+      description: |
+        For classes with inheritance, calculate what percentage of
+        parent methods are actually used.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find classes with extends"
+          command: |
+            grep -rn --include="*.{ts,java}" -E "class\s+\w+\s+extends\s+\w+" . 2>/dev/null | head -50
+      expected_findings:
+        - "Inheritance relationships"
+        - "Parent utilization rates"
+
+    - id: "3"
+      name: "Identify Empty Overrides"
+      description: |
+        Find override methods that are empty or do nothing.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find empty overrides"
+          command: |
+            grep -rn --include="*.java" -A2 "@Override" . 2>/dev/null | grep -E "\{\s*\}" | head -30
+      expected_findings:
+        - "Empty override methods"
+        - "No-op implementations"
+
+    - id: "4"
+      name: "Generate Refactoring Plan"
+      description: |
+        Create prioritized list of inheritance relationships to refactor.
+      duration_estimate: "5 min"
+      expected_findings:
+        - "Classes to refactor"
+        - "Recommended patterns (composition, interfaces)"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "subclass_name"
+        - "parent_class"
+        - "refused_methods"
+        - "utilization_rate"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Refused Bequest Inventory"
+        - "Inheritance Analysis"
+        - "Refactoring Recommendations"
+
+  confidence_guidance:
+    high: "Explicit NotImplementedException or empty override"
+    medium: "Low parent utilization detected"
+    low: "May be acceptable design decision"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "fowler-refused-bequest"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires inheritance analysis"
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "refused-001"
+    item: "NotImplemented scan completed"
+    level: "BLOCKING"
+    verification: |
+      grep -rn --include="*.{ts,java,cs,py}" -E "(NotImplemented|UnsupportedOperation|raise NotImplementedError)" . 2>/dev/null | wc -l
+    expected: "Analysis complete"
+
+  - id: "refused-002"
+    item: "No LSP violations in public APIs"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review public classes for refused methods"
+    expected: "Zero violations"
+
+  - id: "refused-003"
+    item: "Low-utilization hierarchies documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review inheritance relationships"
+    expected: "All documented"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOLID"
+      controls: ["Liskov Substitution Principle"]
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modularity"]
+
+relationships:
+  commonly_combined:
+    - "code-quality.code-smells.speculative-generality"
+    - "code-quality.code-smells.inappropriate-intimacy"
+    - "code-quality.maintainability.coupling-cohesion"

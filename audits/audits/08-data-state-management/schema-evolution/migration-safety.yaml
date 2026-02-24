@@ -1,0 +1,336 @@
+# ============================================================
+# AUDIT: Migration Safety
+# ============================================================
+# Evaluates database migration safety practices to prevent data loss,
+# downtime, and failed deployments during schema changes.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-evolution.migration-safety"
+
+  name: "Migration Safety"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-evolution"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+    - "security"
+
+  blocks_phase: true
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates database migration safety practices including
+    destructive operation guards, data validation before and after
+    migrations, lock management, and transaction handling. It identifies
+    migrations that could cause data loss, extended downtime, or
+    deployment failures.
+
+  why_it_matters: |
+    Unsafe migrations can cause catastrophic data loss, extended outages,
+    and failed deployments that are difficult to recover from. A single
+    DROP TABLE without backup can destroy years of data. Long-running
+    migrations can lock tables and bring production to a halt. Safe
+    migration practices are essential for reliable operations.
+
+  when_to_run:
+    - "Before deploying any database migration"
+    - "During migration code review"
+    - "After migration failures"
+    - "When establishing migration standards"
+
+prerequisites:
+  required_artifacts:
+    - type: "migration-files"
+      description: "Database migration files to be reviewed"
+    - type: "migration-tooling"
+      description: "Migration framework configuration"
+
+  access_requirements:
+    - "Read access to migration files"
+    - "Access to migration framework documentation"
+    - "Historical migration logs (recommended)"
+
+discovery:
+  code_patterns:
+    - pattern: "DROP TABLE|DROP COLUMN|TRUNCATE|DELETE FROM"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify destructive operations"
+    - pattern: "ALTER TABLE.*ADD|ALTER TABLE.*DROP|ALTER TABLE.*MODIFY"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify schema changes"
+    - pattern: "BEGIN|COMMIT|ROLLBACK|TRANSACTION"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify transaction boundaries"
+
+  file_patterns:
+    - glob: "**/migrations/**/*.sql"
+      purpose: "SQL migration files"
+    - glob: "**/migrations/**/*.ts"
+      purpose: "TypeScript migration files"
+    - glob: "**/migrations/**/*.py"
+      purpose: "Python migration files"
+    - glob: "**/alembic/**/*.py"
+      purpose: "Alembic migration files"
+
+knowledge_sources:
+  guides:
+    - id: "zero-downtime-migrations"
+      name: "Zero Downtime Migrations"
+      url: "https://www.braintreepayments.com/blog/safe-operations-for-high-volume-postgresql/"
+      offline_cache: true
+
+    - id: "strong-migrations"
+      name: "Strong Migrations Ruby Gem Documentation"
+      url: "https://github.com/ankane/strong_migrations"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "strong_migrations"
+      purpose: "Detect unsafe migrations in Ruby"
+      offline_capable: true
+    - tool: "squawk"
+      purpose: "Lint PostgreSQL migrations for safety"
+      offline_capable: true
+
+  scripts:
+    - id: "detect-unsafe-migrations"
+      language: "bash"
+      purpose: "Find potentially unsafe migration operations"
+      source: "inline"
+      code: |
+        grep -riE '(DROP TABLE|DROP COLUMN|TRUNCATE|DELETE FROM)' \
+          --include='*.sql' --include='*.py' --include='*.ts' \
+          migrations/ 2>/dev/null
+
+signals:
+  critical:
+    - id: "MGSAFE-CRIT-001"
+      signal: "DROP TABLE or DROP DATABASE without backup verification"
+      evidence_pattern: "DROP TABLE|DROP DATABASE without preceding backup command"
+      explanation: |
+        Dropping tables or databases without verified backups risks
+        permanent, unrecoverable data loss. This is the most destructive
+        operation possible in database management.
+      remediation: "Implement backup verification step before any DROP operation; consider soft-delete pattern"
+
+    - id: "MGSAFE-CRIT-002"
+      signal: "Data-modifying migrations without transactions"
+      evidence_pattern: "UPDATE, DELETE statements outside transaction blocks"
+      explanation: |
+        Data modifications outside transactions cannot be rolled back
+        if errors occur partway through. A failed migration might leave
+        data in an inconsistent state.
+      remediation: "Wrap all data modifications in explicit transactions with proper error handling"
+
+  high:
+    - id: "MGSAFE-HIGH-001"
+      signal: "DROP COLUMN on production tables without data preservation"
+      evidence_pattern: "ALTER TABLE DROP COLUMN without preceding data backup/migration"
+      explanation: |
+        Dropping columns removes data permanently. Even if the column
+        seems unused, there may be historical data or edge cases that
+        depend on it.
+      remediation: "Archive column data before dropping; maintain column for transition period"
+
+    - id: "MGSAFE-HIGH-002"
+      signal: "Migrations that could acquire long-held locks"
+      evidence_pattern: "ALTER TABLE on large tables, ADD INDEX without CONCURRENTLY"
+      explanation: |
+        Schema changes on large tables can acquire locks that block
+        all reads or writes for extended periods, causing application
+        timeouts and downtime.
+      remediation: "Use CONCURRENTLY for index creation; break large migrations into smaller operations"
+
+  medium:
+    - id: "MGSAFE-MED-001"
+      signal: "Migrations without idempotency checks"
+      evidence_pattern: "CREATE TABLE without IF NOT EXISTS"
+      remediation: "Add IF EXISTS/IF NOT EXISTS guards to make migrations idempotent"
+
+    - id: "MGSAFE-MED-002"
+      signal: "Missing down/rollback migrations"
+      evidence_pattern: "Up migration without corresponding down migration"
+      remediation: "Create rollback migrations for all forward migrations"
+
+  low:
+    - id: "MGSAFE-LOW-001"
+      signal: "Migrations without comments explaining changes"
+
+  positive:
+    - id: "MGSAFE-POS-001"
+      signal: "Comprehensive migration safety practices with backup verification"
+    - id: "MGSAFE-POS-002"
+      signal: "All migrations include rollback procedures"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Migration Inventory"
+      description: |
+        Catalog all migration files and identify their operations
+        and risk levels.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find all migration files"
+          command: "find . -type f \\( -name '*.sql' -o -name '*.py' -o -name '*.ts' \\) -path '*/migrations/*' 2>/dev/null | head -50"
+        - purpose: "Count migrations by type"
+          command: "find . -type f -path '*/migrations/*' 2>/dev/null | wc -l"
+
+      expected_findings:
+        - "Complete migration inventory"
+        - "Migration file organization"
+
+    - id: "2"
+      name: "Destructive Operation Analysis"
+      description: |
+        Identify all destructive operations that could cause
+        data loss or extended downtime.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find DROP operations"
+          command: "grep -riE 'DROP (TABLE|COLUMN|DATABASE|INDEX)' --include='*.sql' --include='*.py' --include='*.ts' . 2>/dev/null | head -40"
+        - purpose: "Find TRUNCATE operations"
+          command: "grep -riE 'TRUNCATE|DELETE FROM.*WHERE' --include='*.sql' --include='*.py' --include='*.ts' . 2>/dev/null | head -30"
+        - purpose: "Find bulk UPDATE operations"
+          command: "grep -riE 'UPDATE.*SET.*WHERE' --include='*.sql' --include='*.py' --include='*.ts' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Destructive operations inventory"
+        - "Risk assessment for each operation"
+
+    - id: "3"
+      name: "Transaction Safety Analysis"
+      description: |
+        Verify migrations use proper transaction handling
+        for atomicity and rollback capability.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find transaction boundaries"
+          command: "grep -riE 'BEGIN|COMMIT|ROLLBACK|transaction|atomic' --include='*.sql' --include='*.py' --include='*.ts' -path '*/migrations/*' . 2>/dev/null | head -40"
+        - purpose: "Find operations outside transactions"
+          command: "grep -riE '(UPDATE|DELETE|INSERT)' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Transaction usage patterns"
+        - "Potentially unsafe non-transactional operations"
+
+    - id: "4"
+      name: "Lock Impact Analysis"
+      description: |
+        Identify migrations that could acquire long-held locks
+        causing downtime.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find index creation (lock-acquiring)"
+          command: "grep -riE 'CREATE INDEX|CREATE UNIQUE INDEX' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -30"
+        - purpose: "Check for CONCURRENTLY usage"
+          command: "grep -riE 'CONCURRENTLY' --include='*.sql' . 2>/dev/null | head -20"
+        - purpose: "Find large table alterations"
+          command: "grep -riE 'ALTER TABLE' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -40"
+
+      expected_findings:
+        - "Lock-acquiring operations"
+        - "Concurrent operation usage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Risk Assessment"
+        - "Destructive Operations"
+        - "Transaction Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct evidence of unsafe operations without safeguards"
+    medium: "Patterns suggest risk, context-dependent"
+    low: "Potential issues depending on table size and access patterns"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "zero-downtime-migrations"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed migration analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "mgsafe-001"
+    item: "All destructive operations identified and reviewed"
+    level: "CRITICAL"
+    verification: "grep -riE 'DROP|TRUNCATE|DELETE FROM' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | wc -l | xargs -I{} echo PASS"
+    expected: "PASS"
+
+  - id: "mgsafe-002"
+    item: "Transaction handling verified for data modifications"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify data modifications are in transactions"
+    expected: "Confirmed by reviewer"
+
+  - id: "mgsafe-003"
+    item: "Lock impact assessed for schema changes"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should assess lock duration for schema changes"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Change Management"
+      controls: ["CM-001", "CM-002"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-evolution.migration-rollback-capability"
+    - "data-state-management.schema-evolution.zero-downtime-migration"

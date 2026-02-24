@@ -1,0 +1,353 @@
+# ============================================================
+# AUDIT: Soak Test Coverage
+# ============================================================
+# Evaluates soak/endurance testing to verify system stability
+# over extended periods.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.performance-testing.soak-test-coverage"
+  name: "Soak Test Coverage"
+  version: "1.0.0"
+  last_updated: "2026-01-22"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 26
+  subcategory: "performance-testing"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "yes"
+  severity: "medium"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates soak testing (endurance testing) which runs the system
+    under normal load for extended periods to detect memory leaks,
+    resource exhaustion, database connection pool issues, and other
+    time-dependent degradation patterns.
+
+  why_it_matters: |
+    Some bugs only appear over time: memory leaks, connection pool
+    exhaustion, log file growth, and gradual performance degradation.
+    Short load tests miss these issues. Soak tests reveal problems
+    that would cause production systems to fail after days or weeks.
+
+  when_to_run:
+    - "Pre-production validation"
+    - "After memory management changes"
+    - "Long-running service validation"
+    - "Quarterly stability verification"
+
+prerequisites:
+  required_artifacts:
+    - type: "soak_tests"
+      description: "Long-duration test scripts"
+    - type: "monitoring"
+      description: "Resource monitoring capability"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Long-running test environment"
+    - "System monitoring access"
+
+discovery:
+  file_patterns:
+    - glob: "**/soak/**"
+      purpose: "Soak test directory"
+    - glob: "**/*soak*.{js,scala,py}"
+      purpose: "Soak test files"
+    - glob: "**/*endurance*.{js,scala,py}"
+      purpose: "Endurance test files"
+
+  code_patterns:
+    - pattern: "soak|endurance|duration.*[0-9]+[hm]"
+      type: "regex"
+      scope: "test"
+      purpose: "Long-duration test markers"
+    - pattern: "hours|minutes.*[0-9]{2,}"
+      type: "regex"
+      scope: "test"
+      purpose: "Extended duration configuration"
+
+knowledge_sources:
+  guides:
+    - id: "soak-testing"
+      name: "Soak Testing Guide"
+      url: "https://k6.io/docs/test-types/soak-testing/"
+      offline_cache: true
+    - id: "endurance-testing"
+      name: "Endurance Testing Best Practices"
+      url: "https://www.guru99.com/endurance-testing.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "perf-patterns"
+      title: "Performance Testing Patterns"
+      type: "article"
+      reference: "https://martinfowler.com/articles/perfTestPattern.html"
+
+tooling:
+  infrastructure_tools:
+    - tool: "k6"
+      purpose: "Soak test execution"
+      offline_capable: true
+    - tool: "JMeter"
+      purpose: "Extended duration testing"
+      offline_capable: true
+    - tool: "Prometheus + Grafana"
+      purpose: "Resource monitoring during soak"
+      offline_capable: false
+
+  scripts:
+    - id: "soak-test-check"
+      language: "bash"
+      purpose: "Check soak test configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Soak Test Coverage Analysis ==="
+
+        echo "Soak/endurance test files:"
+        find . -name '*soak*' -o -name '*endurance*' 2>/dev/null | wc -l
+
+        echo ""
+        echo "Long duration configurations:"
+        grep -r -E 'duration.*[0-9]+[hm]|hours|minutes' --include='*.js' . 2>/dev/null | head -10
+
+        echo ""
+        echo "Memory monitoring in tests:"
+        grep -r -c 'memory\|heap\|rss' --include='*.js' . 2>/dev/null | awk -F: '{sum+=$2} END {print sum}'
+
+signals:
+  critical:
+    - id: "SOAK-CRIT-001"
+      signal: "No soak testing performed"
+      evidence_pattern: "No tests running longer than 30 minutes"
+      explanation: |
+        Without soak testing, memory leaks and gradual degradation
+        go undetected. Production systems may fail after days or
+        weeks of running, causing outages during business hours.
+      remediation: |
+        Implement soak testing:
+        1. Create normal-load scenario
+        2. Run for extended duration (4+ hours minimum)
+        3. Monitor memory, CPU, connections over time
+        4. Check for resource growth patterns
+        5. Verify response time stability
+
+    - id: "SOAK-CRIT-002"
+      signal: "Resource metrics not monitored during soak"
+      evidence_pattern: "Soak tests without memory/CPU monitoring"
+      explanation: |
+        Soak tests are only valuable if resources are monitored.
+        Without tracking memory and connection usage over time,
+        leaks and exhaustion patterns can't be detected.
+      remediation: |
+        Add resource monitoring:
+        - Memory usage over time
+        - CPU utilization trends
+        - Database connection count
+        - Open file handles
+        - Thread count growth
+
+  high:
+    - id: "SOAK-HIGH-001"
+      signal: "Soak test duration too short"
+      evidence_threshold: "Soak tests < 1 hour duration"
+      explanation: |
+        Short soak tests miss slow leaks. A small memory leak may
+        take hours to become apparent. Production runs 24/7 - tests
+        should validate extended operation.
+      remediation: |
+        Extend soak test duration:
+        - Minimum 4 hours for basic validation
+        - Overnight (8+ hours) for thorough testing
+        - 24+ hours for critical systems
+        - Match production restart cycles
+
+    - id: "SOAK-HIGH-002"
+      signal: "Response time drift not checked"
+      evidence_pattern: "No validation of response time over duration"
+      explanation: |
+        Response times may gradually increase during soak as caches
+        fill, garbage collection increases, or resources compete.
+        This degradation indicates underlying issues.
+      remediation: |
+        Track response time trends:
+        - Compare start vs end response times
+        - Monitor p95/p99 throughout duration
+        - Alert on degradation > 20%
+        - Graph response time over time
+
+  medium:
+    - id: "SOAK-MED-001"
+      signal: "Database connection pool not monitored"
+      evidence_pattern: "No connection tracking during soak"
+      remediation: "Monitor active and total database connections"
+
+    - id: "SOAK-MED-002"
+      signal: "Soak tests not scheduled regularly"
+      evidence_pattern: "Manual soak test execution only"
+      remediation: "Schedule regular soak test runs (weekly/monthly)"
+
+  low:
+    - id: "SOAK-LOW-001"
+      signal: "Soak test results not archived"
+      evidence_pattern: "No historical soak test data"
+
+  positive:
+    - id: "SOAK-POS-001"
+      signal: "Regular soak testing with monitoring"
+      evidence_pattern: "Scheduled soak tests with resource tracking"
+
+    - id: "SOAK-POS-002"
+      signal: "No resource leaks detected"
+      evidence_pattern: "Flat resource usage over extended duration"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory soak tests"
+      description: |
+        Find existing soak/endurance test scenarios.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find soak tests"
+          command: "find . -name '*soak*' -o -name '*endurance*' 2>/dev/null"
+        - purpose: "Find long-duration configs"
+          command: "grep -r -l 'duration.*[0-9][hm]' --include='*.js' . 2>/dev/null"
+      expected_findings:
+        - "Soak test inventory"
+        - "Duration configurations"
+
+    - id: "2"
+      name: "Review test durations"
+      description: |
+        Analyze configured test durations.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Extract durations"
+          command: "grep -r 'duration' --include='*soak*' . 2>/dev/null | head -10"
+      expected_findings:
+        - "Configured durations"
+        - "Duration adequacy"
+
+    - id: "3"
+      name: "Check resource monitoring"
+      description: |
+        Verify resource metrics are captured during soak tests.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find monitoring configuration"
+          command: "grep -r 'memory\\|cpu\\|connection' --include='*soak*' . 2>/dev/null | head -15"
+      expected_findings:
+        - "Monitored resources"
+        - "Monitoring gaps"
+
+    - id: "4"
+      name: "Review soak test results"
+      description: |
+        Examine historical soak test outcomes if available.
+      duration_estimate: "20 min"
+      questions:
+        - "When was the last soak test run?"
+        - "Were any leaks detected?"
+        - "What was the response time trend?"
+      expected_findings:
+        - "Historical results"
+        - "Issue patterns"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "soak_report"
+      format: "table"
+      sections:
+        - "Soak Test Inventory"
+        - "Duration Analysis"
+        - "Resource Monitoring"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Soak Test Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Soak test execution with results"
+    medium: "Configuration analysis"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "soak-testing"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 8
+
+closeout_checklist:
+  - id: "soak-001"
+    item: "Soak tests inventoried"
+    level: "CRITICAL"
+    verification: "find . -name '*soak*' -o -name '*endurance*' 2>/dev/null | wc -l"
+    expected: "Count documented"
+
+  - id: "soak-002"
+    item: "Test duration assessed"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Document configured durations"
+    expected: "Confirmed by reviewer"
+
+  - id: "soak-003"
+    item: "Resource monitoring verified"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm resource metrics are tracked"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Reliability", "Performance Efficiency"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.performance-testing.load-test-coverage"
+    - "testing-quality-assurance.performance-testing.stress-test-coverage"
+    - "observability.memory-monitoring.memory-leak-detection"

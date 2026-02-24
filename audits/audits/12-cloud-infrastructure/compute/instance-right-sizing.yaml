@@ -1,0 +1,367 @@
+audit:
+  id: cloud-infrastructure.compute.instance-right-sizing
+  name: Instance Right-Sizing
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: compute
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes compute instance sizing across cloud infrastructure to identify
+    over-provisioned and under-provisioned instances. Examines CPU utilization,
+    memory usage, network throughput, and storage I/O patterns against instance
+    specifications to recommend optimal instance types and sizes.
+  why_it_matters: |
+    Improper instance sizing leads to significant cost waste (over-provisioning)
+    or performance degradation (under-provisioning). Organizations typically
+    over-provision by 40-60% due to fear of outages, resulting in millions in
+    unnecessary cloud spend. Conversely, under-provisioned instances cause
+    latency spikes, request failures, and poor user experience.
+  when_to_run:
+  - Monthly cost optimization reviews
+  - After workload pattern changes
+  - Before contract renewals with cloud providers
+  - When experiencing performance issues
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to cloud provider compute APIs
+  - type: metrics_access
+    description: Access to instance-level metrics (CPU, memory, network, disk)
+  - type: billing_access
+    description: Access to cost and usage data
+  access_requirements:
+  - Cloud provider console or API credentials
+  - CloudWatch/Stackdriver/Azure Monitor access
+  - Cost management dashboard access
+discovery:
+  metrics_queries:
+  - system: CloudWatch
+    query: |
+      SELECT AVG(CPUUtilization), MAX(CPUUtilization), MIN(CPUUtilization)
+      FROM EC2 WHERE InstanceId = '{instance_id}'
+      GROUP BY InstanceId
+      PERIOD 300 FOR 14 DAYS
+    purpose: Identify CPU utilization patterns
+    threshold: Avg < 20% suggests over-provisioning, Avg > 80% suggests under-provisioning
+  - system: CloudWatch
+    query: |
+      SELECT AVG(mem_used_percent), MAX(mem_used_percent)
+      FROM CWAgent WHERE InstanceId = '{instance_id}'
+      GROUP BY InstanceId
+      PERIOD 300 FOR 14 DAYS
+    purpose: Identify memory utilization patterns
+    threshold: Avg < 30% suggests over-provisioning
+  - system: Prometheus
+    query: |
+      avg_over_time(node_cpu_seconds_total{mode!="idle"}[14d])
+      / avg_over_time(node_cpu_seconds_total[14d]) * 100
+    purpose: Calculate CPU utilization from Prometheus metrics
+    threshold: Below 20% average indicates over-provisioning
+  file_patterns:
+  - glob: '**/terraform/**/*.tf'
+    purpose: Find Terraform instance definitions
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: Find CloudFormation templates
+  - glob: '**/pulumi/**/*.ts'
+    purpose: Find Pulumi infrastructure code
+knowledge_sources:
+  specifications:
+  - id: aws-instance-types
+    name: AWS EC2 Instance Types Documentation
+    url: https://aws.amazon.com/ec2/instance-types/
+    offline_cache: true
+    priority: required
+  - id: gcp-machine-types
+    name: Google Cloud Machine Types
+    url: https://cloud.google.com/compute/docs/machine-types
+    offline_cache: true
+    priority: required
+  - id: azure-vm-sizes
+    name: Azure VM Sizes
+    url: https://docs.microsoft.com/en-us/azure/virtual-machines/sizes
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-rightsizing
+    name: AWS Right Sizing Best Practices
+    url: https://docs.aws.amazon.com/cost-management/latest/userguide/ce-rightsizing.html
+    offline_cache: true
+  - id: finops-framework
+    name: FinOps Foundation Right-Sizing Guide
+    url: https://www.finops.org/framework/capabilities/rightsizing/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS Cost Explorer
+    purpose: Generate right-sizing recommendations
+    command: aws ce get-rightsizing-recommendation --service EC2
+  - tool: AWS Compute Optimizer
+    purpose: ML-based instance recommendations
+    command: aws compute-optimizer get-ec2-instance-recommendations
+  - tool: Google Cloud Recommender
+    purpose: GCP instance right-sizing recommendations
+    command: gcloud recommender recommendations list --recommender=google.compute.instance.MachineTypeRecommender
+  - tool: Azure Advisor
+    purpose: Azure VM right-sizing recommendations
+    command: az advisor recommendation list --category Cost
+  monitoring_queries:
+  - system: CloudWatch Insights
+    query: |
+      fields @timestamp, @message
+      | filter @logStream like /cpu|memory/
+      | stats avg(value) as avg_util by bin(1h)
+    purpose: Aggregate utilization patterns
+  scripts:
+  - id: utilization-analyzer
+    language: bash
+    purpose: Collect instance utilization metrics
+    source: inline
+    code: |
+      #!/bin/bash
+      # Analyze EC2 instance utilization
+      INSTANCE_ID=$1
+      DAYS=${2:-14}
+
+      echo "=== CPU Utilization Analysis ==="
+      aws cloudwatch get-metric-statistics \
+        --namespace AWS/EC2 \
+        --metric-name CPUUtilization \
+        --dimensions Name=InstanceId,Value=$INSTANCE_ID \
+        --start-time $(date -d "$DAYS days ago" -u +%Y-%m-%dT%H:%M:%SZ) \
+        --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+        --period 3600 \
+        --statistics Average Maximum Minimum \
+        --output table
+
+      echo "=== Network Utilization ==="
+      aws cloudwatch get-metric-statistics \
+        --namespace AWS/EC2 \
+        --metric-name NetworkIn \
+        --dimensions Name=InstanceId,Value=$INSTANCE_ID \
+        --start-time $(date -d "$DAYS days ago" -u +%Y-%m-%dT%H:%M:%SZ) \
+        --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+        --period 3600 \
+        --statistics Average Maximum \
+        --output table
+signals:
+  critical:
+  - id: RIGHTSIZING-CRIT-001
+    signal: Instance running at less than 5% CPU for extended period
+    evidence_threshold: CPU utilization avg < 5% over 14 days
+    explanation: |
+      Instances with extremely low utilization (< 5%) represent severe over-provisioning.
+      These instances are costing significant money while doing minimal work and should
+      be candidates for immediate downsizing or consolidation.
+    remediation: Downsize to smaller instance type or consolidate workloads
+  - id: RIGHTSIZING-CRIT-002
+    signal: Instance consistently maxed out causing performance degradation
+    evidence_threshold: CPU utilization avg > 95% with high p99 latency
+    explanation: |
+      Instances at maximum capacity cannot handle load spikes, causing request
+      failures and latency issues. This directly impacts user experience and
+      may violate SLAs.
+    remediation: Upsize instance or implement horizontal scaling
+  high:
+  - id: RIGHTSIZING-HIGH-001
+    signal: Instance over-provisioned with less than 20% average utilization
+    evidence_threshold: CPU avg < 20%, Memory avg < 30%
+    explanation: |
+      Significant over-provisioning wastes cloud spend. Each instance class
+      down typically saves 30-50% cost.
+    remediation: Right-size to next smaller instance type
+  - id: RIGHTSIZING-HIGH-002
+    signal: Instance type mismatched for workload pattern
+    evidence_indicators:
+    - Compute-optimized instance running memory-intensive workload
+    - General purpose instance running GPU workload
+    explanation: |
+      Using the wrong instance family for a workload results in poor
+      price-performance ratio.
+    remediation: Switch to appropriate instance family for workload type
+  medium:
+  - id: RIGHTSIZING-MED-001
+    signal: No right-sizing recommendations implemented in past 6 months
+    remediation: Review and act on cloud provider recommendations
+  - id: RIGHTSIZING-MED-002
+    signal: Instance sizing not reviewed after application changes
+    remediation: Establish process to review sizing after deployments
+  low:
+  - id: RIGHTSIZING-LOW-001
+    signal: Right-sizing implemented but savings tracking not in place
+    remediation: Implement cost tracking to validate optimization impact
+  positive:
+  - id: RIGHTSIZING-POS-001
+    signal: Regular right-sizing reviews with documented savings
+  - id: RIGHTSIZING-POS-002
+    signal: Automated right-sizing recommendations integrated into workflow
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Collection
+    description: |
+      Collect complete inventory of compute instances across all regions
+      and accounts. Document instance types, sizes, and current costs.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all EC2 instances with types
+      command: aws ec2 describe-instances --query 'Reservations[].Instances[].{ID:InstanceId,Type:InstanceType,State:State.Name}'
+        --output table
+    - purpose: Get GCP instances
+      command: gcloud compute instances list --format='table(name,zone,machineType,status)'
+    expected_findings:
+    - Complete instance inventory with types and regions
+    - Current monthly cost per instance
+  - id: '2'
+    name: Metrics Collection
+    description: |
+      Gather CPU, memory, network, and disk utilization metrics for
+      a representative time period (minimum 14 days, ideally 30 days).
+    duration_estimate: 45 min
+    commands:
+    - purpose: Export CloudWatch metrics
+      command: aws cloudwatch get-metric-data --metric-data-queries file://queries.json --start-time $(date
+        -d '14 days ago' -u +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ)
+    expected_findings:
+    - CPU utilization patterns per instance
+    - Memory usage patterns (if CW agent installed)
+    - Network throughput patterns
+  - id: '3'
+    name: Provider Recommendations Review
+    description: |
+      Collect and analyze cloud provider native right-sizing recommendations
+      from Cost Explorer, Compute Optimizer, or equivalent tools.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get AWS Compute Optimizer recommendations
+      command: aws compute-optimizer get-ec2-instance-recommendations --output json
+    - purpose: Get AWS Cost Explorer recommendations
+      command: aws ce get-rightsizing-recommendation --service EC2
+    expected_findings:
+    - Recommended instance type changes
+    - Estimated savings per recommendation
+  - id: '4'
+    name: Workload Pattern Analysis
+    description: |
+      Analyze workload patterns to understand peak usage times,
+      seasonality, and burst requirements that may affect sizing decisions.
+    duration_estimate: 45 min
+    questions:
+    - What are the peak usage hours/days for each workload?
+    - Are there seasonal patterns affecting resource needs?
+    - What burst capacity is required for traffic spikes?
+    expected_findings:
+    - Peak vs average utilization differential
+    - Time-based patterns for scheduling optimization
+  - id: '5'
+    name: Right-Sizing Recommendations
+    description: |
+      Generate specific right-sizing recommendations with cost impact
+      analysis and implementation risk assessment.
+    duration_estimate: 60 min
+    expected_findings:
+    - Prioritized list of right-sizing opportunities
+    - Estimated monthly savings per change
+    - Risk assessment for each recommendation
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Cost Analysis
+    - Right-Sizing Opportunities
+    - Implementation Roadmap
+    - Risk Assessment
+  - type: spreadsheet
+    format: csv
+    contents: Instance inventory with utilization and recommendations
+  confidence_guidance:
+    high: 14+ days of metrics data, provider recommendations align with analysis
+    medium: 7-14 days of metrics, some gaps in data collection
+    low: Less than 7 days of metrics or significant data gaps
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-instance-types
+      priority: required
+    - source_id: finops-framework
+      priority: recommended
+  limitations:
+  - Cannot collect live metrics offline
+  - Provider recommendations require API access
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires significant metrics collection time
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: rightsizing-001
+  item: Instance inventory complete
+  level: CRITICAL
+  verification: aws ec2 describe-instances --query 'length(Reservations[].Instances[])' | grep -q '[0-9]'
+    && echo PASS || echo FAIL
+  expected: PASS
+- id: rightsizing-002
+  item: Metrics collected for analysis period
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm metrics data covers at least 14 days
+  expected: Confirmed by reviewer
+- id: rightsizing-003
+  item: Provider recommendations reviewed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Document all provider-generated recommendations
+  expected: Confirmed by reviewer
+- id: rightsizing-004
+  item: Savings opportunities quantified
+  level: WARNING
+  verification: manual
+  verification_notes: Each recommendation includes estimated monthly savings
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Rightsizing
+    - Cost Optimization
+  - framework: ISO 27001
+    controls:
+    - A.12.1.3
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.compute.auto-scaling-config
+  - cloud-infrastructure.compute.reserved-capacity
+  - cloud-infrastructure.compute.spot-instance-usage

@@ -1,0 +1,424 @@
+audit:
+  id: security-trust.application-security.file-upload-security
+  name: File Upload Security Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: application-security
+  tier: phd
+  estimated_duration: 2.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines file upload functionality for security vulnerabilities
+    including unrestricted file types, insufficient validation, path traversal,
+    and storage security. It evaluates file type validation, magic byte
+    verification, filename sanitization, storage isolation, and access controls.
+  why_it_matters: |
+    Unrestricted file upload (CWE-434) allows attackers to upload malicious
+    files including web shells, malware, and scripts. Successful exploitation
+    can lead to remote code execution, complete server compromise, and data
+    breaches. File upload vulnerabilities are consistently ranked in OWASP
+    Top 10 and are actively exploited in the wild.
+  when_to_run:
+  - New file upload functionality
+  - Security assessment
+  - After upload feature changes
+  - Penetration testing
+  - Compliance audits
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: File upload handling code
+  - type: running_application
+    description: Application for testing uploads
+  access_requirements:
+  - Source code access
+  - Test account with upload permissions
+  - File storage access for verification
+discovery:
+  code_patterns:
+  - pattern: upload|multipart|file.*input|multer|formidable
+    type: regex
+    scope: source
+    purpose: Identify file upload implementations
+  - pattern: contentType|mimeType|extension|\.(?:exe|php|jsp|asp)
+    type: regex
+    scope: source
+    purpose: Identify file type validation
+  - pattern: move_uploaded_file|saveAs|write.*file
+    type: regex
+    scope: source
+    purpose: Identify file storage operations
+  file_patterns:
+  - glob: '**/upload*.js'
+    purpose: JavaScript upload handlers
+  - glob: '**/upload*.py'
+    purpose: Python upload handlers
+  - glob: '**/FileUpload*.java'
+    purpose: Java upload handlers
+knowledge_sources:
+  specifications:
+  - id: cwe-434
+    name: 'CWE-434: Unrestricted Upload of File with Dangerous Type'
+    url: https://cwe.mitre.org/data/definitions/434.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-file-upload
+    name: OWASP File Upload Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-unrestricted-upload
+    name: OWASP Unrestricted File Upload
+    url: https://owasp.org/www-community/vulnerabilities/Unrestricted_File_Upload
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Test file upload with malicious files
+    command: curl -X POST -F 'file=@shell.php' https://target/upload
+  - tool: burp
+    purpose: Intercept and modify upload requests
+    command: Manual testing with Burp Suite
+  scripts:
+  - id: upload-test
+    language: bash
+    purpose: Test upload validation bypass
+    source: inline
+    code: |
+      #!/bin/bash
+      URL=$1
+      # Test various malicious file types
+      for ext in php php5 phtml jsp jspx asp aspx exe html svg; do
+        echo "test" > /tmp/test.$ext
+        curl -s -X POST -F "file=@/tmp/test.$ext" "$URL" -o /dev/null -w "%{http_code} "
+        echo $ext
+      done
+signals:
+  critical:
+  - id: UPLOAD-CRIT-001
+    signal: No file type validation
+    cwe_id: CWE-434
+    evidence_indicators:
+    - Any file extension accepted
+    - No MIME type checking
+    - No content validation
+    explanation: |
+      Without file type validation, attackers can upload executable scripts
+      like PHP, JSP, or ASPX files. If these are served by the web server,
+      they enable remote code execution.
+    remediation: Implement allowlist-based file type validation with magic byte verification
+  - id: UPLOAD-CRIT-002
+    signal: Uploaded files stored in webroot with execute permissions
+    cwe_id: CWE-434
+    evidence_indicators:
+    - Files stored in public directory
+    - Upload directory has execute permissions
+    - Files served with original extension
+    explanation: |
+      Files stored in the webroot can be directly accessed and executed
+      by the web server. This is the primary attack vector for web shells.
+    remediation: Store uploads outside webroot; serve through application with no execute permissions
+  - id: UPLOAD-CRIT-003
+    signal: Extension validation only (no content check)
+    cwe_id: CWE-434
+    evidence_pattern: extension.*=|filename.*\.\w+
+    explanation: |
+      Extension-only validation can be bypassed using double extensions
+      (shell.php.jpg), null bytes (shell.php%00.jpg), or MIME type
+      manipulation. Content must also be validated.
+    remediation: Validate magic bytes/file headers in addition to extension
+  high:
+  - id: UPLOAD-HIGH-001
+    signal: Path traversal possible in filename
+    cwe_id: CWE-22
+    evidence_pattern: filename.*\.\.|\.\./|\\\.\.|\.\.\\
+    explanation: |
+      Unsanitized filenames with ../ can write files outside the intended
+      directory, potentially overwriting critical files or placing shells
+      in accessible locations.
+    remediation: Sanitize filenames; strip path components; generate random filenames
+  - id: UPLOAD-HIGH-002
+    signal: No file size limits
+    cwe_id: CWE-400
+    evidence_indicators:
+    - No maxFileSize configuration
+    - Unlimited upload size
+    - DoS via large file upload
+    explanation: |
+      Without size limits, attackers can exhaust server storage or memory,
+      causing denial of service.
+    remediation: Implement reasonable file size limits based on business requirements
+  - id: UPLOAD-HIGH-003
+    signal: Uploaded files not scanned for malware
+    cwe_id: CWE-434
+    evidence_indicators:
+    - No antivirus scanning
+    - No content inspection
+    - Direct storage without analysis
+    explanation: |
+      Uploaded files may contain malware that affects users who download
+      them or systems that process them.
+    remediation: Integrate antivirus scanning for all uploaded files
+  - id: UPLOAD-HIGH-004
+    signal: Client-side validation only
+    cwe_id: CWE-434
+    evidence_pattern: accept=|type=.*file.*accept|javascript.*validation
+    explanation: |
+      Client-side validation is trivially bypassed by intercepting requests.
+      All validation must occur server-side.
+    remediation: Implement server-side validation; client-side is only for UX
+  medium:
+  - id: UPLOAD-MED-001
+    signal: Original filename preserved
+    cwe_id: CWE-22
+    evidence_pattern: originalFilename|originalname|filename.*user
+    explanation: |
+      Preserving original filenames can enable attacks via special
+      characters, long names, or encoding issues. Random names are safer.
+    remediation: Generate random filenames; store original name in database if needed
+  - id: UPLOAD-MED-002
+    signal: MIME type from Content-Type header trusted
+    cwe_id: CWE-434
+    evidence_pattern: Content-Type|mimetype.*req|request.*contentType
+    explanation: |
+      The Content-Type header is client-controlled and easily spoofed.
+      It should not be trusted for security decisions.
+    remediation: Determine MIME type from file content using magic bytes
+  - id: UPLOAD-MED-003
+    signal: No Content-Disposition header on downloads
+    cwe_id: CWE-79
+    evidence_indicators:
+    - Files served without disposition header
+    - Browser renders uploaded HTML/SVG
+    explanation: |
+      Without Content-Disposition: attachment, browsers may render
+      uploaded files, enabling XSS via HTML or SVG uploads.
+    remediation: 'Add Content-Disposition: attachment and X-Content-Type-Options: nosniff'
+  low:
+  - id: UPLOAD-LOW-001
+    signal: Upload logging insufficient
+    evidence_indicators:
+    - No audit trail for uploads
+    - Uploader not recorded
+    - No file hash stored
+    explanation: |
+      Without logging, tracking malicious uploads is difficult.
+    remediation: Log all uploads with user, timestamp, hash, and original filename
+  positive:
+  - id: UPLOAD-POS-001
+    signal: Allowlist-based validation with magic bytes
+    explanation: Strong file type validation using content inspection
+  - id: UPLOAD-POS-002
+    signal: Files stored outside webroot with random names
+    explanation: Proper storage isolation prevents direct execution
+  - id: UPLOAD-POS-003
+    signal: Antivirus scanning enabled
+    explanation: Malware detection protects users and systems
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Upload Functionality
+    description: |
+      Locate all file upload endpoints and handlers in the application.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find upload handlers
+      command: grep -rn 'upload\|multipart\|multer\|formidable' src/
+    - purpose: Find file input forms
+      command: grep -rn 'type.*=.*file\|input.*file' templates/ src/
+    - purpose: Find storage operations
+      command: grep -rn 'move_uploaded_file\|saveAs\|writeFile' src/
+    expected_findings:
+    - Upload endpoint locations
+    - File handling code
+  - id: '2'
+    name: Review File Type Validation
+    description: |
+      Examine how file types are validated including extension,
+      MIME type, and content validation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find extension validation
+      command: grep -rn 'extension\|\.\(jpg\|png\|pdf\)' src/
+    - purpose: Find MIME validation
+      command: grep -rn 'mimetype\|contentType\|file-type' src/
+    - purpose: Check for magic byte validation
+      command: grep -rn 'magic\|signature\|header.*bytes' src/
+    expected_findings:
+    - Validation methods used
+    - Allowed file types
+    - Content validation presence
+  - id: '3'
+    name: Test Validation Bypass
+    description: |
+      Attempt to bypass file type validation using various techniques.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test double extension
+      command: curl -X POST -F 'file=@shell.php.jpg' https://target/upload
+    - purpose: Test null byte
+      command: curl -X POST -F 'file=@shell.php%00.jpg' https://target/upload
+    - purpose: Test MIME type manipulation
+      command: curl -X POST -F 'file=@shell.php;type=image/jpeg' https://target/upload
+    expected_findings:
+    - Bypass possibilities
+    - Validation weaknesses
+  - id: '4'
+    name: Review Storage Security
+    description: |
+      Examine where and how uploaded files are stored and accessed.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find storage path configuration
+      command: grep -rn 'upload.*path\|storage.*path\|destination' config/ src/
+    - purpose: Check storage permissions
+      command: ls -la /path/to/upload/directory
+    - purpose: Test direct file access
+      command: curl https://target/uploads/test.txt
+    expected_findings:
+    - Storage location
+    - Access controls
+    - Direct accessibility
+  - id: '5'
+    name: Test Filename Handling
+    description: |
+      Test for path traversal and filename injection vulnerabilities.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Test path traversal
+      command: curl -X POST -F 'file=@test.txt;filename=../../../etc/passwd' https://target/upload
+    - purpose: Test special characters
+      command: curl -X POST -F 'file=@test.txt;filename=test<script>.txt' https://target/upload
+    expected_findings:
+    - Path traversal possible
+    - Filename sanitization
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Upload Analysis
+    - Validation Review
+    - Storage Security
+    - Recommendations
+  confidence_guidance:
+    high: Direct testing confirms vulnerabilities, code reviewed
+    medium: Code review without comprehensive testing
+    low: Based on configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-file-upload
+      priority: required
+    - source_id: cwe-434
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: File upload audit requires comprehensive testing
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: upload-001
+  item: File type validation includes content inspection
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify magic byte/header validation in upload code
+  expected: Confirmed by reviewer
+- id: upload-002
+  item: Files stored outside webroot
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify upload directory is not web-accessible
+  expected: Confirmed by reviewer
+- id: upload-003
+  item: Executable extensions blocked
+  level: CRITICAL
+  verification: curl -s -X POST -F 'file=@test.php' https://$HOST/upload -w '%{http_code}' | grep -q '400\|403\|415'
+    && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: upload-004
+  item: Server-side validation implemented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify validation occurs server-side, not just client-side
+  expected: Confirmed by reviewer
+- id: upload-005
+  item: File size limits enforced
+  level: BLOCKING
+  verification: manual
+  verification_notes: Test upload of oversized file is rejected
+  expected: Confirmed by reviewer
+- id: upload-006
+  item: Filename sanitization implemented
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify path traversal sequences are stripped/rejected
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP-ASVS
+    controls:
+    - 12.1.1
+    - 12.1.2
+    - 12.1.3
+  - framework: PCI-DSS
+    controls:
+    - 6.5.1
+    - 6.5.8
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-5
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.injection-prevention
+  - security-trust.application-security.content-security-policy

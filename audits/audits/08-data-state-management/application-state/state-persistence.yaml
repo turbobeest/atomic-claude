@@ -1,0 +1,317 @@
+# ============================================================
+# AUDIT: State Persistence
+# ============================================================
+# Evaluates how application state is persisted including storage
+# mechanisms, serialization, versioning, and recovery.
+# ============================================================
+
+audit:
+  id: "data-state-management.application-state.state-persistence"
+
+  name: "State Persistence"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "application-state"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates state persistence strategies including what state
+    is persisted, storage mechanisms used, serialization formats, schema
+    versioning, and recovery procedures. It examines both client-side
+    persistence (localStorage, IndexedDB) and server-side persistence
+    (databases, caches).
+
+  why_it_matters: |
+    Improper state persistence leads to data loss, corruption, and poor
+    user experience. Users lose their work when browsers crash. State
+    that cannot be serialized causes silent failures. Schema changes
+    break persisted state. Proper persistence ensures continuity and
+    recoverability across sessions and failures.
+
+  when_to_run:
+    - "When implementing state persistence"
+    - "After data loss incidents"
+    - "Before major state structure changes"
+    - "When adding offline support"
+
+prerequisites:
+  required_artifacts:
+    - type: "application-code"
+      description: "Code implementing state persistence"
+    - type: "storage-config"
+      description: "Storage mechanism configuration"
+
+  access_requirements:
+    - "Read access to persistence code"
+    - "Access to storage configuration"
+
+discovery:
+  code_patterns:
+    - pattern: "persist|Persist|save|Save|localStorage|sessionStorage|IndexedDB"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify persistence code"
+    - pattern: "serialize|deserialize|JSON\\.parse|JSON\\.stringify"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify serialization"
+    - pattern: "rehydrate|hydrate|restore|load"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify state restoration"
+
+  file_patterns:
+    - glob: "**/persist/**/*"
+      purpose: "Persistence-related code"
+    - glob: "**/storage/**/*"
+      purpose: "Storage utilities"
+    - glob: "**/db/**/*"
+      purpose: "Database/IndexedDB code"
+
+knowledge_sources:
+  guides:
+    - id: "redux-persist"
+      name: "Redux Persist Documentation"
+      url: "https://github.com/rt2zz/redux-persist"
+      offline_cache: true
+
+    - id: "indexeddb-guide"
+      name: "IndexedDB API Guide"
+      url: "https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "storage-analyzer"
+      purpose: "Detect persistence issues"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "PERSIST-CRIT-001"
+      signal: "Unserializable state causing silent persistence failures"
+      evidence_pattern: "Functions, Dates, or circular references in persisted state"
+      explanation: |
+        State containing functions, Date objects, or circular references
+        cannot be JSON-serialized properly. Persistence silently fails
+        or produces corrupted state that cannot be restored.
+      remediation: "Ensure all persisted state is serializable; use custom serializers for special types"
+
+    - id: "PERSIST-CRIT-002"
+      signal: "Persisted state without versioning"
+      evidence_pattern: "No version field in persisted state structure"
+      explanation: |
+        Without versioning, schema changes break existing persisted state.
+        Users with old state formats encounter crashes or data corruption
+        when the app expects a new format.
+      remediation: "Version persisted state; implement migrations for format changes"
+
+  high:
+    - id: "PERSIST-HIGH-001"
+      signal: "localStorage used for large data sets"
+      evidence_pattern: "Storing >5MB in localStorage, exceeding quota"
+      explanation: |
+        localStorage has a ~5MB limit per origin. Exceeding this causes
+        write failures and potential data loss. Large datasets need
+        IndexedDB or other storage.
+      remediation: "Use IndexedDB for large datasets; implement storage quota monitoring"
+
+    - id: "PERSIST-HIGH-002"
+      signal: "No persistence failure handling"
+      evidence_pattern: "localStorage.setItem without try/catch"
+      explanation: |
+        Storage operations can fail due to quota, permissions, or
+        private browsing mode. Without error handling, failures go
+        undetected and users lose data.
+      remediation: "Wrap storage operations in try/catch; notify users of persistence failures"
+
+  medium:
+    - id: "PERSIST-MED-001"
+      signal: "No selective persistence (persisting unnecessary state)"
+      evidence_pattern: "Entire Redux store persisted including transient data"
+      remediation: "Configure whitelist/blacklist; persist only essential state"
+
+    - id: "PERSIST-MED-002"
+      signal: "Synchronous persistence blocking main thread"
+      evidence_pattern: "localStorage in hot path without debouncing"
+      remediation: "Use debounced persistence; consider IndexedDB for async operations"
+
+  low:
+    - id: "PERSIST-LOW-001"
+      signal: "No persistence encryption for sensitive data"
+
+  positive:
+    - id: "PERSIST-POS-001"
+      signal: "Versioned persistence with migration support"
+    - id: "PERSIST-POS-002"
+      signal: "Proper error handling and user notification"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Persistence Strategy Discovery"
+      description: |
+        Identify what state is persisted and which storage
+        mechanisms are used.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find localStorage usage"
+          command: "grep -riE 'localStorage|sessionStorage' --include='*.ts' --include='*.js' --include='*.tsx' . 2>/dev/null | head -50"
+        - purpose: "Find IndexedDB usage"
+          command: "grep -riE 'indexedDB|IDBDatabase|Dexie|localForage|idb-keyval' --include='*.ts' --include='*.js' --include='*.json' . 2>/dev/null | head -30"
+        - purpose: "Find persistence libraries"
+          command: "grep -riE 'redux-persist|persist|PERSIST|REHYDRATE' --include='*.ts' --include='*.js' --include='*.json' . 2>/dev/null | head -40"
+
+      expected_findings:
+        - "Storage mechanisms in use"
+        - "What state is persisted"
+
+    - id: "2"
+      name: "Serialization Analysis"
+      description: |
+        Evaluate serialization approach for completeness
+        and correctness.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find JSON serialization"
+          command: "grep -riE 'JSON\\.stringify|JSON\\.parse|serialize|deserialize' --include='*.ts' --include='*.js' . 2>/dev/null | head -50"
+        - purpose: "Find custom serializers"
+          command: "grep -riE 'transform|replacer|reviver|serializer' --include='*.ts' --include='*.js' . 2>/dev/null | head -30"
+        - purpose: "Find Date/function in state"
+          command: "grep -riE 'new Date\\(|Date\\.now|function|=>.*this' --include='*.ts' --include='*.js' -path '*store*' -path '*state*' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Serialization approach"
+        - "Non-serializable data risks"
+
+    - id: "3"
+      name: "Versioning Analysis"
+      description: |
+        Verify persistence includes versioning and migration
+        capability for schema evolution.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find version in persistence"
+          command: "grep -riE 'version|migrate|migration|PERSIST_VERSION|stateVersion' --include='*.ts' --include='*.js' . 2>/dev/null | head -40"
+        - purpose: "Find migration transforms"
+          command: "grep -riE 'createMigrate|transforms|migration' --include='*.ts' --include='*.js' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Versioning implementation"
+        - "Migration capability"
+
+    - id: "4"
+      name: "Error Handling Analysis"
+      description: |
+        Evaluate how persistence failures are handled
+        and communicated.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find storage error handling"
+          command: "grep -riE 'try.*localStorage|catch.*storage|quota|QuotaExceeded' --include='*.ts' --include='*.js' . 2>/dev/null | head -30"
+        - purpose: "Find persistence failure notifications"
+          command: "grep -riE 'persist.*error|storage.*error|save.*fail' --include='*.ts' --include='*.js' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Error handling coverage"
+        - "User notification mechanisms"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Storage Analysis"
+        - "Serialization Review"
+        - "Versioning Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of unserializable state or missing error handling"
+    medium: "Persistence exists but edge cases uncertain"
+    low: "Implementation appears robust but failure scenarios need testing"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "redux-persist"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive persistence analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "persist-001"
+    item: "Persistence mechanism identified"
+    level: "CRITICAL"
+    verification: "grep -riE 'localStorage|IndexedDB|persist' --include='*.ts' --include='*.js' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "persist-002"
+    item: "Persisted state is serializable"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify no functions/Dates in persisted state"
+    expected: "Confirmed by reviewer"
+
+  - id: "persist-003"
+    item: "Persistence versioning implemented"
+    level: "WARNING"
+    verification: "grep -riE 'version|migrate' --include='*.ts' --include='*.js' -path '*persist*' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "mobile-application"]
+
+  compliance_frameworks:
+    - framework: "Data Integrity"
+      controls: ["DI-009", "DI-010"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.application-state.state-recovery"
+    - "data-state-management.application-state.client-side-state-management"

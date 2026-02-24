@@ -1,0 +1,333 @@
+# ============================================================
+# Connection Pool Utilization Audit
+# ============================================================
+# Evaluates connection pool configurations and utilization for
+# database, HTTP, and other pooled connections.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.resource-utilization.connection-pool-utilization"
+  name: "Connection Pool Utilization Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "resource-utilization"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines connection pool configurations and utilization
+    patterns for database connections (HikariCP, c3p0, DBCP), HTTP client
+    pools, Redis connection pools, and other pooled resources. It identifies
+    exhausted pools, connection leaks, and misconfigured settings.
+
+  why_it_matters: |
+    Connection pool exhaustion is a common cause of application failures.
+    When pools are exhausted, threads block waiting for connections, causing
+    request timeouts and cascading failures. Connection leaks slowly degrade
+    performance until the application fails. Proper pool sizing is critical
+    for application reliability.
+
+  when_to_run:
+    - "After deploying applications with external dependencies"
+    - "When investigating timeout errors"
+    - "During database connection troubleshooting"
+    - "After changes to pool configurations"
+
+prerequisites:
+  required_artifacts:
+    - type: "application-metrics"
+      description: "Access to connection pool metrics (HikariCP, etc.)"
+    - type: "runtime-access"
+      description: "Ability to query pool metrics from applications"
+
+  access_requirements:
+    - "Read access to application metrics endpoints"
+    - "Access to database connection statistics"
+    - "Read access to application configurations"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus (HikariCP)"
+      query: "hikaricp_connections_active / hikaricp_connections_max"
+      purpose: "Database pool utilization"
+      threshold: "< 80% normal, alert at > 90%"
+    - system: "Prometheus (HikariCP)"
+      query: "hikaricp_connections_pending"
+      purpose: "Threads waiting for connections"
+      threshold: "Should be 0 normally"
+    - system: "Prometheus (HikariCP)"
+      query: "hikaricp_connections_timeout_total"
+      purpose: "Connection timeout events"
+      threshold: "Should be 0"
+    - system: "Prometheus"
+      query: "http_client_pool_connections_used / http_client_pool_connections_max"
+      purpose: "HTTP client pool utilization"
+      threshold: "< 80% for healthy operation"
+
+  code_patterns:
+    - pattern: "spring\\.datasource\\.hikari|maximum-pool-size|minimum-idle"
+      type: "regex"
+      scope: "config"
+      purpose: "HikariCP configuration"
+    - pattern: "c3p0|maxPoolSize|minPoolSize"
+      type: "regex"
+      scope: "config"
+      purpose: "c3p0 pool configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "hikaricp"
+      name: "HikariCP Configuration"
+      url: "https://github.com/brettwooldridge/HikariCP#configuration-knobs-baby"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "hikari-sizing"
+      name: "HikariCP Pool Sizing"
+      url: "https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing"
+      offline_cache: true
+    - id: "postgres-connections"
+      name: "PostgreSQL Connection Management"
+      url: "https://www.postgresql.org/docs/current/runtime-config-connection.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Query actuator metrics"
+      command: "curl -s http://localhost:8080/actuator/metrics/hikaricp.connections"
+    - tool: "psql"
+      purpose: "Check PostgreSQL active connections"
+      command: "psql -c 'SELECT count(*) FROM pg_stat_activity;'"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        rate(hikaricp_connections_timeout_total[5m]) > 0
+      purpose: "Connection timeout rate"
+
+signals:
+  critical:
+    - id: "POOL-CRIT-001"
+      signal: "Connection pool exhausted with pending requests"
+      evidence_threshold: "active == max AND pending > 0"
+      explanation: |
+        Pool exhaustion means no connections are available, and threads are
+        blocking. This causes request timeouts, thread pool exhaustion, and
+        can cascade to complete application failure.
+      remediation: "Increase pool size, fix connection leaks, or reduce connection hold time"
+
+    - id: "POOL-CRIT-002"
+      signal: "Connection leak detected"
+      evidence_threshold: "active connections growing without release"
+      explanation: |
+        Connection leaks occur when connections are acquired but never returned
+        to the pool. Over time, this exhausts the pool. Common causes include
+        missing try-with-resources or exception handling issues.
+      remediation: "Enable leak detection, find and fix unclosed connections"
+
+  high:
+    - id: "POOL-HIGH-001"
+      signal: "Connection pool utilization consistently above 80%"
+      evidence_threshold: "active / max > 0.8 for extended period"
+      explanation: |
+        High pool utilization leaves no headroom for traffic spikes. The pool
+        may exhaust during peak load, causing cascading failures.
+      remediation: "Increase pool size or optimize query performance"
+
+    - id: "POOL-HIGH-002"
+      signal: "Connection timeout events occurring"
+      evidence_threshold: "hikaricp_connections_timeout_total increasing"
+      explanation: |
+        Connection timeouts mean requests couldn't obtain a connection within
+        the configured timeout. This results in failed requests and poor user
+        experience.
+      remediation: "Increase pool size, timeout, or fix slow queries"
+
+  medium:
+    - id: "POOL-MED-001"
+      signal: "Pool significantly oversized for workload"
+      evidence_threshold: "avg(active) < 20% of max consistently"
+      remediation: "Right-size pool to reduce database connection overhead"
+
+    - id: "POOL-MED-002"
+      signal: "Connection validation not configured"
+      evidence_pattern: "Missing connectionTestQuery or validation timeout"
+      remediation: "Configure connection validation to detect stale connections"
+
+  low:
+    - id: "POOL-LOW-001"
+      signal: "Pool metrics not exposed for monitoring"
+
+  positive:
+    - id: "POOL-POS-001"
+      signal: "Pool utilization healthy with adequate headroom"
+    - id: "POOL-POS-002"
+      signal: "Zero connection timeouts in monitoring period"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory connection pool configurations"
+      description: |
+        Collect connection pool configurations from application properties
+        and runtime settings.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find HikariCP configurations"
+          command: |
+            grep -r "hikari\|datasource" --include="*.yaml" --include="*.properties" | grep -E "pool-size|maximum|minimum|timeout"
+        - purpose: "Check runtime pool settings"
+          command: |
+            curl -s http://localhost:8080/actuator/configprops | jq '.contexts[].beans | to_entries[] | select(.key | contains("hikari"))'
+      expected_findings:
+        - "Pool size configurations"
+        - "Timeout settings"
+
+    - id: "2"
+      name: "Analyze pool utilization metrics"
+      description: |
+        Query metrics to understand connection pool utilization patterns
+        and identify saturation issues.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Current pool utilization"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=hikaricp_connections_active/hikaricp_connections_max' | jq '.data.result'
+        - purpose: "Pending connection requests"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=hikaricp_connections_pending' | jq '.data.result'
+      expected_findings:
+        - "Pool utilization percentages"
+        - "Pending request counts"
+
+    - id: "3"
+      name: "Check for connection leaks"
+      description: |
+        Investigate potential connection leaks by analyzing connection
+        acquisition and release patterns.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check connection acquisition time"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=hikaricp_connections_acquire_seconds' | jq '.data.result'
+        - purpose: "Connection usage duration"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=hikaricp_connections_usage_seconds' | jq '.data.result'
+      expected_findings:
+        - "Connection hold times"
+        - "Leak indicators"
+
+    - id: "4"
+      name: "Verify database-side connection limits"
+      description: |
+        Check database connection limits to ensure pool configurations
+        are compatible with database capacity.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "PostgreSQL connection count"
+          command: |
+            psql -c "SELECT count(*) as active_connections, (SELECT setting::int FROM pg_settings WHERE name='max_connections') as max_connections FROM pg_stat_activity;"
+        - purpose: "MySQL connection count"
+          command: |
+            mysql -e "SELECT COUNT(*) as active_connections, @@max_connections as max_connections FROM information_schema.processlist;"
+      expected_findings:
+        - "Database-side connection counts"
+        - "Max connection limits"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Pool Configuration Review"
+        - "Utilization Analysis"
+        - "Leak Detection Results"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct pool metrics with historical data"
+    medium: "Point-in-time metrics observation"
+    low: "Configuration analysis without runtime verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "hikaricp"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime pool metrics"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "pool-001"
+    item: "No connection pools at >90% utilization"
+    level: "CRITICAL"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=max(hikaricp_connections_active/hikaricp_connections_max)' | jq '.data.result[0].value[1] | tonumber < 0.9'
+    expected: "true"
+
+  - id: "pool-002"
+    item: "Zero connection timeouts in past hour"
+    level: "CRITICAL"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=increase(hikaricp_connections_timeout_total[1h])' | jq '.data.result[0].value[1] | tonumber == 0'
+    expected: "true"
+
+  - id: "pool-003"
+    item: "Leak detection enabled for all pools"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify leakDetectionThreshold configured in HikariCP"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.database-performance.connection-pool-sizing"
+    - "performance-efficiency.resource-utilization.thread-pool-utilization"

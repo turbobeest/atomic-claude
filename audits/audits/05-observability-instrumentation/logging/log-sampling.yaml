@@ -1,0 +1,387 @@
+# ============================================================
+# AUDIT: Log Sampling
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "observability-instrumentation.logging.log-sampling"
+
+  name: "Log Sampling Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "observability-instrumentation"
+  category_number: 5
+  subcategory: "logging"
+
+  tier: "expert"
+  estimated_duration: "1 hour"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "medium"
+
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates log sampling strategies for high-volume logging scenarios.
+    Reviews how sampling is implemented for verbose log types (DEBUG, access logs),
+    whether sampling preserves statistical validity, and how sampling rates are
+    configured and adjusted.
+
+  why_it_matters: |
+    High-volume logging can overwhelm storage and aggregation systems, increase
+    costs, and degrade application performance. Strategic sampling maintains
+    visibility while controlling volume. However, naive sampling may miss rare
+    but critical events. Proper sampling implementation balances cost, performance,
+    and observability needs.
+
+  when_to_run:
+    - "High log volume causing cost or performance issues"
+    - "Capacity planning for logging infrastructure"
+    - "After traffic growth exceeds logging capacity"
+    - "Cost optimization initiatives"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code with logging implementation"
+    - type: "metrics"
+      description: "Log volume and rate metrics"
+
+  access_requirements:
+    - "Read access to application codebase"
+    - "Access to log volume metrics"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "sample|sampling|rate.?limit|throttle"
+      type: "regex"
+      scope: "source"
+      purpose: "Find sampling implementation"
+    - pattern: "every.?n|skip|modulo|percent"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find sampling strategies"
+    - pattern: "log.?rate|rate.?log"
+      type: "regex"
+      scope: "config"
+      purpose: "Find rate-based logging config"
+
+  file_patterns:
+    - glob: "**/sampler*.{js,ts,py,go}"
+      purpose: "Sampling implementation files"
+    - glob: "**/rate*.{js,ts,py,go}"
+      purpose: "Rate limiting implementations"
+
+  metrics_queries:
+    - system: "Prometheus"
+      query: "sum(rate(log_messages_total[1h])) by (service)"
+      purpose: "Measure log volume per service"
+      threshold: "Identify services with >10K logs/minute"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "sampling-strategies"
+      name: "Log Sampling Strategies"
+      url: "https://docs.honeycomb.io/manage-data-volume/sampling/"
+      offline_cache: true
+
+  papers:
+    - id: "reservoir-sampling"
+      title: "Random Sampling with a Reservoir"
+      url: "https://www.cs.umd.edu/~samir/498/vitter.pdf"
+
+  learning_resources:
+    - id: "observability-cost"
+      title: "Managing Observability Costs"
+      type: "article"
+      reference: "Industry practices for log volume management"
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Find sampling patterns"
+      offline_capable: true
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "sum(rate(log_bytes_total[1h]))"
+      purpose: "Measure total log volume"
+
+  scripts:
+    - id: "find-sampling"
+      language: "bash"
+      purpose: "Discover sampling implementations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Finding sampling patterns ==="
+        rg -i '(sample|sampling|rate.?limit)' --type-add 'code:*.{js,ts,py,go,java}' -t code
+        echo "=== Finding probabilistic logging ==="
+        rg -i '(random|Math\\.random|rand).*log' --type-add 'code:*.{js,ts,py,go}' -t code
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "LOG-SAMP-CRIT-001"
+      signal: "Error and critical logs being sampled"
+      evidence_pattern: "sample.*(error|critical|fatal)"
+      explanation: |
+        Sampling error logs may cause critical issues to go undetected.
+        All errors should be logged without sampling.
+      remediation: "Exclude error and above severity from sampling"
+
+  high:
+    - id: "LOG-SAMP-HIGH-001"
+      signal: "No sampling despite very high log volume"
+      explanation: "Uncontrolled volume causes storage costs and potential log loss"
+      remediation: "Implement sampling for high-volume, low-value log types"
+    - id: "LOG-SAMP-HIGH-002"
+      signal: "Sampling drops logs with unique information"
+      explanation: "May lose first occurrence of new error types"
+      remediation: "Implement head-based sampling to preserve first occurrences"
+
+  medium:
+    - id: "LOG-SAMP-MED-001"
+      signal: "Sampling rate not configurable at runtime"
+      remediation: "Allow dynamic sampling rate adjustment without restart"
+    - id: "LOG-SAMP-MED-002"
+      signal: "No metrics on sampling rate and dropped logs"
+      remediation: "Add observability into sampling behavior"
+
+  low:
+    - id: "LOG-SAMP-LOW-001"
+      signal: "Simple random sampling instead of stratified"
+
+  positive:
+    - id: "LOG-SAMP-POS-001"
+      signal: "Tail-based sampling preserves interesting traces"
+    - id: "LOG-SAMP-POS-002"
+      signal: "Severity-based sampling (sample DEBUG, log all ERROR)"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Assess current log volume"
+      description: |
+        Measure current log volume and identify high-volume sources
+        that may benefit from sampling.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Get log volume metrics"
+          command: "curl -s 'prometheus:9090/api/v1/query?query=sum(rate(log_messages_total[1h]))by(service)'"
+
+      questions:
+        - "Which services produce the most logs?"
+        - "What percentage is DEBUG vs INFO vs ERROR?"
+
+      expected_findings:
+        - "Log volume by service and level"
+        - "Candidates for sampling"
+
+    - id: "2"
+      name: "Find existing sampling implementations"
+      description: |
+        Search for any existing log sampling, rate limiting, or
+        throttling implementations.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find sampling code"
+          command: "rg -i '(sample|sampling|throttle|rate.?limit).*log' --type-add 'code:*.{js,ts,py,go,java}' -t code"
+        - purpose: "Find logger rate configuration"
+          command: "rg -i '(sample.?rate|log.?rate|every)' --type-add 'config:*.{yml,yaml,json}' -t config"
+
+      expected_findings:
+        - "Existing sampling mechanisms"
+        - "Sampling rates and strategies"
+
+    - id: "3"
+      name: "Evaluate sampling strategy"
+      description: |
+        If sampling exists, evaluate whether the strategy preserves
+        important information and excludes critical events.
+      duration_estimate: "20 min"
+
+      questions:
+        - "Are error logs excluded from sampling?"
+        - "Is sampling rate appropriate for log importance?"
+        - "Does sampling preserve statistical properties?"
+
+      expected_findings:
+        - "Sampling strategy assessment"
+        - "Coverage of log types"
+
+    - id: "4"
+      name: "Review sampling observability"
+      description: |
+        Check if there are metrics on sampling behavior including
+        drop rate and sample counts.
+      duration_estimate: "10 min"
+
+      commands:
+        - purpose: "Find sampling metrics"
+          command: "rg -i '(sampled|dropped|skipped).*counter' --type-add 'code:*.{js,ts,py,go,java}' -t code"
+
+      expected_findings:
+        - "Sampling metrics availability"
+        - "Visibility into sampling behavior"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Volume Analysis"
+        - "Sampling Strategy Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Sampling implementation directly verified in code"
+    medium: "Sampling inferred from configuration or metrics"
+    low: "Based on absence of sampling patterns"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "sampling-strategies"
+        priority: "recommended"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires volume analysis and strategy evaluation"
+    full:
+      included: true
+      priority: 3
+    production:
+      included: true
+      priority: 2
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "log-samp-001"
+    item: "Error and critical logs are not sampled"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify sampling excludes ERROR and above severity"
+    expected: "Confirmed by reviewer"
+
+  - id: "log-samp-002"
+    item: "High-volume log types have appropriate sampling"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify DEBUG/access logs are sampled if volume is excessive"
+    expected: "Confirmed by reviewer"
+
+  - id: "log-samp-003"
+    item: "Sampling rate is configurable"
+    level: "WARNING"
+    verification: "rg -l '(SAMPLE_RATE|sample.?rate)' . && echo 'PASS' || echo 'FAIL'"
+    expected: "PASS"
+
+  - id: "log-samp-004"
+    item: "Metrics exist for sampling behavior"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify counters exist for sampled and dropped logs"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["high-traffic", "cost-conscious"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.2"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "observability-instrumentation.logging.log-storage-cost"
+    - "observability-instrumentation.logging.log-level-configuration"
+    - "observability-instrumentation.logging.log-aggregation"

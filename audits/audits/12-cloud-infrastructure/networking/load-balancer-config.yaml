@@ -1,0 +1,378 @@
+audit:
+  id: cloud-infrastructure.networking.load-balancer-config
+  name: Load Balancer Configuration
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: networking
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates load balancer configurations including ALB/NLB/CLB settings,
+    health checks, SSL/TLS termination, security policies, access logging,
+    and target group configurations. Examines whether load balancers are
+    properly configured for availability, security, and performance.
+  why_it_matters: |
+    Load balancers are critical infrastructure for high availability and
+    security. Misconfigured health checks cause traffic to unhealthy targets.
+    Weak SSL policies expose data in transit. Missing access logs prevent
+    incident investigation. Proper configuration ensures availability,
+    security, and operational visibility.
+  when_to_run:
+  - Security assessments
+  - Before major traffic events
+  - After availability incidents
+  - Quarterly infrastructure reviews
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to load balancer configurations
+  - type: security_requirements
+    description: SSL/TLS and security requirements
+  access_requirements:
+  - ELB/ALB/NLB configuration access
+  - Target group access
+  - Certificate manager access
+discovery:
+  code_patterns:
+  - pattern: ssl_policy.*ELBSecurityPolicy-2016
+    type: regex
+    scope: config
+    purpose: Find outdated SSL policies
+  file_patterns:
+  - glob: '**/terraform/**/*alb*.tf'
+    purpose: Find Terraform ALB configurations
+  - glob: '**/terraform/**/*lb*.tf'
+    purpose: Find load balancer configurations
+  - glob: '**/k8s/**/*ingress*.yaml'
+    purpose: Find Kubernetes ingress configurations
+knowledge_sources:
+  specifications:
+  - id: aws-alb-docs
+    name: AWS Application Load Balancer
+    url: https://docs.aws.amazon.com/elasticloadbalancing/latest/application/
+    offline_cache: true
+    priority: required
+  - id: aws-nlb-docs
+    name: AWS Network Load Balancer
+    url: https://docs.aws.amazon.com/elasticloadbalancing/latest/network/
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: 'NIST SP 800-207: Zero Trust Architecture'
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-elb-best-practices
+    name: AWS ELB Best Practices
+    url: https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/elb-security-best-practices.html
+    offline_cache: true
+  - id: ssl-best-practices
+    name: SSL/TLS Best Practices
+    url: https://wiki.mozilla.org/Security/Server_Side_TLS
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: List load balancers
+    command: aws elbv2 describe-load-balancers
+  - tool: AWS CLI
+    purpose: List target groups and health
+    command: aws elbv2 describe-target-groups
+  - tool: AWS CLI
+    purpose: Check SSL policies
+    command: aws elbv2 describe-listeners --load-balancer-arn {lb_arn}
+  scripts:
+  - id: lb-analyzer
+    language: bash
+    purpose: Analyze load balancer configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Load Balancer Analysis ==="
+
+      # List all load balancers
+      echo "Load Balancers:"
+      aws elbv2 describe-load-balancers \
+        --query 'LoadBalancers[].{Name:LoadBalancerName,Type:Type,Scheme:Scheme,VPC:VpcId,State:State.Code}' \
+        --output table
+
+      # Check for logging
+      echo ""
+      echo "Access Logging Status:"
+      for arn in $(aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerArn' --output text); do
+        name=$(aws elbv2 describe-load-balancers --load-balancer-arns $arn --query 'LoadBalancers[0].LoadBalancerName' --output text)
+        logging=$(aws elbv2 describe-load-balancer-attributes --load-balancer-arn $arn --query 'Attributes[?Key==`access_logs.s3.enabled`].Value' --output text)
+        echo "$name: Logging=$logging"
+      done
+
+      # Check SSL policies
+      echo ""
+      echo "HTTPS Listener SSL Policies:"
+      for arn in $(aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerArn' --output text); do
+        name=$(aws elbv2 describe-load-balancers --load-balancer-arns $arn --query 'LoadBalancers[0].LoadBalancerName' --output text)
+        aws elbv2 describe-listeners --load-balancer-arn $arn --query "Listeners[?Protocol=='HTTPS'].{Port:Port,Policy:SslPolicy}" --output text | while read line; do
+          [ ! -z "$line" ] && echo "$name: $line"
+        done
+      done
+
+      # Target group health
+      echo ""
+      echo "Target Group Health:"
+      for tg in $(aws elbv2 describe-target-groups --query 'TargetGroups[].TargetGroupArn' --output text); do
+        name=$(aws elbv2 describe-target-groups --target-group-arns $tg --query 'TargetGroups[0].TargetGroupName' --output text)
+        health=$(aws elbv2 describe-target-health --target-group-arn $tg --query 'TargetHealthDescriptions[].TargetHealth.State' --output text)
+        echo "$name: $health"
+      done
+signals:
+  critical:
+  - id: LB-CRIT-001
+    signal: HTTP listener without redirect to HTTPS
+    evidence_indicators:
+    - Port 80 listener with forward action (not redirect)
+    - No HTTPS listener configured
+    explanation: |
+      HTTP traffic is unencrypted and exposes data in transit.
+      All production traffic should be HTTPS with HTTP redirected.
+    remediation: Add redirect action for HTTP to HTTPS
+  - id: LB-CRIT-002
+    signal: Outdated SSL policy allowing weak ciphers
+    evidence_pattern: 'SslPolicy: ELBSecurityPolicy-2016-08 or older'
+    explanation: |
+      Outdated SSL policies include weak ciphers vulnerable to attacks.
+      Modern policies remove known-vulnerable cipher suites.
+    remediation: Update to ELBSecurityPolicy-TLS13-1-2-2021-06 or newer
+  - id: LB-CRIT-003
+    signal: All targets unhealthy in target group
+    evidence_pattern: All targets showing unhealthy state
+    explanation: |
+      No healthy targets means the load balancer cannot serve traffic.
+      This is an active outage situation requiring immediate attention.
+    remediation: Investigate and resolve target health issues immediately
+  high:
+  - id: LB-HIGH-001
+    signal: Access logging not enabled
+    evidence_pattern: 'access_logs.s3.enabled: false'
+    explanation: |
+      Without access logs, request analysis, troubleshooting, and
+      security incident investigation is impossible.
+    remediation: Enable access logging to S3 bucket
+  - id: LB-HIGH-002
+    signal: Health check configuration too lenient
+    evidence_indicators:
+    - Health check interval > 30 seconds
+    - Unhealthy threshold > 3
+    - No path-based health check
+    explanation: |
+      Lenient health checks delay detection of unhealthy targets,
+      causing prolonged periods of degraded service.
+    remediation: Configure health checks with appropriate sensitivity
+  - id: LB-HIGH-003
+    signal: Cross-zone load balancing disabled
+    evidence_pattern: 'load_balancing.cross_zone.enabled: false'
+    explanation: |
+      Without cross-zone, traffic isn't distributed evenly when
+      AZ capacity is unbalanced, causing potential overload.
+    remediation: Enable cross-zone load balancing
+  medium:
+  - id: LB-MED-001
+    signal: WAF not associated with ALB
+    remediation: Associate WAF WebACL for application-layer protection
+  - id: LB-MED-002
+    signal: Connection draining timeout too short
+    remediation: Increase deregistration delay for graceful shutdown
+  - id: LB-MED-003
+    signal: No deletion protection enabled
+    remediation: Enable deletion protection for production load balancers
+  low:
+  - id: LB-LOW-001
+    signal: Load balancer not tagged for cost allocation
+    remediation: Implement cost allocation tags
+  positive:
+  - id: LB-POS-001
+    signal: Modern SSL policy with TLS 1.3 support
+  - id: LB-POS-002
+    signal: Access logging enabled with appropriate retention
+  - id: LB-POS-003
+    signal: WAF protection enabled
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Load Balancer Inventory
+    description: |
+      Collect inventory of all load balancers including types,
+      schemes, and associated resources.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List all load balancers
+      command: aws elbv2 describe-load-balancers --query 'LoadBalancers[].{Name:LoadBalancerName,ARN:LoadBalancerArn,Type:Type,Scheme:Scheme,VPC:VpcId}'
+        --output table
+    - purpose: List classic load balancers
+      command: aws elb describe-load-balancers --query 'LoadBalancerDescriptions[].{Name:LoadBalancerName,Scheme:Scheme,VPC:VPCId}'
+        --output table 2>/dev/null || echo 'No CLBs'
+    expected_findings:
+    - Complete load balancer inventory
+    - Types and schemes in use
+  - id: '2'
+    name: Security Configuration Review
+    description: |
+      Review SSL policies, security groups, and WAF associations
+      for security compliance.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check listener SSL policies
+      command: for arn in $(aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerArn'
+        --output text); do echo "=== $arn ==="; aws elbv2 describe-listeners --load-balancer-arn $arn
+        --query 'Listeners[].{Port:Port,Protocol:Protocol,SSLPolicy:SslPolicy}' --output table; done
+    - purpose: Check WAF associations
+      command: for arn in $(aws elbv2 describe-load-balancers --query 'LoadBalancers[?Type==`application`].LoadBalancerArn'
+        --output text); do echo "=== $arn ==="; aws wafv2 get-web-acl-for-resource --resource-arn $arn
+        2>/dev/null || echo 'No WAF'; done
+    expected_findings:
+    - SSL policy compliance
+    - WAF coverage
+  - id: '3'
+    name: Health Check Assessment
+    description: |
+      Review target group health check configurations and
+      current target health status.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get target group health check configs
+      command: aws elbv2 describe-target-groups --query 'TargetGroups[].{Name:TargetGroupName,Protocol:Protocol,Port:Port,HealthPath:HealthCheckPath,Interval:HealthCheckIntervalSeconds,Threshold:UnhealthyThresholdCount}'
+        --output table
+    - purpose: Check current target health
+      command: for tg in $(aws elbv2 describe-target-groups --query 'TargetGroups[].TargetGroupArn' --output
+        text | head -10); do echo "=== $tg ==="; aws elbv2 describe-target-health --target-group-arn $tg
+        --output table; done
+    expected_findings:
+    - Health check configurations
+    - Current health status
+  - id: '4'
+    name: Logging and Monitoring Review
+    description: |
+      Verify access logging is enabled and properly configured
+      for all load balancers.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check access logging
+      command: 'for arn in $(aws elbv2 describe-load-balancers --query ''LoadBalancers[].LoadBalancerArn''
+        --output text); do name=$(echo $arn | rev | cut -d''/'' -f2 | rev); logging=$(aws elbv2 describe-load-balancer-attributes
+        --load-balancer-arn $arn --query ''Attributes[?Key==`access_logs.s3.enabled`].Value'' --output
+        text); echo "$name: $logging"; done'
+    expected_findings:
+    - Logging enablement status
+    - Log destination verification
+  - id: '5'
+    name: Recommendations Development
+    description: |
+      Generate specific recommendations for load balancer
+      configuration improvements.
+    duration_estimate: 20 min
+    expected_findings:
+    - Security improvements
+    - Availability improvements
+    - Operational improvements
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Security Assessment
+    - Health Check Review
+    - Logging Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Full access to load balancer configurations and logs
+    medium: Configuration access without log access
+    low: Limited configuration access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-alb-docs
+      priority: required
+    - source_id: ssl-best-practices
+      priority: required
+  limitations:
+  - Cannot access live configurations offline
+  - Target health requires runtime access
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Critical availability check
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: lb-001
+  item: All load balancers inventoried
+  level: CRITICAL
+  verification: aws elbv2 describe-load-balancers --query 'length(LoadBalancers)' | grep -qE '[0-9]+'
+    && echo PASS || echo FAIL
+  expected: PASS
+- id: lb-002
+  item: SSL policies meet minimum requirements
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify no policies older than 2020
+  expected: Confirmed by reviewer
+- id: lb-003
+  item: Access logging enabled
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify access logging for all production LBs
+  expected: Confirmed by reviewer
+- id: lb-004
+  item: Health checks appropriately configured
+  level: WARNING
+  verification: manual
+  verification_notes: Review health check settings for sensitivity
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.7
+  - framework: PCI-DSS
+    controls:
+    - '2.2'
+    - '4.1'
+  - framework: HIPAA
+    controls:
+    - 164.312(e)(1)
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.networking.vpc-design
+  - cloud-infrastructure.compute.auto-scaling-config
+  - cloud-infrastructure.networking.cdn-configuration

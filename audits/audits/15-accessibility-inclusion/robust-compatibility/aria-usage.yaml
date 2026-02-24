@@ -1,0 +1,424 @@
+audit:
+  id: accessibility-inclusion.robust-compatibility.aria-usage
+  name: ARIA Implementation Correctness
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: accessibility-inclusion
+  category_number: 15
+  subcategory: robust-compatibility
+  tier: phd
+  estimated_duration: 3-5 hours  # median: 4h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines ARIA (Accessible Rich Internet Applications) usage
+    to ensure it follows the WAI-ARIA specification and enhances rather than
+    hinders accessibility. The audit checks:
+
+    - ARIA roles are valid and used appropriately
+    - Required ARIA states and properties are present
+    - ARIA attributes have valid values
+    - ARIA is not used where native HTML semantics suffice
+    - Parent-child role relationships are correct
+    - Dynamic ARIA state updates are implemented correctly
+    - ARIA live regions are properly configured
+
+    The first rule of ARIA is "Don't use ARIA if you don't have to" - native
+    HTML semantics should be preferred. When ARIA is necessary, it must be
+    implemented correctly to avoid creating barriers.
+  why_it_matters: |
+    Incorrect ARIA usage is one of the most common causes of accessibility
+    failures. Misused ARIA can:
+    - Override correct native HTML semantics
+    - Provide incorrect information to assistive technologies
+    - Create confusing or misleading user experiences
+    - Cause screen readers to announce content incorrectly or skip it
+    - Break expected keyboard navigation patterns
+
+    Properly implemented ARIA enables complex UI patterns to be accessible,
+    but incorrect ARIA is worse than no ARIA at all.
+  when_to_run:
+  - During development of custom widgets
+  - When implementing ARIA design patterns
+  - During accessibility audits
+  - After major UI component changes
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Frontend components with ARIA implementation
+  - type: running_application
+    description: Application for live ARIA testing
+  access_requirements:
+  - Source code access
+  - Browser developer tools
+  - Screen reader for verification
+discovery:
+  code_patterns:
+  - pattern: role=['"][^'"]+['"]
+    type: regex
+    scope: source
+    purpose: Find ARIA role attributes
+  - pattern: aria-[a-z]+=['"][^'"]*['"]
+    type: regex
+    scope: source
+    purpose: Find ARIA state and property attributes
+  - pattern: aria-live=['"][^'"]*['"]
+    type: regex
+    scope: source
+    purpose: Find ARIA live regions
+  - pattern: aria-hidden=['"]true['"]
+    type: regex
+    scope: source
+    purpose: Find hidden content that may affect focusable elements
+  file_patterns:
+  - glob: '**/*.{js,jsx,ts,tsx}'
+    purpose: JavaScript/TypeScript components
+  - glob: '**/*.vue'
+    purpose: Vue components
+  - glob: '**/*.svelte'
+    purpose: Svelte components
+  - glob: '**/*.html'
+    purpose: HTML files
+  - glob: '**/components/**'
+    purpose: Component library
+knowledge_sources:
+  specifications:
+  - id: wai-aria-1.2
+    name: WAI-ARIA 1.2 Specification
+    url: https://www.w3.org/TR/wai-aria-1.2/
+    offline_cache: true
+    priority: required
+  - id: wcag-4.1.2
+    name: 'WCAG 2.2 Success Criterion 4.1.2: Name, Role, Value'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/name-role-value.html
+    offline_cache: true
+    priority: required
+  - id: aria-in-html
+    name: ARIA in HTML
+    url: https://www.w3.org/TR/html-aria/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aria-apg
+    name: ARIA Authoring Practices Guide
+    url: https://www.w3.org/WAI/ARIA/apg/
+    offline_cache: true
+  - id: aria-rules
+    name: Five Rules of ARIA Use
+    url: https://www.w3.org/TR/using-aria/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: axe-core
+    purpose: Comprehensive ARIA validation
+    offline_capable: true
+  - tool: eslint-plugin-jsx-a11y
+    purpose: Lint ARIA usage in React components
+    offline_capable: true
+  - tool: pa11y
+    purpose: Automated ARIA testing
+    offline_capable: true
+  scripts:
+  - id: aria-role-finder
+    language: bash
+    purpose: Find and categorize ARIA roles
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== ARIA Roles Used ==="
+      grep -rohn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        --include="*.html" 'role="[^"]*"' . | sort | uniq -c | sort -rn
+
+      echo ""
+      echo "=== ARIA Live Regions ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        --include="*.html" 'aria-live=' .
+
+      echo ""
+      echo "=== aria-hidden on potentially focusable elements ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        'aria-hidden="true"' . | grep -E "(button|input|a |href|tabindex)"
+signals:
+  critical:
+  - id: A11Y-ARIA-CRIT-001
+    signal: aria-hidden on focusable interactive elements
+    evidence_pattern: aria-hidden=['"]true['"][^>]*(button|input|href|tabindex="[0-9])
+    explanation: |
+      Content is hidden from assistive technology (aria-hidden="true") but
+      contains focusable elements. This creates a trap where keyboard users
+      can focus elements that screen readers cannot access, or causes
+      confusion when focus appears to be on invisible content.
+    remediation: |
+      Either remove aria-hidden or ensure no focusable elements exist within.
+      Use inert attribute or tabindex="-1" on all descendants if content
+      must be hidden but remain in DOM.
+  - id: A11Y-ARIA-CRIT-002
+    signal: Invalid ARIA role value
+    evidence_pattern: role="[^"]+"
+    explanation: |
+      An ARIA role attribute has an invalid value not defined in the
+      WAI-ARIA specification. Invalid roles are ignored, leaving elements
+      without proper semantic meaning.
+    remediation: |
+      Use only valid ARIA roles from the specification. Common mistakes:
+      - "role='link'" should be just "role='link'" not "role='hyperlink'"
+      - "role='btn'" should be "role='button'"
+      Check WAI-ARIA spec for valid role values.
+  - id: A11Y-ARIA-CRIT-003
+    signal: Missing required ARIA properties for role
+    evidence_pattern: role="(slider|checkbox|radio)"[^>]*(?!aria-)
+    explanation: |
+      An ARIA role requires certain states or properties that are missing.
+      For example, role="checkbox" requires aria-checked, role="slider"
+      requires aria-valuenow, aria-valuemin, aria-valuemax.
+    remediation: |
+      Add all required ARIA states and properties for the role. Consult
+      WAI-ARIA specification for required properties per role.
+  high:
+  - id: A11Y-ARIA-HIGH-001
+    signal: ARIA role conflicts with native HTML semantics
+    evidence_pattern: <(button|input|a)[^>]*role="(?!button|link)
+    explanation: |
+      An ARIA role overrides appropriate native HTML semantics. For example,
+      a <button> with role="link" confuses the semantic meaning and expected
+      behavior.
+    remediation: |
+      Use native HTML elements with their inherent semantics when possible.
+      Only override with ARIA when creating truly different functionality.
+  - id: A11Y-ARIA-HIGH-002
+    signal: ARIA attribute on wrong element type
+    evidence_pattern: aria-(checked|pressed|expanded).*(?!button|role)
+    explanation: |
+      ARIA states are applied to elements where they don't make semantic
+      sense. For example, aria-checked on a div without a role.
+    remediation: |
+      Apply ARIA states only to elements with appropriate roles, either
+      native or explicitly assigned via role attribute.
+  - id: A11Y-ARIA-HIGH-003
+    signal: Incorrect parent-child role relationship
+    evidence_indicators:
+    - role='listitem' without parent role='list'
+    - role='option' without parent role='listbox'
+    - role='tab' without parent role='tablist'
+    explanation: |
+      Certain ARIA roles require specific parent-child relationships. When
+      violated, assistive technologies cannot properly interpret the
+      structure.
+    remediation: |
+      Ensure required parent roles exist. Examples:
+      - listitem must be child of list
+      - option must be child of listbox
+      - tab must be child of tablist
+      - menuitem must be child of menu/menubar
+  medium:
+  - id: A11Y-ARIA-MED-001
+    signal: Redundant ARIA role on semantic HTML
+    evidence_pattern: <(button|nav|main|header|footer)[^>]*role="\1"
+    explanation: |
+      ARIA roles duplicate what native HTML already provides. While not
+      harmful, it's unnecessary and may indicate misunderstanding of ARIA.
+    remediation: |
+      Remove redundant ARIA roles. Native HTML5 elements provide semantics:
+      - <button> has implicit role="button"
+      - <nav> has implicit role="navigation"
+      - <main> has implicit role="main"
+  - id: A11Y-ARIA-MED-002
+    signal: aria-live region too aggressive
+    evidence_pattern: aria-live=['"]assertive['"]
+    explanation: |
+      aria-live="assertive" interrupts the user immediately. Overuse causes
+      a jarring experience where frequent updates constantly interrupt.
+    remediation: |
+      Use aria-live="polite" for most updates. Reserve "assertive" for
+      critical time-sensitive information like session timeout warnings.
+  low:
+  - id: A11Y-ARIA-LOW-001
+    signal: aria-label on non-interactive element
+    evidence_pattern: <(div|span|p)[^>]*aria-label=
+    explanation: |
+      aria-label on non-interactive elements may not be announced by all
+      screen readers. Consider if the label is serving its intended purpose.
+    remediation: |
+      For non-interactive elements, prefer visible text or aria-labelledby
+      pointing to visible text. Use aria-label primarily on interactive
+      elements and landmarks.
+  positive:
+  - id: A11Y-ARIA-POS-001
+    signal: ARIA Authoring Practices patterns followed
+    evidence_indicators:
+    - Widgets match APG design patterns
+    - Keyboard interaction patterns implemented correctly
+  - id: A11Y-ARIA-POS-002
+    signal: Native HTML preferred over ARIA
+    evidence_indicators:
+    - Semantic HTML elements used where appropriate
+    - ARIA only used for custom widget patterns
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory ARIA usage
+    description: |
+      Catalog all ARIA roles, states, and properties used in the codebase.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find all ARIA roles
+      command: |
+        grep -rohn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+          --include="*.html" 'role="[^"]*"' . | sort | uniq -c | sort -rn
+    - purpose: Find all ARIA attributes
+      command: |
+        grep -rohn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+          --include="*.html" 'aria-[a-z-]*=' . | sed 's/=.*//' | sort | uniq -c | sort -rn
+    expected_findings:
+    - Complete inventory of ARIA usage
+    - Frequency of each role and attribute
+  - id: '2'
+    name: Validate ARIA values and combinations
+    description: |
+      Verify ARIA roles are valid and required properties are present.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Run automated ARIA validation
+      command: |
+        npx axe-cli --rules "aria-*" . 2>/dev/null || echo "Run axe manually"
+    expected_findings:
+    - Invalid ARIA values identified
+    - Missing required properties identified
+  - id: '3'
+    name: Check ARIA structural relationships
+    description: |
+      Verify parent-child role relationships and proper nesting.
+    duration_estimate: 30 min
+    questions:
+    - Do all listitems have list parents?
+    - Do all tabs have tablist parents?
+    - Are menu structures properly nested?
+    expected_findings:
+    - Any structural relationship violations
+  - id: '4'
+    name: Verify live region implementation
+    description: |
+      Check that aria-live regions are properly configured and not overused.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find live regions
+      command: |
+        grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+          'aria-live=' .
+    expected_findings:
+    - Live region inventory
+    - Assessment of politeness levels used
+  - id: '5'
+    name: Screen reader verification
+    description: |
+      Test custom widgets with screen reader to verify ARIA implementation
+      produces expected announcements.
+    duration_estimate: 45 min
+    questions:
+    - Are roles announced correctly?
+    - Are states (expanded, selected, etc.) announced on change?
+    - Is live region content announced appropriately?
+    expected_findings:
+    - Screen reader announcement patterns
+    - Any ARIA that doesn't function as expected
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - ARIA Usage Inventory
+    - Validation Findings
+    - Screen Reader Testing Results
+    - Recommendations
+  confidence_guidance:
+    high: Automated validation plus screen reader testing
+    medium: Automated validation only
+    low: Code review without runtime testing
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: wai-aria-1.2
+      priority: required
+    - source_id: wcag-4.1.2
+      priority: required
+    - source_id: aria-apg
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis and testing
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: aria-usage-001
+  item: No invalid ARIA role values
+  level: CRITICAL
+  verification: manual
+  verification_notes: Run axe-core and verify no invalid role violations
+  expected: Confirmed by reviewer
+- id: aria-usage-002
+  item: No aria-hidden on focusable elements
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.jsx" --include="*.tsx" --include="*.html" \
+      'aria-hidden="true"' . | grep -E "(button|href|tabindex=\"[0-9])" | wc -l | \
+      xargs -I {} sh -c '[ {} -eq 0 ] && echo "PASS" || echo "FAIL"'
+  expected: PASS
+- id: aria-usage-003
+  item: Required ARIA properties present for all roles
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify roles like checkbox, slider have required states
+  expected: Confirmed by reviewer
+- id: aria-usage-004
+  item: Screen reader announces ARIA content correctly
+  level: BLOCKING
+  verification: manual
+  verification_notes: Test with NVDA, JAWS, or VoiceOver
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - spa
+    - custom-widgets
+  compliance_frameworks:
+  - framework: WCAG 2.2
+    controls:
+    - 4.1.2
+  - framework: Section 508
+    controls:
+    - 1194.22(n)
+  - framework: EN 301 549
+    controls:
+    - 9.4.1.2
+relationships:
+  commonly_combined:
+  - accessibility-inclusion.robust-compatibility.valid-html
+  - accessibility-inclusion.robust-compatibility.aria-label-completeness
+  - accessibility-inclusion.robust-compatibility.role-attribute
+  - accessibility-inclusion.assistive-technology.screen-reader-flow

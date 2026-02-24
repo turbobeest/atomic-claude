@@ -1,0 +1,279 @@
+audit:
+  id: signal-processing-data-acquisition.spectral-analysis.windowing-function
+  name: Windowing Function Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: spectral-analysis
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates window function selection and application
+    for spectral analysis. It examines:
+    - Window type selection for application
+    - Spectral leakage control
+    - Main lobe width vs. side lobe trade-offs
+    - Window overlap for STFT applications
+    - Amplitude correction factors
+    - Window symmetry and periodic vs. symmetric variants
+  why_it_matters: |
+    Windowing is essential for accurate spectral analysis:
+    - Rectangular window causes severe spectral leakage
+    - Different windows trade off frequency resolution vs. leakage
+    - Hann/Hamming suitable for general use
+    - Flat-top for amplitude accuracy
+    - Blackman for high dynamic range
+    - Wrong window choice corrupts spectral measurements
+
+    Proper windowing enables accurate frequency and amplitude
+    measurements from finite-length data records.
+  when_to_run:
+  - Spectral analysis system design
+  - FFT-based measurement development
+  - STFT/spectrogram implementation
+  - Amplitude accuracy verification
+  - Dynamic range optimization
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Windowing implementation
+  - type: requirements
+    description: Spectral analysis requirements
+  - type: application_context
+    description: Application type and constraints
+  access_requirements:
+  - Access to windowing code
+  - Spectral analysis requirements
+  - Application documentation
+discovery:
+  code_patterns:
+  - pattern: (window|hann|hamming|blackman|kaiser|flat_top)
+    type: regex
+    scope: source
+    purpose: Detect window type
+  - pattern: (window|win)_(function|type|coeff)
+    type: regex
+    scope: source
+    purpose: Detect window configuration
+  - pattern: (overlap|hop_size|hop_length)
+    type: regex
+    scope: source
+    purpose: Detect overlap-add parameters
+  file_patterns:
+  - glob: '**/window*.{c,h,cpp,py}'
+    purpose: Window function files
+  - glob: '**/fft*.{c,h,cpp,py}'
+    purpose: FFT files with windowing
+  - glob: '**/spectrum*.{c,h,cpp,py}'
+    purpose: Spectral analysis files
+knowledge_sources:
+  specifications:
+  - id: harris-windows
+    name: Harris - On the Use of Windows for Harmonic Analysis
+    url: https://ieeexplore.ieee.org/document/1455106
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ni-windowing
+    name: National Instruments Windowing Guide
+    url: https://www.ni.com/en-us/support/documentation/supplemental/windowing.html
+    offline_cache: true
+signals:
+  critical:
+  - id: WIN-CRIT-001
+    signal: No windowing applied (rectangular window implicit)
+    evidence_indicators:
+    - FFT applied directly to data
+    - No window function multiplication
+    - Severe spectral leakage visible
+    explanation: |
+      Rectangular window (no windowing) causes severe spectral
+      leakage with -13dB side lobes. This masks small signals
+      near strong ones and corrupts spectral measurements.
+    remediation: |
+      - Apply appropriate window before FFT
+      - Use Hann for general purpose
+      - Select window based on requirements
+      - Document window selection rationale
+    cwe: CWE-682
+  high:
+  - id: WIN-HIGH-001
+    signal: Window type inappropriate for application
+    evidence_indicators:
+    - Hann used where flat-top needed for amplitude
+    - Rectangular used for continuous analysis
+    - Main lobe too wide for resolution needs
+    explanation: |
+      Different windows trade off main lobe width against side lobe
+      level. Wrong selection compromises either frequency resolution
+      or spectral leakage suppression.
+    remediation: |
+      - Use flat-top for amplitude accuracy
+      - Use Blackman-Harris for high dynamic range
+      - Use Hann for balanced general purpose
+      - Match window to application requirements
+  - id: WIN-HIGH-002
+    signal: Amplitude correction not applied
+    evidence_indicators:
+    - Window reduces signal amplitude
+    - No coherent or incoherent gain correction
+    - Amplitude measurements incorrect
+    explanation: |
+      Windows reduce signal amplitude. Coherent gain correction
+      restores amplitude for sinusoids; energy gain correction
+      restores total energy. Measurements require correction.
+    remediation: |
+      - Apply coherent gain correction for tones
+      - Apply energy correction for noise/broadband
+      - Document correction factors used
+      - Verify amplitude accuracy after correction
+  medium:
+  - id: WIN-MED-001
+    signal: STFT overlap not matched to window
+    evidence_indicators:
+    - Overlap doesn't provide constant overlap-add
+    - Amplitude modulation in spectrogram
+    - Window overlap factor arbitrary
+    explanation: |
+      STFT requires proper overlap for constant overlap-add (COLA).
+      Hann window needs 50% overlap; other windows have different
+      requirements. Wrong overlap causes amplitude modulation.
+    remediation: |
+      - Use COLA-compliant overlap
+      - Hann: 50% overlap
+      - Verify overlap-add sums to constant
+      - Document overlap selection rationale
+  - id: WIN-MED-002
+    signal: Periodic vs. symmetric window confusion
+    evidence_indicators:
+    - Wrong variant for FFT use
+    - Symmetric window used for IFFT reconstruction
+    - Subtle amplitude errors
+    explanation: |
+      Symmetric windows have length N with endpoints equal.
+      Periodic windows have length N with period N for DFT.
+      Wrong choice causes subtle errors in spectral analysis.
+    remediation: |
+      - Use periodic for spectral analysis
+      - Use symmetric for filter design
+      - Verify library function variant
+      - Document which variant is used
+  low:
+  - id: WIN-LOW-001
+    signal: Window selection not documented
+    evidence_indicators:
+    - Window type chosen without rationale
+    - No documentation of trade-offs
+    - Correction factors not specified
+    explanation: |
+      Undocumented window selection makes verification and
+      maintenance difficult. Trade-offs and correction factors
+      should be recorded for future reference.
+    remediation: |
+      - Document window selection rationale
+      - Record main lobe width and side lobe level
+      - Specify correction factors
+      - Note application requirements
+  positive:
+  - id: WIN-POS-001
+    signal: Well-selected window with proper correction
+    evidence_indicators:
+    - Window matched to application
+    - Amplitude correction applied
+    - Selection documented
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: dsp-engineer
+  steps:
+  - id: '1'
+    name: Window Configuration Review
+    description: |
+      Review window function selection and application.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find windowing code
+      command: |
+        grep -rniE "(window|hann|hamming|blackman)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - Window type identification
+    - Application point
+    - Correction factors
+  - id: '2'
+    name: Spectral Leakage Assessment
+    description: |
+      Assess spectral leakage control.
+    duration_estimate: 30 min
+    manual_verification: true
+    expected_findings:
+    - Side lobe level
+    - Main lobe width
+    - Application appropriateness
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Window Selection Analysis
+    - Leakage Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: win-001
+  item: Windowing applied before FFT
+  level: CRITICAL
+  verification: |
+    grep -rniE "(window|hann|hamming).*fft|fft.*window" \
+      --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: win-002
+  item: Window type appropriate for application
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify window selection matches requirements
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - signal-processing
+    - audio-systems
+    - scientific-instruments
+relationships:
+  commonly_combined:
+  - signal-processing.spectral-analysis.fft-implementation
+  - signal-processing.spectral-analysis.spectral-leakage
+  - signal-processing.spectral-analysis.frequency-resolution
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

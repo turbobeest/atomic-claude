@@ -1,0 +1,458 @@
+audit:
+  id: security-trust.input-validation.header-injection
+  name: Header Injection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the codebase for HTTP Header Injection vulnerabilities
+    (CWE-113), also known as CRLF Injection or HTTP Response Splitting. It
+    identifies patterns where user input is included in HTTP response headers
+    without proper sanitization of CR (Carriage Return) and LF (Line Feed)
+    characters.
+  why_it_matters: |
+    Header injection allows attackers to inject arbitrary HTTP headers or even
+    control the response body. This enables Cross-Site Scripting (XSS), cookie
+    injection, session fixation, CSP bypass, CORS manipulation, and cache
+    poisoning. While modern frameworks provide some protection, custom header
+    handling and legacy code remain vulnerable. OWASP classifies this under
+    A03:2021-Injection.
+  when_to_run:
+  - Initial security audit of web applications
+  - Code review for HTTP handling changes
+  - Before production deployment
+  - When implementing custom headers
+  - When adding redirect functionality
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code with HTTP response handling
+  access_requirements:
+  - Read access to source code repositories
+discovery:
+  code_patterns:
+  - pattern: response\.headers\[.*\]\s*=.*request|add_header.*request|set_header.*request
+    type: regex
+    scope: source
+    purpose: Detect Python header assignment with user input
+  - pattern: response\[.*\].*=.*request|make_response.*headers
+    type: regex
+    scope: source
+    purpose: Detect Flask header manipulation
+  - pattern: HttpResponse\[.*\].*=|response\.set_cookie.*request
+    type: regex
+    scope: source
+    purpose: Detect Django header assignment
+  - pattern: res\.setHeader\s*\(.*req\.|res\.header\s*\(.*req\.
+    type: regex
+    scope: source
+    purpose: Detect Express.js header with request data
+  - pattern: response\.headers\.set.*request|writeHead.*req\.
+    type: regex
+    scope: source
+    purpose: Detect Node.js header manipulation
+  - pattern: setHeader\s*\(.*request|addHeader\s*\(.*getParameter
+    type: regex
+    scope: source
+    purpose: Detect Java servlet header with request
+  - pattern: response\.setHeader|HttpServletResponse.*setHeader
+    type: regex
+    scope: source
+    purpose: Detect Java HTTP header manipulation
+  - pattern: header\s*\(.*\$_(GET|POST|REQUEST)|header\s*\(.*\.
+    type: regex
+    scope: source
+    purpose: Detect PHP header() with user input
+  - pattern: redirect\s*\(.*request|Location.*request|302.*request
+    type: regex
+    scope: source
+    purpose: Detect redirects with user input
+  - pattern: res\.redirect.*req\.|return.*redirect.*request
+    type: regex
+    scope: source
+    purpose: Detect framework redirects with request
+  - pattern: set_cookie.*request|Set-Cookie.*request|res\.cookie.*req
+    type: regex
+    scope: source
+    purpose: Detect cookie setting with user input
+  - pattern: \\r\\n|\\n|%0d%0a|%0a|%0d
+    type: regex
+    scope: source
+    purpose: Detect CRLF sequences in code
+  - pattern: Content-Type.*request|content_type.*user
+    type: regex
+    scope: source
+    purpose: Detect Content-Type with user input
+  - pattern: replace.*\\r|replace.*\\n|strip.*newline|sanitize.*header
+    type: regex
+    scope: source
+    purpose: Detect CRLF sanitization (positive)
+  file_patterns:
+  - glob: '**/*.py'
+    purpose: Python HTTP handling code
+  - glob: '**/*.js'
+    purpose: JavaScript HTTP handling code
+  - glob: '**/*.java'
+    purpose: Java servlet code
+  - glob: '**/*.php'
+    purpose: PHP HTTP handling code
+  - glob: '**/views/*.py'
+    purpose: View modules
+  - glob: '**/controllers/*.py'
+    purpose: Controller modules
+  - glob: '**/routes/*.js'
+    purpose: Route handlers
+knowledge_sources:
+  specifications:
+  - id: cwe-113
+    name: 'CWE-113: Improper Neutralization of CRLF Sequences in HTTP Headers'
+    url: https://cwe.mitre.org/data/definitions/113.html
+    offline_cache: true
+    priority: required
+  - id: cwe-644
+    name: 'CWE-644: Improper Neutralization of HTTP Headers for Scripting Syntax'
+    url: https://cwe.mitre.org/data/definitions/644.html
+    offline_cache: true
+    priority: recommended
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-response-splitting
+    name: OWASP HTTP Response Splitting
+    url: https://owasp.org/www-community/attacks/HTTP_Response_Splitting
+    offline_cache: true
+  - id: portswigger-header-injection
+    name: PortSwigger HTTP Response Header Injection
+    url: https://portswigger.net/kb/issues/00200200_http-response-header-injection
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect header injection patterns
+    offline_capable: true
+  - tool: bandit
+    purpose: Python security linting
+    offline_capable: true
+  - tool: eslint-plugin-security
+    purpose: JavaScript security linting
+    offline_capable: true
+  scripts:
+  - id: detect-header-injection
+    language: bash
+    purpose: Detect potential header injection vulnerabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Header Injection Detection ==="
+
+      echo "--- Header assignment with user input ---"
+      grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.php" \
+        -E "(setHeader|set_header|headers\[).*request" . 2>/dev/null | head -20
+
+      echo "--- Redirects with user input ---"
+      grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.php" \
+        -E "(redirect|Location).*request" . 2>/dev/null | head -20
+
+      echo "--- Cookie setting with user input ---"
+      grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.php" \
+        -E "(set_cookie|Set-Cookie|cookie).*request" . 2>/dev/null | head -20
+
+      echo "--- PHP header() with user input ---"
+      grep -rn --include="*.php" "header\s*\(.*\$_" . 2>/dev/null | head -20
+
+      echo "--- CRLF sanitization (positive) ---"
+      grep -rn --include="*.py" --include="*.js" --include="*.java" \
+        -E "(replace|strip).*(\\\\r|\\\\n|newline)" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: HEADER-CRIT-001
+    signal: User input directly in HTTP header value
+    cwe: CWE-113
+    evidence_pattern: (setHeader|set_header|headers\[).*=.*request\.(args|form|params)|header\s*\(.*\$_(GET|POST)
+    explanation: |
+      Direct inclusion of user input in HTTP headers allows CRLF injection.
+      An attacker can inject \r\n to add new headers or even control the
+      response body. Payload example: value%0d%0aSet-Cookie:+evil=injected
+    remediation: |
+      Strip or reject CRLF characters from header values:
+      Python: value = value.replace('\r', '').replace('\n', '')
+      Java: Use ESAPI encoder or OWASP Java Encoder
+      Modern frameworks (Django, Flask, Express) often sanitize automatically,
+      but verify your version and configuration.
+  - id: HEADER-CRIT-002
+    signal: Redirect URL from user input without validation
+    cwe: CWE-113
+    evidence_pattern: redirect\s*\(.*request\.(args|form)|Location.*request\.get
+    explanation: |
+      Redirect URLs from user input can contain CRLF sequences that
+      inject headers. Additionally, this enables open redirect attacks.
+      Payload: /redirect?url=http://evil.com%0d%0aSet-Cookie:+session=hijacked
+    remediation: |
+      Validate redirect URLs against an allowlist of permitted destinations.
+      Strip CRLF before setting Location header.
+      Use framework redirect functions that sanitize URLs:
+      Flask: redirect(url_for('page')) not redirect(request.args.get('url'))
+  - id: HEADER-CRIT-003
+    signal: PHP header() with user input
+    cwe: CWE-113
+    evidence_pattern: header\s*\(.*\$_(GET|POST|REQUEST|COOKIE)
+    explanation: |
+      PHP versions before 5.1.2 are vulnerable to header injection.
+      While modern PHP provides some protection, direct user input in
+      header() remains dangerous and should be avoided.
+    remediation: |
+      Use header() only with sanitized values:
+      $safe_value = str_replace(array("\r", "\n"), '', $user_input);
+      header("X-Custom: " . $safe_value);
+      Consider using framework abstractions that handle sanitization.
+  high:
+  - id: HEADER-HIGH-001
+    signal: Cookie value from user input
+    cwe: CWE-113
+    evidence_pattern: set_cookie.*request|res\.cookie.*req\.(body|query)
+    explanation: |
+      Setting cookie values from user input can enable session fixation
+      or cookie injection via CRLF. Attackers could set arbitrary cookies.
+    remediation: |
+      Generate cookie values server-side. If user input must influence
+      cookies, sanitize CRLF and validate against expected format.
+      Use HTTP-only and secure flags for session cookies.
+  - id: HEADER-HIGH-002
+    signal: Content-Type header from user input
+    cwe: CWE-644
+    evidence_pattern: Content-Type.*request|content_type.*=.*user
+    explanation: |
+      User-controlled Content-Type can enable XSS by changing response
+      interpretation (e.g., text/html) or bypass security controls.
+    remediation: |
+      Use allowlist of permitted Content-Types. Never directly use
+      user input for Content-Type header.
+  - id: HEADER-HIGH-003
+    signal: CORS headers with user input
+    cwe: CWE-113
+    evidence_pattern: Access-Control-Allow-Origin.*request|cors.*origin.*request
+    explanation: |
+      CORS headers from user input can enable cross-origin attacks by
+      allowing arbitrary origins to access the response.
+    remediation: |
+      Validate Origin against allowlist of permitted domains.
+      Never reflect arbitrary origins in Access-Control-Allow-Origin.
+  medium:
+  - id: HEADER-MED-001
+    signal: Custom header with dynamic value
+    cwe: CWE-113
+    evidence_pattern: X-.*=.*request|custom.*header.*user
+    explanation: |
+      Custom headers with dynamic values may be vulnerable if user
+      input reaches the header value without sanitization.
+    remediation: |
+      Sanitize all dynamic header values by stripping CRLF characters.
+      Validate input format before inclusion in headers.
+  - id: HEADER-MED-002
+    signal: Content-Disposition with user filename
+    cwe: CWE-113
+    evidence_pattern: Content-Disposition.*filename.*request|attachment.*=.*user
+    explanation: |
+      User-controlled filenames in Content-Disposition can inject headers
+      or enable XSS via browser handling of certain filenames.
+    remediation: |
+      Sanitize filenames: remove CRLF, limit character set, validate format.
+      Use framework functions that handle Content-Disposition safely.
+  low:
+  - id: HEADER-LOW-001
+    signal: CRLF sequences in code
+    evidence_pattern: '%0d%0a|%0a|%0d|\\r\\n'
+    explanation: |
+      CRLF sequences in code may indicate testing or awareness of the
+      vulnerability, or could be part of vulnerable logic.
+    remediation: |
+      Review context of CRLF sequences. Ensure they're not part of
+      exploit strings that could be reached by attackers.
+  positive:
+  - id: HEADER-POS-001
+    signal: CRLF sanitization implemented
+    evidence_pattern: replace.*\\r.*replace.*\\n|strip.*(\\r|\\n)|sanitize.*header
+    explanation: |
+      The codebase sanitizes CRLF characters before header inclusion.
+  - id: HEADER-POS-002
+    signal: Framework header functions used
+    evidence_pattern: make_response|HttpResponse|res\.set\(|response\.headers
+    explanation: |
+      Using framework header functions typically provides built-in
+      CRLF protection (verify framework version).
+  - id: HEADER-POS-003
+    signal: Redirect uses allowlist validation
+    evidence_pattern: (allowed|whitelist|permitted).*redirect|validate.*url.*redirect
+    explanation: |
+      Redirect URLs are validated against an allowlist, preventing
+      open redirect and header injection.
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find all header manipulation
+    description: |
+      Identify all locations where HTTP headers are set or modified.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find header setting code
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.php" \
+          -E "(setHeader|set_header|headers\[|header\s*\(|res\.set|add_header)" . 2>/dev/null | head -50
+    expected_findings:
+    - Inventory of header manipulation operations
+    - Classification by header type
+  - id: '2'
+    name: Identify user input in headers
+    description: |
+      Find where user input is included in header values.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find headers with request data
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.php" \
+          -E "(header|Header).*request|request.*(header|Header)" . 2>/dev/null | head -30
+    - purpose: Find redirects with user input
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.php" \
+          -E "(redirect|Location).*request" . 2>/dev/null | head -20
+    expected_findings:
+    - User input paths to headers
+    - Risk assessment for each path
+  - id: '3'
+    name: Check CRLF sanitization
+    description: |
+      Verify that CRLF characters are sanitized before header inclusion.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find CRLF sanitization
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.java" \
+          -E "replace.*(\\\\r|\\\\n)|strip.*(\\\\r|\\\\n)" . 2>/dev/null | head -20
+    expected_findings:
+    - CRLF sanitization coverage
+    - Gaps in sanitization
+  - id: '4'
+    name: Run static analysis
+    description: |
+      Execute security-focused static analysis for header injection.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Run Semgrep header injection rules
+      command: |
+        semgrep --config=p/security-audit . 2>/dev/null | grep -i "header\|crlf" | head -50 || echo "Semgrep not available"
+    expected_findings:
+    - Static analysis findings
+    - Additional patterns from tooling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Header Injection Vulnerabilities
+    - CRLF Sanitization Assessment
+    - Remediation Roadmap
+  confidence_guidance:
+    high: Direct evidence of user input in header without sanitization
+    medium: Dynamic header values, user input source unclear
+    low: Header manipulation present, needs detailed data flow analysis
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-113
+      priority: required
+    - source_id: owasp-response-splitting
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Header injection is less common, not needed in quick scan
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: header-001
+  item: No direct user input in header values
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" --include="*.js" --include="*.java" \
+      "(setHeader|set_header|headers\[).*request\.(args|form|params)" . 2>/dev/null && echo "PASS" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: header-002
+  item: CRLF sanitization for dynamic headers
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.py" --include="*.js" "replace.*(\\\\r|\\\\n)" . 2>/dev/null && echo "PASS" || \
+    ! grep -rn --include="*.py" --include="*.js" "header.*request" . 2>/dev/null && echo "NO_DYNAMIC" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: header-003
+  item: Redirects use allowlist validation
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.py" --include="*.js" "(allowed|whitelist).*redirect" . 2>/dev/null && echo "PASS" || \
+    ! grep -rn --include="*.py" --include="*.js" "redirect.*request" . 2>/dev/null && echo "NO_USER_REDIRECT" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: header-004
+  item: No PHP header() with user input
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.php" "header\s*\(.*\$_(GET|POST|REQUEST)" . 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A03:2021 - Injection
+  - framework: CWE
+    controls:
+    - CWE-113
+    - CWE-644
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.xss-prevention
+  - security-trust.application-security.open-redirect
+  - security-trust.application-security.cors-configuration

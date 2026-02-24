@@ -1,0 +1,308 @@
+# ============================================================
+# AUDIT: Multi-Version Support Assessment
+# ============================================================
+# Evaluates capability to run multiple API versions concurrently
+# ============================================================
+
+audit:
+  id: "api-integration.versioning.multi-version-support"
+
+  name: "Multi-Version Support Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "versioning"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the architecture and implementation for supporting multiple
+    API versions concurrently. Examines version routing, code organization,
+    data model compatibility, shared vs separate infrastructure, and the
+    maintenance burden of multi-version support.
+
+  why_it_matters: |
+    Multi-version support enables gradual consumer migration without forced
+    upgrades. Poor implementation leads to code duplication, bugs in one
+    version not fixed in others, and operational complexity. Good design
+    enables efficient multi-version operation.
+
+  when_to_run:
+    - "During architecture reviews"
+    - "Before implementing new versions"
+    - "When version maintenance becomes burdensome"
+
+prerequisites:
+  required_artifacts:
+    - type: "api-source"
+      description: "API implementations"
+    - type: "infrastructure-config"
+      description: "Deployment configurations"
+
+  access_requirements:
+    - "Read access to API source code"
+    - "Access to deployment configurations"
+
+discovery:
+  code_patterns:
+    - pattern: "v[0-9]+/|version[0-9]+|api-v[0-9]+"
+      type: "regex"
+      scope: "source"
+      purpose: "Version-specific code paths"
+    - pattern: "router.*version|version.*router|ApiVersion"
+      type: "regex"
+      scope: "source"
+      purpose: "Version routing logic"
+    - pattern: "adapter|converter|transformer.*v[0-9]"
+      type: "regex"
+      scope: "source"
+      purpose: "Version adapters"
+
+  file_patterns:
+    - glob: "**/v[0-9]/**/*.{java,ts,py}"
+      purpose: "Version-specific directories"
+    - glob: "**/api/**/v[0-9]/**"
+      purpose: "Versioned API modules"
+    - glob: "**/adapters/**/*.{java,ts,py}"
+      purpose: "Version adapters"
+
+knowledge_sources:
+  guides:
+    - id: "api-versioning-patterns"
+      name: "API Versioning Implementation Patterns"
+      url: "https://www.vinaysahni.com/best-practices-for-a-pragmatic-restful-api#versioning"
+      offline_cache: true
+
+  learning_resources:
+    - id: "microservices-patterns"
+      title: "Microservices Patterns - API Versioning"
+      type: "book"
+      reference: "ISBN: 978-1617294549"
+
+tooling:
+  static_analysis:
+    - tool: "custom-analyzer"
+      purpose: "Detect code duplication across versions"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "MULTI-CRIT-001"
+      signal: "Version-specific bugs not backported"
+      evidence_pattern: "fix.*v[0-9].*only|bug.*not.*all.*versions"
+      explanation: |
+        Security and critical bugs must be fixed in all supported versions.
+        Version-specific fixes leave consumers on older versions vulnerable.
+      remediation: "Implement backporting process for critical fixes"
+
+    - id: "MULTI-CRIT-002"
+      signal: "Data model incompatible across versions"
+      evidence_pattern: "migration.*required|schema.*incompatible"
+      explanation: |
+        If different versions require different data schemas, the database
+        becomes a versioning nightmare. Consumer data may be inaccessible
+        from certain versions.
+      remediation: "Design data model for forward/backward compatibility"
+
+  high:
+    - id: "MULTI-HIGH-001"
+      signal: "Full code duplication between versions"
+      evidence_pattern: "copy.*v[0-9]|duplicate.*version"
+      explanation: |
+        Copying entire codebases for each version multiplies maintenance
+        burden and leads to version drift where fixes aren't applied uniformly.
+      remediation: "Use shared core with version adapters for differences only"
+
+    - id: "MULTI-HIGH-002"
+      signal: "No shared infrastructure between versions"
+      evidence_indicators:
+        - "Separate deployments per version"
+        - "Duplicated databases/caches"
+      explanation: |
+        Separate infrastructure per version multiplies operational cost
+        and complexity. Changes must be applied multiple times.
+      remediation: "Share infrastructure where possible; version at API layer"
+
+  medium:
+    - id: "MULTI-MED-001"
+      signal: "Version routing inconsistent"
+      evidence_pattern: "v[0-9].*route.*differs|routing.*varies"
+      remediation: "Centralize version routing logic"
+
+    - id: "MULTI-MED-002"
+      signal: "No version-specific testing"
+      evidence_indicators:
+        - "Tests don't cover all versions"
+        - "No multi-version test suite"
+      remediation: "Run test suite against each supported version"
+
+  low:
+    - id: "MULTI-LOW-001"
+      signal: "Version adapter complexity high"
+      remediation: "Simplify adapters; consider reducing version differences"
+
+  positive:
+    - id: "MULTI-POS-001"
+      signal: "Shared core with version-specific adapters"
+    - id: "MULTI-POS-002"
+      signal: "Automated testing across all versions"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Version Code Organization"
+      description: |
+        Understand how version-specific code is organized.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find version directories"
+          command: "find . -type d -name 'v[0-9]*' -o -name 'version[0-9]*' 2>/dev/null | head -20"
+        - purpose: "Count files per version"
+          command: "for v in $(find . -type d -name 'v[0-9]' 2>/dev/null | head -5); do echo \"$v: $(find $v -type f | wc -l) files\"; done"
+        - purpose: "Find shared code"
+          command: "find . -type d -name 'shared' -o -name 'common' -o -name 'core' 2>/dev/null | head -10"
+      expected_findings:
+        - "Version directory structure"
+        - "Code distribution"
+
+    - id: "2"
+      name: "Analyze Version Routing"
+      description: |
+        Examine how requests are routed to versions.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find version routing"
+          command: "grep -rn 'version.*route\\|route.*version\\|ApiVersion\\|VersionRouter' --include='*.java' --include='*.ts' ."
+        - purpose: "Check for version middleware"
+          command: "grep -rn 'middleware.*version\\|version.*filter' --include='*.java' --include='*.ts' ."
+        - purpose: "Find version resolution"
+          command: "grep -rn 'resolve.*version\\|version.*header\\|extractVersion' --include='*.java' --include='*.ts' ."
+      expected_findings:
+        - "Routing implementation"
+        - "Version resolution logic"
+
+    - id: "3"
+      name: "Check Code Sharing"
+      description: |
+        Evaluate how much code is shared vs duplicated.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find adapters/converters"
+          command: "grep -rn 'Adapter\\|Converter\\|Transformer\\|Mapper' --include='*.java' --include='*.ts' . | grep -i v[0-9] | head -20"
+        - purpose: "Check for inheritance"
+          command: "grep -rn 'extends.*Base\\|implements.*Common' --include='*.java' --include='*.ts' . | head -20"
+        - purpose: "Find potential duplication"
+          command: "diff -rq $(find . -type d -name 'v1' | head -1) $(find . -type d -name 'v2' | head -1) 2>/dev/null | head -20 || echo 'Cannot compare versions'"
+      expected_findings:
+        - "Adapter patterns"
+        - "Code sharing level"
+
+    - id: "4"
+      name: "Review Testing Strategy"
+      description: |
+        Check testing coverage across versions.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find version-specific tests"
+          command: "find . -name '*v[0-9]*Test*' -o -name '*Test*v[0-9]*' 2>/dev/null | head -20"
+        - purpose: "Check test parameterization"
+          command: "grep -rn '@Parameterized\\|version.*test\\|test.*version' --include='*Test*.java' --include='*.spec.ts' . | head -20"
+      expected_findings:
+        - "Test organization"
+        - "Version coverage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Architecture Analysis"
+        - "Code Organization Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Multi-version architecture thoroughly analyzed"
+    medium: "Partial version support found"
+    low: "Single version or limited evidence"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "api-versioning-patterns"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires architecture analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "multi-001"
+    item: "Shared core with version adapters"
+    level: "CRITICAL"
+    verification: |
+      if find . -type d -name 'shared' -o -name 'common' -o -name 'core' 2>/dev/null | grep -q . && grep -rq 'Adapter\|Converter' --include='*.java' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "multi-002"
+    item: "Bug fixes applied to all versions"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms backporting process exists"
+    expected: "Confirmed by reviewer"
+
+  - id: "multi-003"
+    item: "Centralized version routing"
+    level: "BLOCKING"
+    verification: |
+      if grep -rq 'VersionRouter\|version.*route\|route.*version' --include='*.java' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "multi-004"
+    item: "Tests cover all supported versions"
+    level: "WARNING"
+    verification: |
+      if find . -name '*v[0-9]*Test*' -o -name '*Test*v[0-9]*' 2>/dev/null | grep -q .; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["api-service", "platform", "enterprise-api"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.versioning.versioning-strategy"
+    - "api-integration.versioning.sunset-policy"

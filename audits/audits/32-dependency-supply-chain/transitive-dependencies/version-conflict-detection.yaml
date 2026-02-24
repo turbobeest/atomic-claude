@@ -1,0 +1,223 @@
+audit:
+  id: dependency-supply-chain.transitive-dependencies.version-conflict-detection
+  name: Version Conflict Detection Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: transitive-dependencies
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: medium
+  scope: dependencies
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit detects version conflicts where different parts of the
+    dependency tree require incompatible versions of the same package.
+    It identifies potential runtime issues, bundle bloat, and security
+    gaps from version conflicts.
+  why_it_matters: |
+    Version conflicts cause unpredictable behavior, subtle bugs, and
+    security issues. Multiple versions of a package may coexist,
+    increasing bundle size and creating confusion about which version
+    handles what. Security patches may not apply to all instances.
+  when_to_run:
+  - After dependency updates
+  - When experiencing strange bugs
+  - During dependency audits
+  - Before releases
+prerequisites:
+  required_artifacts:
+  - type: lock_file
+    description: Lock file with resolved versions
+  access_requirements:
+  - Read access to dependency files
+discovery:
+  file_patterns:
+  - glob: '**/package-lock.json'
+    purpose: Find npm lock file
+  - glob: '**/yarn.lock'
+    purpose: Find yarn lock file
+  - glob: '**/node_modules'
+    purpose: Find installed packages
+knowledge_sources:
+  guides:
+  - id: npm-dedupe
+    name: npm Dedupe
+    url: https://docs.npmjs.com/cli/v9/commands/npm-dedupe
+  - id: yarn-resolutions
+    name: Yarn Resolutions
+    url: https://classic.yarnpkg.com/lang/en/docs/selective-version-resolutions/
+  standards:
+  - id: semver
+    name: Semantic Versioning
+    relevance: Version compatibility
+tooling:
+  analysis_tools:
+  - tool: npm ls
+    purpose: Show duplicate versions
+  - tool: npm dedupe
+    purpose: Attempt deduplication
+  - tool: yarn-deduplicate
+    purpose: Yarn deduplication
+  - tool: pip check
+    purpose: Python conflict detection
+signals:
+  critical:
+  - id: DEP-CONF-CRIT-001
+    signal: Incompatible peer dependency requirements
+    evidence_indicators:
+    - npm ERESOLVE errors
+    - Peer dep conflict blocks install
+    explanation: |
+      Peer dependency conflicts prevent clean installation and
+      indicate fundamental incompatibility between packages. The
+      resolved state may have unpredictable behavior.
+    remediation: Resolve peer conflicts; may require version changes
+  high:
+  - id: DEP-CONF-HIGH-001
+    signal: Multiple major versions of same package
+    evidence_indicators:
+    - lodash@3.x and lodash@4.x both present
+    - Breaking changes between versions
+    remediation: Consolidate to single major version if possible
+  - id: DEP-CONF-HIGH-002
+    signal: Security patch not applied to all versions
+    evidence_indicators:
+    - Some versions vulnerable, others patched
+    - Multiple copies of vulnerable package
+    remediation: Use resolutions to force patched version
+  medium:
+  - id: DEP-CONF-MED-001
+    signal: Significant bundle size from duplicates
+    evidence_indicators:
+    - Multiple copies of large packages
+    - 10%+ bundle size from duplicates
+    remediation: Dedupe to reduce bundle size
+  - id: DEP-CONF-MED-002
+    signal: Minor version conflicts
+    evidence_indicators:
+    - Same package at different patch versions
+    - Generally compatible but duplicated
+    remediation: Run npm dedupe; may be acceptable
+  low:
+  - id: DEP-CONF-LOW-001
+    signal: Patch-level duplicates
+    evidence_indicators:
+    - Same minor, different patch versions
+    - Common in npm
+    remediation: Run npm dedupe; low priority
+  positive:
+  - id: DEP-CONF-POS-001
+    signal: No version conflicts detected
+  - id: DEP-CONF-POS-002
+    signal: Minimal duplication after deduplication
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find Duplicate Packages
+    description: Identify packages with multiple versions
+    commands:
+    - purpose: Find npm duplicates
+      command: npm ls --all 2>/dev/null | grep -E 'deduped|\+--' | grep -oE '[a-z@/-]+@[0-9.]+' | sort
+        | uniq -d | head -20 || echo 'Duplicate detection not available'
+  - id: '2'
+    name: Check for Peer Dependency Issues
+    description: Identify peer dependency conflicts
+    commands:
+    - purpose: Check peer deps
+      command: npm ls 2>&1 | grep -E '(peer|ERESOLVE|conflict)' | head -20 || echo 'No peer dependency
+        issues found'
+  - id: '3'
+    name: Show All Versions of a Package
+    description: See where duplicates come from
+    commands:
+    - purpose: Show lodash versions
+      command: 'npm ls lodash --all 2>/dev/null || echo ''Use: npm ls [package] --all'''
+  - id: '4'
+    name: Try Deduplication
+    description: Attempt to reduce duplicates
+    commands:
+    - purpose: Dry-run dedupe
+      command: npm dedupe --dry-run 2>/dev/null | head -30 || echo 'npm dedupe not available'
+  - id: '5'
+    name: Check Python Conflicts
+    description: Verify Python dependencies compatible
+    commands:
+    - purpose: Run pip check
+      command: pip check 2>/dev/null || echo 'pip check not available'
+  - id: '6'
+    name: Document Resolution Options
+    description: Options for fixing conflicts
+    commands:
+    - purpose: Generate resolution guide
+      command: |-
+        echo 'Version Conflict Resolution Options:
+
+        1. npm dedupe - Automatically reduce duplicates
+        2. npm overrides (package.json) - Force specific versions
+        3. yarn resolutions - Yarn equivalent
+        4. Update direct deps - May resolve transitive conflicts
+        5. Remove conflicting dep - If not essential'
+output:
+  deliverables:
+  - type: conflict_report
+    format: structured
+    description: List of version conflicts
+  - type: resolution_plan
+    format: structured
+    description: Plan for resolving conflicts
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Conflict Analysis
+    - Security Impact
+    - Resolution Options
+    - Recommendations
+closeout_checklist:
+- id: dep-conf-001
+  item: No peer dependency conflicts
+  level: CRITICAL
+  verification: npm ls shows no peer issues
+- id: dep-conf-002
+  item: Duplicates identified
+  level: REQUIRED
+  verification: Duplicate list generated
+- id: dep-conf-003
+  item: Deduplication attempted
+  level: REQUIRED
+  verification: npm dedupe run
+- id: dep-conf-004
+  item: Remaining conflicts documented
+  level: REQUIRED
+  verification: Conflicts documented with reasons
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SOC 2
+    control: CC8.1
+    description: Change management
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.transitive-dependencies.transitive-analysis
+  depends_on:
+  - dependency-supply-chain.transitive-dependencies.transitive-analysis
+  feeds_into:
+  - performance-efficiency.bundle-optimization
