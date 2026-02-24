@@ -991,121 +991,186 @@ app.get('/api/timeline', (req, res) => {
   }
 });
 
-// API: Get skills used
+// API: Get skills catalog
 app.get('/api/skills', (req, res) => {
   try {
     const skillsDir = path.join(__dirname, '..', 'skills');
     const skills = [];
 
-    // Scan tactical skills
-    const tacticalDir = path.join(skillsDir, 'tactical');
-    if (fs.existsSync(tacticalDir)) {
-      const categories = fs.readdirSync(tacticalDir).filter(f =>
-        fs.statSync(path.join(tacticalDir, f)).isDirectory()
-      );
-
-      categories.forEach(category => {
-        const categoryPath = path.join(tacticalDir, category);
-        const skillDirs = fs.readdirSync(categoryPath).filter(f =>
-          fs.statSync(path.join(categoryPath, f)).isDirectory()
-        );
-
-        skillDirs.forEach(skillDir => {
-          const skillPath = path.join(categoryPath, skillDir, 'SKILL.md');
-          if (fs.existsSync(skillPath)) {
-            const content = fs.readFileSync(skillPath, 'utf-8');
-            const skill = parseSkillFile(content, skillDir, category, 'tactical');
-            if (skill) skills.push(skill);
-          }
-        });
+    function safeDirs(dir) {
+      if (!fs.existsSync(dir)) return [];
+      return fs.readdirSync(dir).filter(f => {
+        try { return fs.statSync(path.join(dir, f)).isDirectory(); }
+        catch { return false; }
       });
     }
 
-    // Scan community skills - superpowers
-    const superpowersDir = path.join(skillsDir, 'community', 'superpowers', 'skills');
-    if (fs.existsSync(superpowersDir)) {
-      const skillDirs = fs.readdirSync(superpowersDir).filter(f =>
-        fs.statSync(path.join(superpowersDir, f)).isDirectory()
-      );
-
-      skillDirs.forEach(skillDir => {
-        const skillPath = path.join(superpowersDir, skillDir, 'SKILL.md');
-        if (fs.existsSync(skillPath)) {
-          const content = fs.readFileSync(skillPath, 'utf-8');
-          const skill = parseSkillFile(content, skillDir, 'superpowers', 'community');
+    // Scan tactical skills: tactical/{category}/{skill}/README.md
+    const tacticalDir = path.join(skillsDir, 'tactical');
+    for (const category of safeDirs(tacticalDir)) {
+      const categoryPath = path.join(tacticalDir, category);
+      for (const skillDir of safeDirs(categoryPath)) {
+        const readmePath = path.join(categoryPath, skillDir, 'README.md');
+        if (fs.existsSync(readmePath)) {
+          const content = fs.readFileSync(readmePath, 'utf-8');
+          const skill = parseSkillReadme(content, skillDir, category, 'tactical',
+            path.relative(skillsDir, readmePath));
           if (skill) skills.push(skill);
         }
-      });
+      }
     }
 
-    // Scan community skills - trailofbits
+    // Scan community skills - superpowers: community/superpowers/skills/{skill}/README.md
+    const superpowersDir = path.join(skillsDir, 'community', 'superpowers', 'skills');
+    for (const skillDir of safeDirs(superpowersDir)) {
+      const readmePath = path.join(superpowersDir, skillDir, 'README.md');
+      if (fs.existsSync(readmePath)) {
+        const content = fs.readFileSync(readmePath, 'utf-8');
+        const skill = parseSkillReadme(content, skillDir, 'superpowers', 'community',
+          path.relative(skillsDir, readmePath));
+        if (skill) skills.push(skill);
+      }
+    }
+
+    // Scan community skills - trailofbits plugins (README.md at plugin root)
     const trailofbitsDir = path.join(skillsDir, 'community', 'trailofbits', 'plugins');
-    if (fs.existsSync(trailofbitsDir)) {
-      const pluginDirs = fs.readdirSync(trailofbitsDir).filter(f =>
-        fs.statSync(path.join(trailofbitsDir, f)).isDirectory()
-      );
-
-      pluginDirs.forEach(pluginDir => {
-        const pluginSkillsDir = path.join(trailofbitsDir, pluginDir, 'skills');
-        if (fs.existsSync(pluginSkillsDir)) {
-          const skillDirs = fs.readdirSync(pluginSkillsDir).filter(f =>
-            fs.statSync(path.join(pluginSkillsDir, f)).isDirectory()
-          );
-
-          skillDirs.forEach(skillDir => {
-            const skillPath = path.join(pluginSkillsDir, skillDir, 'SKILL.md');
-            if (fs.existsSync(skillPath)) {
-              const content = fs.readFileSync(skillPath, 'utf-8');
-              const skill = parseSkillFile(content, skillDir, 'trailofbits', 'community');
-              if (skill) skills.push(skill);
-            }
-          });
-        }
-      });
+    for (const pluginDir of safeDirs(trailofbitsDir)) {
+      const readmePath = path.join(trailofbitsDir, pluginDir, 'README.md');
+      if (fs.existsSync(readmePath)) {
+        const content = fs.readFileSync(readmePath, 'utf-8');
+        const skill = parseSkillReadme(content, pluginDir, 'trailofbits', 'community',
+          path.relative(skillsDir, readmePath));
+        if (skill) skills.push(skill);
+      }
     }
 
-    res.json({ skills, total: skills.length });
+    // Scan community skills - ralph (single entry)
+    const ralphReadme = path.join(skillsDir, 'community', 'ralph', 'README.md');
+    if (fs.existsSync(ralphReadme)) {
+      const content = fs.readFileSync(ralphReadme, 'utf-8');
+      const skill = parseSkillReadme(content, 'ralph', 'ralph', 'community',
+        path.relative(skillsDir, ralphReadme));
+      if (skill) skills.push(skill);
+    }
+
+    const { search, type } = req.query;
+    let filtered = skills;
+    if (search) {
+      const q = search.toLowerCase();
+      filtered = filtered.filter(s =>
+        (s.name || '').toLowerCase().includes(q) ||
+        (s.description || '').toLowerCase().includes(q) ||
+        (s.category || '').toLowerCase().includes(q)
+      );
+    }
+    if (type) {
+      filtered = filtered.filter(s => s.type === type);
+    }
+
+    res.json({ skills: filtered, total: filtered.length });
   } catch (error) {
     console.error('Error loading skills:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Helper function to parse skill markdown files
-function parseSkillFile(content, skillName, category, type) {
+// Parse a skill README.md and extract metadata
+function parseSkillReadme(content, dirName, category, type, relativePath) {
   try {
-    // Extract YAML frontmatter
-    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!frontmatterMatch) return null;
+    const lines = content.split('\n');
 
-    const frontmatter = {};
-    frontmatterMatch[1].split('\n').forEach(line => {
-      const [key, ...valueParts] = line.split(':');
-      if (key && valueParts.length) {
-        const value = valueParts.join(':').trim();
-        if (value.startsWith('[')) {
-          // Parse array
-          frontmatter[key.trim()] = value.slice(1, -1).split(',').map(v => v.trim());
-        } else {
-          frontmatter[key.trim()] = value;
-        }
+    // Extract title from first # heading
+    let name = dirName.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    for (const line of lines) {
+      const m = line.match(/^#\s+(.+)/);
+      if (m) { name = m[1].trim(); break; }
+    }
+
+    // Extract description: first non-empty paragraph after heading
+    let description = '';
+    let pastHeading = false;
+    for (const line of lines) {
+      if (line.startsWith('# ')) { pastHeading = true; continue; }
+      if (!pastHeading) continue;
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith('[![') || trimmed.startsWith('![')) continue;
+      if (trimmed.startsWith('> ')) {
+        description = trimmed.replace(/^>\s*\**/, '').replace(/\**$/, '').trim();
+        break;
       }
-    });
+      if (trimmed.startsWith('**Author:**')) continue;
+      if (trimmed.startsWith('#') || trimmed.startsWith('|') || trimmed.startsWith('```')) break;
+      description = trimmed;
+      break;
+    }
+
+    // Extract author
+    let author = '';
+    for (const line of lines) {
+      const m = line.match(/\*\*Author:\*\*\s*(.+)/);
+      if (m) { author = m[1].trim(); break; }
+    }
 
     return {
-      name: frontmatter.name || skillName,
-      description: frontmatter.description || '',
-      model: frontmatter.model || 'sonnet',
-      tools: frontmatter.tools || [],
-      context: frontmatter.context || '',
-      category: category,
-      type: type
+      name,
+      description,
+      author,
+      category,
+      type,
+      dirName,
+      path: relativePath
     };
   } catch (error) {
-    console.error(`Error parsing skill ${skillName}:`, error);
+    console.error(`Error parsing skill ${dirName}:`, error);
     return null;
   }
 }
+
+// API: Read skill definition file
+app.get('/api/skills/definition', (req, res) => {
+  try {
+    const relPath = req.query.path;
+    if (!relPath) return res.status(400).json({ error: 'Missing path parameter' });
+
+    const skillsDir = path.join(__dirname, '..', 'skills');
+    const resolved = path.resolve(skillsDir, relPath);
+    if (!resolved.startsWith(path.resolve(skillsDir))) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (!fs.existsSync(resolved)) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    const stat = fs.statSync(resolved);
+    const content = fs.readFileSync(resolved, 'utf-8');
+    res.json({ content, size: stat.size, modified: stat.mtime.toISOString(), path: relPath });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Save skill definition file
+app.put('/api/skills/definition', (req, res) => {
+  try {
+    const { path: relPath, content } = req.body || {};
+    if (!relPath || content === undefined) {
+      return res.status(400).json({ error: 'Missing path or content' });
+    }
+
+    const skillsDir = path.join(__dirname, '..', 'skills');
+    const resolved = path.resolve(skillsDir, relPath);
+    if (!resolved.startsWith(path.resolve(skillsDir))) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    fs.writeFileSync(resolved, content, 'utf-8');
+    const stat = fs.statSync(resolved);
+    res.json({ success: true, size: stat.size, modified: stat.mtime.toISOString() });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // API: Get audit suggestions based on current phase
 app.get('/api/audit-suggestions', (req, res) => {
@@ -1141,6 +1206,53 @@ app.get('/api/audit-suggestions', (req, res) => {
       total_audits: 2186
     });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get audit catalog from pre-built audits.json
+let auditCatalogCache = null;
+app.get('/api/audits', (req, res) => {
+  try {
+    if (!auditCatalogCache) {
+      const dataPath = path.join(__dirname, '..', 'audits', 'audit-browser', 'static', 'data', 'audits.json');
+      if (!fs.existsSync(dataPath)) {
+        return res.status(404).json({ error: 'Audit data not found. Run: cd audits/audit-browser && npm run generate-data' });
+      }
+      auditCatalogCache = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
+    }
+
+    const { search, tier, category, phase } = req.query;
+    let audits = auditCatalogCache.audits || [];
+
+    if (search) {
+      const q = search.toLowerCase();
+      audits = audits.filter(a =>
+        (a.audit_name || '').toLowerCase().includes(q) ||
+        (a.audit_id || '').toLowerCase().includes(q) ||
+        (a.category || '').toLowerCase().includes(q) ||
+        (a.subcategory || '').toLowerCase().includes(q)
+      );
+    }
+    if (tier) {
+      audits = audits.filter(a => a.tier === tier);
+    }
+    if (category) {
+      audits = audits.filter(a => a.category === category);
+    }
+    if (phase) {
+      audits = audits.filter(a => a[phase] === true);
+    }
+
+    res.json({
+      audits,
+      navigation: auditCatalogCache.navigation || [],
+      stats: auditCatalogCache.stats || {},
+      filterOptions: auditCatalogCache.filterOptions || {},
+      total: audits.length
+    });
+  } catch (error) {
+    console.error('Error loading audits:', error);
     res.status(500).json({ error: error.message });
   }
 });

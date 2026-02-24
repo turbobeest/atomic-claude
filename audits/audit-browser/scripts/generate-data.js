@@ -18,7 +18,9 @@ const OUTPUT_DIR = join(__dirname, '..', 'static', 'data');
 const OUTPUT_PATH = join(OUTPUT_DIR, 'audits.json');
 
 function parseBoolean(value) {
-  return value?.toLowerCase() === 'yes';
+  if (!value) return false;
+  const v = value.toLowerCase().trim();
+  return v === 'yes' || v === 'true';
 }
 
 function loadInventory() {
@@ -55,20 +57,15 @@ function loadInventory() {
     integration: parseBoolean(row.integration),
     deployment: parseBoolean(row.deployment),
     post_production: parseBoolean(row.post_production),
-    // Requirements
-    requires_source_code: parseBoolean(row.requires_source_code),
-    requires_runtime_data: parseBoolean(row.requires_runtime_data),
-    requires_cost_data: parseBoolean(row.requires_cost_data),
-    requires_team_input: parseBoolean(row.requires_team_input),
-    requires_production_access: parseBoolean(row.requires_production_access),
-    // Automation
-    fully_automated: parseBoolean(row.fully_automated),
-    semi_automated: parseBoolean(row.semi_automated),
-    human_required: parseBoolean(row.human_required),
-    // Phase restrictions
-    pre_production_only: parseBoolean(row.pre_production_only),
-    production_only: parseBoolean(row.production_only),
-    any_phase: parseBoolean(row.any_phase)
+    // Requirements (CSV columns: requires_runtime, requires_physical_access, requires_human_evaluation, requires_interviews)
+    requires_runtime: parseBoolean(row.requires_runtime),
+    requires_physical_access: parseBoolean(row.requires_physical_access),
+    requires_human_evaluation: parseBoolean(row.requires_human_evaluation),
+    requires_interviews: parseBoolean(row.requires_interviews),
+    // Extra metadata
+    automatable: row.automatable || '',
+    severity: row.severity || '',
+    estimated_duration: row.estimated_duration || ''
   }));
 }
 
@@ -150,9 +147,15 @@ function getStats(inventory) {
       standard: inventory.filter(a => a.tier === 'standard').length
     },
     byAutomation: {
-      fullyAutomated: inventory.filter(a => a.fully_automated).length,
-      semiAutomated: inventory.filter(a => a.semi_automated).length,
-      humanRequired: inventory.filter(a => a.human_required).length
+      yes: inventory.filter(a => a.automatable === 'yes').length,
+      partial: inventory.filter(a => a.automatable === 'partial').length,
+      no: inventory.filter(a => a.automatable === 'no').length,
+    },
+    bySeverity: {
+      critical: inventory.filter(a => a.severity === 'critical').length,
+      high: inventory.filter(a => a.severity === 'high').length,
+      medium: inventory.filter(a => a.severity === 'medium').length,
+      low: inventory.filter(a => a.severity === 'low').length,
     },
     categories: new Set(inventory.map(a => a.category)).size
   };
