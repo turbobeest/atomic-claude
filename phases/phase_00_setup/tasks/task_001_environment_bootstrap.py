@@ -264,7 +264,7 @@ def _check_tool(tool: str) -> Optional[str]:
             result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout.split()[0] if result.stdout else "installed"
-    except Exception:
+    except (subprocess.SubprocessError, OSError, ValueError):
         pass
 
     return "installed"

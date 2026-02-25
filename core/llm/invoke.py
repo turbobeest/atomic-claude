@@ -6,9 +6,12 @@ degradation when features are unavailable.
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any, Iterator
+
+logger = logging.getLogger(__name__)
 
 from .base import BaseLLMProvider
 from .capabilities import ModelCapability, provider_supports
@@ -256,8 +259,8 @@ def _track_tokens(response):
 
         tokens_file.parent.mkdir(parents=True, exist_ok=True)
         tokens_file.write_text(json.dumps(data, indent=2))
-    except Exception:
-        pass  # Token tracking is non-blocking
+    except Exception as e:
+        logger.warning("Token tracking failed: %s", e)
 
 
 class FeatureAwareLLMInvoker:

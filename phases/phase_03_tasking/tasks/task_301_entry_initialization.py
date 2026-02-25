@@ -283,7 +283,8 @@ def _configure_taskmaster_provider(
 
     try:
         secrets = json.loads(read_file(secrets_file))
-    except Exception:
+    except Exception as e:
+        logger.debug("Could not read secrets.json: %s", e)
         print(print_dim("Could not read secrets.json - TaskMaster will use defaults"))
         return
 

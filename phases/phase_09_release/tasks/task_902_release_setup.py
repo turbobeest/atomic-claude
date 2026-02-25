@@ -6,6 +6,7 @@ Final confirmation and release notes review before executing release.
 
 import sys
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any
@@ -16,6 +17,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from core.config import Config
 from core.state import StateManager
 from core.ui import success, error, warning, info, step
+from core.utils.file_ops import read_json, write_json
+
+logger = logging.getLogger(__name__)
 
 
 # ANSI color codes for formatted output
@@ -56,12 +60,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(f"  {DIM}UAT Mode: Creating minimal valid output{NC}")
 
         # Create minimal release setup
-        with open(release_setup_file, 'w') as f:
-            json.dump({
-                "version": "0.1.0",
-                "release_type": "internal",
-                "confirmed": True
-            }, f, indent=2)
+        write_json(release_setup_file, {
+            "version": "0.1.0",
+            "release_type": "internal",
+            "confirmed": True
+        })
 
         success("UAT bypass complete")
         return True
@@ -75,12 +78,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     release_type = "minor"
     if setup_file.exists():
         try:
-            with open(setup_file) as f:
-                setup_data = json.load(f)
+            setup_data = read_json(setup_file)
             version = setup_data.get("release", {}).get("version", "0.1.0")
             release_type = setup_data.get("release", {}).get("type", "minor")
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read setup file: %s", e)
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # FINAL CONFIRMATION
@@ -116,6 +118,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     try:
         proceed_choice = input("  Choice (default: yes): ").strip().lower() or "yes"
     except EOFError:
+        logger.debug("Non-interactive mode: defaulting to 'yes'")
         proceed_choice = "yes"
 
     if proceed_choice in ["review again", "review"]:
@@ -128,7 +131,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         try:
             input("  Press Enter after review...")
         except EOFError:
-            pass
+            logger.debug("Non-interactive mode: skipping review prompt")
         print()
     elif proceed_choice == "abort":
         print()
@@ -168,6 +171,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     try:
         notes_confirm = input("  Accept (default: y/n): ").strip().lower() or "y"
     except EOFError:
+        logger.debug("Non-interactive mode: defaulting to 'y'")
         notes_confirm = "y"
 
     if notes_confirm not in ["y", "Y"]:
@@ -175,33 +179,32 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         try:
             notes_feedback = input("  Notes for modification: ")
         except EOFError:
+            logger.debug("Non-interactive mode: skipping notes feedback")
             notes_feedback = ""
         print()
 
     # Save release setup
-    with open(release_setup_file, 'w') as f:
-        json.dump({
-            "release": {
-                "version": version,
-                "type": release_type
-            },
-            "changelog": {
-                "features": features_count,
-                "fixes": fixes_count
-            },
-            "confirmed": True,
-            "setup_at": datetime.now().isoformat()
-        }, f, indent=2)
+    write_json(release_setup_file, {
+        "release": {
+            "version": version,
+            "type": release_type
+        },
+        "changelog": {
+            "features": features_count,
+            "fixes": fixes_count
+        },
+        "confirmed": True,
+        "setup_at": datetime.now().isoformat()
+    })
 
     # Save decision to context
     decision_file = output_dir / "setup-decision.json"
     decision_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(decision_file, 'w') as f:
-        json.dump({
-            "decision": f"Release v{version} confirmed for execution",
-            "type": "setup",
-            "artifact": str(release_setup_file)
-        }, f, indent=2)
+    write_json(decision_file, {
+        "decision": f"Release v{version} confirmed for execution",
+        "type": "setup",
+        "artifact": str(release_setup_file)
+    })
 
     success("Release Setup complete")
     return True

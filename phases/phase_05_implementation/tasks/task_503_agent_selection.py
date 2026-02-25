@@ -4,12 +4,15 @@ Task 503: Agent Selection
 Select agents for TDD execution: test-writer, code-implementer, refactorer, security-scanner.
 """
 
+import logging
 import sys
 import json
 import csv
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -80,7 +83,8 @@ def analyze_project_patterns(specs_dir: Path) -> Dict[str, bool]:
                 patterns["has_cli"] = True
             if any(keyword in content_lower for keyword in ["async", "await", "concurrent", "parallel"]):
                 patterns["has_async"] = True
-        except:
+        except Exception as e:
+            logger.debug("Failed to read spec file %s: %s", spec_file, e)
             continue
 
     return patterns

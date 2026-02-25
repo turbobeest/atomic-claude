@@ -4,12 +4,15 @@ Task 604: Refinement
 Address review findings and apply code improvements using the code-refiner agent.
 """
 
+import logging
 import sys
 import json
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -295,7 +298,8 @@ def _apply_fix(finding: Dict, output_prefix: Path, atomic_root: Path) -> bool:
                     marker = " >> " if i == finding_line else "    "
                     numbered_lines.append(f"{marker}{i:4d} | {line}")
                 source_context = "\n".join(numbered_lines)
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to read source file %s: %s", source_path, e)
                 source_context = "(Unable to read source file)"
 
     # Build fix prompt with actual code context
@@ -363,6 +367,7 @@ If you cannot safely generate a fix, set can_fix to false and explain why.
 
         return result.get("can_fix", False)
     except Exception as e:
+        logger.debug("Failed to apply fix for %s: %s", finding.get("file", "unknown"), e)
         return False
 
 
@@ -421,8 +426,8 @@ def _run_test_verification(atomic_root: Path) -> tuple:
                 timeout=60
             )
             tests_passing = (result.returncode == 0)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Test verification failed: %s", e)
 
     print("  ─" * 50)
     print(print_bold("TEST RESULTS"))

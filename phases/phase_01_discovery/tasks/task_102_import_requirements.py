@@ -15,17 +15,21 @@ Purpose:
 """
 
 import json
+import logging
 import re
 import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Set, Tuple
 
+logger = logging.getLogger(__name__)
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.config import Config
 from core.state import StateManager
 from core.ui import phase_header, success, error, warning, info, step
+from core.utils.file_ops import write_json
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
@@ -113,7 +117,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             with open(rst_file, 'r', encoding='utf-8') as f:
                 if any(directive_pattern.match(line) for line in f):
                     files_with_needs.append(rst_file)
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to scan RST file %s: %s", rst_file, e)
             continue
 
     if not files_with_needs:
@@ -199,14 +204,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # STEP 5: SAVE
     # ═══════════════════════════════════════════════════════════════
 
-    with open(needs_index, 'w') as f:
-        json.dump(needs_data, f, indent=2)
+    write_json(needs_index, needs_data)
     print(f"  ✓ Saved: .claude/needs/needs-index.json")
 
     # Also save to phase output
     output_needs = output_dir / "needs-index.json"
-    with open(output_needs, 'w') as f:
-        json.dump(needs_data, f, indent=2)
+    write_json(output_needs, needs_data)
     print(f"  ✓ Copied to phase output")
 
     # Write to knowledge graph
@@ -257,7 +260,8 @@ def _count_directives(rst_file: Path, pattern: re.Pattern) -> int:
     try:
         with open(rst_file, 'r', encoding='utf-8') as f:
             return sum(1 for line in f if pattern.match(line))
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to count directives in %s: %s", rst_file, e)
         return 0
 
 
@@ -274,7 +278,8 @@ def _parse_rst_needs(rst_file: Path, file_relpath: str, seen_ids: Set[str]) -> L
     try:
         with open(rst_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to read RST file %s for parsing: %s", rst_file, e)
         return needs
 
     in_need = False

@@ -287,8 +287,8 @@ def _detect_credentials(
         if result.returncode == 0:
             has_ollama = True
             print(print_green("  Ollama available"))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Ollama local detection failed: %s", e)
 
     return has_aws, has_anthropic, has_ollama
 
@@ -352,8 +352,7 @@ def _credential_wizard(
         has_anthropic = True
         lines.append("# Anthropic API")
         lines.append(f"ANTHROPIC_API_KEY={api_key}")
-        masked = api_key[:7] + "..." + api_key[-4:] if len(api_key) > 15 else "***"
-        print(print_green(f"  Anthropic API key set ({masked})"))
+        print(print_green("  Anthropic API key set"))
 
     elif choice == "3":
         # AWS Bedrock
@@ -407,7 +406,8 @@ def _credential_wizard(
                 print(print_red("  Ollama not responding"))
                 print(print_dim("  Start it with: ollama serve"))
                 return None
-        except Exception:
+        except Exception as e:
+            logger.debug("Ollama connectivity check failed during wizard: %s", e)
             print(print_red("  Ollama not reachable"))
             print(print_dim("  Start it with: ollama serve"))
             return None
@@ -429,8 +429,8 @@ def _credential_wizard(
     if os.name != 'nt':
         try:
             os.chmod(env_file, 0o600)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to set permissions on %s: %s", env_file, e)
 
     print()
     print(print_green(f"  Saved: {env_file}"))
@@ -482,8 +482,8 @@ def _create_secrets_file(
     if os.name != 'nt':
         try:
             os.chmod(secrets_file, 0o600)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to set permissions on %s: %s", secrets_file, e)
 
     print(print_dim(f"  Secrets file: {secrets_file}"))
     print()
@@ -510,7 +510,8 @@ def _push_provider_to_dashboard(
         if rm.provider:
             update_current_task_provider(rm.provider, rm.model_id,
                                          phase_id="0-setup")
-    except Exception:
+    except Exception as e:
+        logger.debug("Resolver-based dashboard push failed: %s", e)
         # Fallback: detect provider manually
         provider = None
         if env_vars.get('ATOMIC_LLM_PROVIDER') == 'claude-code':
@@ -556,8 +557,8 @@ def _configure_ollama_hosts(
                 if legacy:
                     host = legacy if legacy.startswith("http") else f"http://{legacy}"
                     existing_hosts = [host]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load existing secrets for Ollama hosts: %s", e)
 
     # Check local Ollama
     local_host = "http://localhost:11434"
@@ -633,8 +634,8 @@ def _configure_ollama_hosts(
             # Remove legacy single-host key
             secrets.pop('ollama_host', None)
             write_file(secrets_file, json.dumps(secrets, indent=2))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to write updated Ollama hosts to secrets: %s", e)
 
     return existing_hosts
 
@@ -646,7 +647,8 @@ def _check_ollama_host(host: str) -> bool:
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:
             return resp.status == 200
-    except Exception:
+    except Exception as e:
+        logger.debug("Ollama host %s unreachable: %s", host, e)
         return False
 
 
@@ -658,7 +660,8 @@ def _list_ollama_models(host: str) -> List[str]:
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             return [m.get("name", "") for m in data.get("models", [])]
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to list Ollama models on %s: %s", host, e)
         return []
 
 
@@ -711,8 +714,8 @@ def _health_check_providers(
     if secrets_file.exists():
         try:
             secrets = json.loads(read_file(secrets_file))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load secrets for health check: %s", e)
 
     # Read network mode from config
     config_file = output_dir / "project-config.json"
@@ -721,8 +724,8 @@ def _health_check_providers(
         try:
             config = json.loads(read_file(config_file))
             network_mode = config.get("sandbox", {}).get("network_mode", "internet")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load project config: %s", e)
 
     provider_results: Dict[str, Dict[str, Any]] = {}
 
@@ -739,7 +742,8 @@ def _health_check_providers(
                 "cui_compatible": use_bedrock,
                 "detail": "Bedrock backend" if use_bedrock else "",
             }
-        except Exception:
+        except Exception as e:
+            logger.debug("Claude Code CLI health check failed: %s", e)
             provider_results["Claude Code CLI"] = {
                 "status": "unavailable", "cui_compatible": False,
                 "detail": "error during check",
@@ -762,7 +766,8 @@ def _health_check_providers(
                 provider_results["Anthropic API"] = {
                     "status": status.value, "cui_compatible": False, "detail": "",
                 }
-            except Exception:
+            except Exception as e:
+                logger.debug("Anthropic API health check failed: %s", e)
                 provider_results["Anthropic API"] = {
                     "status": "unavailable", "cui_compatible": False,
                     "detail": "error during check",
@@ -790,7 +795,8 @@ def _health_check_providers(
                     "status": status.value, "cui_compatible": True,
                     "detail": f"region: {bedrock_config['aws_region']}",
                 }
-            except Exception:
+            except Exception as e:
+                logger.debug("AWS Bedrock health check failed: %s", e)
                 provider_results["AWS Bedrock"] = {
                     "status": "unavailable", "cui_compatible": True,
                     "detail": "error during check",
@@ -816,7 +822,8 @@ def _health_check_providers(
                 if status.value == "healthy":
                     models = provider.list_models()
                 servers[host] = {"status": status.value, "models": models}
-            except Exception:
+            except Exception as e:
+                logger.debug("Ollama health check failed for %s: %s", host, e)
                 servers[host] = {"status": "unavailable", "models": []}
 
         up = sum(1 for s in servers.values() if s["status"] in ("healthy", "degraded"))

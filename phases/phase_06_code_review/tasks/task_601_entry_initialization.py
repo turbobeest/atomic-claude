@@ -4,11 +4,14 @@ Task 601: Entry & Initialization
 Welcome to Phase 6, verify Phase 5 completion, display review overview.
 """
 
+import logging
 import sys
 import json
 from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -128,7 +131,8 @@ def _verify_phase_5(closeout_file: Path) -> bool:
     # Load closeout data
     try:
         closeout_data = json.loads(read_file(closeout_file))
-    except:
+    except Exception as e:
+        logger.debug("Failed to parse Phase 5 closeout %s: %s", closeout_file, e)
         print(print_red("✗ Failed to read Phase 5 closeout"))
         return False
 

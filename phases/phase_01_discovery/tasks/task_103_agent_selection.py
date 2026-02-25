@@ -18,11 +18,14 @@ The conversation continues until:
 """
 
 import json
+import logging
 import re
 import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
@@ -30,6 +33,7 @@ from core.config import Config
 from core.state import StateManager
 from core.llm import invoke_llm as invoke
 from core.ui import phase_header, success, error, warning, info, step, wrap_text
+from core.utils.file_ops import write_json
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
@@ -269,14 +273,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "total_experts": len(selected_experts)
     }
 
-    with open(agents_output, 'w') as f:
-        json.dump(agents_json, f, indent=2)
+    write_json(agents_output, agents_json)
 
     # Build roster
     roster = _build_roster(default_pipeline_agents, selected_experts)
 
-    with open(roster_output, 'w') as f:
-        json.dump(roster, f, indent=2)
+    write_json(roster_output, roster)
 
     print()
     print("━" * 60)
@@ -330,22 +332,25 @@ def _load_project_context(output_dir: Path) -> Dict[str, str]:
             tech = constraints.get("technical", [])
             if tech:
                 context["technical_constraints"] = tech
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load project config for context: %s", e)
 
     # Load corpus analysis (the detailed analysis from task 101)
     analysis_file = output_dir / "corpus-analysis.md"
     if analysis_file.exists():
         try:
             context["corpus_analysis"] = analysis_file.read_text().strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read corpus analysis: %s", e)
 
     corpus_file = output_dir / "corpus.json"
     if corpus_file.exists():
-        with open(corpus_file) as f:
-            data = json.load(f)
-        context["corpus"] = data.get("materials", [])
+        try:
+            with open(corpus_file) as f:
+                data = json.load(f)
+            context["corpus"] = data.get("materials", [])
+        except Exception as e:
+            logger.debug("Failed to read corpus.json: %s", e)
 
     # Load dialogue synthesis if available (from task 104)
     dialogue_file = output_dir / "dialogue.json"
@@ -356,8 +361,8 @@ def _load_project_context(output_dir: Path) -> Dict[str, str]:
             synthesis = dialogue_data.get("synthesis", {})
             if synthesis:
                 context["dialogue_synthesis"] = synthesis
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read dialogue synthesis: %s", e)
 
     return context
 
@@ -383,8 +388,8 @@ def _suggest_experts(prompts_dir: Path, context: Dict[str, str],
         try:
             valid_agents = graph.reader.get_nodes("Agent")
             valid_names = {a["id"] for a in valid_agents}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to query agent nodes from graph: %s", e)
 
     if not catalog and manifest:
         # Fallback: build catalog directly from manifest JSON
@@ -470,8 +475,8 @@ backend-architect
                 # All suggestions were hallucinated — fall through to defaults
 
             return parsed if parsed else default_experts
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("LLM agent suggestion failed, using defaults: %s", e)
 
     return default_experts
 
@@ -582,11 +587,9 @@ def _use_builtin_agents(agents_output: Path, roster_output: Path) -> None:
         }
     }
 
-    with open(agents_output, 'w') as f:
-        json.dump(agents_json, f, indent=2)
+    write_json(agents_output, agents_json)
 
-    with open(roster_output, 'w') as f:
-        json.dump(roster, f, indent=2)
+    write_json(roster_output, roster)
 
     print("  ✓ Created default agent selection")
     print("  ✓ Created default phase roster")
@@ -594,27 +597,25 @@ def _use_builtin_agents(agents_output: Path, roster_output: Path) -> None:
 
 def _create_uat_agents(agents_output: Path, roster_output: Path, conversation_log: Path) -> None:
     """Create minimal agent files for UAT mode."""
-    with open(agents_output, 'w') as f:
-        json.dump({
-            "expert_agents": ["python-pro", "test-strategist", "backend-architect"],
-            "selection_method": "uat_defaults"
-        }, f, indent=2)
+    write_json(agents_output, {
+        "expert_agents": ["python-pro", "test-strategist", "backend-architect"],
+        "selection_method": "uat_defaults"
+    })
 
-    with open(roster_output, 'w') as f:
-        json.dump({
-            "pipeline": {
-                "1-discovery": ["discovery-agent"],
-                "2-prd": ["prd-validator"],
-                "3-tasking": ["task-decomposer"],
-                "4-specification": ["specification-agent"],
-                "5-implementation": ["tdd-implementation-agent"],
-                "6-code-review": ["code-review-gate"],
-                "7-integration": ["integration-testing-gate"],
-                "8-validation": ["plan-guardian"],
-                "9-deployment": ["deployment-gate"]
-            },
-            "experts": ["python-pro", "test-strategist", "backend-architect"]
-        }, f, indent=2)
+    write_json(roster_output, {
+        "pipeline": {
+            "1-discovery": ["discovery-agent"],
+            "2-prd": ["prd-validator"],
+            "3-tasking": ["task-decomposer"],
+            "4-specification": ["specification-agent"],
+            "5-implementation": ["tdd-implementation-agent"],
+            "6-code-review": ["code-review-gate"],
+            "7-integration": ["integration-testing-gate"],
+            "8-validation": ["plan-guardian"],
+            "9-deployment": ["deployment-gate"]
+        },
+        "experts": ["python-pro", "test-strategist", "backend-architect"]
+    })
 
     conversation_log.write_text("""## UAT Mode
 

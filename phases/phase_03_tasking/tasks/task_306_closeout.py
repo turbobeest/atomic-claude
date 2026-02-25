@@ -190,7 +190,8 @@ def _run_checklist(
                 print(print_red(f"[CRIT] ✗ Insufficient tasks ({task_count})"))
                 checklist.append(("Tasks decomposed", "FAIL"))
                 all_passed = False
-        except:
+        except Exception as e:
+            logger.debug("Tasks file parse error: %s", e)
             print(print_red("[CRIT] ✗ Tasks file invalid"))
             checklist.append(("Tasks decomposed", "FAIL"))
             all_passed = False
@@ -211,7 +212,8 @@ def _run_checklist(
             else:
                 print(print_yellow("[CRIT] !") + " Dependency issues found")
                 checklist.append(("Dependencies mapped", "WARN"))
-        except:
+        except Exception as e:
+            logger.debug("Dependency analysis parse error: %s", e)
             print(print_yellow("[CRIT] !") + " Dependency analysis invalid")
             checklist.append(("Dependencies mapped", "WARN"))
     else:
@@ -241,7 +243,8 @@ def _run_checklist(
             else:
                 print(print_red(f"[BLCK] ✗ Audit has failures ({failed} failed)"))
                 checklist.append(("Audit", "FAIL"))
-        except:
+        except Exception as e:
+            logger.debug("Audit file parse error: %s", e)
             print(print_green("[BLCK] ✓ Audit completed"))
             checklist.append(("Audit", "PASS"))
     else:
@@ -255,7 +258,8 @@ def _run_checklist(
             pkg_count = len(packages_data.get("packages", []))
             print(print_green(f"[BLCK] ✓ Work packages created ({pkg_count} packages)"))
             checklist.append(("Work packages", "PASS"))
-        except:
+        except Exception as e:
+            logger.debug("Work packages parse error: %s", e)
             print(print_yellow("[BLCK] ! Work packages invalid"))
             checklist.append(("Work packages", "SKIP"))
     else:
@@ -272,8 +276,8 @@ def _run_checklist(
             analysis = json.loads(read_file(dep_analysis))
             if "complexity" in analysis:
                 has_complexity = True
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Complexity analysis parse error: %s", e)
 
     if has_complexity:
         print(print_green("[PASS] ✓ Complexity analysis complete"))
@@ -300,8 +304,8 @@ def _show_review(output_dir: Path, project_root: Path) -> None:
     import subprocess
     try:
         subprocess.run(["ls", "-la", str(output_dir)], check=False)
-    except:
-        pass
+    except Exception as e:
+        logger.debug("Could not list output directory: %s", e)
     print()
 
 
@@ -319,15 +323,15 @@ def _gather_metrics(tasks_file: Path, packages_file: Path) -> Dict[str, Any]:
             tasks = tasks_data.get("tasks", [])
             metrics["task_count"] = len(tasks)
             metrics["high_priority"] = sum(1 for t in tasks if t.get("priority") == "high")
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Could not parse tasks file for metrics: %s", e)
 
     if packages_file.exists():
         try:
             packages_data = json.loads(read_file(packages_file))
             metrics["package_count"] = len(packages_data.get("packages", []))
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Could not parse packages file for metrics: %s", e)
 
     return metrics
 

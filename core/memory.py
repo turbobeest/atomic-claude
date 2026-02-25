@@ -7,10 +7,13 @@ Currently wraps memory.sh bash functions via subprocess.
 TODO: Convert to pure Python implementation later (Phase 0/1 don't need it heavily)
 """
 
+import logging
 import subprocess
 import os
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 
 def _get_memory_script() -> Path:
@@ -45,6 +48,7 @@ def _call_memory_function(func_name: str, *args: str) -> tuple[int, str, str]:
         memory_script = _get_memory_script()
     except FileNotFoundError:
         # Memory system not available - fail gracefully
+        logger.debug("Memory system not available: memory.sh not found")
         return (1, "", "memory.sh not found")
 
     # Build environment
@@ -70,8 +74,10 @@ def _call_memory_function(func_name: str, *args: str) -> tuple[int, str, str]:
         )
         return (result.returncode, result.stdout, result.stderr)
     except subprocess.TimeoutExpired:
+        logger.warning("Memory function '%s' timed out after 30s", func_name)
         return (124, "", "Memory function timed out")
     except Exception as e:
+        logger.debug("Memory function '%s' failed: %s", func_name, e)
         return (1, "", str(e))
 
 

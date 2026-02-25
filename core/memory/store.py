@@ -62,7 +62,7 @@ class MemoryStore:
                 head_phase=-1,
                 head_checkpoint=None
             )
-            self._write_atomic(self.head_file, head.dict())
+            self._write_atomic(self.head_file, head.model_dump())
 
         # Initialize index
         if not self.index_file.exists():
@@ -115,7 +115,7 @@ class MemoryStore:
     def _save(self) -> None:
         """Save memory entries to disk."""
         data = {
-            "entries": [entry.dict() for entry in self._entries],
+            "entries": [entry.model_dump() for entry in self._entries],
             "updated_at": datetime.now().isoformat()
         }
         self._write_atomic(self.memory_file, data)
@@ -208,9 +208,9 @@ class MemoryStore:
             with open(file_path, 'a', encoding='utf-8') as f:
                 f.write(md_content)
 
-        except Exception:
+        except Exception as e:
             # Never block the main memory operation
-            pass
+            logger.debug("Failed to write phase markdown file: %s", e)
 
     def get(self, entry_id: str) -> Optional[MemoryEntry]:
         """
@@ -382,7 +382,7 @@ class MemoryStore:
 
         data = {
             "exported_at": datetime.now().isoformat(),
-            "entries": [entry.dict() for entry in self._entries]
+            "entries": [entry.model_dump() for entry in self._entries]
         }
 
         with open(path, 'w', encoding='utf-8') as f:
@@ -451,7 +451,7 @@ class MemoryStore:
         if self._graph:
             try:
                 self._graph.clear_memory_after_phase(phase_num - 1)
-            except Exception:
-                pass  # Non-blocking
+            except Exception as e:
+                logger.warning("Graph memory cleanup failed (non-blocking): %s", e)
 
         return removed_count

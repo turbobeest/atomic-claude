@@ -9,10 +9,13 @@ contextual display right before each task runs.
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from core.llm.resolver import ResolvedModel, get_resolver, resolve_model
 from core.utils.cli_ui import (
@@ -621,5 +624,6 @@ def _get_ollama_models(resolver) -> List[str]:
             return []
         models = ollama_cfg.get("models", {})
         return list(models.keys())
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to get Ollama models from config: %s", e)
         return []

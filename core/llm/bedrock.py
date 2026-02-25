@@ -24,7 +24,7 @@ from .base import (
     HealthStatus,
     AuthenticationError,
     RateLimitError,
-    TimeoutError,
+    LLMTimeoutError,
     APIError,
     ModelNotFoundError,
 )

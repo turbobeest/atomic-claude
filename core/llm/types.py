@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Any
 
 try:
-    from pydantic import BaseModel, Field, validator
+    from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
     PYDANTIC_AVAILABLE = True
 except ImportError:
     PYDANTIC_AVAILABLE = False
@@ -60,16 +60,15 @@ if PYDANTIC_AVAILABLE:
         stream: bool = Field(False, description="Enable streaming")
         metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
-        @validator('prompt')
+        model_config = ConfigDict(validate_assignment=True)
+
+        @field_validator('prompt')
+        @classmethod
         def prompt_not_empty(cls, v):
             """Validate prompt is not empty."""
             if not v or not v.strip():
                 raise ValueError("Prompt cannot be empty")
             return v
-
-        class Config:
-            """Pydantic config."""
-            validate_assignment = True
 
 
     class LLMResponse(BaseModel):
@@ -88,11 +87,9 @@ if PYDANTIC_AVAILABLE:
         timestamp: datetime = Field(default_factory=datetime.now, description="Response timestamp")
         metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
-        class Config:
-            """Pydantic config."""
-            json_encoders = {
-                datetime: lambda v: v.isoformat()
-            }
+        @field_serializer('timestamp')
+        def serialize_timestamp(self, v: datetime) -> str:
+            return v.isoformat()
 
 
     class UsageStats(BaseModel):
@@ -153,11 +150,9 @@ if PYDANTIC_AVAILABLE:
         error_message: Optional[str] = Field(None, description="Error message if unavailable")
         metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional health data")
 
-        class Config:
-            """Pydantic config."""
-            json_encoders = {
-                datetime: lambda v: v.isoformat()
-            }
+        @field_serializer('last_check')
+        def serialize_last_check(self, v: datetime) -> str:
+            return v.isoformat()
 
 
 else:

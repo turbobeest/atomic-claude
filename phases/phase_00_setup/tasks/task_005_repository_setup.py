@@ -9,6 +9,7 @@ inventory, validates git configuration, and performs a full system capability
 assessment (CPU, GPU, memory, storage, network).
 """
 
+import logging
 import os
 import sys
 import json
@@ -29,6 +30,8 @@ from core.utils.cli_ui import (
     print_red, print_dim, prompt_user, clear_input_buffer
 )
 from core.utils.file_ops import ensure_dir, read_file, write_file
+
+logger = logging.getLogger(__name__)
 
 
 # Global validation state
@@ -562,7 +565,7 @@ def _assess_cpu(report_file: Path, os_type: str) -> None:
             )
             if result.returncode == 0:
                 cpu_model = result.stdout.strip()
-        except:
+        except Exception:
             cpu_model = "Apple Silicon"
     elif os_type == "linux":
         try:
@@ -571,7 +574,7 @@ def _assess_cpu(report_file: Path, os_type: str) -> None:
                     if line.startswith("model name"):
                         cpu_model = line.split(":", 1)[1].strip()
                         break
-        except:
+        except Exception:
             pass
 
     print(f"    Model: {cpu_model}")
@@ -619,7 +622,7 @@ def _assess_gpu(report_file: Path, os_type: str) -> None:
             has_metal = True
             print(f"    GPU:   {gpu_name or 'Integrated'}")
             print(print_green("    ✓ Metal support (Apple Silicon / macOS)"))
-        except:
+        except Exception:
             gpu_name = "Unknown"
             has_metal = True
             print(print_dim("    ○ GPU detection unavailable"))
@@ -636,7 +639,7 @@ def _assess_gpu(report_file: Path, os_type: str) -> None:
                     has_cuda = True
                     print(f"    GPU:   {gpu_name}")
                     print(print_green("    ✓ CUDA support"))
-            except:
+            except Exception:
                 pass
         else:
             print(print_dim("    ○ No dedicated GPU detected"))
@@ -674,7 +677,7 @@ def _assess_memory(report_file: Path, os_type: str) -> None:
             )
             if result.returncode == 0:
                 total_mb = int(result.stdout.strip()) // (1024 * 1024)
-        except:
+        except Exception:
             pass
     elif os_type == "linux":
         try:
@@ -684,7 +687,7 @@ def _assess_memory(report_file: Path, os_type: str) -> None:
                         total_mb = int(line.split()[1]) // 1024
                     elif line.startswith("MemAvailable:"):
                         avail_mb = int(line.split()[1]) // 1024
-        except:
+        except Exception:
             pass
 
     total_gb = total_mb // 1024
@@ -735,7 +738,7 @@ def _assess_storage(report_file: Path, os_type: str) -> None:
                     local_total = int(parts[1]) // (1024 * 1024)  # Convert to GB
                     local_avail = int(parts[3]) // (1024 * 1024)
                     local_mount = parts[-1]
-        except:
+        except Exception:
             pass
 
     print(f"    Local ({local_mount}):")
@@ -788,12 +791,12 @@ def _assess_network(report_file: Path) -> None:
             # Update report
             _update_report_capability(report_file, "network", {
                 "wan": {
-                    "latency_ms": str(latency_ms)
+                    "latency_ms": int(latency_ms)
                 }
             })
         else:
             print(print_yellow("    ! Network connectivity test failed"))
-    except:
+    except Exception:
         print(print_yellow("    ! Network connectivity test failed"))
 
     print()

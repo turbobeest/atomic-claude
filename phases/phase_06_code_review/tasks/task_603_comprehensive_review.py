@@ -8,12 +8,15 @@ Execute parallel code review across all dimensions:
 - Documentation Review (comments, docstrings, API docs)
 """
 
+import logging
 import sys
 import json
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -134,8 +137,8 @@ def _load_agents(agents_file: Path, atomic_root: Path) -> Dict[str, str]:
         agents["arch"] = review_agents.get("architecture", {}).get("name", "")
         agents["perf"] = review_agents.get("performance", {}).get("name", "")
         agents["doc"] = review_agents.get("documentation", {}).get("name", "")
-    except:
-        pass
+    except Exception as e:
+        logger.debug("Failed to load review agents from %s: %s", agents_file, e)
 
     return agents
 
@@ -230,7 +233,8 @@ def _gather_code_sample(files: List[Path], project_root: Path, prompts_dir: Path
         try:
             lines = read_file(file).splitlines()
             content.append("\n".join(lines[:max_lines]))
-        except:
+        except Exception as e:
+            logger.debug("Failed to read source file %s: %s", file, e)
             content.append("(Unable to read file)")
         content.append("\n```\n")
 
@@ -254,7 +258,8 @@ def _gather_test_sample(files: List[Path], prompts_dir: Path) -> Path:
         try:
             lines = read_file(file).splitlines()
             content.append("\n".join(lines[:max_lines]))
-        except:
+        except Exception as e:
+            logger.debug("Failed to read test file %s: %s", file, e)
             content.append("(Unable to read file)")
         content.append("\n```\n")
 
@@ -279,8 +284,8 @@ def _load_project_context(atomic_root: Path) -> str:
                 context_parts.append(f"**Description:** {project['description']}")
             if project.get("type"):
                 context_parts.append(f"**Type:** {project['type']}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load project config from %s: %s", config_file, e)
 
     # Load corpus analysis from discovery phase
     analysis_file = project_root / ".outputs" / "1-discovery" / "corpus-analysis.md"
@@ -289,8 +294,8 @@ def _load_project_context(atomic_root: Path) -> str:
             analysis = read_file(analysis_file).strip()
             if analysis:
                 context_parts.append(f"\n**Technical Landscape:**\n{analysis}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load corpus analysis from %s: %s", analysis_file, e)
 
     # Load OpenSpec constraints if available
     openspec_dir = project_root / ".openspec"
@@ -311,8 +316,8 @@ def _load_project_context(atomic_root: Path) -> str:
                     spec = json.loads(stripped)
                     title = spec.get("task_title", sf.stem)
                     spec_summary.append(f"  - {title}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to parse OpenSpec %s: %s", sf, e)
             if spec_summary:
                 context_parts.append(f"\n**OpenSpec Tasks:**\n" + "\n".join(spec_summary))
 

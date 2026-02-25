@@ -21,10 +21,13 @@ Validation agents (always included):
 
 import sys
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -349,8 +352,8 @@ def _custom_selection(recommendations: List[Tuple[str, str]]) -> List[str]:
                 idx = int(num_str) - 1
                 if 0 <= idx < len(recommendations):
                     additional.append(recommendations[idx][0])
-            except ValueError:
-                pass
+            except ValueError as e:
+                logger.debug("Invalid agent selection number %r: %s", num_str, e)
 
     return additional
 

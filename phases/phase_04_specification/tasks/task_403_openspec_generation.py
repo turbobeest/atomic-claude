@@ -8,6 +8,7 @@ Uses ThreadPoolExecutor for concurrent spec generation with Rich live progress.
 """
 
 import json
+import logging
 import re
 import sys
 import time
@@ -15,6 +16,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -104,8 +107,8 @@ def _load_project_context(atomic_root: Path) -> str:
             tech = constraints.get("technical", [])
             if tech:
                 context_parts.append(f"**Technical Constraints:** {', '.join(str(c) for c in tech[:10])}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not load project config: %s", e)
 
     # Load corpus analysis (detailed analysis from Phase 1)
     analysis_file = project_root / ".outputs" / "1-discovery" / "corpus-analysis.md"
@@ -114,8 +117,8 @@ def _load_project_context(atomic_root: Path) -> str:
             analysis = read_file(analysis_file).strip()
             if analysis:
                 context_parts.append(f"\n**Corpus Analysis:**\n{analysis}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not load corpus analysis: %s", e)
 
     # Load PRD content for specification grounding
     prd_file = project_root / "docs" / "prd" / "PRD.md"
@@ -124,8 +127,8 @@ def _load_project_context(atomic_root: Path) -> str:
             prd_content = read_file(prd_file).strip()
             if prd_content:
                 context_parts.append(f"\n**PRD (Product Requirements Document):**\n{prd_content}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not load PRD content: %s", e)
 
     # Load task dependency info from tasks.json
     tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
@@ -141,8 +144,8 @@ def _load_project_context(atomic_root: Path) -> str:
                     deps = t.get("dependencies", [])
                     dep_summary.append(f"  T{tid}: {title} (depends on: {deps})")
                 context_parts.append(f"\n**Task Dependencies:**\n" + "\n".join(dep_summary))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not load task dependencies: %s", e)
 
     return "\n".join(context_parts) if context_parts else "No project context available."
 
@@ -160,8 +163,8 @@ def _extract_canonical_layout(atomic_root: Path) -> str:
                 prd_path = data.get("prd_file", "")
                 if prd_path:
                     prd_file = Path(prd_path)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Could not read prd-approved.json: %s", e)
 
     if not prd_file.exists():
         return ""
@@ -173,8 +176,8 @@ def _extract_canonical_layout(atomic_root: Path) -> str:
         if match:
             layout = match.group(2).strip()
             return layout[:5000] if len(layout) > 5000 else layout
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not extract canonical layout from PRD: %s", e)
     return ""
 
 
@@ -409,8 +412,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 try:
                     graph.add_spec(task_id=task_id, spec_data=spec)
                 except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning(f"Graph spec write failed for T{task_id}: {e}")
+                    logger.warning("Graph spec write failed for T%s: %s", task_id, e)
 
         # Write generation report
         report = {
@@ -446,8 +448,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             if graph_context_cache:
                 print(print_green(f"  ✓ Graph context loaded for {len(graph_context_cache)} tasks"))
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Graph spec context query failed, using file context: {e}")
+            logger.warning("Graph spec context query failed, using file context: %s", e)
 
     project_context = _load_project_context(atomic_root)
 
@@ -482,8 +483,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                         graph.add_spec(task_id=task_id, spec_data=spec_data)
                         graph_written += 1
                     except Exception as e:
-                        import logging
-                        logging.getLogger(__name__).warning(f"Graph spec write failed for T{task_id}: {e}")
+                        logger.warning("Graph spec write failed for T%s: %s", task_id, e)
             if graph_written > 0:
                 print(print_green(f"  ✓ {graph_written} specs written to knowledge graph"))
 

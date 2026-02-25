@@ -14,10 +14,13 @@ Resolution hierarchy (first match wins):
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # Claude Code fast mode (--fast / /fast) is STRICTLY FORBIDDEN.
@@ -122,7 +125,8 @@ class ModelResolver:
         path = self._atomic_root / ".state" / "model-overrides.json"
         try:
             self._overrides = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as e:
+            logger.debug("Could not load model overrides from %s: %s", path, e)
             self._overrides = {}
 
     def resolve(
@@ -371,7 +375,8 @@ class ModelResolver:
         config_path = self._atomic_root / "config" / "models.json"
         try:
             return json.loads(config_path.read_text())
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as e:
+            logger.debug("Could not load tool defaults from %s: %s", config_path, e)
             return {}
 
     def _load_project_config(self) -> Dict[str, Any]:
@@ -380,7 +385,8 @@ class ModelResolver:
         try:
             data = json.loads(config_path.read_text())
             return data.get("extracted", {})
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as e:
+            logger.debug("Could not load project config from %s: %s", config_path, e)
             return {}
 
     def _load_agent_manifest(self) -> Dict[str, Dict[str, Any]]:
@@ -390,7 +396,8 @@ class ModelResolver:
             data = json.loads(manifest_path.read_text())
             agents = data.get("agents", [])
             return {a["name"]: a for a in agents if "name" in a}
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as e:
+            logger.debug("Could not load agent manifest from %s: %s", manifest_path, e)
             return {}
 
     def _detect_bootstrap_provider(self) -> Optional[str]:
@@ -433,8 +440,8 @@ class ModelResolver:
                 if "AWS_PROFILE=" in text or "CLAUDE_CODE_USE_BEDROCK=" in text:
                     self._bootstrap_provider = "aws-bedrock"
                     return self._bootstrap_provider
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug("Could not read .env for bootstrap provider detection: %s", e)
 
         self._bootstrap_provider = None
         return None

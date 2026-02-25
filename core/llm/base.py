@@ -96,11 +96,14 @@ class RateLimitError(LLMError):
         self.retry_after = retry_after
 
 
-class TimeoutError(LLMError):
+class LLMTimeoutError(LLMError):
     """Request timed out."""
 
     def __init__(self, message: str, provider: Optional[str] = None):
         super().__init__(message, provider, "timeout", retryable=True)
+
+
+TimeoutError = LLMTimeoutError  # noqa: A001 — backward compat
 
 
 class APIError(LLMError):

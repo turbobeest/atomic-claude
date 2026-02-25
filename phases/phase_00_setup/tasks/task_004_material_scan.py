@@ -13,6 +13,7 @@ Features:
 - Organization into docs/reference/
 """
 
+import logging
 import os
 import sys
 import json
@@ -20,18 +21,17 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
-import subprocess
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.config import Config
-from core.state import StateManager
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, prompt_user, clear_input_buffer
 )
 from core.utils.file_ops import ensure_dir, read_file, write_file
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -576,8 +576,9 @@ def _prompt_exclusions(manifest: Dict[str, Any], project_root: Path, uat_mode: b
             ))
             print()
 
-    except Exception:
+    except Exception as e:
         # Fall back to text-based UI on any failure
+        logger.warning("Interactive exclusion prompt failed, using text fallback: %s", e)
         _prompt_exclusions_text(manifest, project_root, uat_mode=False)
 
 
@@ -1092,8 +1093,9 @@ def _select_reference_materials(
             print(print_dim(f"  Reference corpus: all {total} files included"))
             print()
 
-    except Exception:
+    except Exception as e:
         # Fallback: include all candidates
+        logger.warning("Reference corpus selection failed, including all: %s", e)
         manifest['reference_materials'] = [str(p) for p in candidates]
 
 
@@ -1314,7 +1316,7 @@ def _count_lines(files: List[Path]) -> int:
         try:
             with open(f, 'r', encoding='utf-8', errors='ignore') as fp:
                 total += sum(1 for _ in fp)
-        except:
+        except (OSError, UnicodeDecodeError):
             pass
     return total
 

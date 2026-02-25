@@ -10,12 +10,15 @@ This task is OPTIONAL - can be skipped if no stakeholders are available
 or if defaults are acceptable.
 """
 
+import logging
 import os
 import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))

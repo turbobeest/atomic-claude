@@ -5,12 +5,15 @@ Handles checkpoint creation, restoration, and pruning.
 """
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from .types import Checkpoint, CheckpointStatus, MemoryHead
 from .store import MemoryStore
+
+logger = logging.getLogger(__name__)
 
 
 class CheckpointManager:
@@ -87,8 +90,8 @@ class CheckpointManager:
 
         # Save to file
         checkpoint_file = self.checkpoint_dir / f"{checkpoint_id}.json"
-        with open(checkpoint_file, 'w', encoding='utf-8') as f:
-            json.dump(checkpoint.dict(), f, indent=2, default=str)
+        from core.utils.file_ops import write_json
+        write_json(checkpoint_file, checkpoint.model_dump())
 
         # Dual-write to graph
         if self._graph:
@@ -101,8 +104,8 @@ class CheckpointManager:
                     key_decisions=key_decisions,
                     artifacts=artifacts,
                 )
-            except Exception:
-                pass  # Non-blocking
+            except Exception as e:
+                logger.warning("Graph checkpoint write failed (non-blocking): %s", e)
 
         # Update head
         self._update_head(phase, checkpoint_id)
@@ -162,8 +165,9 @@ class CheckpointManager:
 
                 checkpoints.append(checkpoint)
 
-            except Exception:
+            except (json.JSONDecodeError, OSError, TypeError, KeyError) as e:
                 # Skip invalid checkpoints
+                logger.debug("Skipping invalid checkpoint file %s: %s", checkpoint_file, e)
                 continue
 
         # Sort by created_at (newest first)
@@ -258,8 +262,8 @@ class CheckpointManager:
 
                 # Save updated checkpoint
                 checkpoint_file = self.checkpoint_dir / f"{checkpoint.checkpoint_id}.json"
-                with open(checkpoint_file, 'w', encoding='utf-8') as f:
-                    json.dump(checkpoint.dict(), f, indent=2, default=str)
+                from core.utils.file_ops import write_json
+                write_json(checkpoint_file, checkpoint.model_dump())
 
                 invalidated += 1
 
@@ -267,8 +271,8 @@ class CheckpointManager:
         if self._graph:
             try:
                 self._graph.invalidate_checkpoints_after(phase_num)
-            except Exception:
-                pass  # Non-blocking
+            except Exception as e:
+                logger.warning("Graph checkpoint invalidation failed (non-blocking): %s", e)
 
         return invalidated
 
@@ -306,5 +310,5 @@ class CheckpointManager:
         })
 
         # Save head
-        with open(self.head_file, 'w', encoding='utf-8') as f:
-            json.dump(head.dict(), f, indent=2, default=str)
+        from core.utils.file_ops import write_json
+        write_json(self.head_file, head.model_dump())

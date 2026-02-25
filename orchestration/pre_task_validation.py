@@ -13,9 +13,12 @@ Philosophy:
 Violations are HARD ERRORS - the pipeline stops until they're fixed.
 """
 
+import logging
 from pathlib import Path
 from typing import List, Dict, Any
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 # Allowed patterns in atomic-claude2 directory

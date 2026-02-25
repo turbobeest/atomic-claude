@@ -4,11 +4,14 @@ Task 501: Entry & Initialization
 Verify Phase 4 artifacts exist and prepare for TDD implementation.
 """
 
+import logging
 import sys
 import json
 from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -17,7 +20,7 @@ from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, print_magenta, prompt_user
 )
-from core.utils.file_ops import ensure_dir, write_file
+from core.utils.file_ops import ensure_dir, write_file, read_json
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -93,8 +96,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Check Phase 4 closeout
     if phase4_closeout.exists():
-        with open(phase4_closeout) as f:
-            closeout_data = json.load(f)
+        closeout_data = read_json(phase4_closeout)
         phase4_status = closeout_data.get("status", "unknown")
         if phase4_status == "complete" or "tasks_completed" in closeout_data:
             print(print_green(f"✓ Phase 4 closeout verified"))
@@ -107,8 +109,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     tasks_with_tdd = 0
     total_tasks = 0
     if tasks_file.exists():
-        with open(tasks_file) as f:
-            tasks_data = json.load(f)
+        tasks_data = read_json(tasks_file)
         tasks = tasks_data.get("tasks", [])
         total_tasks = len(tasks)
         tasks_with_tdd = sum(1 for task in tasks if len(task.get("subtasks", [])) >= 4)
@@ -154,8 +155,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Calculate total subtasks
     total_subtasks = 0
     if tasks_file.exists():
-        with open(tasks_file) as f:
-            tasks_data = json.load(f)
+        tasks_data = read_json(tasks_file)
         for task in tasks_data.get("tasks", []):
             total_subtasks += len(task.get("subtasks", []))
 

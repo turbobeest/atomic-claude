@@ -12,6 +12,7 @@ from .base import (
     TokenUsage,
     AuthenticationError,
     RateLimitError,
+    LLMTimeoutError,
     TimeoutError,
     APIError,
     ModelNotFoundError,
@@ -72,6 +73,7 @@ __all__ = [
     # Base exceptions
     "AuthenticationError",
     "RateLimitError",
+    "LLMTimeoutError",
     "TimeoutError",
     "APIError",
     "ModelNotFoundError",

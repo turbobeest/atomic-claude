@@ -182,7 +182,8 @@ def validate_phase1_artifacts(phase1_dir: Path, project_root: Path = None) -> Tu
                 approach_data = json.load(f)
             approach_name = approach_data.get('name', 'unnamed')
             print("    " + print_green("✓") + f" selected-approach.json ({approach_name})")
-        except Exception:
+        except Exception as e:
+            logger.debug("Error reading selected-approach.json: %s", e)
             print("    " + print_yellow("!") + " selected-approach.json (error reading)")
     else:
         print("    " + print_red("✗") + " selected-approach.json - NOT FOUND")
@@ -197,7 +198,8 @@ def validate_phase1_artifacts(phase1_dir: Path, project_root: Path = None) -> Tu
                 corpus_data = json.load(f)
             material_count = len(corpus_data.get('materials', []))
             print("    " + print_green("✓") + f" corpus.json ({material_count} materials)")
-        except Exception:
+        except Exception as e:
+            logger.debug("Error reading corpus.json: %s", e)
             print("    " + print_yellow("○") + " corpus.json - error reading")
     else:
         print("    " + print_yellow("○") + " corpus.json - not found (optional)")
@@ -305,8 +307,8 @@ def load_phase1_context(phase1_dir: Path) -> Dict[str, Any]:
             with open(corpus_file, 'r') as f:
                 corpus_data = json.load(f)
             context["corpus_materials"] = len(corpus_data.get('materials', []))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load corpus data: %s", e)
 
     print("  " + print_green("✓") + " Context loaded")
     print()

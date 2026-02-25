@@ -6,6 +6,7 @@ Generate release package, changelog, documentation, and installation guide.
 
 import sys
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -17,7 +18,9 @@ from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, print_magenta, print_blue
 )
-from core.utils.file_ops import read_json, write_json
+from core.utils.file_ops import read_json, write_json, read_file
+
+logger = logging.getLogger(__name__)
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -78,9 +81,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     prd_file = project_root / "docs" / "prd" / "PRD.md"
     project_context = ""
     if prd_file.exists():
-        with open(prd_file, 'r') as f:
-            lines = f.readlines()[:200]
+        try:
+            content = read_file(prd_file)
+            lines = content.splitlines(keepends=True)[:200]
             project_context = "".join(lines)
+        except Exception as e:
+            logger.debug("Failed to read PRD file: %s", e)
 
     # Generate all artifacts
     package_result = _generate_package(prompts_dir, version, release_type, project_context)

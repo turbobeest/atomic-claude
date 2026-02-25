@@ -5,11 +5,14 @@ Generate closeout document and prepare for Phase 6 (Code Review).
 Reads real metrics from validation-report.json and tdd-progress.json.
 """
 
+import logging
 import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -26,8 +29,8 @@ def _load_json(path: Path) -> Dict[str, Any]:
     try:
         if path.exists():
             return json.loads(path.read_text())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to load JSON from %s: %s", path, e)
     return {}
 
 

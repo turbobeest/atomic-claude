@@ -7,7 +7,7 @@ feature detection and graceful degradation.
 
 from typing import Dict, Set, Optional
 from enum import Enum
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ModelCapability(str, Enum):
@@ -31,8 +31,7 @@ class ProviderCapabilities(BaseModel):
     supports_system_prompt: bool = True
     supports_multiple_images: bool = False
 
-    class Config:
-        use_enum_values = False
+    model_config = ConfigDict(use_enum_values=False)
 
     def supports(self, capability: ModelCapability) -> bool:
         """Check if provider supports a capability."""

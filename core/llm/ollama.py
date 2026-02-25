@@ -21,7 +21,7 @@ from .base import (
     LLMError,
     AuthenticationError,
     RateLimitError,
-    TimeoutError,
+    LLMTimeoutError,
     APIError,
     ModelNotFoundError,
 )
@@ -167,8 +167,8 @@ class OllamaProvider(BaseLLMProvider):
                 )
             raise APIError(f"Ollama API error: {e}", provider="ollama")
 
-        except TimeoutError as e:
-            raise TimeoutError(
+        except LLMTimeoutError as e:
+            raise LLMTimeoutError(
                 f"Ollama request timed out after {timeout}s",
                 provider="ollama"
             )

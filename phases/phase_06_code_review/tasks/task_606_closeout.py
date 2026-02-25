@@ -4,11 +4,14 @@ Task 606: Phase Closeout
 Generate closeout document and prepare for Phase 7 (Integration Testing).
 """
 
+import logging
 import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -111,8 +114,8 @@ def _run_closeout_checklist(
             totals = findings_data.get("totals", {})
             critical_found = totals.get("critical", 0)
             major_found = totals.get("major", 0)
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load findings from %s: %s", findings_file, e)
 
     if refinement_file.exists():
         try:
@@ -122,8 +125,8 @@ def _run_closeout_checklist(
             major_fixed = refinements.get("major", {}).get("fixed", 0)
             test_verification = refinement_data.get("test_verification", {})
             tests_passing = test_verification.get("all_passing", True)
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load refinement report from %s: %s", refinement_file, e)
 
     # Check code review complete
     if findings_file.exists():
@@ -191,7 +194,8 @@ def _run_closeout_checklist(
             else:
                 print(print_red(f"[BLCK] ✗ Audit has failures ({failed} failed)"))
                 checklist.append(("Audit", "FAIL"))
-        except:
+        except Exception as e:
+            logger.debug("Failed to parse audit file %s: %s", audit_file, e)
             print(print_yellow("[BLCK] !") + " Audit not completed")
             checklist.append(("Audit", "SKIP"))
     else:
@@ -276,8 +280,8 @@ def _generate_closeout_documents(
             totals = findings_data.get("totals", {})
             critical_found = totals.get("critical", 0)
             major_found = totals.get("major", 0)
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load findings for closeout from %s: %s", findings_file, e)
 
     if refinement_file.exists():
         try:
@@ -287,8 +291,8 @@ def _generate_closeout_documents(
             major_fixed = refinements.get("major", {}).get("fixed", 0)
             test_verification = refinement_data.get("test_verification", {})
             tests_passing = str(test_verification.get("all_passing", True)).lower()
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load refinement for closeout from %s: %s", refinement_file, e)
 
     # Generate markdown
     checklist_md = []
@@ -407,8 +411,8 @@ def _memory_checkpoint(findings_file: Path, refinement_file: Path) -> None:
             totals = findings_data.get("totals", {})
             critical_found = totals.get("critical", 0)
             major_found = totals.get("major", 0)
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load findings for memory checkpoint from %s: %s", findings_file, e)
 
     if refinement_file.exists():
         try:
@@ -416,8 +420,8 @@ def _memory_checkpoint(findings_file: Path, refinement_file: Path) -> None:
             refinements = refinement_data.get("refinements", {})
             critical_fixed = refinements.get("critical", {}).get("fixed", 0)
             major_fixed = refinements.get("major", {}).get("fixed", 0)
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load refinement for memory checkpoint from %s: %s", refinement_file, e)
 
     memory_summary = f"""PHASE 6 CODE REVIEW COMPLETE
 

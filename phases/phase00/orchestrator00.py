@@ -12,6 +12,7 @@ Tasks:
   005 - Repository & system setup (agents/audits/skills, git, system capabilities)
 """
 
+import logging
 import sys
 import os
 import json
@@ -22,6 +23,8 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import traceback
+
+logger = logging.getLogger(__name__)
 
 from core.state import StateManager
 from core.ui import phase_header, phase_complete
@@ -116,6 +119,12 @@ def run_phase(resume_at: str = None) -> bool:
     # Determine starting point
     start_index = 0
     if resume_at:
+        valid_ids = {t[0] for t in tasks}
+        if resume_at not in valid_ids:
+            logger.error("Invalid resume_at task ID '%s'; valid IDs: %s",
+                         resume_at, sorted(valid_ids))
+            print(f"\n  Invalid task ID '{resume_at}'. Valid: {sorted(valid_ids)}")
+            return False
         for i, (task_id, _, _) in enumerate(tasks):
             if task_id == resume_at:
                 start_index = i
@@ -130,7 +139,8 @@ def run_phase(resume_at: str = None) -> bool:
 
         # PRE-TASK VALIDATION: Ensure directory is pristine (BLOCKER)
         if not validate_directory_pristine(phase_id, task_id):
-            print(f"\n🛑 Cannot proceed to Task {task_id} - fix violations first")
+            print(f"\n  Cannot proceed to Task {task_id} - fix violations first")
+            clear_current_task()
             return False
 
         # Run task
@@ -190,8 +200,8 @@ def run_phase(resume_at: str = None) -> bool:
                     entry_type=MemoryEntryType.TASK_END,
                     metadata=memory_metadata,
                 )
-            except Exception:
-                pass  # Memory save failure is non-blocking
+            except Exception as e:
+                logger.warning("Memory save failed for task %s: %s", task_id, e)
 
         except Exception as e:
             print(f"\n❌ Task {task_id} error: {e}")
@@ -214,11 +224,14 @@ def run_phase(resume_at: str = None) -> bool:
             tags=["phase-complete", phase_id],
             entry_type=MemoryEntryType.PHASE_CLOSEOUT,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Phase closeout memory save failed: %s", e)
 
     # Create closeout file
-    create_closeout(phase_id, tasks)
+    try:
+        create_closeout(phase_id, tasks)
+    except Exception as e:
+        logger.warning("Closeout file creation failed: %s", e)
 
     return True
 

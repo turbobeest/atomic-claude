@@ -7,6 +7,7 @@ Currently focuses on internal release with announcement generation.
 
 import sys
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -16,6 +17,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.ui import success, error, warning, info, step
 from core.llm import invoke_llm
+from core.utils.file_ops import read_json, write_json, read_file, write_file
+
+logger = logging.getLogger(__name__)
 
 
 # ANSI color codes for formatted output
@@ -49,8 +53,7 @@ def find_agent_prompt(agent_name: str, agent_repo: Path) -> Optional[str]:
     for pattern in agent_patterns:
         if pattern.exists():
             try:
-                with open(pattern) as f:
-                    content = f.read()
+                content = read_file(pattern)
                 # Strip frontmatter (lines between --- markers)
                 lines = content.split('\n')
                 if lines and lines[0].strip() == '---':
@@ -58,10 +61,10 @@ def find_agent_prompt(agent_name: str, agent_repo: Path) -> Optional[str]:
                         end_idx = lines[1:].index('---') + 2
                         return '\n'.join(lines[end_idx:])
                     except ValueError:
-                        pass
+                        logger.debug("No closing frontmatter marker in %s", pattern)
                 return content
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to read agent prompt %s: %s", pattern, e)
 
     return None
 
@@ -96,16 +99,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(f"  {DIM}UAT Mode: Creating minimal valid output{NC}")
 
         # Create minimal execution file
-        with open(execution_file, 'w') as f:
-            json.dump({
-                "status": "executed",
-                "executed_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "uat_mode": True
-            }, f, indent=2)
+        write_json(execution_file, {
+            "status": "executed",
+            "executed_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "uat_mode": True
+        })
 
-        with open(announcement_file, 'w') as f:
-            f.write("# Release Announcement (UAT)\n\n")
-            f.write("Release executed in UAT mode.\n")
+        write_file(announcement_file, "# Release Announcement (UAT)\n\nRelease executed in UAT mode.\n")
 
         success("UAT bypass complete")
         return True
@@ -133,8 +133,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print()
 
         try:
-            with open(agents_file) as f:
-                agents_data = json.load(f)
+            agents_data = read_json(agents_file)
 
             agents_array = agents_data.get("agents", [])
 
@@ -147,6 +146,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                         announcement_agent_prompt = agent_prompt
                         print(f"  {YELLOW}✓{NC} Loaded agent: {agent_name} (Announcement)")
         except Exception as e:
+            logger.debug("Failed to load agents: %s", e)
             print(f"  {YELLOW}!{NC} Failed to load agents: {e}")
 
         print()
@@ -158,11 +158,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     version = "0.1.0"
     if setup_file.exists():
         try:
-            with open(setup_file) as f:
-                setup_data = json.load(f)
+            setup_data = read_json(setup_file)
             version = setup_data.get("release", {}).get("version", "0.1.0")
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read release setup: %s", e)
 
     # Gather project context — load full content for informed release notes
     prd_file = project_root / "docs" / "prd" / "PRD.md"
@@ -171,19 +170,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     if prd_file.exists():
         try:
-            with open(prd_file) as f:
-                prd_content = f.read()
+            prd_content = read_file(prd_file)
             project_context += f"## PRD\n{prd_content}\n\n"
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read PRD file: %s", e)
 
     if changelog_file.exists():
         try:
-            with open(changelog_file) as f:
-                changelog_content = f.read()
+            changelog_content = read_file(changelog_file)
             project_context += f"## Changelog\n{changelog_content}\n\n"
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read changelog: %s", e)
 
     # Load phase 5-8 summaries for release context
     phase_summaries = []
@@ -196,14 +193,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         for cp in closeout_paths:
             if cp.exists():
                 try:
-                    with open(cp) as f:
-                        closeout_data = json.load(f)
+                    closeout_data = read_json(cp)
                     phase_summaries.append(
                         f"### Phase {phase_num} ({phase_name})\n"
                         f"{json.dumps(closeout_data, indent=2)}"
                     )
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to read closeout %s: %s", cp, e)
                 break
 
     if phase_summaries:
@@ -250,8 +246,7 @@ Draft internal release notes for stakeholders. Include:
 Return as markdown suitable for internal distribution.
 """
 
-    with open(announce_prompt_file, 'w') as f:
-        f.write(prompt_content)
+    write_file(announce_prompt_file, prompt_content)
 
     print(f"  {DIM}[announcement-writer] Drafting internal release notes...{NC}")
     print()
@@ -270,11 +265,9 @@ Return as markdown suitable for internal distribution.
 
     # Generate internal release notes (using LLM response or fallback)
     if announcement_content:
-        with open(announcement_file, 'w') as f:
-            f.write(announcement_content)
+        write_file(announcement_file, announcement_content)
     else:
-        with open(announcement_file, 'w') as f:
-            f.write(f"""# Internal Release Notes - v{version}
+        write_file(announcement_file, f"""# Internal Release Notes - v{version}
 
 ## Release Summary
 
@@ -332,28 +325,26 @@ Version {version} has been completed and is ready for internal use.
     print()
 
     # Save execution record
-    with open(execution_file, 'w') as f:
-        json.dump({
-            "release": {
-                "version": version,
-                "channel": "internal"
-            },
-            "announcement": {
-                "file": ".claude/release/announcement.md",
-                "status": announcement_status
-            },
-            "executed_at": datetime.now().isoformat()
-        }, f, indent=2)
+    write_json(execution_file, {
+        "release": {
+            "version": version,
+            "channel": "internal"
+        },
+        "announcement": {
+            "file": ".claude/release/announcement.md",
+            "status": announcement_status
+        },
+        "executed_at": datetime.now().isoformat()
+    })
 
     # Save decision to context
     decision_file = output_dir / "execution-decision.json"
     decision_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(decision_file, 'w') as f:
-        json.dump({
-            "decision": f"Release v{version} executed: internal",
-            "type": "execution",
-            "artifact": str(execution_file)
-        }, f, indent=2)
+    write_json(decision_file, {
+        "decision": f"Release v{version} executed: internal",
+        "type": "execution",
+        "artifact": str(execution_file)
+    })
 
     success("Release Execution complete")
     return True

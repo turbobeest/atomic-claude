@@ -407,7 +407,7 @@ class LLMRouter:
             role_enum = ModelRole(role.lower())
             chain = self._roles.get(role_enum, [])
         except ValueError:
-            # Unknown role
+            logger.debug("Unknown model role '%s', falling back to all providers", role)
             chain = []
 
         # Fallback to all providers if no role-specific chain

@@ -7,9 +7,21 @@ Provides context assembly for LLM prompts and graph traversal.
 
 import json
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from core.graph.schema import NodeLabel
 
 logger = logging.getLogger(__name__)
+
+# Whitelist of properties that may be used in ORDER BY clauses
+_VALID_ORDER_PROPERTIES: Set[str] = {
+    "id", "task_id", "name", "title", "phase", "status", "priority",
+    "created_at", "updated_at", "category", "tier", "type", "order",
+    "relevance_score", "timestamp", "phase_id",
+}
+
+# Valid node labels for Cypher injection prevention
+_VALID_LABELS: Set[str] = {label.value for label in NodeLabel}
 
 
 class GraphReader:
@@ -56,6 +68,11 @@ class GraphReader:
         Returns:
             List of property dicts
         """
+        if order_by and order_by not in _VALID_ORDER_PROPERTIES:
+            raise ValueError(f"Invalid order_by property: {order_by}")
+        if limit is not None:
+            limit = int(limit)
+
         params = {}
         where_clauses = []
 
@@ -134,6 +151,8 @@ class GraphReader:
         Returns:
             List of node dicts along the path, or empty list if no path
         """
+        max_depth = max(1, min(int(max_depth), 50))
+
         from_id_prop = "task_id" if from_label == "Spec" else "id"
         to_id_prop = "task_id" if to_label == "Spec" else "id"
 
@@ -446,6 +465,10 @@ class GraphReader:
             query_text: Search text
             limit: Max results
         """
+        if label not in _VALID_LABELS:
+            raise ValueError(f"Invalid label for fulltext search: {label}")
+        limit = int(limit)
+
         cypher = (
             f"CALL db.idx.fulltext.queryNodes('{label}', $query) "
             f"YIELD node RETURN node LIMIT {limit}"

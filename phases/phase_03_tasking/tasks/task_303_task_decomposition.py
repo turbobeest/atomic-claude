@@ -124,8 +124,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             analysis = read_file(corpus_analysis_file).strip()
             if analysis:
                 sections["corpus_analysis"] = analysis
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not read corpus analysis: %s", e)
 
     print(print_green(f"✓ PRD loaded ({prd_lines} lines)"))
     print(print_dim("  Extracted: Feature Requirements, Dependencies, Phases, Tech Stack"))
@@ -757,8 +757,8 @@ def _repair_json(file_path: Path) -> bool:
                 write_file(file_path, json_content)
                 print(print_green("✓ JSON repaired from markdown"))
                 return True
-            except:
-                pass
+            except Exception as e:
+                logger.debug("JSON repair from markdown failed: %s", e)
 
     # Try to find JSON object
     if "{" in content:
@@ -769,8 +769,8 @@ def _repair_json(file_path: Path) -> bool:
             write_file(file_path, json_content)
             print(print_green("✓ JSON extracted from output"))
             return True
-        except:
-            pass
+        except Exception as e:
+            logger.debug("JSON extraction from output failed: %s", e)
 
     return False
 

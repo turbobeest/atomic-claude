@@ -17,6 +17,7 @@ Parallel DAG engine that:
   - Tracks per-task records and overall progress with resume support
 """
 
+import logging
 import os
 import re
 import sys
@@ -27,6 +28,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Set
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -268,8 +271,8 @@ class ProjectSourceRegistry:
             with self._lock:
                 self._files = data.get("files", {})
                 self._by_task = data.get("by_task", {})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load source registry from %s: %s", path, e)
 
 
 # ---------------------------------------------------------------------------
@@ -292,8 +295,8 @@ class TokenBudget:
             if self.tokens_file.exists():
                 data = json.loads(self.tokens_file.read_text())
                 return data.get("estimated_cost_usd", 0.0)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read token spend from %s: %s", self.tokens_file, e)
         return 0.0
 
     def check(self) -> Tuple[bool, str]:
@@ -402,8 +405,8 @@ def load_json_safe(path: Path) -> Dict[str, Any]:
                 if stripped.endswith("```"):
                     stripped = stripped[:-3].strip()
             return json.loads(stripped)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to load OpenSpec from %s: %s", path, e)
     return {}
 
 
@@ -1033,7 +1036,17 @@ If unsure of the project layout, place files in src/ or the appropriate module d
 
             written_files = []
             for rel_path, content in files.items():
+                if os.path.isabs(rel_path) or '..' in Path(rel_path).parts:
+                    if not quiet:
+                        print(print_yellow(f"         Skipped unsafe path: {rel_path}"))
+                    continue
                 abs_path = project_root / rel_path
+                try:
+                    abs_path.resolve().relative_to(project_root.resolve())
+                except ValueError:
+                    if not quiet:
+                        print(print_yellow(f"         Skipped path outside project: {rel_path}"))
+                    continue
                 ensure_dir(abs_path.parent)
                 write_file(abs_path, content)
                 written_files.append(rel_path)
@@ -1085,7 +1098,17 @@ If unsure of the project layout, place files in src/ or the appropriate module d
                 # Multi-file output — write to project tree
                 written_files = []
                 for rel_path, content in files.items():
+                    if os.path.isabs(rel_path) or '..' in Path(rel_path).parts:
+                        if not quiet:
+                            print(print_yellow(f"         Skipped unsafe path: {rel_path}"))
+                        continue
                     abs_path = project_root / rel_path
+                    try:
+                        abs_path.resolve().relative_to(project_root.resolve())
+                    except ValueError:
+                        if not quiet:
+                            print(print_yellow(f"         Skipped path outside project: {rel_path}"))
+                        continue
                     ensure_dir(abs_path.parent)
                     write_file(abs_path, content)
                     written_files.append(rel_path)

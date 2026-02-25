@@ -7,7 +7,7 @@ Pydantic models for memory system data structures.
 from datetime import datetime
 from enum import Enum
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 class MemoryEntryType(str, Enum):
@@ -34,10 +34,9 @@ class MemoryEntry(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     relevance_score: float = Field(0.0, ge=0.0, le=1.0)
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    @field_serializer('timestamp')
+    def serialize_timestamp(self, v: datetime) -> str:
+        return v.isoformat()
 
 
 class CheckpointStatus(str, Enum):
@@ -63,10 +62,9 @@ class Checkpoint(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     previous_checkpoint: Optional[str] = None
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    @field_serializer('created_at')
+    def serialize_created_at(self, v: datetime) -> str:
+        return v.isoformat()
 
 
 class MemoryContext(BaseModel):
@@ -78,7 +76,8 @@ class MemoryContext(BaseModel):
     max_tokens: int = 4000
     relevance_threshold: float = 0.3
 
-    @validator("entries")
+    @field_validator("entries")
+    @classmethod
     def sort_by_relevance(cls, v):
         """Sort entries by relevance score (descending)."""
         return sorted(v, key=lambda e: e.relevance_score, reverse=True)
@@ -96,10 +95,9 @@ class MemoryStats(BaseModel):
     entries_by_phase: Dict[str, int] = Field(default_factory=dict)
     entries_by_type: Dict[str, int] = Field(default_factory=dict)
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat() if v else None
-        }
+    @field_serializer('oldest_entry', 'newest_entry')
+    def serialize_optional_datetime(self, v: Optional[datetime]) -> Optional[str]:
+        return v.isoformat() if v else None
 
 
 class MemoryHead(BaseModel):
@@ -112,7 +110,6 @@ class MemoryHead(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    @field_serializer('created_at', 'updated_at')
+    def serialize_datetime(self, v: datetime) -> str:
+        return v.isoformat()

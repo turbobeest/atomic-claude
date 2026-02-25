@@ -6,6 +6,7 @@ Human gate for confirming release success.
 
 import sys
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any
@@ -14,6 +15,9 @@ from typing import Dict, Any
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.ui import success, error, warning, info, step
+from core.utils.file_ops import read_json, write_json
+
+logger = logging.getLogger(__name__)
 
 
 # ANSI color codes for formatted output
@@ -52,12 +56,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
         # Create minimal confirmation file
         release_dir.mkdir(parents=True, exist_ok=True)
-        with open(confirmation_file, 'w') as f:
-            json.dump({
-                "confirmed": True,
-                "confirmed_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "confirmer": "UAT"
-            }, f, indent=2)
+        write_json(confirmation_file, {
+            "confirmed": True,
+            "confirmed_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "confirmer": "UAT"
+        })
 
         success("UAT bypass complete")
         return True
@@ -81,13 +84,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     if execution_file.exists():
         try:
-            with open(execution_file) as f:
-                execution_data = json.load(f)
+            execution_data = read_json(execution_file)
             version = execution_data.get("release", {}).get("version", "0.1.0")
             channel = execution_data.get("release", {}).get("channel", "internal")
             announcement_status = execution_data.get("announcement", {}).get("status", "unknown")
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read execution file: %s", e)
 
     print(f"  {DIM}Internal release completed. Please verify:{NC}")
     print()
@@ -158,6 +160,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     try:
         confirm_choice = input("  Choice (default: confirm): ").strip().lower() or "confirm"
     except EOFError:
+        logger.debug("Non-interactive mode: defaulting to 'confirm'")
         confirm_choice = "confirm"
 
     if confirm_choice == "investigate":
@@ -172,7 +175,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         try:
             input("  Press Enter after investigation...")
         except EOFError:
-            pass
+            logger.debug("Non-interactive mode: skipping investigation prompt")
         print()
         print(f"  {DIM}Returning to confirmation...{NC}")
         # Recursive call to re-run confirmation
@@ -195,18 +198,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             if confirmer_input:
                 confirmer_name = confirmer_input
         except EOFError:
-            pass
+            logger.debug("Non-interactive mode: using default confirmer name")
         print()
 
     # Save confirmation
-    with open(confirmation_file, 'w') as f:
-        json.dump({
-            "status": "confirmed",
-            "confirmer": confirmer_name,
-            "version": version,
-            "channel": channel,
-            "confirmed_at": datetime.now().isoformat()
-        }, f, indent=2)
+    write_json(confirmation_file, {
+        "status": "confirmed",
+        "confirmer": confirmer_name,
+        "version": version,
+        "channel": channel,
+        "confirmed_at": datetime.now().isoformat()
+    })
 
     print(f"  {GREEN}{'━' * 110}{NC}")
     print(f"  {GREEN}✓ RELEASE CONFIRMED{NC} by {confirmer_name}")
@@ -216,12 +218,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Save decision to context
     decision_file = output_dir / "confirmation-decision.json"
     decision_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(decision_file, 'w') as f:
-        json.dump({
-            "decision": f"Release v{version} confirmed by {confirmer_name}",
-            "type": "confirmation",
-            "artifact": str(confirmation_file)
-        }, f, indent=2)
+    write_json(decision_file, {
+        "decision": f"Release v{version} confirmed by {confirmer_name}",
+        "type": "confirmation",
+        "artifact": str(confirmation_file)
+    })
 
     success("Release Confirmation complete")
     return True

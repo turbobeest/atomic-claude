@@ -12,10 +12,13 @@ No hardcoded metrics — everything comes from actual artifacts.
 
 import sys
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Dict, Any, Tuple, List, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -33,8 +36,8 @@ def _load_json(path: Path) -> Dict[str, Any]:
     try:
         if path.exists():
             return json.loads(path.read_text())
-    except Exception:
-        pass
+    except (json.JSONDecodeError, OSError) as e:
+        logger.debug("Failed to load JSON from %s: %s", path, e)
     return {}
 
 
@@ -262,8 +265,8 @@ def _run_coverage(
                 totals = data.get("totals", {})
                 pct = totals.get("percent_covered", 0)
                 return {"line_coverage_pct": round(pct, 1), "source": "coverage.py"}
-    except Exception:
-        pass
+    except (json.JSONDecodeError, OSError, KeyError) as e:
+        logger.debug("Failed to parse coverage report from %s: %s", coverage_json, e)
 
     return None
 

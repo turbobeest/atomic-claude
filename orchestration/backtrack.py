@@ -16,8 +16,12 @@ import json
 from typing import Optional
 
 from core.memory import memory_init, memory_handle_backtrack
+from core.utils.file_ops import write_json
 
 logger = logging.getLogger(__name__)
+
+# Compute atomic-claude root directory (parent of orchestration/)
+atomic_root = Path(__file__).resolve().parent.parent
 
 
 PHASE_NAMES = {
@@ -40,19 +44,28 @@ PROJECT_DELIVERABLES = {
 }
 
 
-def backtrack_to(phase: int, task: Optional[str] = None):
+def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
     """
     Reset pipeline to a specific phase/task.
 
     Args:
         phase: Phase number (0-9)
         task: Optional task ID to reset to (e.g., "205")
+        force: If True, skip confirmation prompts (for programmatic use)
 
     This will:
     1. Reset state to target point
     2. Clear all artifacts after target
     3. Clear all phases after target
     """
+    # Validate phase number
+    if not isinstance(phase, int) or phase < 0 or phase > 9:
+        print(f"\n❌ Invalid phase number: {phase}. Must be 0-9.")
+        return
+
+    # Safety check: ensure we're in the right directory
+    if not (atomic_root / "main.py").exists():
+        raise RuntimeError(f"Safety check failed: {atomic_root} does not look like atomic-claude root")
 
     phase_name = PHASE_NAMES.get(phase, f"phase-{phase}")
 
@@ -62,14 +75,15 @@ def backtrack_to(phase: int, task: Optional[str] = None):
     print("   - Artifacts will be deleted")
     print("   - Memory will be cleared")
 
-    confirm = input("\nType 'yes' to confirm: ")
+    if not force:
+        confirm = input("\nType 'yes' to confirm: ")
 
-    if confirm.lower() != "yes":
-        print("❌ Backtrack cancelled")
-        return
+        if confirm.lower() != "yes":
+            print("❌ Backtrack cancelled")
+            return
 
     # Load state
-    state_file = Path(".state/task-state.json")
+    state_file = atomic_root / ".state" / "task-state.json"
     if not state_file.exists():
         print("❌ No state file found")
         return
@@ -84,8 +98,8 @@ def backtrack_to(phase: int, task: Optional[str] = None):
     try:
         memory_init()
         memory_handle_backtrack(phase)
-    except Exception:
-        pass  # Memory cleanup failure is non-blocking
+    except Exception as e:
+        logger.warning("Memory cleanup during backtrack failed: %s", e)
 
     # Clear state for future phases
     print("\n📝 Clearing state...")
@@ -140,13 +154,12 @@ def backtrack_to(phase: int, task: Optional[str] = None):
     state["current_task"] = None
 
     # Save updated state
-    with open(state_file, "w") as f:
-        json.dump(state, f, indent=2)
+    write_json(state_file, state)
 
     # Clear artifacts
     print("\n📁 Clearing artifacts...")
-    project_root = Path("..")
-    outputs_dir = project_root / ".outputs"
+    project_root = atomic_root.parent
+    outputs_dir = atomic_root / ".outputs"
 
     # Always wipe subsequent phases entirely
     for p in phases_to_clear:
@@ -168,7 +181,7 @@ def backtrack_to(phase: int, task: Optional[str] = None):
         print(f"   ℹ Preserved {target_phase_dir} (earlier task artifacts needed)")
 
     # Clear memory: same logic — wipe target phase if first task or no task
-    memory_dir = Path(".state/memory")
+    memory_dir = atomic_root / ".state" / "memory"
     for p in phases_to_clear:
         phase_mem = memory_dir / f"phase-{p}"
         if phase_mem.exists():
@@ -251,13 +264,13 @@ def backtrack_to(phase: int, task: Optional[str] = None):
                     print(f"   ✓ Cleared {f.name}")
 
     # Clear dashboard status file (no active task after backtrack)
-    current_task_file = Path(".state/current-task.json")
+    current_task_file = atomic_root / ".state" / "current-task.json"
     if current_task_file.exists():
         current_task_file.unlink()
         print("   ✓ Cleared dashboard current-task status")
 
     # Clear error log (prevents stale error cards in dashboard)
-    errors_file = Path(".logs/errors.json")
+    errors_file = atomic_root / ".logs" / "errors.json"
     if errors_file.exists():
         errors_file.write_text('{"errors": []}')
         print("   ✓ Cleared error log")
@@ -266,11 +279,11 @@ def backtrack_to(phase: int, task: Optional[str] = None):
     try:
         from orchestration.dashboard_sync import clear_current_task
         clear_current_task()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to signal dashboard during backtrack: %s", e)
 
     # Clear memory debug logs for affected phases
-    debug_dir = Path(".state/memory-debug")
+    debug_dir = atomic_root / ".state" / "memory-debug"
     if debug_dir.exists():
         for p in phases_to_clear:
             phase_id = f"{p}-{PHASE_NAMES[p]}"
@@ -287,13 +300,13 @@ def backtrack_to(phase: int, task: Optional[str] = None):
             print(f"   ✓ Cleared memory debug logs for rolled-back phases")
 
     # Clear model overrides (user may want fresh selections)
-    overrides_file = Path(".state/model-overrides.json")
+    overrides_file = atomic_root / ".state" / "model-overrides.json"
     if overrides_file.exists():
         overrides_file.unlink()
         print("   ✓ Cleared model overrides")
 
     # Clear LLM response cache (prevents stale cached responses on re-run)
-    llm_cache_dir = Path(".state/llm_cache")
+    llm_cache_dir = atomic_root / ".state" / "llm_cache"
     if llm_cache_dir.exists():
         shutil.rmtree(llm_cache_dir)
         print("   ✓ Cleared LLM response cache")
@@ -328,11 +341,14 @@ def backtrack_to(phase: int, task: Optional[str] = None):
         if not graph_cleaned:
             print("   ℹ No graph data to clear (graph disabled or empty)")
     except ImportError:
-        pass  # Graph module not available
+        logger.debug("Graph module not available for backtrack cleanup")
 
     # Prompt to clear generated code
     print("\n🗂️  Generated code...")
-    clear_code = input("Clear generated code in ../src/? (y/n): ")
+    if force:
+        clear_code = "n"
+    else:
+        clear_code = input("Clear generated code in ../src/? (y/n): ")
     if clear_code.lower() == "y":
         src_dir = project_root / "src"
         if src_dir.exists():
@@ -340,7 +356,10 @@ def backtrack_to(phase: int, task: Optional[str] = None):
             src_dir.mkdir()
             print("   ✓ Cleared ../src/")
 
-    clear_tests = input("Clear generated tests in ../tests/? (y/n): ")
+    if force:
+        clear_tests = "n"
+    else:
+        clear_tests = input("Clear generated tests in ../tests/? (y/n): ")
     if clear_tests.lower() == "y":
         tests_dir = project_root / "tests"
         if tests_dir.exists():

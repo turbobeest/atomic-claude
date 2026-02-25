@@ -29,7 +29,7 @@ from datetime import datetime
 from enum import Enum
 
 try:
-    from pydantic import BaseModel, Field, field_validator, model_validator
+    from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
     HAS_PYDANTIC = True
 except ImportError:
     # Fallback if pydantic not installed
@@ -153,8 +153,7 @@ if HAS_PYDANTIC:
                 raise ValueError("Dashboard ports must be unique")
             return self
 
-        class Config:
-            extra = "allow"  # Allow additional fields for extensibility
+        model_config = ConfigDict(extra="allow")  # Allow additional fields for extensibility
 
 
 # ============================================================================

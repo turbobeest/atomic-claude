@@ -23,7 +23,7 @@ from .base import (
     HealthStatus,
     AuthenticationError,
     RateLimitError,
-    TimeoutError,
+    LLMTimeoutError,
     APIError,
     ModelNotFoundError,
 )
@@ -237,7 +237,7 @@ class AnthropicProvider(BaseLLMProvider):
                     time.sleep(2 ** attempt)
                     continue
 
-                raise TimeoutError(
+                raise LLMTimeoutError(
                     f"Anthropic request timed out: {str(e)}",
                     provider="anthropic"
                 )
@@ -343,7 +343,7 @@ class AnthropicProvider(BaseLLMProvider):
             )
 
         except anthropic.APITimeoutError as e:
-            raise TimeoutError(
+            raise LLMTimeoutError(
                 f"Anthropic request timed out: {str(e)}",
                 provider="anthropic"
             )

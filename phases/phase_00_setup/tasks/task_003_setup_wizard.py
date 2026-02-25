@@ -294,8 +294,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     env_vars = provider_inventory.get("env_vars", dict(os.environ))
     ai_defaults = _infer_project_defaults(env_vars, project_root, env_info)
 
-    # --- Run the 10-step wizard ---
-    config = _run_wizard(ai_defaults, env_info, provider_inventory, config_file, mem=mem)
+    # --- Run the 10-step wizard (loop on RESTART sentinel) ---
+    config = "RESTART"
+    while config == "RESTART":
+        config = _run_wizard(ai_defaults, env_info, provider_inventory, config_file, mem=mem)
     if config is None:
         print(print_red("Setup aborted"))
         return False
@@ -364,8 +366,8 @@ def _detect_environment(project_root: Path) -> Dict[str, Any]:
         )
         if result.returncode == 0:
             info["git_url"] = result.stdout.strip()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Git remote URL detection failed: %s", e)
 
     # Default branch
     try:
@@ -377,8 +379,8 @@ def _detect_environment(project_root: Path) -> Dict[str, Any]:
         if result.returncode == 0:
             ref = result.stdout.strip()  # refs/remotes/origin/main
             info["default_branch"] = ref.rsplit('/', 1)[-1]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Git default branch detection failed: %s", e)
 
     # Reference files -- scan explicit names + common subdirectories
     candidates = [
@@ -465,8 +467,8 @@ def _infer_project_defaults(
             ref_text += f"\n=== {Path(ref_path).name} ===\n"
             ref_text += '\n'.join(lines)
             ref_text += "\n\n"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read reference file %s: %s", ref_path, e)
 
     if not ref_text:
         return fallback
@@ -609,8 +611,8 @@ def _write_preliminary_config(config_file: Path, cfg: Dict[str, Any]) -> None:
             except (json.JSONDecodeError, OSError):
                 pass
         config_file.write_text(json.dumps(data, indent=2))
-    except Exception:
-        pass  # Never block the wizard
+    except Exception as e:
+        logger.warning("Preliminary config write failed: %s", e)
 
 
 def _run_wizard(
@@ -1239,7 +1241,7 @@ def _run_wizard(
     if choice in ('n', 'no'):
         print(print_yellow("  Restarting wizard..."))
         print()
-        return _run_wizard(ai, env_info, provider_inventory, config_file, mem=mem)
+        return "RESTART"
 
     # Fill in auto-defaults that are not prompted
     _apply_auto_defaults(cfg)
@@ -1798,8 +1800,8 @@ def _detect_git_remote_url() -> str:
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Git remote URL detection failed: %s", e)
     return ""
 
 

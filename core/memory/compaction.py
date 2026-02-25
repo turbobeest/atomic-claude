@@ -78,6 +78,9 @@ class MemoryCompactor:
             "total_removed": initial_count - final_stats.total_entries
         }
 
+    # Cap on pairwise comparisons within a single group to avoid O(n**2) blow-up
+    MAX_GROUP_COMPARISONS = 5000
+
     def find_redundant(self, similarity_threshold: float = 0.85) -> Set[str]:
         """
         Find redundant (duplicate/similar) entries.
@@ -102,9 +105,14 @@ class MemoryCompactor:
             if len(group) < 2:
                 continue
 
-            # Compare each pair
+            # Compare each pair (capped to avoid runaway cost)
+            comparisons = 0
             for i, entry1 in enumerate(group):
                 for entry2 in group[i + 1:]:
+                    comparisons += 1
+                    if comparisons > self.MAX_GROUP_COMPARISONS:
+                        break
+
                     similarity = self._calculate_similarity(entry1, entry2)
 
                     if similarity >= similarity_threshold:
@@ -113,6 +121,8 @@ class MemoryCompactor:
                             redundant.add(entry1.id)
                         else:
                             redundant.add(entry2.id)
+                if comparisons > self.MAX_GROUP_COMPARISONS:
+                    break
 
         return redundant
 

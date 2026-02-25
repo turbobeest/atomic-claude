@@ -6,6 +6,7 @@ Present and select release agents for announcement writing.
 
 import sys
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
@@ -16,6 +17,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from core.config import Config
 from core.state import StateManager
 from core.ui import success, error, warning, info, step
+from core.utils.file_ops import write_json
+
+logger = logging.getLogger(__name__)
 
 
 # ANSI color codes for formatted output
@@ -55,11 +59,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         # Create minimal output that satisfies downstream tasks
         output_dir.mkdir(parents=True, exist_ok=True)
         selected_agents_file = output_dir / "selected-agents.json"
-        with open(selected_agents_file, 'w') as f:
-            json.dump({
-                "agents": ["announcement-writer-phd:haiku"],
-                "count": 1
-            }, f, indent=2)
+        write_json(selected_agents_file, {
+            "agents": ["announcement-writer-phd:haiku"],
+            "count": 1
+        })
 
         success("UAT bypass complete")
         return True
@@ -129,6 +132,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     try:
         ann_choice = input("  Select (default: 1): ").strip() or "1"
     except EOFError:
+        logger.debug("Non-interactive mode: defaulting to '1'")
         ann_choice = "1"
 
     if ann_choice == "1":
@@ -141,6 +145,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             custom_model = input("  Custom agent model (default: haiku): ").strip() or "haiku"
             selected_agents.append(f"{custom_name}:{custom_model}")
         except EOFError:
+            logger.debug("Non-interactive mode: defaulting to announcement-writer-phd:haiku")
             selected_agents.append("announcement-writer-phd:haiku")
     else:
         selected_agents.append("announcement-writer-phd:haiku")
@@ -166,21 +171,19 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Save agent selection
     agents_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(agents_file, 'w') as f:
-        json.dump({
-            "phase": 9,
-            "agents": selected_agents,
-            "selected_at": datetime.now().isoformat()
-        }, f, indent=2)
+    write_json(agents_file, {
+        "phase": 9,
+        "agents": selected_agents,
+        "selected_at": datetime.now().isoformat()
+    })
 
     # Save decision to context
     decision_file = output_dir / "agents-decision.json"
-    with open(decision_file, 'w') as f:
-        json.dump({
-            "decision": f"Release agents selected: {len(selected_agents)} agents",
-            "type": "agents",
-            "artifact": str(agents_file)
-        }, f, indent=2)
+    write_json(decision_file, {
+        "decision": f"Release agents selected: {len(selected_agents)} agents",
+        "type": "agents",
+        "artifact": str(agents_file)
+    })
 
     success("Agent Selection complete")
     return True

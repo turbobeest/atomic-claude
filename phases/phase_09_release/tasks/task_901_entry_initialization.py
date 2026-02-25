@@ -6,6 +6,7 @@ Validate prerequisites and present phase objectives for the Release phase.
 
 import sys
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any
 
@@ -13,6 +14,9 @@ from typing import Dict, Any
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.ui import success, error, warning, info, step
+from core.utils.file_ops import read_json, write_json
+
+logger = logging.getLogger(__name__)
 
 
 # ANSI color codes for formatted output
@@ -83,8 +87,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Check Phase 8 closeout
     if closeout_file and closeout_file.exists():
         try:
-            with open(closeout_file) as f:
-                closeout_data = json.load(f)
+            closeout_data = read_json(closeout_file)
             phase_8_status = closeout_data.get("status", "unknown")
             if phase_8_status == "complete" or "tasks_completed" in closeout_data:
                 print(f"  {GREEN}[CRIT]{NC} {GREEN}✓{NC} Phase 8 (Deployment Prep) complete")
@@ -92,6 +95,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 print(f"  {RED}[CRIT]{NC} {RED}✗{NC} Phase 8 not complete (status: {phase_8_status})")
                 all_valid = False
         except Exception as e:
+            logger.debug("Failed to read Phase 8 closeout: %s", e)
             print(f"  {RED}[CRIT]{NC} {RED}✗{NC} Failed to read Phase 8 closeout: {e}")
             all_valid = False
     else:
@@ -159,18 +163,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     try:
         input("  Press Enter to continue...")
     except EOFError:
-        pass  # Handle non-interactive mode
+        logger.debug("Non-interactive mode: skipping Enter prompt")
     print()
 
     # Save decision to context (future: integrate with memory system)
     decision_file = output_dir / "entry-decision.json"
     decision_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(decision_file, 'w') as f:
-        json.dump({
-            "decision": "Phase 9 entry validated",
-            "type": "entry",
-            "prerequisites_met": all_valid
-        }, f, indent=2)
+    write_json(decision_file, {
+        "decision": "Phase 9 entry validated",
+        "type": "entry",
+        "prerequisites_met": all_valid
+    })
 
     success("Entry & Initialization complete")
     return True

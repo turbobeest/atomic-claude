@@ -7,11 +7,14 @@ Response caching with TTL and disk persistence.
 
 import hashlib
 import json
+import logging
 import os
 import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 class LLMCache:
@@ -201,8 +204,8 @@ class LLMCache:
                     if current_time - timestamp >= self.ttl_seconds:
                         cache_file.unlink()
                         pruned += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to prune cache file %s: %s", cache_file, e)
 
         return pruned
 
@@ -245,8 +248,8 @@ class LLMCache:
             try:
                 self._save_to_disk(key, response, timestamp=timestamp)
                 saved += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to save cache entry %s to disk: %s", key[:16], e)
 
         return saved
 
@@ -281,8 +284,8 @@ class LLMCache:
                     self._put(key, response, timestamp=timestamp)
                     loaded += 1
 
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to load cache file %s: %s", cache_file, e)
 
         return loaded
 
@@ -384,6 +387,8 @@ class LLMCache:
         if timestamp is None:
             timestamp = time.time()
 
+        from core.utils.file_ops import write_json
+
         cache_file = self.cache_dir / f"{key}.json"
 
         data = {
@@ -393,8 +398,7 @@ class LLMCache:
             "ttl": ttl or self.ttl_seconds,
         }
 
-        with open(cache_file, "w") as f:
-            json.dump(data, f, indent=2)
+        write_json(cache_file, data)
 
     def _get_from_disk(self, key: str) -> Optional[Dict[str, Any]]:
         """
@@ -429,5 +433,6 @@ class LLMCache:
 
             return data.get("response")
 
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read cache file %s: %s", cache_file, e)
             return None

@@ -17,10 +17,13 @@ Then:
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -29,6 +32,7 @@ from core.config import Config
 from core.state import StateManager
 from core.llm import invoke_llm as invoke
 from core.ui import phase_header, success, error, warning, info, step
+from core.utils.file_ops import write_json, write_file
 
 # Supported file extensions for corpus analysis
 SUPPORTED_EXTS = {'.md', '.txt', '.rst', '.pdf', '.json', '.yaml', '.yml', '.dot', '.svg'}
@@ -240,8 +244,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             try:
                 analysis_text = analysis_file.read_text()[:500]
                 mem.conversation(f"Corpus analysis summary: {analysis_text.splitlines()[0] if analysis_text else 'N/A'}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to read corpus analysis for memory: %s", e)
         feedback = corpus_data.get("human_feedback", "")
         if feedback:
             mem.conversation(f"Human feedback: {feedback}")
@@ -297,8 +301,7 @@ def _flatten_config(config_file: Path, config_data: Dict[str, Any]) -> None:
     config_data['approved_at'] = datetime.now().isoformat()
 
     # Save flattened config
-    with open(config_file, 'w') as f:
-        json.dump(config_data, f, indent=2)
+    write_json(config_file, config_data)
 
 
 def _load_curated_materials(setup_dir: Path) -> Optional[List[Path]]:
@@ -391,7 +394,8 @@ def _analyze_corpus(
         rm = resolve_model(phase_id="1-discovery", task_id="101")
         context_tokens = rm.context_window or 200_000
         corpus_model = rm.tier  # Use the resolved tier for the invoke call
-    except Exception:
+    except Exception as e:
+        logger.debug("Model resolution failed, using defaults: %s", e)
         context_tokens = 200_000
         corpus_model = "sonnet"
     # Use 50% of context for corpus (~4 chars/token).
@@ -450,7 +454,8 @@ def _analyze_corpus(
             chars_used += len(header) + len(text) + 1
             files_read += 1
 
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read corpus file %s: %s", path.name, e)
             continue
 
     if files_truncated > 0:
@@ -513,8 +518,7 @@ Be specific to THIS project. Output as markdown.
 """
 
     prompt_file = prompts_dir / "corpus-analysis.md"
-    with open(prompt_file, 'w') as f:
-        f.write(prompt)
+    write_file(prompt_file, prompt)
 
     print("  Claude is analyzing corpus...")
 
@@ -562,7 +566,8 @@ def _load_project_context(setup_dir: Path) -> str:
 
         return f"## Project Context (from setup configuration)\n\n**Project Name:** {p_name}\n**Description:** {p_desc}\n\n---\n"
 
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to load project context: %s", e)
         return ""
 
 
@@ -624,35 +629,39 @@ def _corpus_reflection(analysis_file: Path, corpus_data: Dict[str, Any]) -> None
 def _save_corpus(corpus_json: Path, corpus_data: Dict[str, Any], analysis_file: Path = None) -> None:
     """Save corpus JSON and summary."""
     # Save JSON
-    with open(corpus_json, 'w') as f:
-        json.dump(corpus_data, f, indent=2)
+    write_json(corpus_json, corpus_data)
     print(f"  ✓ Saved corpus.json")
 
     # Generate index alongside corpus.json
     index_file = corpus_json.parent / "CORPUS-INDEX.md"
-    with open(index_file, 'w') as f:
-        f.write("# Corpus Index\n\n")
-        f.write(f"Generated: {datetime.now().isoformat()}\n\n")
-        f.write("## Materials\n\n")
+    index_parts = []
+    index_parts.append("# Corpus Index\n\n")
+    index_parts.append(f"Generated: {datetime.now().isoformat()}\n\n")
+    index_parts.append("## Materials\n\n")
 
-        for material in corpus_data.get("materials", []):
-            name = material.get("name", "unknown")
-            f.write(f"- **{name}**\n")
+    for material in corpus_data.get("materials", []):
+        name = material.get("name", "unknown")
+        index_parts.append(f"- **{name}**\n")
 
-        # Analysis summary
-        if analysis_file and analysis_file.exists():
-            f.write("\n## Analysis Summary\n\n")
+    # Analysis summary
+    if analysis_file and analysis_file.exists():
+        index_parts.append("\n## Analysis Summary\n\n")
+        try:
             with open(analysis_file) as af:
                 for i, line in enumerate(af):
                     if i >= 30:
                         break
-                    f.write(line)
+                    index_parts.append(line)
+        except OSError as e:
+            logger.debug("Failed to read analysis file for index: %s", e)
 
-        # Human feedback
-        if corpus_data.get("human_feedback"):
-            f.write("\n## Human Feedback\n\n")
-            f.write(corpus_data["human_feedback"])
-            f.write("\n")
+    # Human feedback
+    if corpus_data.get("human_feedback"):
+        index_parts.append("\n## Human Feedback\n\n")
+        index_parts.append(corpus_data["human_feedback"])
+        index_parts.append("\n")
+
+    write_file(index_file, "".join(index_parts))
 
     print(f"  ✓ Generated CORPUS-INDEX.md")
     print()

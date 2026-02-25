@@ -13,9 +13,9 @@ Tasks:
   306 - Closeout
 """
 
+import logging
 import sys
 import os
-import json
 from pathlib import Path
 from datetime import datetime
 
@@ -23,6 +23,8 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import traceback
+
+logger = logging.getLogger(__name__)
 
 from core.state import StateManager
 from core.ui import phase_header, phase_complete
@@ -33,6 +35,7 @@ from orchestration.memory_enrichment import summarize_task_artifacts, enrich_mem
 from orchestration.task_memory import TaskMemory
 from orchestration.task_display import display_task_roster, resolve_agent_roster, is_infrastructure_task
 from core.llm.resolver import resolve_model, get_resolver
+from core.utils.file_ops import write_json
 from core.graph import get_graph
 
 
@@ -189,8 +192,8 @@ def run_phase(resume_at: str = None) -> bool:
                     entry_type=MemoryEntryType.TASK_END,
                     metadata=memory_metadata,
                 )
-            except Exception:
-                pass  # Memory save failure is non-blocking
+            except Exception as e:
+                logger.warning("Memory save failed for task %s: %s", task_id, e)
 
         except Exception as e:
             state.mark_task_failed(phase_id, task_id, task_name, str(e))
@@ -213,11 +216,14 @@ def run_phase(resume_at: str = None) -> bool:
             tags=["phase-complete", phase_id],
             entry_type=MemoryEntryType.PHASE_CLOSEOUT,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Phase closeout memory save failed: %s", e)
 
     # Create closeout file
-    create_closeout(phase_id, tasks)
+    try:
+        create_closeout(phase_id, tasks)
+    except Exception as e:
+        logger.warning("Closeout file creation failed: %s", e)
 
     return True
 
@@ -262,8 +268,6 @@ def create_closeout(phase_id: str, tasks: list):
         phase_id: Phase identifier (e.g., "3-tasking")
         tasks: List of (task_id, task_name, task_func) tuples
     """
-    import os
-
     atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
     output_dir = atomic_root.parent / ".outputs" / phase_id
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -285,8 +289,7 @@ def create_closeout(phase_id: str, tasks: list):
         "summary": f"Phase {phase_num} ({phase_id.split('-', 1)[1].title()}) completed successfully."
     }
 
-    with open(closeout_file, "w") as f:
-        json.dump(closeout_data, f, indent=2)
+    write_json(closeout_file, closeout_data)
 
     print(f"\n✅ Phase {phase_num} closeout: {closeout_file}")
 

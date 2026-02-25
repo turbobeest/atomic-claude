@@ -6,6 +6,7 @@ Generate closeout document and prepare for Phase 9 (Release).
 
 import sys
 import json
+import logging
 from pathlib import Path
 from typing import List, Tuple
 from datetime import datetime
@@ -17,7 +18,9 @@ from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, prompt_user
 )
-from core.utils.file_ops import read_json, write_json
+from core.utils.file_ops import read_json, write_json, write_file
+
+logger = logging.getLogger(__name__)
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -52,9 +55,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_dim("  UAT Mode: Creating minimal valid output"))
 
         # Create minimal closeout files
-        with open(closeout_file, 'w') as f:
-            f.write("# Phase 8: Deployment Prep - Closeout (UAT)\n\n")
-            f.write("Deployment artifacts prepared and approved in UAT mode.\n")
+        write_file(closeout_file, "# Phase 8: Deployment Prep - Closeout (UAT)\n\nDeployment artifacts prepared and approved in UAT mode.\n")
 
         closeout_data = {
             "phase": "8-deployment-prep",
@@ -245,8 +246,7 @@ python main.py run 9
 *Phase 8 completed by ATOMIC CLAUDE*
 """
 
-    with open(closeout_file, 'w') as f:
-        f.write(closeout_md)
+    write_file(closeout_file, closeout_md)
 
     # Generate JSON closeout
     closeout_data = {

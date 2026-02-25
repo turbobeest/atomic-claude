@@ -28,6 +28,7 @@ Author: Phase 2 - State Management
 
 import json
 import fcntl
+import logging
 import tempfile
 import shutil
 from pathlib import Path
@@ -37,6 +38,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, asdict
 from enum import Enum
 import os
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -202,8 +205,8 @@ class StateLock:
             try:
                 fcntl.flock(self.lock_fd.fileno(), fcntl.LOCK_UN)
                 self.lock_fd.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to release state lock: %s", e)
             finally:
                 self.lock_fd = None
 
@@ -387,8 +390,8 @@ class StateManager:
             # Clean up temp file on error
             try:
                 os.unlink(temp_path)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to clean up temp state file %s: %s", temp_path, e)
             raise IOError(f"Failed to save state: {e}")
 
     def _create_empty_state(self) -> Dict[str, Any]:
@@ -670,12 +673,13 @@ class StateManager:
         Returns:
             Path to saved snapshot
         """
+        from core.utils.file_ops import write_json
+
         snapshot = self.snapshot()
         name = name or datetime.now().strftime('%Y%m%d_%H%M%S')
         snapshot_file = self.snapshots_dir / f"{name}.json"
 
-        with open(snapshot_file, 'w') as f:
-            json.dump(snapshot.to_dict(), f, indent=2)
+        write_json(snapshot_file, snapshot.to_dict())
 
         return snapshot_file
 
@@ -842,9 +846,10 @@ def task_running(phase_id: str, task_id: str, task_name: str, state_dir: Path = 
             # Task logic here
             pass
     """
+    from core.utils.file_ops import write_json
+
     state_dir = state_dir or Path(".state")
     current_task_file = state_dir / "current-task.json"
-    current_task_file.parent.mkdir(parents=True, exist_ok=True)
 
     current_task = {
         "phase": phase_id,
@@ -854,8 +859,7 @@ def task_running(phase_id: str, task_id: str, task_name: str, state_dir: Path = 
         "started_at": datetime.now().isoformat()
     }
 
-    with open(current_task_file, "w") as f:
-        json.dump(current_task, f, indent=2)
+    write_json(current_task_file, current_task)
 
     try:
         yield

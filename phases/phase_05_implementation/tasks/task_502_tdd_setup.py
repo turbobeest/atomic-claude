@@ -10,12 +10,15 @@ Stack detection uses a 4-strategy cascade:
   4. User prompt — ask interactively (defaults to "python" in UAT mode)
 """
 
+import logging
 import sys
 import json
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -24,7 +27,7 @@ from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, print_magenta, prompt_user
 )
-from core.utils.file_ops import ensure_dir, write_file
+from core.utils.file_ops import ensure_dir, write_file, read_json
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +123,8 @@ def _load_prd_text(project_root: Path) -> Optional[str]:
             if prd_path and prd_path.is_file() and prd_path.stat().st_size > 0:
                 text = prd_path.read_text(errors="replace")
                 return text[:100_000]
-        except Exception:
-            pass  # Fall through to other strategies
+        except Exception as e:
+            logger.debug("Failed to load PRD pointer from %s: %s", approved_meta, e)
 
     # Strategy 2: Markdown/text in prd_dir and prompts/ subdir
     candidates = list(prd_dir.glob("*.md")) + list(prd_dir.glob("*.txt"))
@@ -140,7 +143,8 @@ def _load_prd_text(project_root: Path) -> Optional[str]:
     try:
         text = candidates[0].read_text(errors="replace")
         return text[:100_000]
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to read PRD candidate: %s", e)
         return None
 
 
@@ -156,7 +160,8 @@ def _load_spec_and_task_text(project_root: Path) -> Optional[str]:
         for sf in spec_files:
             try:
                 parts.append(sf.read_text(errors="replace")[:10_000])
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to read spec file %s: %s", sf, e)
                 continue
 
     # Task titles from tasks.json
@@ -167,8 +172,8 @@ def _load_spec_and_task_text(project_root: Path) -> Optional[str]:
             for task in data.get("tasks", [])[:10]:
                 parts.append(task.get("title", ""))
                 parts.append(task.get("description", "")[:500])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read tasks.json for spec scan: %s", e)
 
     combined = "\n".join(parts)
     return combined if combined.strip() else None
@@ -323,7 +328,8 @@ def _check_tool_availability(stack: str) -> Dict[str, bool]:
         available = result.returncode == 0
         version = result.stdout.strip() if available else None
         return {"available": available, "command": cmd, "version": version}
-    except Exception:
+    except Exception as e:
+        logger.debug("Tool availability check failed for %s: %s", cmd, e)
         return {"available": False, "command": cmd}
 
 
@@ -334,16 +340,16 @@ def detect_cpu_count() -> int:
         result = subprocess.run(['nproc'], capture_output=True, text=True)
         if result.returncode == 0:
             return int(result.stdout.strip())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("nproc not available: %s", e)
 
     try:
         # Try sysctl (macOS)
         result = subprocess.run(['sysctl', '-n', 'hw.ncpu'], capture_output=True, text=True)
         if result.returncode == 0:
             return int(result.stdout.strip())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("sysctl not available: %s", e)
 
     return 4  # Default fallback
 
@@ -529,8 +535,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Get task count
     task_count = 0
     if tasks_file.exists():
-        with open(tasks_file) as f:
-            tasks_data = json.load(f)
+        tasks_data = read_json(tasks_file)
         task_count = sum(1 for task in tasks_data.get("tasks", []) if len(task.get("subtasks", [])) >= 4)
 
     print(print_dim("  TDD cycles execute in parallel using git worktrees, just like the DAG"))

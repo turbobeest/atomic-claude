@@ -5,10 +5,13 @@ Generate closeout document and prepare for Phase 5 (TDD Implementation).
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -119,8 +122,8 @@ def check_closeout_items(
                 spec_data = json.loads(stripped)
                 if len(spec_data.get("test_strategy", {}).get("unit_tests", [])) > 0:
                     specs_with_tests += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Could not parse spec file %s: %s", spec_file.name, e)
 
         if specs_with_tests >= spec_count and spec_count > 0:
             print(print_green("  [BLCK] ✓ Test strategies defined"))
@@ -389,8 +392,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             graph.export_tasks_json(output_dir / "tasks.json")
             print(print_green("  ✓ Tasks exported from knowledge graph"))
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Graph export failed: {e}")
+            logger.warning("Graph export failed: %s", e)
 
     # Memory Checkpoint (placeholder for future memory.py integration)
     tasks_data = json.loads(read_file(tasks_file))

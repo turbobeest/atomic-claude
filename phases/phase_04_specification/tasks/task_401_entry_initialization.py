@@ -5,9 +5,12 @@ Verifies Phase 3 artifacts exist and initializes specification directory.
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Dict, Any
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -119,7 +122,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             packages_data = json.loads(read_file(packages_file))
             pkg_count = len(packages_data.get("packages", []))
             print(print_green(f"  ✓ work-packages.json found ({pkg_count} packages)"))
-        except:
+        except Exception as e:
+            logger.debug("Could not parse work-packages.json: %s", e)
             print(print_yellow("  ! work-packages.json found but invalid (optional)"))
     else:
         print(print_yellow("  ! work-packages.json not found (optional)"))

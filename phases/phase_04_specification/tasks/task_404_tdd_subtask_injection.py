@@ -10,6 +10,7 @@ Uses ThreadPoolExecutor for concurrent generation with Rich live progress
 """
 
 import json
+import logging
 import re
 import sys
 import shutil
@@ -18,6 +19,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -93,21 +96,22 @@ def _load_openspec(task_id: int, openspec_dir: Path) -> Optional[Dict]:
         # Try direct parse first
         try:
             return json.loads(content)
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as e:
+            logger.debug("Direct JSON parse failed for spec-t%s.json: %s", task_id, e)
         # Strip markdown code fences
         fenced = _extract_json_block(content)
         if fenced:
             try:
                 return json.loads(fenced)
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                logger.debug("Fenced JSON parse failed for spec-t%s.json: %s", task_id, e)
         # Last resort: find first { ... } block
         match = re.search(r'\{[\s\S]*\}', content)
         if match:
             return json.loads(match.group())
         return None
-    except Exception:
+    except Exception as e:
+        logger.debug("Could not load openspec for task %s: %s", task_id, e)
         return None
 
 
@@ -504,12 +508,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 try:
                     spec_node = graph.reader.get_node("Spec", task_id)
                     if spec_node:
-                        import logging
-                        logging.getLogger(__name__).info(f"Loaded spec for T{task_id} from graph")
+                        logger.info("Loaded spec for T%s from graph", task_id)
                         write_file(spec_file, json.dumps(spec_node, indent=2))
                 except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning(f"Graph spec query failed for T{task_id}: {e}")
+                    logger.warning("Graph spec query failed for T%s: %s", task_id, e)
 
     spec_count = sum(1 for t in tasks_to_process
                      if (openspec_dir / f"spec-t{t.get('id', 0)}.json").exists())

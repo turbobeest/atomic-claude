@@ -6,9 +6,12 @@ Select and configure agents for OpenSpec generation from agent inventory.
 
 import csv
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -292,8 +295,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                         selected = all_impl_agents[num - 1]
                         if selected not in selected_agents:
                             selected_agents.append(selected)
-                except ValueError:
-                    pass
+                except ValueError as e:
+                    logger.debug("Invalid agent selection number %r: %s", num_str, e)
             break
         elif agent_choice == "list":
             print()

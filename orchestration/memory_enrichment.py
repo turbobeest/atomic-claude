@@ -10,8 +10,11 @@ Provides two enrichment levels:
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import List, Optional, Dict
+
+logger = logging.getLogger(__name__)
 
 
 def scan_output_files(output_dir: Path, max_depth: int = 2) -> List[Dict]:
@@ -45,10 +48,10 @@ def scan_output_files(output_dir: Path, max_depth: int = 2) -> List[Dict]:
                             "size": item.stat().st_size,
                             "suffix": item.suffix,
                         })
-                    except OSError:
-                        pass
-        except OSError:
-            pass
+                    except OSError as e:
+                        logger.debug("Could not stat file %s: %s", item, e)
+        except OSError as e:
+            logger.debug("Could not scan directory %s: %s", d, e)
 
     _walk(output_dir, 0)
     return files
@@ -103,7 +106,8 @@ def summarize_task_artifacts(
             if summary:
                 parts.append(summary)
                 found_content = True
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to summarize artifact %s: %s", p, e)
             continue
 
     # Discover additional output files beyond registered artifacts
@@ -167,7 +171,8 @@ def enrich_memory_with_llm(
             if total_chars + len(text) + len(label) < max_input_chars:
                 content_parts.append(f"{label}\n{text}")
                 total_chars += len(text) + len(label)
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read artifact %s for LLM enrichment: %s", p, e)
             continue
 
     # 2. Discover additional output files (prompts, markdown, etc.)
@@ -196,7 +201,8 @@ def enrich_memory_with_llm(
                 label = f"=== {file_info['name']} ({file_info['size']} bytes) ==="
                 content_parts.append(f"{label}\n{text}")
                 total_chars += len(text) + len(label)
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to read output file %s: %s", file_info.get("path"), e)
                 continue
 
     if not content_parts:
@@ -252,8 +258,8 @@ Do NOT include generic boilerplate. Every line should carry information."""
         if result and len(result) > 20:
             return f"Task {task_id} ({task_name}) completed.\n\n{result}"
 
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("LLM memory enrichment failed for task %s: %s", task_id, e)
 
     return None
 

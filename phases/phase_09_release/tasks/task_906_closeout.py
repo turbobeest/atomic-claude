@@ -7,6 +7,7 @@ in the entire pipeline - project completion.
 
 import sys
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
@@ -15,6 +16,9 @@ from typing import Dict, Any, List
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.ui import success, error, warning, info, step
+from core.utils.file_ops import read_json, write_json, write_file
+
+logger = logging.getLogger(__name__)
 
 
 # ANSI color codes for formatted output
@@ -57,17 +61,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(f"  {DIM}UAT Mode: Creating minimal valid output{NC}")
 
         # Create minimal closeout files
-        with open(closeout_file, 'w') as f:
-            f.write("# Phase 9: Release - Closeout (UAT)\n\n")
-            f.write("Release completed in UAT mode.\n")
+        write_file(closeout_file, "# Phase 9: Release - Closeout (UAT)\n\nRelease completed in UAT mode.\n")
 
-        with open(closeout_json, 'w') as f:
-            json.dump({
-                "phase": "9-release",
-                "status": "complete",
-                "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "uat_mode": True
-            }, f, indent=2)
+        write_json(closeout_json, {
+            "phase": "9-release",
+            "status": "complete",
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "uat_mode": True
+        })
 
         success("UAT bypass complete")
         return True
@@ -94,20 +95,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     if execution_file.exists():
         try:
-            with open(execution_file) as f:
-                execution_data = json.load(f)
+            execution_data = read_json(execution_file)
             version = execution_data.get("release", {}).get("version", "0.1.0")
             channel = execution_data.get("release", {}).get("channel", "internal")
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read execution file: %s", e)
 
     if confirmation_file.exists():
         try:
-            with open(confirmation_file) as f:
-                confirmation_data = json.load(f)
+            confirmation_data = read_json(confirmation_file)
             confirmation_status = confirmation_data.get("status", "pending")
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read confirmation file: %s", e)
 
     # Check internal release notes
     announcement_file = release_dir / "announcement.md"
@@ -165,6 +164,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     try:
         closeout_choice = input("  Choice (default: approve): ").strip().lower() or "approve"
     except EOFError:
+        logger.debug("Non-interactive mode: defaulting to 'approve'")
         closeout_choice = "approve"
 
     if closeout_choice == "review":
@@ -178,7 +178,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         try:
             input("  Press Enter to continue to closeout...")
         except EOFError:
-            pass
+            logger.debug("Non-interactive mode: skipping closeout prompt")
     elif closeout_choice == "hold":
         print()
         warning("Closeout held - phase not complete")
@@ -193,8 +193,19 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     # Generate markdown closeout
-    with open(closeout_file, 'w') as f:
-        f.write(f"""# Phase 9 Closeout: Release (Final)
+    checklist_md_lines = []
+    for item in checklist:
+        name, status = item.split(':')
+        if status == "PASS":
+            checklist_md_lines.append(f"- [x] {name}")
+        elif status == "WARN":
+            checklist_md_lines.append(f"- [~] {name} (warning)")
+        elif status == "FAIL":
+            checklist_md_lines.append(f"- [ ] {name} (failed)")
+        else:
+            checklist_md_lines.append(f"- [-] {name} (deferred)")
+
+    closeout_md = f"""# Phase 9 Closeout: Release (Final)
 
 **Completed:** {datetime.now().isoformat()}
 **Status:** COMPLETE
@@ -213,19 +224,8 @@ This is the final phase - **PROJECT COMPLETE**.
 
 ### Checklist Status
 
-""")
-        for item in checklist:
-            name, status = item.split(':')
-            if status == "PASS":
-                f.write(f"- [x] {name}\n")
-            elif status == "WARN":
-                f.write(f"- [~] {name} (warning)\n")
-            elif status == "FAIL":
-                f.write(f"- [ ] {name} (failed)\n")
-            else:
-                f.write(f"- [-] {name} (deferred)\n")
+{chr(10).join(checklist_md_lines)}
 
-        f.write(f"""
 ## Project Complete
 
 The project has completed all phases successfully.
@@ -238,29 +238,29 @@ python main.py run 0
 ---
 
 *Project completed by ATOMIC CLAUDE*
-""")
+"""
+    write_file(closeout_file, closeout_md)
 
     # Generate JSON closeout
-    with open(closeout_json, 'w') as f:
-        json.dump({
-            "phase": 9,
-            "name": "Release",
-            "status": "complete",
-            "final_phase": True,
-            "completed_at": datetime.now().isoformat(),
-            "release": {
-                "version": version,
-                "channel": channel
-            },
-            "confirmation_status": confirmation_status,
-            "checklist": checklist,
-            "artifacts": {
-                "setup": ".claude/release/setup.json",
-                "execution": ".claude/release/execution.json",
-                "confirmation": ".claude/release/confirmation.json",
-                "announcement": ".claude/release/announcement.md"
-            }
-        }, f, indent=2)
+    write_json(closeout_json, {
+        "phase": 9,
+        "name": "Release",
+        "status": "complete",
+        "final_phase": True,
+        "completed_at": datetime.now().isoformat(),
+        "release": {
+            "version": version,
+            "channel": channel
+        },
+        "confirmation_status": confirmation_status,
+        "checklist": checklist,
+        "artifacts": {
+            "setup": ".claude/release/setup.json",
+            "execution": ".claude/release/execution.json",
+            "confirmation": ".claude/release/confirmation.json",
+            "announcement": ".claude/release/announcement.md"
+        }
+    })
 
     print(f"  {GREEN}✓{NC} Generated phase-09-closeout.md")
     print(f"  {GREEN}✓{NC} Generated phase-09-closeout.json")

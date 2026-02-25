@@ -7,11 +7,14 @@ Writes current-task.json, session-tokens.json, and errors.json for dashboard con
 """
 
 import json
+import logging
 import os
 import urllib.request
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 try:
     import requests
@@ -85,8 +88,8 @@ def write_current_task(phase_id: str, task_id: str, task_name: str,
             if entry.name != "\u2014"  # Skip placeholder entries
         ]
 
-    with open(state_dir / "current-task.json", "w") as f:
-        json.dump(data, f, indent=2)
+    from core.utils.file_ops import write_json
+    write_json(state_dir / "current-task.json", data)
 
 
 def update_current_task_provider(provider: str, model: str = None,
@@ -115,8 +118,8 @@ def update_current_task_provider(provider: str, model: str = None,
                 context_window = rm.context_window
                 max_output = rm.max_output
                 data["effort_level"] = rm.effort_level
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Could not resolve model for phase %s: %s", phase_id, e)
 
         if not context_window:
             context_window, max_output = _get_model_limits(model)
@@ -127,8 +130,8 @@ def update_current_task_provider(provider: str, model: str = None,
             data["max_output"] = max_output
 
         ct.write_text(json.dumps(data, indent=2))
-    except (json.JSONDecodeError, OSError):
-        pass
+    except (json.JSONDecodeError, OSError) as e:
+        logger.debug("Failed to update current-task.json: %s", e)
 
 
 def init_session_tokens():
@@ -137,6 +140,7 @@ def init_session_tokens():
     state_dir.mkdir(parents=True, exist_ok=True)
     tokens_file = state_dir / "session-tokens.json"
     if not tokens_file.exists():
+        from core.utils.file_ops import write_json
         data = {
             "total_input_tokens": 0,
             "total_output_tokens": 0,
@@ -145,7 +149,7 @@ def init_session_tokens():
             "by_model": {},
             "started_at": datetime.now().isoformat(),
         }
-        tokens_file.write_text(json.dumps(data, indent=2))
+        write_json(tokens_file, data)
 
 
 def _resolve_phase_model(phase_id: str) -> Tuple[Optional[str], Optional[str]]:
@@ -160,7 +164,8 @@ def _resolve_phase_model(phase_id: str) -> Tuple[Optional[str], Optional[str]]:
         from core.llm.resolver import resolve_model
         result = resolve_model(phase_id)
         return result.provider, result.model_id
-    except Exception:
+    except Exception as e:
+        logger.debug("Could not resolve phase model for %s: %s", phase_id, e)
         return None, None
 
 
@@ -227,8 +232,8 @@ def ensure_dashboard(atomic_root=None) -> bool:
             running = str(Path(data.get("root", "")).resolve())
             if running == expected:
                 main_ok = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Dashboard health check failed: %s", e)
 
     # Check sub-apps (agent-manager:5175, audit-browser:5176, skills-browser:5177)
     subapps_ok = all(_check_port_listening(p) for p in (5175, 5176, 5177))
@@ -264,7 +269,8 @@ def _restart_dashboard(atomic_root: Path, port: str) -> bool:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to start dashboard: %s", e)
         return False
 
     # Wait for main dashboard to respond (up to 10s)
@@ -273,7 +279,8 @@ def _restart_dashboard(atomic_root: Path, port: str) -> bool:
             req = urllib.request.Request(f"http://127.0.0.1:{port}/api/root")
             with urllib.request.urlopen(req, timeout=1):
                 return True
-        except Exception:
+        except Exception as e:
+            logger.debug("Dashboard not yet responding: %s", e)
             time.sleep(0.5)
     return False
 
@@ -305,8 +312,8 @@ def stop_dashboard(atomic_root=None):
             stderr=subprocess.DEVNULL,
             timeout=10,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to stop dashboard: %s", e)
 
 
 def log_error(phase_id: str, task_id: str, error: str, traceback_str: str = None):
@@ -318,6 +325,7 @@ def log_error(phase_id: str, task_id: str, error: str, traceback_str: str = None
         errors = json.loads(errors_file.read_text()) if errors_file.exists() else {"errors": []}
     except json.JSONDecodeError:
         errors = {"errors": []}
+    from core.utils.file_ops import write_json
     errors["errors"].append({
         "timestamp": datetime.now().isoformat(),
         "phase": phase_id,
@@ -325,7 +333,7 @@ def log_error(phase_id: str, task_id: str, error: str, traceback_str: str = None
         "error": error,
         "traceback": traceback_str,
     })
-    errors_file.write_text(json.dumps(errors, indent=2))
+    write_json(errors_file, errors)
 
 
 def sync_dashboard(phase_id: Optional[str] = None, task_id: Optional[str] = None):
@@ -350,8 +358,8 @@ def sync_dashboard(phase_id: Optional[str] = None, task_id: Optional[str] = None
                 json={"phase": phase_id, "task": task_id},
                 timeout=1
             )
-        except Exception:
-            pass  # Dashboard not running, that's ok
+        except Exception as e:
+            logger.debug("Dashboard refresh failed (server may not be running): %s", e)
 
 
 def validate_state_files() -> bool:
@@ -402,8 +410,8 @@ def fix_state_inconsistencies():
 
     # Create minimal valid state if missing
     if not task_state_file.exists():
-        with open(task_state_file, "w") as f:
-            json.dump({"phases": {}}, f, indent=2)
+        from core.utils.file_ops import write_json
+        write_json(task_state_file, {"phases": {}})
         print("✓ Created task-state.json")
 
     # Clear stale current-task.json
@@ -444,8 +452,8 @@ def get_dashboard_status() -> Dict[str, Any]:
                     "port": int(port),
                     "url": f"http://127.0.0.1:{port}",
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Dashboard status check failed: %s", e)
 
     return {"running": False}
 
