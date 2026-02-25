@@ -1,0 +1,263 @@
+"""
+Shared phase orchestration logic.
+
+Eliminates ~150 lines of duplication per orchestrator by extracting the
+common task loop, memory handling, and closeout logic into reusable functions.
+
+Usage in orchestrators:
+    from orchestration.phase_runner import run_phase_tasks, create_phase_closeout
+"""
+
+import logging
+import os
+import traceback
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple
+
+from core.memory import memory_save, MemoryEntryType
+from core.state import StateManager
+from core.ui import phase_header, phase_complete
+from core.utils.file_ops import write_json
+from core.llm.resolver import get_resolver
+from orchestration.dashboard_sync import (
+    clear_current_task,
+    ensure_dashboard,
+    log_error,
+    write_current_task,
+)
+from orchestration.memory_enrichment import enrich_memory_with_llm, summarize_task_artifacts
+from orchestration.pre_task_validation import validate_directory_pristine
+from orchestration.task_display import display_task_roster, is_infrastructure_task, resolve_agent_roster
+from orchestration.task_memory import TaskMemory
+
+logger = logging.getLogger(__name__)
+
+# Type alias for task tuples: (task_id, task_name, task_callable)
+TaskEntry = Tuple[str, str, Callable]
+
+
+def make_flush_fn(phase_id: str, task_id: str) -> Callable:
+    """Create a callback for mid-task memory checkpoints."""
+    def flush(content, tags, entry_type):
+        memory_save(
+            phase=phase_id,
+            task_id=task_id,
+            content=content,
+            tags=tags,
+            entry_type=MemoryEntryType.TASK_PROGRESS,
+        )
+    return flush
+
+
+def run_phase_tasks(
+    *,
+    phase_num: int,
+    phase_name: str,
+    phase_id: str,
+    tasks: List[TaskEntry],
+    task_artifacts: Dict[str, List[str]],
+    atomic_root: Path,
+    output_dir: Path,
+    uat_mode: bool = False,
+    resume_at: Optional[str] = None,
+    pre_header_fn: Optional[Callable] = None,
+    graph=None,
+) -> bool:
+    """
+    Execute a phase's task list with full orchestration.
+
+    This is the shared task loop extracted from orchestrators 00-09. It handles:
+    - Phase header display
+    - Resume-at logic
+    - Pre-task validation
+    - Agent roster display
+    - Task execution with memory tracking
+    - Artifact collection
+    - Phase closeout
+
+    Args:
+        phase_num: Phase number (0-9)
+        phase_name: Human-readable phase name (e.g., "Setup", "Discovery")
+        phase_id: Phase identifier (e.g., "0-setup", "1-discovery")
+        tasks: List of (task_id, task_name, task_callable) tuples
+        task_artifacts: Dict mapping task_id to expected artifact filenames
+        atomic_root: Path to atomic-claude2 root
+        output_dir: Phase output directory
+        uat_mode: Whether running in UAT mode
+        resume_at: Optional task ID to resume from
+        pre_header_fn: Optional callable to run after header but before task loop
+                       (e.g., phase 0's description print)
+        graph: Optional FalkorDB graph instance to pass to tasks
+
+    Returns:
+        True if all tasks completed successfully
+    """
+    label = f"Phase {phase_num}: {phase_name}"
+
+    if resume_at:
+        phase_header(f"{label} (resuming)")
+    else:
+        phase_header(label)
+        if pre_header_fn:
+            pre_header_fn()
+
+    state = StateManager()
+    state.set_current_phase(phase_id)
+
+    # Determine starting point
+    start_index = 0
+    if resume_at:
+        valid_ids = {t[0] for t in tasks}
+        if resume_at not in valid_ids:
+            logger.error(
+                "Invalid resume_at task ID '%s'; valid IDs: %s",
+                resume_at, sorted(valid_ids),
+            )
+            print(f"\n  Invalid task ID '{resume_at}'. Valid: {sorted(valid_ids)}")
+            return False
+        for i, (task_id, _, _) in enumerate(tasks):
+            if task_id == resume_at:
+                start_index = i
+                break
+
+    # Execute tasks
+    for task_id, task_name, task_func in tasks[start_index:]:
+        if state.is_task_complete(phase_id, task_id):
+            print(f"✓ Task {task_id} already complete, skipping")
+            continue
+
+        # Pre-task validation
+        if not validate_directory_pristine(phase_id, task_id):
+            print(f"\n🛑 Cannot proceed to Task {task_id} - fix violations first")
+            clear_current_task()
+            return False
+
+        # Agent roster & dashboard
+        print(f"\n⚡ Running Task {task_id}: {task_name}")
+        ensure_dashboard(atomic_root)
+        if is_infrastructure_task(task_name):
+            print(f"\n  {task_name}\n")
+            write_current_task(phase_id, task_id, task_name)
+        else:
+            roster = resolve_agent_roster(phase_id, task_id, output_dir)
+            roster = display_task_roster(task_id, task_name, roster, uat_mode=uat_mode)
+            write_current_task(
+                phase_id, task_id, task_name,
+                resolved=roster[0][1], agent_roster=roster,
+            )
+
+        state.mark_task_started(phase_id, task_id, task_name)
+        mem = TaskMemory(
+            phase_id, task_id, task_name,
+            flush_fn=make_flush_fn(phase_id, task_id),
+        )
+
+        try:
+            # Call task — pass graph if provided
+            if graph is not None:
+                success = task_func(mem, graph=graph)
+            else:
+                success = task_func(mem)
+
+            if not success:
+                state.mark_task_failed(phase_id, task_id, task_name)
+                print(f"\n❌ Task {task_id} failed")
+                clear_current_task()
+                get_resolver().clear_task_overrides()
+                return False
+
+            # Collect artifacts
+            artifacts = [
+                str(output_dir / f)
+                for f in task_artifacts.get(task_id, [])
+                if (output_dir / f).exists()
+            ]
+            state.mark_task_complete(phase_id, task_id, task_name, artifacts=artifacts)
+            get_resolver().clear_task_overrides()
+
+            # Save task completion to memory
+            try:
+                if mem.has_entries():
+                    memory_content = mem.build_content()
+                    memory_metadata = mem.build_metadata()
+                else:
+                    memory_content = enrich_memory_with_llm(
+                        artifacts, task_id, task_name, output_dir=output_dir,
+                    )
+                    if not memory_content:
+                        memory_content = summarize_task_artifacts(
+                            artifacts, task_id, task_name, output_dir=output_dir,
+                        )
+                    memory_metadata = {}
+                memory_save(
+                    phase=phase_id,
+                    task_id=task_id,
+                    content=memory_content,
+                    tags=["task-complete", phase_id, f"task-{task_id}"],
+                    entry_type=MemoryEntryType.TASK_END,
+                    metadata=memory_metadata,
+                )
+            except Exception as e:
+                logger.warning("Memory save failed for task %s: %s", task_id, e)
+
+        except Exception as e:
+            state.mark_task_failed(phase_id, task_id, task_name, str(e))
+            log_error(phase_id, task_id, str(e), traceback.format_exc())
+            print(f"\n❌ Task {task_id} error: {e}")
+            clear_current_task()
+            get_resolver().clear_task_overrides()
+            return False
+
+    # Phase complete
+    clear_current_task()
+    phase_complete(label)
+
+    # Save phase closeout to memory
+    try:
+        memory_save(
+            phase=phase_id,
+            task_id=None,
+            content=f"Phase {phase_id} completed. Tasks: {', '.join(t[0] for t in tasks)}",
+            tags=["phase-complete", phase_id],
+            entry_type=MemoryEntryType.PHASE_CLOSEOUT,
+        )
+    except Exception as e:
+        logger.warning("Phase closeout memory save failed: %s", e)
+
+    # Create closeout file
+    try:
+        create_phase_closeout(phase_id, tasks)
+    except Exception as e:
+        logger.warning("Closeout file creation failed: %s", e)
+
+    return True
+
+
+def create_phase_closeout(phase_id: str, tasks: List[TaskEntry]) -> None:
+    """
+    Create standardized closeout.json for a completed phase.
+
+    Args:
+        phase_id: Phase identifier (e.g., "1-discovery")
+        tasks: List of (task_id, task_name, task_func) tuples
+    """
+    atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
+    output_dir = atomic_root.parent / ".outputs" / phase_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    phase_num = int(phase_id.split("-")[0])
+    phase_name = phase_id.split("-", 1)[1].replace("_", " ").title()
+
+    closeout_data = {
+        "phase": phase_id,
+        "phase_num": phase_num,
+        "status": "complete",
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "tasks_completed": [task_id for task_id, _, _ in tasks],
+        "summary": f"Phase {phase_num} ({phase_name}) completed successfully.",
+    }
+
+    closeout_file = output_dir / "closeout.json"
+    write_json(closeout_file, closeout_data)
+    print(f"\n✅ Phase {phase_num} closeout: {closeout_file}")
