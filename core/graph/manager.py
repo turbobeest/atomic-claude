@@ -479,6 +479,20 @@ class GraphManager:
         """Assemble context for OpenSpec generation of a specific task."""
         return self.reader.query_spec_context(task_id)
 
+    def compile_context(self, traversals, max_tokens: int = 8000) -> str:
+        """Assemble context from configurable graph traversals.
+
+        Args:
+            traversals: List of Traversal instances defining query steps
+            max_tokens: Total token budget for assembled output
+
+        Returns:
+            Assembled context string
+        """
+        from .context_compiler import ContextCompiler
+        compiler = ContextCompiler(self.reader)
+        return compiler.compile(traversals, max_tokens=max_tokens)
+
     # ========================================================================
     # TASK MANAGEMENT OPERATIONS
     # ========================================================================
