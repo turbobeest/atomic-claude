@@ -44,11 +44,10 @@ Usage:
 Author: Phase Pipeline System
 """
 
-import json
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple
 from datetime import datetime
 from enum import Enum
 from dataclasses import dataclass, field
@@ -56,7 +55,7 @@ from dataclasses import dataclass, field
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.state import StateManager, PhaseStatus as StatePhaseStatus
+from core.state import StateManager
 from core.config import Config
 from core.memory import memory_init, memory_checkpoint, memory_handle_backtrack
 from core.utils.file_ops import write_json

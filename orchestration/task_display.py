@@ -10,7 +10,6 @@ contextual display right before each task runs.
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 from core.llm.resolver import ResolvedModel, get_resolver, resolve_model
 from core.utils.cli_ui import (
-    print_bold, print_cyan, print_dim, print_green,
-    print_yellow, print_red, prompt_user, clear_input_buffer,
+    print_bold, print_dim, print_green,
+    print_red, prompt_user, clear_input_buffer,
 )
 
 

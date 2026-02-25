@@ -18,7 +18,6 @@ from .base import (
     HealthStatus,
     APIError,
 )
-from .resolver import CLAUDE_CODE_FAST_MODE_FORBIDDEN
 
 
 # Model tier → CLI model flag

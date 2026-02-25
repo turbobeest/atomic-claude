@@ -8,9 +8,9 @@ Handles node creation, edge creation, updates, and bulk operations.
 import logging
 from typing import Any, Dict, List, Optional
 
-from .exceptions import SchemaValidationError, QueryError, NodeNotFoundError
+from .exceptions import SchemaValidationError
 from .schema import (
-    NodeLabel, RelType, REQUIRED_PROPERTIES, PROPERTY_DEFAULTS,
+    PROPERTY_DEFAULTS,
     validate_node_properties, validate_relationship,
 )
 

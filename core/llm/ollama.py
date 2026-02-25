@@ -19,8 +19,6 @@ from .base import (
     TokenUsage,
     HealthStatus,
     LLMError,
-    AuthenticationError,
-    RateLimitError,
     LLMTimeoutError,
     APIError,
     ModelNotFoundError,
