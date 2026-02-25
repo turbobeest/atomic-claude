@@ -9,7 +9,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -54,7 +54,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 "documentation": {"name": "code-reviewer", "model": "sonnet", "dimension": "documentation"},
                 "refiner": {"name": "code-reviewer", "model": "sonnet", "dimension": "refinement"}
             },
-            "selected_at": datetime.now().isoformat()
+            "selected_at": datetime.now(timezone.utc).isoformat()
         }, indent=2))
         print(print_green("✓ UAT bypass complete"))
         return True
@@ -84,7 +84,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "documentation": {"name": agents["doc"], "model": "haiku", "dimension": "documentation"},
             "refiner": {"name": agents["refiner"], "model": "opus", "dimension": "refinement"}
         },
-        "selected_at": datetime.now().isoformat()
+        "selected_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_file(agents_file, json.dumps(agent_data, indent=2))

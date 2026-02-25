@@ -8,7 +8,7 @@ import sys
 import json
 from pathlib import Path
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -148,7 +148,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     agents_data = {
         "phase": 8,
         "agents": selected_agents,
-        "selected_at": datetime.utcnow().isoformat() + "Z"
+        "selected_at": datetime.now(timezone.utc).isoformat() + "Z"
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)

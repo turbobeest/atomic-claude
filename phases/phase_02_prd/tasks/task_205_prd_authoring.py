@@ -17,7 +17,7 @@ import json
 import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 resuming = True
                 print(print_cyan(f"  Resuming — {remaining} section(s) to generate..."))
             elif choice == "n":
-                backup_file = prd_file.parent / f"PRD.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+                backup_file = prd_file.parent / f"PRD.backup.{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.md"
                 prd_file.rename(backup_file)
                 print(print_dim(f"  Backed up to: {backup_file}"))
                 completed_gens = set()
@@ -151,7 +151,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             choice = prompt_user("  Choice (default: accept): ").strip().lower()
 
             if choice == "n":
-                backup_file = prd_file.parent / f"PRD.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+                backup_file = prd_file.parent / f"PRD.backup.{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.md"
                 prd_file.rename(backup_file)
                 print(print_dim(f"  Backed up to: {backup_file}"))
                 completed_gens = set()
@@ -244,7 +244,7 @@ def create_minimal_prd(prd_file: Path, atomic_root: Path, output_dir: Path) -> N
 
 **Project**: UAT Test Project
 **Version**: 1.0
-**Date**: """ + datetime.now().strftime("%Y-%m-%d") + """
+**Date**: """ + datetime.now(timezone.utc).strftime("%Y-%m-%d") + """
 **Status**: Draft (UAT Mode)
 
 ## 0. Vision & Problem Statement
@@ -330,7 +330,7 @@ tests/
 ## 14. Approval & Sign-off
 
 **Status**: Auto-approved (UAT mode)
-**Date**: """ + datetime.now().strftime("%Y-%m-%d") + """
+**Date**: """ + datetime.now(timezone.utc).strftime("%Y-%m-%d") + """
 """
 
     write_file(prd_file, minimal_prd)
@@ -360,8 +360,8 @@ def load_prd_context(atomic_root: Path, output_dir: Path) -> Dict[str, Any]:
         try:
             with open(setup_file, 'r') as f:
                 context["setup"] = json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load PRD setup file: %s", e)
 
     # Load interview
     interview_file = output_dir / "prd-interview.json"
@@ -369,8 +369,8 @@ def load_prd_context(atomic_root: Path, output_dir: Path) -> Dict[str, Any]:
         try:
             with open(interview_file, 'r') as f:
                 context["interview"] = json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load interview file: %s", e)
 
     # Load Phase 1 context
     phase1_context_file = output_dir / "phase1-context.json"
@@ -378,8 +378,8 @@ def load_prd_context(atomic_root: Path, output_dir: Path) -> Dict[str, Any]:
         try:
             with open(phase1_context_file, 'r') as f:
                 context["phase1"] = json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load Phase 1 context file: %s", e)
 
     # Load project config
     config_file = output_dir.parent / "0-setup" / "project-config.json"
@@ -387,8 +387,8 @@ def load_prd_context(atomic_root: Path, output_dir: Path) -> Dict[str, Any]:
         try:
             with open(config_file, 'r') as f:
                 context["project_config"] = json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load project config file: %s", e)
 
     return context
 
@@ -607,8 +607,8 @@ def _detect_completed_sections(prompts_dir: Path) -> set:
                 content = _strip_llm_preamble(content)
                 if _is_valid_section_output(content):
                     completed.add(gen_num)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to scan section output gen%02d: %s", gen_num, e)
     return completed
 
 

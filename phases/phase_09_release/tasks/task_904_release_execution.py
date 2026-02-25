@@ -9,7 +9,7 @@ import sys
 import json
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 # Add project root to path for imports
@@ -101,7 +101,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         # Create minimal execution file
         write_json(execution_file, {
             "status": "executed",
-            "executed_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "executed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "uat_mode": True
         })
 
@@ -334,7 +334,7 @@ Version {version} has been completed and is ready for internal use.
             "file": ".claude/release/announcement.md",
             "status": announcement_status
         },
-        "executed_at": datetime.now().isoformat()
+        "executed_at": datetime.now(timezone.utc).isoformat()
     })
 
     # Save decision to context

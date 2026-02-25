@@ -41,7 +41,8 @@ def _load_model_ids() -> Dict[str, Dict[str, str]]:
     try:
         data = json.loads(config_path.read_text())
         _model_ids_cache = data.get("model_ids", {})
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to load model_ids from config: %s", e)
         _model_ids_cache = {}
 
     return _model_ids_cache
@@ -92,7 +93,8 @@ def _get_default_router():
         from core.config import Config
         config = Config()
         provider_name = config.get("llm.primary_provider", "api")
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to load provider config, defaulting to api: %s", e)
         provider_name = "api"
 
     # Register provider based on config
@@ -155,8 +157,8 @@ def _get_default_router():
                     "claude-code", provider,
                     [ModelRole.PRIMARY, ModelRole.FAST, ModelRole.HEAVYWEIGHT]
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Fallback Claude Code provider init failed: %s", e)
 
     return _default_router
 

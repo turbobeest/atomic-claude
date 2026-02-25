@@ -11,10 +11,13 @@ Steps:
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
@@ -91,7 +94,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             diagram_count = diagram_data.get('summary', {}).get('generated', 0)
             print(f"  [BLCK] ✓ Diagrams generated ({diagram_count})")
             checklist.append(("diagrams", "PASS"))
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read diagrams manifest: %s", e)
             print("  [BLCK] ! Diagrams manifest invalid")
             checklist.append(("diagrams", "WARN"))
     else:
@@ -136,7 +140,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             else:
                 print(f"  [BLCK] ✗ Audit has failures ({failed} failed)")
                 checklist.append(("audit", "FAIL"))
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read audit file: %s", e)
             print("  [BLCK] ! Audit file invalid")
             checklist.append(("audit", "WARN"))
     else:
@@ -244,8 +249,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         try:
             needs_export = output_dir / "needs-index-graph.json"
             graph.export_needs_index(needs_export)
-        except Exception:
-            pass  # Graph export failure is non-blocking
+        except Exception as e:
+            logger.debug("Graph export failure (non-blocking): %s", e)
 
     success("Phase 1 closeout complete")
     return True
@@ -277,8 +282,8 @@ def _get_approach_name(output_dir: Path) -> str:
             with open(approach_file) as f:
                 data = json.load(f)
             return data.get('name', 'N/A')
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read approach file: %s", e)
     return "N/A"
 
 
@@ -290,8 +295,8 @@ def _get_corpus_count(output_dir: Path) -> int:
             with open(corpus_file) as f:
                 data = json.load(f)
             return len(data.get('materials', []))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read corpus file: %s", e)
     return 0
 
 
@@ -303,14 +308,14 @@ def _get_agent_count(output_dir: Path) -> int:
             with open(agents_file) as f:
                 data = json.load(f)
             return len(data.get('selected', []))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to read agents file: %s", e)
     return 0
 
 
 def _generate_markdown_closeout(closeout_file: Path, approach_name: str, corpus_count: int, agent_count: int, checklist: List[Tuple[str, str]]) -> None:
     """Generate the markdown closeout document."""
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
 
     checklist_md = []
     for name, status in checklist:
@@ -389,7 +394,7 @@ python main.py run 2
 
 def _generate_json_closeout(closeout_json: Path, approach_name: str, corpus_count: int, agent_count: int, checklist: List[Tuple[str, str]]) -> None:
     """Generate the JSON closeout document."""
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
 
     data = {
         "phase": 1,

@@ -7,7 +7,7 @@ Human gate for approving integration test results.
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -193,7 +193,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "acceptance": {"passed": criteria_passed, "total": criteria_total},
             "performance": "all_passing"
         },
-        "approved_at": datetime.now().isoformat()
+        "approved_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_json(approval_file, approval_data)

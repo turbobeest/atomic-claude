@@ -19,7 +19,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Set, Tuple
 
 logger = logging.getLogger(__name__)
@@ -157,7 +157,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     needs_data = {
         "version": "1.0",
-        "parsed_at": datetime.now().isoformat(),
+        "parsed_at": datetime.now(timezone.utc).isoformat(),
         "source_files": [],
         "needs": [],
         "summary": {

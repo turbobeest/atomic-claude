@@ -37,7 +37,7 @@ import logging
 import urllib.request
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -1050,7 +1050,8 @@ def _run_wizard(
         _tier_defs = _resolver._defaults.get("tier_definitions", {})
         _prov = primary_provider or _resolver._detect_bootstrap_provider() or "claude-code"
         _prov_ctx = _resolver._defaults.get("provider_overrides", {}).get(_prov, {}).get("context_window")
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to load tier definitions from resolver: %s", e)
         _tier_defs = {}
         _prov_ctx = None
 
@@ -1844,9 +1845,9 @@ def _save_config(
     # and mark as approved (replaces the former Task 002 config review step)
     project_config = {
         "setup_mode": "wizard",
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "config_approved": True,
-        "approved_at": datetime.now().isoformat(),
+        "approved_at": datetime.now(timezone.utc).isoformat(),
         "extracted": config,
     }
     # Flatten extracted sections into top-level for downstream consumers

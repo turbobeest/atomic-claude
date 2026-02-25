@@ -16,7 +16,7 @@ Outputs:
 import json
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -320,7 +320,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "next_steps": next_steps,
         "open_items": open_items,
         "dissenting_views": dissenting_views,
-        "confirmed_at": datetime.now().isoformat(),
+        "confirmed_at": datetime.now(timezone.utc).isoformat(),
         "confirmed_by": "human"
     }
 
@@ -383,7 +383,7 @@ def _create_markdown_doc(output_file: Path, direction: str, rationale: str,
     """Create the markdown documentation file."""
     content = f"""# Selected Direction
 
-**Confirmed:** {datetime.now().isoformat()}
+**Confirmed:** {datetime.now(timezone.utc).isoformat()}
 
 ---
 

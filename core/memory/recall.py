@@ -4,10 +4,13 @@ Memory Recall - Context retrieval with relevance scoring
 Intelligent context search with semantic matching and recency weighting.
 """
 
+import logging
 import math
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set
+
+logger = logging.getLogger(__name__)
 
 from .types import MemoryEntry, MemoryContext, MemoryEntryType
 from .store import MemoryStore
@@ -68,8 +71,8 @@ class MemoryRecall:
                         max_tokens=max_tokens,
                         relevance_threshold=relevance_threshold,
                     )
-            except Exception:
-                pass  # Fall through to file-based recall
+            except Exception as e:
+                logger.debug("Graph fulltext recall failed, falling back to file-based: %s", e)
 
         # File-based recall (fallback)
         entries = self.store.query(phase=phase, task_id=task_id)
@@ -291,7 +294,7 @@ class MemoryRecall:
 
         Recent entries score higher.
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         age = now - timestamp
 
         # Exponential decay: score = e^(-age/halflife)
@@ -348,7 +351,7 @@ class MemoryRecall:
 
         return MemoryEntry(
             id=node_dict.get("id", ""),
-            timestamp=datetime.fromisoformat(node_dict["created_at"]) if node_dict.get("created_at") else datetime.now(),
+            timestamp=datetime.fromisoformat(node_dict["created_at"]) if node_dict.get("created_at") else datetime.now(timezone.utc),
             entry_type=entry_type,
             phase=node_dict.get("phase", ""),
             task_id=node_dict.get("task_id") or None,

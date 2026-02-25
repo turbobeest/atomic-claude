@@ -18,7 +18,7 @@ import platform
 import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -72,7 +72,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Initialize report
     report = {
-        "validated_at": datetime.now().isoformat(),
+        "validated_at": datetime.now(timezone.utc).isoformat(),
         "checks": [],
         "capabilities": {}
     }
@@ -105,8 +105,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             ollama_info = providers.get("ollama", providers.get("Ollama", {}))
             ollama_status = ollama_info.get("status", "unavailable")
             ollama_configured = ollama_status in ("healthy", "degraded")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load inventory for Ollama check: %s", e)
 
     # Task routing configuration
     routing_config = _configure_routing(ollama_configured)
@@ -167,8 +167,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 if arch or cores:
                     mem.finding(f"System: {arch}/{cores} cores"
                                 + (f", {ram_mb}MB RAM" if ram_mb else ""))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to read setup report for memory: %s", e)
         mem.configuration(f"Routing: {'Ollama-enabled' if ollama_configured else 'API-only'}")
 
     # Handle failures
@@ -214,7 +214,8 @@ def _verify_agents(agents_dir: Path, agents_manifest: Path) -> Tuple[int, int]:
             print(print_green(f"  ✓ Agents available (v{manifest_version})"))
             print(f"    Total agents:     {total_agents}")
             print(f"    Phase categories: {total_categories}")
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to load agent manifest: %s", e)
             print(print_yellow(f"  ! Agent manifest corrupt: {agents_manifest}"))
             print(print_dim("    Using built-in defaults"))
             total_agents, total_categories = 0, 0
@@ -412,7 +413,8 @@ def _validate_git(report_file: Path, uat_mode: bool = False) -> None:
             print(print_yellow("    ! Git user not configured"))
             _add_check(report_file, "git_user", "warn", "recommended", "")
             CHECKS_WARN += 1
-    except Exception:
+    except Exception as e:
+        logger.debug("Git user check failed: %s", e)
         print(print_yellow("    ! Git user not configured"))
         _add_check(report_file, "git_user", "warn", "recommended", "")
         CHECKS_WARN += 1
@@ -438,7 +440,8 @@ def _validate_git(report_file: Path, uat_mode: bool = False) -> None:
             print(print_yellow("    ! Not a git repository"))
             _add_check(report_file, "git_repo", "warn", "recommended", "")
             CHECKS_WARN += 1
-    except Exception:
+    except Exception as e:
+        logger.debug("Git repo check failed: %s", e)
         print(print_yellow("    ! Not a git repository"))
         _add_check(report_file, "git_repo", "warn", "recommended", "")
         CHECKS_WARN += 1
@@ -461,7 +464,8 @@ def _validate_git_remote(report_file: Path, uat_mode: bool = False) -> None:
             capture_output=True, text=True, timeout=5
         )
         remotes = result.stdout.strip() if result.returncode == 0 else ""
-    except Exception:
+    except Exception as e:
+        logger.debug("Git remote check failed: %s", e)
         remotes = ""
 
     if remotes:
@@ -565,7 +569,8 @@ def _assess_cpu(report_file: Path, os_type: str) -> None:
             )
             if result.returncode == 0:
                 cpu_model = result.stdout.strip()
-        except Exception:
+        except Exception as e:
+            logger.debug("CPU brand string detection failed: %s", e)
             cpu_model = "Apple Silicon"
     elif os_type == "linux":
         try:
@@ -574,8 +579,8 @@ def _assess_cpu(report_file: Path, os_type: str) -> None:
                     if line.startswith("model name"):
                         cpu_model = line.split(":", 1)[1].strip()
                         break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("CPU model detection from /proc/cpuinfo failed: %s", e)
 
     print(f"    Model: {cpu_model}")
     print(f"    Cores: {cpu_cores}")
@@ -622,7 +627,8 @@ def _assess_gpu(report_file: Path, os_type: str) -> None:
             has_metal = True
             print(f"    GPU:   {gpu_name or 'Integrated'}")
             print(print_green("    ✓ Metal support (Apple Silicon / macOS)"))
-        except Exception:
+        except Exception as e:
+            logger.debug("macOS GPU detection failed: %s", e)
             gpu_name = "Unknown"
             has_metal = True
             print(print_dim("    ○ GPU detection unavailable"))
@@ -639,8 +645,8 @@ def _assess_gpu(report_file: Path, os_type: str) -> None:
                     has_cuda = True
                     print(f"    GPU:   {gpu_name}")
                     print(print_green("    ✓ CUDA support"))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("NVIDIA GPU detection failed: %s", e)
         else:
             print(print_dim("    ○ No dedicated GPU detected"))
     else:
@@ -677,8 +683,8 @@ def _assess_memory(report_file: Path, os_type: str) -> None:
             )
             if result.returncode == 0:
                 total_mb = int(result.stdout.strip()) // (1024 * 1024)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("macOS memory detection failed: %s", e)
     elif os_type == "linux":
         try:
             with open("/proc/meminfo") as f:
@@ -687,8 +693,8 @@ def _assess_memory(report_file: Path, os_type: str) -> None:
                         total_mb = int(line.split()[1]) // 1024
                     elif line.startswith("MemAvailable:"):
                         avail_mb = int(line.split()[1]) // 1024
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Linux memory detection failed: %s", e)
 
     total_gb = total_mb // 1024
     avail_gb = avail_mb // 1024
@@ -738,8 +744,8 @@ def _assess_storage(report_file: Path, os_type: str) -> None:
                     local_total = int(parts[1]) // (1024 * 1024)  # Convert to GB
                     local_avail = int(parts[3]) // (1024 * 1024)
                     local_mount = parts[-1]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Disk space detection failed: %s", e)
 
     print(f"    Local ({local_mount}):")
     if local_total > 0:
@@ -796,7 +802,8 @@ def _assess_network(report_file: Path) -> None:
             })
         else:
             print(print_yellow("    ! Network connectivity test failed"))
-    except Exception:
+    except Exception as e:
+        logger.debug("Network connectivity test failed: %s", e)
         print(print_yellow("    ! Network connectivity test failed"))
 
     print()
@@ -872,7 +879,7 @@ def _save_configuration(
     providers_config = {
         "routing": routing_config,
         "ollama_enabled": ollama_configured,
-        "configured_at": datetime.now().isoformat()
+        "configured_at": datetime.now(timezone.utc).isoformat()
     }
 
     # Read system capabilities from the report

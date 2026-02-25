@@ -15,12 +15,15 @@ Flow:
   7. Loop until user approves
 """
 
+import logging
 import os
 import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -204,7 +207,8 @@ def check_for_issues(validation_file: Path) -> bool:
 
         return has_recommendations or has_contradictions or has_gaps
 
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to check pending issues in validation data: %s", e)
         return False
 
 
@@ -220,7 +224,7 @@ def approve_prd(approval_file: Path, prd_file: Path, approver: str) -> None:
     approval_data = {
         "status": "approved",
         "approver": approver,
-        "approved_at": datetime.now().isoformat(),
+        "approved_at": datetime.now(timezone.utc).isoformat(),
         "prd_file": str(prd_file)
     }
 

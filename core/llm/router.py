@@ -9,7 +9,7 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Generator
 
 from .base import BaseLLMProvider, LLMResponse
@@ -146,7 +146,7 @@ class LLMRouter:
             provider=name,
             status=HealthStatus.UNKNOWN,
             available=False,
-            last_check=datetime.now(),
+            last_check=datetime.now(timezone.utc),
         )
 
         logger.info(f"Registered provider: {name} with roles: {roles}")
@@ -486,7 +486,7 @@ class LLMRouter:
         failure = self._failures.get(provider_name)
         if failure and failure.disabled_until:
             # Check if cooldown expired
-            if datetime.now() < failure.disabled_until:
+            if datetime.now(timezone.utc) < failure.disabled_until:
                 return False
             else:
                 # Re-enable provider
@@ -509,7 +509,7 @@ class LLMRouter:
         # Check if health check needed
         last_check = self._last_health_check.get(provider_name)
         if last_check:
-            elapsed = (datetime.now() - last_check).total_seconds()
+            elapsed = (datetime.now(timezone.utc) - last_check).total_seconds()
             if elapsed < self.config.health_check_interval:
                 # Use cached status
                 return self._provider_health[provider_name].status
@@ -523,7 +523,7 @@ class LLMRouter:
                 provider=provider_name,
                 status=status,
                 available=(status == HealthStatus.HEALTHY),
-                last_check=datetime.now(),
+                last_check=datetime.now(timezone.utc),
             )
 
         except Exception as e:
@@ -532,11 +532,11 @@ class LLMRouter:
                 provider=provider_name,
                 status=HealthStatus.UNAVAILABLE,
                 available=False,
-                last_check=datetime.now(),
+                last_check=datetime.now(timezone.utc),
                 error_message=str(e),
             )
 
-        self._last_health_check[provider_name] = datetime.now()
+        self._last_health_check[provider_name] = datetime.now(timezone.utc)
         return self._provider_health[provider_name].status
 
     def _record_success(
@@ -590,11 +590,11 @@ class LLMRouter:
 
         failure = self._failures[provider_name]
         failure.failure_count += 1
-        failure.last_failure = datetime.now()
+        failure.last_failure = datetime.now(timezone.utc)
 
         # Check if we should disable provider (circuit breaker)
         if failure.failure_count >= self.config.failure_threshold:
-            failure.disabled_until = datetime.now() + timedelta(
+            failure.disabled_until = datetime.now(timezone.utc) + timedelta(
                 minutes=self.config.cooldown_minutes
             )
             logger.warning(

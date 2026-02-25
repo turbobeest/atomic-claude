@@ -4,7 +4,7 @@ Memory System Data Types
 Pydantic models for memory system data structures.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
@@ -25,7 +25,7 @@ class MemoryEntry(BaseModel):
     """Single memory entry with content and metadata."""
 
     id: str = Field(description="Unique entry ID")
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     entry_type: MemoryEntryType
     phase: str = Field(description="Phase ID (e.g., '0-setup')")
     task_id: Optional[str] = Field(None, description="Task ID if task-related")
@@ -59,7 +59,7 @@ class Checkpoint(BaseModel):
     state_snapshot: Dict[str, Any] = Field(default_factory=dict)
     context: List[MemoryEntry] = Field(default_factory=list)
     status: CheckpointStatus = CheckpointStatus.VALID
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     previous_checkpoint: Optional[str] = None
 
     @field_serializer('created_at')
@@ -107,8 +107,8 @@ class MemoryHead(BaseModel):
     head_phase: int = -1
     head_checkpoint: Optional[str] = None
     checkpoints: List[Dict[str, Any]] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @field_serializer('created_at', 'updated_at')
     def serialize_datetime(self, v: datetime) -> str:

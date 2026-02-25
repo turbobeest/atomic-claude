@@ -14,6 +14,7 @@ Features:
 - Writes environment section to project-config.json
 """
 
+import logging
 import os
 import sys
 import json
@@ -21,7 +22,9 @@ import subprocess
 import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -397,8 +400,8 @@ def _recheck_required(os_type: str) -> None:
                     major = int(version.split('.')[0])
                     if major >= 18:
                         REQUIRED_INSTALLED += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to parse node version: %s", e)
             else:
                 REQUIRED_INSTALLED += 1
 
@@ -545,8 +548,8 @@ def _install_dashboard_deps(atomic_root: Path) -> None:
                 cwd=str(app_dir),
                 capture_output=True, text=True, timeout=30,
             )
-        except Exception:
-            pass  # Non-critical
+        except Exception as e:
+            logger.debug("svelte-kit sync failed (non-critical): %s", e)
 
     print()
 
@@ -585,7 +588,8 @@ def _launch_dashboard(atomic_root: Path) -> None:
                 with urllib.request.urlopen(req, timeout=1):
                     ready = True
                     break
-            except Exception:
+            except Exception as e:
+                logger.debug("Dashboard not yet responding: %s", e)
                 time.sleep(0.5)
 
         # Detect hostname/IP for remote access
@@ -601,8 +605,8 @@ def _launch_dashboard(atomic_root: Path) -> None:
         if not ready:
             print(print_yellow("  ! Dashboard may still be starting..."))
         print()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Dashboard launch failed: %s", e)
 
 
 def _get_hostname() -> str:
@@ -615,12 +619,13 @@ def _get_hostname() -> str:
         ip = s.getsockname()[0]
         s.close()
         return ip
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to detect routable IP: %s", e)
     # Fallback to hostname
     try:
         return socket.gethostname()
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to get hostname: %s", e)
         return "localhost"
 
 
@@ -672,8 +677,8 @@ def _start_falkordb(atomic_root: Path, uat_mode: bool = False) -> None:
                 if check.returncode == 0 and "PONG" in check.stdout:
                     ready = True
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("FalkorDB ping check failed: %s", e)
             time.sleep(1)
 
         if ready:
@@ -727,7 +732,7 @@ def _record_environment(config_file: Path, os_type: str) -> None:
         "cargo_version": cargo_version,
         "cargo_on_path": cargo_on_path,
         "cargo_env_source_needed": cargo_in_home and not cargo_on_path,
-        "checked_at": datetime.now().isoformat(),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
     }
     write_file(config_file, json.dumps(config, indent=2))
 

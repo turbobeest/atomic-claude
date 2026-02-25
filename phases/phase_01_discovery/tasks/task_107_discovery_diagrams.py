@@ -16,11 +16,14 @@ Output: docs/diagrams/*.dot + *.svg
 """
 
 import json
+import logging
 import sys
 import subprocess
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
@@ -285,8 +288,8 @@ def _load_approach_context(output_dir: Path) -> Dict[str, str]:
             context["project_name"] = project.get("name", "")
             context["project_description"] = project.get("description", "")
             context["project_type"] = project.get("type", "")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load project config for diagrams: %s", e)
 
     # Load approach
     approach_file = output_dir / "selected-approach.json"
@@ -326,8 +329,8 @@ def _load_approach_context(output_dir: Path) -> Dict[str, str]:
             analysis_text = corpus_analysis_file.read_text().strip()
             if analysis_text:
                 context["corpus_analysis"] = analysis_text
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load corpus analysis for diagrams: %s", e)
 
     return context
 
@@ -465,7 +468,8 @@ def _convert_to_svg(dot_file: Path, svg_file: Path) -> bool:
             timeout=30
         )
         return result.returncode == 0
-    except Exception:
+    except Exception as e:
+        logger.debug("DOT to SVG compilation failed: %s", e)
         return False
 
 
@@ -492,7 +496,7 @@ def _create_manifest(diagrams_dir: Path, selected_diagrams: List[str],
             "generated": generated,
             "failed": failed
         },
-        "generated_at": datetime.now().isoformat()
+        "generated_at": datetime.now(timezone.utc).isoformat()
     }
 
     manifest_file = diagrams_dir / "manifest.json"

@@ -17,7 +17,7 @@ import logging
 import sys
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Ensure atomic-claude2 root is in path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -87,10 +87,9 @@ def run_phase(resume_at: str = None) -> bool:
     state = StateManager()
     phase_id = "3-tasking"
 
-    # Initialize knowledge graph (None if disabled/unavailable)
+    # Initialize knowledge graph (raises GraphUnavailableError on failure)
     graph = get_graph(phase_id=phase_id)
-    if graph:
-        graph.ensure_schema()
+    graph.ensure_schema()
 
     # Register active phase in task-state.json so dashboard always knows
     state.set_current_phase(phase_id)
@@ -283,7 +282,7 @@ def create_closeout(phase_id: str, tasks: list):
     closeout_data = {
         "phase": phase_id,
         "phase_num": phase_num,
-        "completed_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "completed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z"),
         "status": "complete",
         "tasks_completed": completed_tasks,
         "summary": f"Phase {phase_num} ({phase_id.split('-', 1)[1].title()}) completed successfully."

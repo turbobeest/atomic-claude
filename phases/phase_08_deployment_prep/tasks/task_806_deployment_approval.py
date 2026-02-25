@@ -7,7 +7,7 @@ Human gate for approving deployment artifacts.
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -46,7 +46,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         deployment_dir.mkdir(parents=True, exist_ok=True)
         approval_data = {
             "approved": True,
-            "approved_at": datetime.utcnow().isoformat() + "Z",
+            "approved_at": datetime.now(timezone.utc).isoformat() + "Z",
             "approver": "UAT"
         }
         write_json(approval_file, approval_data)
@@ -181,7 +181,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "approver": approver_name,
         "version": version,
         "artifacts_approved": ["package", "changelog", "documentation", "installation_guide"],
-        "approved_at": datetime.utcnow().isoformat() + "Z"
+        "approved_at": datetime.now(timezone.utc).isoformat() + "Z"
     }
 
     write_json(approval_file, approval_data)

@@ -19,10 +19,13 @@ The conversation continues until:
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
@@ -79,7 +82,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     dialogue = {
         "conversation": [],
         "synthesis": {},
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "turns": 0
     }
 
@@ -104,8 +107,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             pdesc = project.get("description", "")
             ptype = project.get("type", "")
             project_context = f"**Project:** {pname}\n**Description:** {pdesc}\n**Type:** {ptype}\n"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load project config: %s", e)
 
     # Load corpus analysis results (from task 101)
     corpus_analysis_file = output_dir / "corpus-analysis.md"
@@ -114,8 +117,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             analysis_text = corpus_analysis_file.read_text().strip()
             if analysis_text:
                 project_context += f"\n**Corpus Analysis:**\n{analysis_text}\n"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load corpus analysis: %s", e)
 
     if corpus_file.exists():
         with open(corpus_file) as f:
@@ -149,8 +152,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         try:
             cfg = json.loads((output_dir.parent / "0-setup" / "project-config.json").read_text())
             pname = cfg.get("project", {}).get("name", "")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load project name from config: %s", e)
 
         if corpus_analysis_file.exists() and pname:
             agent_opening = (f"I've analyzed your {corpus_summary} for {pname}. "
@@ -449,8 +452,8 @@ Output ONLY your response, no formatting.
 
         if output_file.exists():
             return output_file.read_text().strip()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("LLM dialogue continuation failed: %s", e)
 
     # Fallback responses
     fallbacks = {
@@ -542,8 +545,8 @@ Return ONLY valid JSON with no additional text:
                 content = '\n'.join(json_lines)
 
             return json.loads(content)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("LLM dialogue synthesis failed: %s", e)
 
     # Fallback synthesis
     return {

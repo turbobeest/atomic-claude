@@ -8,7 +8,7 @@ import sys
 import json
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 # Add project root to path for imports
@@ -174,7 +174,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     write_json(agents_file, {
         "phase": 9,
         "agents": selected_agents,
-        "selected_at": datetime.now().isoformat()
+        "selected_at": datetime.now(timezone.utc).isoformat()
     })
 
     # Save decision to context

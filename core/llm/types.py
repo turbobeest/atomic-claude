@@ -6,7 +6,7 @@ Pydantic models for LLM requests, responses, and metadata.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Any
 
@@ -84,7 +84,7 @@ if PYDANTIC_AVAILABLE:
         finish_reason: Optional[str] = Field(None, description="Finish reason")
         stop_reason: Optional[str] = Field(None, description="Stop reason")
         latency_ms: Optional[int] = Field(None, description="Latency in milliseconds")
-        timestamp: datetime = Field(default_factory=datetime.now, description="Response timestamp")
+        timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Response timestamp")
         metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
         @field_serializer('timestamp')
@@ -146,7 +146,7 @@ if PYDANTIC_AVAILABLE:
         provider: str = Field(..., description="Provider name")
         status: HealthStatus = Field(..., description="Health status")
         available: bool = Field(..., description="Provider available")
-        last_check: datetime = Field(default_factory=datetime.now, description="Last health check")
+        last_check: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Last health check")
         error_message: Optional[str] = Field(None, description="Error message if unavailable")
         metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional health data")
 
@@ -180,7 +180,7 @@ else:
         finish_reason: Optional[str] = None
         stop_reason: Optional[str] = None
         latency_ms: Optional[int] = None
-        timestamp: datetime = field(default_factory=datetime.now)
+        timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
         metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -227,6 +227,6 @@ else:
         provider: str
         status: HealthStatus
         available: bool
-        last_check: datetime = field(default_factory=datetime.now)
+        last_check: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
         error_message: Optional[str] = None
         metadata: Dict[str, Any] = field(default_factory=dict)

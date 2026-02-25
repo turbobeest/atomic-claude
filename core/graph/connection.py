@@ -88,8 +88,8 @@ class GraphConnection:
             if cls._instance is not None:
                 try:
                     cls._instance.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Error closing graph connection during reset: %s", e)
                 cls._instance = None
 
     def _connect(self):
@@ -118,7 +118,8 @@ class GraphConnection:
             # FalkorDB uses Redis protocol; ping tests connectivity
             self._client.connection.ping()
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug("FalkorDB health check ping failed: %s", e)
             self._connected = False
             return False
 
@@ -141,7 +142,8 @@ class GraphConnection:
             # Try reconnect once
             try:
                 self._connect()
-            except Exception:
+            except Exception as e:
+                logger.debug("FalkorDB reconnect failed: %s", e)
                 raise GraphUnavailableError()
 
         try:

@@ -12,12 +12,15 @@ Always non-blocking: returns True even when audits find issues.
 
 import csv
 import json
+import logging
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 # Phase number → CSV column name mapping
@@ -312,7 +315,8 @@ def _load_model_config() -> dict:
     if config_path.exists():
         try:
             _model_config_cache = json.loads(config_path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to load model config from %s: %s", config_path, e)
             _model_config_cache = {}
     else:
         _model_config_cache = {}
@@ -325,7 +329,8 @@ def _detect_default_provider() -> str:
         from core.config import Config
         config = Config()
         name = config.get("llm.primary_provider", "api")
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to detect default provider: %s", e)
         name = "api"
     _MAP = {
         "api": "anthropic", "max": "anthropic", "anthropic": "anthropic",
@@ -375,7 +380,8 @@ def _load_agent_manifest() -> dict:
     try:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
         _agent_manifest_cache = data
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to load agent manifest: %s", e)
         _agent_manifest_cache = {}
 
     return _agent_manifest_cache
@@ -1003,7 +1009,8 @@ def _load_existing_evaluations(
 
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to load audit report from %s: %s", report_path, e)
         return [], []
 
     eval_entries = report.get("evaluations", [])
@@ -1025,8 +1032,8 @@ def _load_existing_evaluations(
                 marker = "---\n\n"
                 idx = raw.find(marker)
                 analysis = raw[idx + len(marker):] if idx >= 0 else raw
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to read audit analysis from %s: %s", md_path, e)
 
         ev = AuditEvaluation(
             audit_id=entry.get("audit_id", "unknown"),
@@ -1697,8 +1704,9 @@ Write a concise executive synthesis in markdown covering:
     try:
         from core.llm.invoke import invoke_llm
         return invoke_llm(prompt=prompt, model="haiku")
-    except Exception:
+    except Exception as e:
         # Non-blocking: return empty on failure
+        logger.debug("LLM executive synthesis failed: %s", e)
         return ""
 
 
@@ -1861,7 +1869,8 @@ def _gather_deliverables(
                 continue
             try:
                 text = fp.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to read output artifact %s: %s", fp, e)
                 continue
 
             header = f"--- {fp.relative_to(output_dir)} ---\n"
@@ -1890,7 +1899,8 @@ def _gather_deliverables(
                     continue
                 try:
                     text = fp.read_text(encoding="utf-8", errors="replace")
-                except Exception:
+                except Exception as e:
+                    logger.debug("Failed to read deliverable file %s: %s", fp, e)
                     continue
 
                 rel = fp.relative_to(extra_dir)
@@ -1918,7 +1928,8 @@ def _gather_deliverables(
                     continue
                 try:
                     text = fp.read_text(encoding="utf-8", errors="replace")
-                except Exception:
+                except Exception as e:
+                    logger.debug("Failed to read source file %s: %s", fp, e)
                     continue
 
                 # Use path relative to atomic/project root for identification

@@ -16,7 +16,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -344,7 +344,7 @@ def _generate_markdown_closeout(
     """Generate markdown closeout document."""
     content = f"""# Phase 3 Closeout: Tasking
 
-**Completed:** {datetime.utcnow().isoformat()}Z
+**Completed:** {datetime.now(timezone.utc).isoformat()}Z
 **Status:** COMPLETE
 
 ## Summary
@@ -419,7 +419,7 @@ def _generate_json_closeout(
         "phase": 3,
         "name": "Tasking",
         "status": "complete",
-        "completed_at": datetime.utcnow().isoformat() + "Z",
+        "completed_at": datetime.now(timezone.utc).isoformat() + "Z",
         "task_count": metrics["task_count"],
         "high_priority_count": metrics["high_priority"],
         "package_count": metrics["package_count"],

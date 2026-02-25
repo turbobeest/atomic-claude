@@ -18,7 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -412,7 +412,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "injection_mode": "uat",
             "tasks_injected": len(tasks),
             "total_subtasks_created": len(tasks) * 4,
-            "completed_at": datetime.now().isoformat()
+            "completed_at": datetime.now(timezone.utc).isoformat()
         }, indent=2))
         print(print_green(f"✓ TDD subtask injection complete (UAT mode, {len(tasks)} tasks)"))
         return True
@@ -448,7 +448,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         write_file(injection_report, json.dumps({
             "injection_mode": "llm-enriched",
             "tasks_injected": 0,
-            "completed_at": datetime.now().isoformat()
+            "completed_at": datetime.now(timezone.utc).isoformat()
         }, indent=2))
         return True
 
@@ -495,7 +495,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "model": "opus",
             "tasks_injected": 0,
             "tasks_skipped": total_tasks,
-            "completed_at": datetime.now().isoformat()
+            "completed_at": datetime.now(timezone.utc).isoformat()
         }, indent=2))
         return True
 
@@ -665,7 +665,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "total_wall_time_s": round(gen_duration, 1),
         "backup_file": "tasks.json.pre-tdd-backup",
         "per_task": per_task,
-        "completed_at": datetime.now().isoformat()
+        "completed_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_file(injection_report, json.dumps(injection_data, indent=2))

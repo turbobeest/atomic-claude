@@ -8,7 +8,7 @@ import sys
 import json
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 # Add project root to path for imports
@@ -194,7 +194,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "fixes": fixes_count
         },
         "confirmed": True,
-        "setup_at": datetime.now().isoformat()
+        "setup_at": datetime.now(timezone.utc).isoformat()
     })
 
     # Save decision to context

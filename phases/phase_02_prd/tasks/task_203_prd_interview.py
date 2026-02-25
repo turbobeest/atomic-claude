@@ -16,7 +16,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -356,7 +356,7 @@ def save_defaults(interview_file: Path) -> None:
         "success_criteria": DEFAULT_SUCCESS_CRITERIA,
         "non_goals": DEFAULT_NON_GOALS,
         "mvp_scope": DEFAULT_MVP_SCOPE,
-        "interview_at": datetime.now().isoformat(),
+        "interview_at": datetime.now(timezone.utc).isoformat(),
         "source": "defaults"
     }
 
@@ -387,7 +387,7 @@ def save_interview(
         "success_criteria": success_criteria,
         "non_goals": non_goals,
         "mvp_scope": mvp_scope,
-        "interview_at": datetime.now().isoformat()
+        "interview_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_file(interview_file, json.dumps(interview_data, indent=2))

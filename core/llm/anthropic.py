@@ -5,9 +5,12 @@ ATOMIC CLAUDE - Anthropic Provider
 Anthropic API provider implementation using official SDK.
 """
 
+import logging
 import os
 import time
 from typing import Dict, Generator, Optional, Any
+
+logger = logging.getLogger(__name__)
 
 try:
     import anthropic
@@ -388,8 +391,9 @@ class AnthropicProvider(BaseLLMProvider):
             # Use Anthropic's count_tokens method
             count = self.client.count_tokens(text)
             return count
-        except Exception:
+        except Exception as e:
             # Fallback to rough estimate (4 chars per token)
+            logger.debug("Token counting failed, using estimate: %s", e)
             return len(text) // 4
 
     def health_check(self) -> HealthStatus:
@@ -418,7 +422,8 @@ class AnthropicProvider(BaseLLMProvider):
         except anthropic.APIError:
             return HealthStatus.DEGRADED
 
-        except Exception:
+        except Exception as e:
+            logger.debug("Anthropic health check failed: %s", e)
             return HealthStatus.UNAVAILABLE
 
     def get_supported_models(self) -> list:

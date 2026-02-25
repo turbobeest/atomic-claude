@@ -10,7 +10,7 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 "all_passing": True
             },
             "all_resolved": True,
-            "refined_at": datetime.now().isoformat()
+            "refined_at": datetime.now(timezone.utc).isoformat()
         }, indent=2))
 
         print(print_green("✓ UAT bypass complete"))
@@ -161,7 +161,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "all_passing": tests_passing
         },
         "all_resolved": (fixed_critical >= total_critical and fixed_major >= total_major),
-        "refined_at": datetime.now().isoformat()
+        "refined_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_file(refinement_file, json.dumps(refinement_data, indent=2))

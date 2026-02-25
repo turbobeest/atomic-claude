@@ -19,7 +19,10 @@ Keybindings:
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from textual import on
 from textual.app import App, ComposeResult
@@ -55,7 +58,8 @@ def _load_model_catalog() -> dict:
         if p.is_file():
             try:
                 return json.loads(p.read_text(encoding="utf-8"))
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to load model config from %s: %s", p, e)
                 continue
     return {}
 

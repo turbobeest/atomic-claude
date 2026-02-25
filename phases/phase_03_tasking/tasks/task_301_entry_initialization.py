@@ -17,7 +17,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +204,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "checks_passed": checks_passed,
         "checks_warned": checks_warned,
         "checks_failed": checks_failed,
-        "validated_at": datetime.utcnow().isoformat() + "Z"
+        "validated_at": datetime.now(timezone.utc).isoformat() + "Z"
     })
 
     ensure_dir(validation_file.parent)

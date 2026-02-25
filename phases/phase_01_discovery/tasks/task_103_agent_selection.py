@@ -22,7 +22,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
@@ -264,7 +264,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Build selected agents output
     agents_json = {
         "version": "1.0",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "core": [
             {"name": "orchestrator", "description": "Pipeline orchestration", "model": "opus"},
             {"name": "agent-selector", "description": "Agent assignment", "model": "opus"}
@@ -533,7 +533,7 @@ def _build_roster(pipeline_agents: Dict[str, str], experts: List[str]) -> Dict[s
     """Build the final agent roster."""
     roster = {
         "version": "1.0",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "phases": {}
     }
 
@@ -562,7 +562,7 @@ def _use_builtin_agents(agents_output: Path, roster_output: Path) -> None:
 
     agents_json = {
         "version": "1.0",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "core": [
             {"name": "orchestrator", "description": "Pipeline orchestration", "model": "opus"},
             {"name": "discovery-facilitator", "description": "Guides discovery process", "model": "sonnet"}
@@ -573,7 +573,7 @@ def _use_builtin_agents(agents_output: Path, roster_output: Path) -> None:
 
     roster = {
         "version": "1.0",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "phases": {
             "1": {"name": "Discovery", "agents": ["discovery-facilitator"]},
             "2": {"name": "PRD", "agents": ["prd-writer"]},

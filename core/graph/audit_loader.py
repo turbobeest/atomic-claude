@@ -349,7 +349,8 @@ def query_audits(graph, category: str = None, subcategory: str = None,
     if search:
         try:
             results = graph.reader.fulltext_search("Audit", search, limit=limit)
-        except Exception:
+        except Exception as e:
+            logger.debug("Audit fulltext search failed: %s", e)
             results = []
     else:
         filters = {}
@@ -428,7 +429,8 @@ def get_audit_stats(graph) -> dict:
     """Get summary statistics for the loaded audit catalog."""
     try:
         total = graph.reader.count_nodes("Audit")
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to get audit stats: %s", e)
         return {"total": 0, "loaded": False}
 
     if total == 0:

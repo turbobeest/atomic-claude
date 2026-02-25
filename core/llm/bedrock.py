@@ -6,9 +6,12 @@ AWS Bedrock provider implementation using boto3.
 """
 
 import json
+import logging
 import os
 import time
 from typing import Dict, Generator, Optional, Any
+
+logger = logging.getLogger(__name__)
 
 try:
     import boto3
@@ -486,7 +489,8 @@ class BedrockProvider(BaseLLMProvider):
 
             return HealthStatus.DEGRADED
 
-        except Exception:
+        except Exception as e:
+            logger.debug("Bedrock health check failed: %s", e)
             return HealthStatus.UNAVAILABLE
 
     def get_supported_models(self) -> list:

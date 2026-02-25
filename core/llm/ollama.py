@@ -7,11 +7,14 @@ Supports streaming, model pulling, and GPU acceleration.
 """
 
 import json
+import logging
 import time
 import urllib.request
 import urllib.error
 from typing import Dict, Generator, Optional, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from .base import (
     BaseLLMProvider,
@@ -209,7 +212,7 @@ class OllamaProvider(BaseLLMProvider):
             usage=usage,
             finish_reason=response_data.get("done_reason"),
             latency_ms=latency_ms,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             metadata={
                 "total_duration": response_data.get("total_duration"),
                 "load_duration": response_data.get("load_duration"),
@@ -326,7 +329,8 @@ class OllamaProvider(BaseLLMProvider):
         try:
             models = self.list_models()
             return resolved in models
-        except Exception:
+        except Exception as e:
+            logger.debug("Ollama model availability check failed for %s: %s", model_name, e)
             return False
 
     def get_token_count(self, text: str, model: Optional[str] = None) -> int:
@@ -371,7 +375,8 @@ class OllamaProvider(BaseLLMProvider):
 
         except urllib.error.URLError:
             return HealthStatus.UNAVAILABLE
-        except Exception:
+        except Exception as e:
+            logger.debug("Ollama health check failed: %s", e)
             return HealthStatus.UNAVAILABLE
 
         return HealthStatus.UNAVAILABLE
@@ -402,7 +407,8 @@ class OllamaProvider(BaseLLMProvider):
                 response_data = json.loads(response.read().decode('utf-8'))
                 return response_data.get("status") == "success"
 
-        except Exception:
+        except Exception as e:
+            logger.debug("Ollama model pull failed for %s: %s", model_name, e)
             return False
 
     def list_models(self) -> List[str]:
@@ -420,7 +426,8 @@ class OllamaProvider(BaseLLMProvider):
                 data = json.loads(response.read().decode('utf-8'))
                 return [model["name"] for model in data.get("models", [])]
 
-        except Exception:
+        except Exception as e:
+            logger.debug("Ollama list_models failed: %s", e)
             return []
 
     def get_supported_models(self) -> List[str]:

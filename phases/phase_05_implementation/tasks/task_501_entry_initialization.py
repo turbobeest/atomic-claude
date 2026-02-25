@@ -9,7 +9,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "total_subtasks": 12,
             "spec_count": 3,
             "mode": "uat",
-            "initialized_at": datetime.now().isoformat()
+            "initialized_at": datetime.now(timezone.utc).isoformat()
         }
         write_file(init_file, json.dumps(init_data, indent=2))
 
@@ -217,7 +217,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "tasks_with_tdd": tasks_with_tdd,
         "total_subtasks": total_subtasks,
         "spec_count": spec_count,
-        "initialized_at": datetime.now().isoformat()
+        "initialized_at": datetime.now(timezone.utc).isoformat()
     }
     write_file(init_file, json.dumps(init_data, indent=2))
 

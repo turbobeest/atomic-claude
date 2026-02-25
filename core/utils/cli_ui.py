@@ -4,11 +4,14 @@ CLI UI Utilities
 Provides color-coded terminal output and user interaction functions.
 """
 
+import logging
 import sys
 import select
 import termios
 import tty
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Enable readline for all input() calls in the process.
 # This gives arrow-key navigation, cursor movement (Home/End),
@@ -124,9 +127,9 @@ def clear_input_buffer() -> None:
             finally:
                 # Restore terminal settings
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-    except:
-        # Silently ignore errors (e.g., on Windows or non-TTY)
-        pass
+    except Exception as e:
+        # Non-TTY or unsupported platform (e.g., Windows)
+        logger.debug("Could not flush stdin: %s", e)
 
 
 def print_header(title: str) -> None:

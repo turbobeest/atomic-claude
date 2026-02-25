@@ -9,7 +9,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +308,7 @@ def _generate_closeout_documents(
 
     markdown_content = f"""# Phase 6 Closeout: Code Review
 
-**Completed:** {datetime.now().isoformat()}
+**Completed:** {datetime.now(timezone.utc).isoformat()}
 **Status:** COMPLETE
 
 ## Summary
@@ -373,7 +373,7 @@ python main.py run 7
         "phase": 6,
         "name": "Code Review",
         "status": "complete",
-        "completed_at": datetime.now().isoformat(),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
         "findings": {
             "critical_found": critical_found,
             "critical_fixed": critical_fixed,

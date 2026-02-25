@@ -7,7 +7,7 @@ Present and select integration testing agents for Phase 7.
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -218,7 +218,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     agents_data = {
         "phase": 7,
         "agents": selected_agents,
-        "selected_at": datetime.now().isoformat()
+        "selected_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_json(agents_file, agents_data)

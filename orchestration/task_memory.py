@@ -20,7 +20,10 @@ Usage in orchestrators:
     memory_save(phase=phase_id, ..., content=content, metadata=mem.build_metadata())
 """
 
+import logging
 from typing import List, Tuple, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class TaskMemory:
@@ -98,8 +101,8 @@ class TaskMemory:
                 tags=["mid-task", self.phase_id, f"task-{self.task_id}"],
                 entry_type="task_progress",
             )
-        except Exception:
-            pass  # Checkpoint failure is non-blocking
+        except Exception as e:
+            logger.debug("Mid-task memory checkpoint failed (non-blocking): %s", e)
 
         self._flushed_count = len(self._entries)
 

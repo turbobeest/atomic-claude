@@ -9,7 +9,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         write_file(entry_context, json.dumps({
             "status": "initialized",
             "phase": "6-code-review",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }, indent=2))
         print(print_green("✓ UAT bypass complete"))
         return True

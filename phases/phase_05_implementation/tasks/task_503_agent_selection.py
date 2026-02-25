@@ -10,7 +10,7 @@ import json
 import csv
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "specialists": ["backend-engineer", "api-developer"],
             "source": "uat-defaults",
             "mode": "uat",
-            "selected_at": datetime.now().isoformat()
+            "selected_at": datetime.now(timezone.utc).isoformat()
         }
         write_file(agents_file, json.dumps(agents_data, indent=2))
 
@@ -362,7 +362,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         },
         "specialists": specialists,
         "source": "agent-inventory.csv",
-        "selected_at": datetime.now().isoformat()
+        "selected_at": datetime.now(timezone.utc).isoformat()
     }
     write_file(agents_file, json.dumps(agents_data, indent=2))
 

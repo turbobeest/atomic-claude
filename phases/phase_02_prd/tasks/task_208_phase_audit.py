@@ -5,8 +5,11 @@ AI-driven audit selection from audit repository.
 Wrapper around the Python audit system.
 """
 
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -59,7 +62,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 failed = summary.get("failed", 0)
                 warnings = summary.get("warnings", 0)
                 mem.finding(f"Audit results: {passed} passed, {failed} failed, {warnings} warnings")
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to parse audit report for memory: %s", e)
                 mem.finding(f"Audit: {'passed' if result else 'had issues'}")
         else:
             mem.finding(f"Audit: {'passed' if result else 'had issues'}")

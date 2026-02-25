@@ -8,7 +8,7 @@ import json
 import logging
 import tempfile
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from collections import defaultdict
@@ -116,7 +116,7 @@ class MemoryStore:
         """Save memory entries to disk."""
         data = {
             "entries": [entry.model_dump() for entry in self._entries],
-            "updated_at": datetime.now().isoformat()
+            "updated_at": datetime.now(timezone.utc).isoformat()
         }
         self._write_atomic(self.memory_file, data)
 
@@ -300,7 +300,7 @@ class MemoryStore:
         if not self._loaded:
             self._load()
 
-        cutoff_date = datetime.now() - timedelta(days=max_age_days)
+        cutoff_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=max_age_days)
         initial_count = len(self._entries)
 
         # Keep entries that are:
@@ -381,7 +381,7 @@ class MemoryStore:
             self._load()
 
         data = {
-            "exported_at": datetime.now().isoformat(),
+            "exported_at": datetime.now(timezone.utc).isoformat(),
             "entries": [entry.model_dump() for entry in self._entries]
         }
 

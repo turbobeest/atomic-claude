@@ -20,7 +20,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -208,7 +208,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     corpus_data = {
         "materials": [{"path": str(p), "name": p.name, "type": "file"} for p in materials],
-        "analyzed_at": datetime.now().isoformat(),
+        "analyzed_at": datetime.now(timezone.utc).isoformat(),
     }
 
     # LLM Analysis
@@ -298,7 +298,7 @@ def _flatten_config(config_file: Path, config_data: Dict[str, Any]) -> None:
 
     # Mark as approved
     config_data['config_approved'] = True
-    config_data['approved_at'] = datetime.now().isoformat()
+    config_data['approved_at'] = datetime.now(timezone.utc).isoformat()
 
     # Save flattened config
     write_json(config_file, config_data)
@@ -636,7 +636,7 @@ def _save_corpus(corpus_json: Path, corpus_data: Dict[str, Any], analysis_file: 
     index_file = corpus_json.parent / "CORPUS-INDEX.md"
     index_parts = []
     index_parts.append("# Corpus Index\n\n")
-    index_parts.append(f"Generated: {datetime.now().isoformat()}\n\n")
+    index_parts.append(f"Generated: {datetime.now(timezone.utc).isoformat()}\n\n")
     index_parts.append("## Materials\n\n")
 
     for material in corpus_data.get("materials", []):

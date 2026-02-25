@@ -6,7 +6,7 @@ Persistent context storage and recall across phases and sessions.
 Pure Python implementation replacing the bash memory.sh (47KB, 1,500 lines).
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import uuid
@@ -101,7 +101,7 @@ def memory_save(
     # Create entry
     entry = MemoryEntry(
         id=entry_id,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc),
         entry_type=entry_type,
         phase=phase,
         task_id=task_id,

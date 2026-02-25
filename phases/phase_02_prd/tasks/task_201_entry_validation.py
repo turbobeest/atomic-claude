@@ -15,7 +15,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +263,7 @@ def load_phase1_context(phase1_dir: Path) -> Dict[str, Any]:
     print(print_dim("  Loading context from Phase 1..."))
 
     context = {
-        "loaded_at": datetime.now().isoformat(),
+        "loaded_at": datetime.now(timezone.utc).isoformat(),
         "approach": None,
         "vision": None,
         "constraints": [],

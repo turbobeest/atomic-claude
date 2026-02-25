@@ -20,7 +20,7 @@ import json
 import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +208,7 @@ def create_passing_validation(validation_file: Path, prd_file: Path) -> None:
         sections_found = len(re.findall(r'^##\s', content, re.MULTILINE))
 
     validation_data = {
-        "audit_timestamp": datetime.now().isoformat(),
+        "audit_timestamp": datetime.now(timezone.utc).isoformat(),
         "overall_status": "PASS",
         "overall_score": 85,
         "completeness": {
@@ -296,7 +296,8 @@ def count_lines(file_path: Path) -> int:
     """Count lines in file."""
     try:
         return len(read_file(file_path).split('\n'))
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to count lines in %s: %s", file_path, e)
         return 0
 
 

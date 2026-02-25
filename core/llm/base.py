@@ -7,7 +7,7 @@ Abstract base class defining the interface for all LLM providers.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, Generator, Optional, Any
 
@@ -53,7 +53,7 @@ class LLMResponse:
     finish_reason: Optional[str] = None
     stop_reason: Optional[str] = None
     latency_ms: Optional[int] = None
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:

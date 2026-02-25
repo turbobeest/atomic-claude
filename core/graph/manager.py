@@ -6,7 +6,7 @@ This is the primary interface used by phase orchestrators."""
 import json
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -270,7 +270,7 @@ class GraphManager:
             "content": content,
             "tags_csv": ",".join(tags) if tags else "",
             "relevance_score": relevance_score,
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         })
 
     def recall_memory(self, query: str, phase: str = None,
@@ -282,7 +282,8 @@ class GraphManager:
         """
         try:
             results = self.reader.fulltext_search("Memory", query, limit=limit)
-        except Exception:
+        except Exception as e:
+            logger.debug("Memory fulltext search failed: %s", e)
             results = []
 
         # Apply phase/task_id filters
@@ -317,7 +318,7 @@ class GraphManager:
             "key_decisions_csv": ",".join(key_decisions) if key_decisions else "",
             "artifacts_csv": ",".join(artifacts) if artifacts else "",
             "status": "valid",
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         })
 
     def invalidate_checkpoints_after(self, phase_num: int) -> int:

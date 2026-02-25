@@ -10,7 +10,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +308,7 @@ Phase 6: Code Review
                 "tasks_total": 3,
                 "completion_rate": 100
             },
-            "completed_at": datetime.now().isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
             "next_phase": 6
         }
         write_file(closeout_json, json.dumps(closeout_data, indent=2))
@@ -419,7 +419,7 @@ Phase 6: Code Review
 
     closeout_md = f"""# Phase 5 Closeout: TDD Implementation
 
-**Completed:** {datetime.now().isoformat()}
+**Completed:** {datetime.now(timezone.utc).isoformat()}
 **Status:** COMPLETE
 **Stack:** {m['stack']}
 
@@ -484,7 +484,7 @@ python main.py run 6
         "phase": 5,
         "name": "TDD Implementation",
         "status": "complete",
-        "completed_at": datetime.now().isoformat(),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
         "stack": m["stack"],
         "tasks_completed": m["tasks_completed"],
         "total_tasks": m["tasks_total"],

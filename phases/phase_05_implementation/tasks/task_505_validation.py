@@ -16,7 +16,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Dict, Any, Tuple, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -617,7 +617,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "coverage": coverage if isinstance(coverage, dict) else None,
         "security": security,
         "validation_passed": validation_passed,
-        "validated_at": datetime.now().isoformat(),
+        "validated_at": datetime.now(timezone.utc).isoformat(),
     }
     write_file(validation_file, json.dumps(validation_data, indent=2))
 

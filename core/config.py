@@ -21,12 +21,15 @@ Architecture:
 Author: Phase 2 - Configuration System
 """
 
+import logging
 import os
 import json
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 try:
     from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -409,7 +412,7 @@ class Config:
                 print(f"Warning: Config validation failed: {e}")
                 self._schema = None
 
-        self._load_timestamp = datetime.now()
+        self._load_timestamp = datetime.now(timezone.utc)
 
     def reload(self) -> None:
         """Hot-reload configuration from all sources."""
@@ -470,7 +473,8 @@ class Config:
         try:
             ConfigSchema(**self._config)
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug("Config validation failed: %s", e)
             return False
 
     def to_dict(self) -> Dict[str, Any]:

@@ -22,7 +22,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -547,7 +547,7 @@ def invoke_revision_agent(
 
     if choice == "apply":
         # Backup current PRD
-        backup_file = prd_file.parent / f"PRD.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        backup_file = prd_file.parent / f"PRD.backup.{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.md"
         write_file(backup_file, prd_content)
 
         # Apply revision

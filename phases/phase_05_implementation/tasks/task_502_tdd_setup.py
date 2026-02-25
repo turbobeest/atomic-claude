@@ -16,7 +16,7 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -396,7 +396,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "stack_detection": stack_meta,
             "token_budget_usd": 50.0,
             "mode": "uat",
-            "configured_at": datetime.now().isoformat()
+            "configured_at": datetime.now(timezone.utc).isoformat()
         }
         write_file(setup_file, json.dumps(setup_data, indent=2))
 
@@ -734,7 +734,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "stack_detection": stack_meta,
         "tools_available": tool_info.get("available", False),
         "token_budget_usd": token_budget,
-        "configured_at": datetime.now().isoformat()
+        "configured_at": datetime.now(timezone.utc).isoformat()
     }
     write_file(setup_file, json.dumps(setup_data, indent=2))
 

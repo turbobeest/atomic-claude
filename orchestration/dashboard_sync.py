@@ -11,7 +11,7 @@ import logging
 import os
 import urllib.request
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ def write_current_task(phase_id: str, task_id: str, task_name: str,
         "phase": phase_id,
         "task": task_id,
         "description": task_name,
-        "started_at": datetime.now().isoformat(),
+        "started_at": datetime.now(timezone.utc).isoformat(),
         "provider": provider,
         "model": model,
         "phase_weight": phase_weight,
@@ -147,7 +147,7 @@ def init_session_tokens():
             "estimated_cost_usd": 0,
             "by_provider": {},
             "by_model": {},
-            "started_at": datetime.now().isoformat(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
         }
         write_json(tokens_file, data)
 
@@ -327,7 +327,7 @@ def log_error(phase_id: str, task_id: str, error: str, traceback_str: str = None
         errors = {"errors": []}
     from core.utils.file_ops import write_json
     errors["errors"].append({
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "phase": phase_id,
         "task": task_id,
         "error": error,

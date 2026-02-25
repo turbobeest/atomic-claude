@@ -7,7 +7,7 @@ Generate closeout document and prepare for Phase 8 (Deployment Prep).
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -212,7 +212,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     closeout_content = f"""# Phase 7 Closeout: Integration
 
-**Completed:** {datetime.now().isoformat()}
+**Completed:** {datetime.now(timezone.utc).isoformat()}
 **Status:** COMPLETE
 
 ## Summary
@@ -278,7 +278,7 @@ python main.py run 8
         "phase": 7,
         "name": "Integration",
         "status": "complete",
-        "completed_at": datetime.now().isoformat(),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
         "results": {
             "e2e_tests": {"passed": e2e_passed, "total": e2e_total},
             "acceptance": {"passed": criteria_passed, "total": criteria_total},

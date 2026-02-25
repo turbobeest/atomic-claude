@@ -9,7 +9,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -58,7 +58,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 {"name": "documentation", "status": "generated"},
                 {"name": "installation-guide", "status": "generated"}
             ],
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
             "uat_mode": True
         }
         write_json(artifacts_file, artifacts_data)
@@ -143,7 +143,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 "status": install_result["status"]
             }
         },
-        "generated_at": datetime.utcnow().isoformat() + "Z"
+        "generated_at": datetime.now(timezone.utc).isoformat() + "Z"
     }
 
     write_json(artifacts_file, artifacts_data)
@@ -222,7 +222,7 @@ def _generate_changelog(prompts_dir: Path, version: str, release_type: str, cont
     print("  " + "─" * 110)
     print(print_bold("  CHANGELOG"))
     print()
-    print(f"    ## [{version}] - {datetime.now().strftime('%Y-%m-%d')}")
+    print(f"    ## [{version}] - {datetime.now(timezone.utc).strftime('%Y-%m-%d')}")
     print()
     print("    ### Added")
     print("    - Core functionality implementation")

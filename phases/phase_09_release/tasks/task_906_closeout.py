@@ -9,7 +9,7 @@ import sys
 import json
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 # Add project root to path for imports
@@ -66,7 +66,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         write_json(closeout_json, {
             "phase": "9-release",
             "status": "complete",
-            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "uat_mode": True
         })
 
@@ -207,7 +207,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     closeout_md = f"""# Phase 9 Closeout: Release (Final)
 
-**Completed:** {datetime.now().isoformat()}
+**Completed:** {datetime.now(timezone.utc).isoformat()}
 **Status:** COMPLETE
 
 ## Summary
@@ -247,7 +247,7 @@ python main.py run 0
         "name": "Release",
         "status": "complete",
         "final_phase": True,
-        "completed_at": datetime.now().isoformat(),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
         "release": {
             "version": version,
             "channel": channel

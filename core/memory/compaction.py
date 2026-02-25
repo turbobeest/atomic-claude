@@ -4,7 +4,7 @@ Memory Compaction - Memory optimization
 Identifies and removes redundant, low-value, or outdated entries.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Set, Tuple
 from collections import defaultdict
 
@@ -158,7 +158,7 @@ class MemoryCompactor:
 
         # Update metadata
         merged.metadata["merged_from"] = [e.id for e in entries[:-1]]
-        merged.metadata["merged_at"] = datetime.now().isoformat()
+        merged.metadata["merged_at"] = datetime.now(timezone.utc).isoformat()
 
         # Save merged entry
         self.store.append(merged)
@@ -266,7 +266,7 @@ class MemoryCompactor:
         type_score = type_scores.get(entry.entry_type, 0.5)
 
         # Recency score (entries from last 30 days score higher)
-        age_days = (datetime.now() - entry.timestamp).days
+        age_days = (datetime.now(timezone.utc) - entry.timestamp).days
         if age_days < 30:
             recency_score = 1.0
         elif age_days < 90:

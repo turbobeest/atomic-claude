@@ -17,7 +17,7 @@ import sys
 import os
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Ensure atomic-claude2 root is in path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -273,7 +273,7 @@ def create_closeout(phase_id: str, tasks: list):
         "phase": phase_id,
         "phase_num": 0,
         "status": "complete",
-        "completed_at": datetime.now().isoformat(),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
         "tasks_completed": [task_id for task_id, _, _ in tasks],
         "summary": "Phase 0 (Setup) completed successfully. Configuration collected and environment prepared."
     }

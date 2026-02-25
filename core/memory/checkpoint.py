@@ -6,7 +6,7 @@ Handles checkpoint creation, restoration, and pruning.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -61,7 +61,7 @@ class CheckpointManager:
             Checkpoint ID
         """
         # Generate checkpoint ID
-        checkpoint_id = f"phase{phase}-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
+        checkpoint_id = f"phase{phase}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')}"
 
         # Get project name from head
         head = self._load_head()
@@ -299,14 +299,14 @@ class CheckpointManager:
         else:
             head.head_phase = phase
             head.head_checkpoint = checkpoint_id
-            head.updated_at = datetime.now()
+            head.updated_at = datetime.now(timezone.utc)
 
         # Add checkpoint to tracking
         head.checkpoints.append({
             "id": checkpoint_id,
             "phase": phase,
             "status": "valid",
-            "created_at": datetime.now().isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat()
         })
 
         # Save head

@@ -15,7 +15,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, Any, List, Set, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     graph_data = {
         "levels": levels,
         "critical_path": _compute_critical_path(tasks, levels),
-        "generated_at": datetime.utcnow().isoformat() + "Z"
+        "generated_at": datetime.now(timezone.utc).isoformat() + "Z"
     }
     write_file(graph_file, json.dumps(graph_data, indent=2))
 
@@ -401,7 +401,7 @@ def _generate_work_packages(tasks: List[Dict[str, Any]], levels: List[Dict[str, 
             "max_parallelism": max_parallelism,
             "total_tasks": len(tasks)
         },
-        "generated_at": datetime.utcnow().isoformat() + "Z"
+        "generated_at": datetime.now(timezone.utc).isoformat() + "Z"
     }
 
 
@@ -490,7 +490,7 @@ def _build_analysis_data(
             "levels": levels,
             "critical_path": _compute_critical_path(tasks, levels)
         },
-        "analyzed_at": datetime.utcnow().isoformat() + "Z"
+        "analyzed_at": datetime.now(timezone.utc).isoformat() + "Z"
     }
 
 

@@ -17,10 +17,13 @@ Outputs:
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
@@ -131,7 +134,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Initialize deliberation log
     deliberation_log.write_text(f"""# Discovery Deliberation Log
 
-**Started:** {datetime.now().isoformat()}
+**Started:** {datetime.now(timezone.utc).isoformat()}
 **Panel:** {', '.join(panel_agents)}
 
 ---
@@ -140,7 +143,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Initialize conversation state
     conversation = {
-        "started_at": datetime.now().isoformat(),
+        "started_at": datetime.now(timezone.utc).isoformat(),
         "panel": panel_agents,
         "exchanges": []
     }
@@ -178,7 +181,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     conversation["exchanges"].append({
         "agent": "orchestrator",
         "message": opening,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
     deliberation_complete = False
@@ -208,7 +211,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         conversation["exchanges"].append({
             "agent": "human",
             "message": user_input,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
 
         turn += 1
@@ -248,7 +251,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         conversation["exchanges"].append({
             "agent": "agent",
             "message": response,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
 
         # Record exchange substance and checkpoint periodically
@@ -290,7 +293,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
 ## Session Complete
 
-**Ended:** {datetime.now().isoformat()}
+**Ended:** {datetime.now(timezone.utc).isoformat()}
 **Total exchanges:** {turn}
 """)
 
@@ -311,8 +314,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 approaches_data = json.loads(approaches_file.read_text())
                 approach_count = len(approaches_data.get("approaches", []))
                 mem.finding(f"Approaches generated: {approach_count}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to read approaches file: %s", e)
         mem.decision(f"Consensus direction: {direction}")
         key_decisions = consensus.get("key_decisions", [])
         if key_decisions:
@@ -421,8 +424,8 @@ def _build_context(output_dir: Path) -> str:
                     parts.append("**Pain Points:**\n")
                     for p in pain:
                         parts.append(f"- {p}\n")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load dialogue synthesis: %s", e)
 
     # 2. Corpus analysis (Task 102) — the full detailed analysis
     corpus_analysis = output_dir / "corpus-analysis.md"
@@ -431,8 +434,8 @@ def _build_context(output_dir: Path) -> str:
             analysis_text = corpus_analysis.read_text().strip()
             if analysis_text:
                 parts.append(f"\n## Corpus Analysis\n\n{analysis_text}\n")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load corpus analysis: %s", e)
 
     # 3. Needs index (Task 102) — if it exists
     needs_file = output_dir / "needs-index.json"
@@ -446,8 +449,8 @@ def _build_context(output_dir: Path) -> str:
                     nid = need.get("id", "")
                     title = need.get("title", "")
                     parts.append(f"- [{nid}] {title}\n")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to load needs index: %s", e)
 
     return ''.join(parts)
 
@@ -480,8 +483,8 @@ Keep it concise - 2-3 sentences max.
 
         if output_file.exists():
             return output_file.read_text().strip()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("LLM orchestrator opening failed: %s", e)
 
     return "Let's discuss the best approach for this project. What directions should we consider?"
 
@@ -515,7 +518,8 @@ Be extremely concise. Output plain text, no JSON.
             print()
             for line in wrap_text(output_file.read_text().strip(), 60):
                 print(line)
-    except Exception:
+    except Exception as e:
+        logger.debug("LLM synthesis failed: %s", e)
         print("  synthesis: Discussion is progressing well.")
     print()
 
@@ -608,8 +612,8 @@ Output plain text, no JSON.
 
         if output_file.exists():
             return output_file.read_text().strip()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("LLM route input failed: %s", e)
 
     return "That's a good point. Let's explore that direction further."
 
@@ -654,8 +658,8 @@ Return ONLY valid JSON:
         if output_file.exists():
             with open(output_file) as f:
                 return json.load(f)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("LLM consensus generation failed: %s", e)
 
     # Fallback consensus
     return {

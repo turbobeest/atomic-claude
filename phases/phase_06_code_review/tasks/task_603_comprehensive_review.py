@@ -14,7 +14,7 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ None (UAT stub)
             "performance": {"critical": 0, "major": 0, "minor": 0, "suggestions": 0, "findings": []},
             "documentation": {"critical": 0, "major": 0, "minor": 0, "suggestions": 0, "findings": []},
             "totals": {"critical": 0, "major": 0, "minor": 0, "suggestions": 0},
-            "reviewed_at": datetime.now().isoformat()
+            "reviewed_at": datetime.now(timezone.utc).isoformat()
         }, indent=2))
 
         print(print_green("✓ UAT bypass complete"))
@@ -682,7 +682,7 @@ def _display_and_save_results(results: Dict[str, Dict], findings_file: Path) -> 
             "minor": total_minor,
             "suggestions": total_suggestions
         },
-        "reviewed_at": datetime.now().isoformat()
+        "reviewed_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_file(findings_file, json.dumps(findings_data, indent=2))

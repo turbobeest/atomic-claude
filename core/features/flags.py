@@ -9,9 +9,12 @@ Supports:
 - Dependency management between features
 """
 
+import logging
 from enum import Enum
 from typing import Dict, Optional, List
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class Feature(str, Enum):
@@ -238,8 +241,8 @@ def load_feature_flags() -> FeatureFlags:
                 return flags
 
             flags_data = config.get("features", {})
-        except Exception:
-            pass  # Fall back to defaults
+        except Exception as e:
+            logger.debug("Failed to load feature flags from config: %s", e)
 
     # Override with environment variables
     features_dict = FeatureFlags._default_features()

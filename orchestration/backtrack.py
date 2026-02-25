@@ -314,11 +314,17 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
     # Clear graph data for rolled-back phases
     try:
         from core.graph import get_graph
-        graph_cleaned = False
-        for p in phases_to_clear:
-            p_id = f"{p}-{PHASE_NAMES[p]}"
-            graph = get_graph(phase_id=p_id)
-            if graph:
+        from core.graph.exceptions import GraphUnavailableError
+    except ImportError:
+        get_graph = None
+        GraphUnavailableError = None
+
+    if get_graph is not None:
+        try:
+            graph_cleaned = False
+            for p in phases_to_clear:
+                p_id = f"{p}-{PHASE_NAMES[p]}"
+                graph = get_graph(phase_id=p_id)
                 try:
                     deleted = graph.delete_phase_data(p_id)
                     logger.info(f"Deleted {deleted} graph nodes/edges for phase {p_id}")
@@ -327,9 +333,8 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
                         graph_cleaned = True
                 except Exception as e:
                     logger.warning(f"Graph cleanup failed for phase {p_id}: {e}")
-        if first_task:
-            graph = get_graph(phase_id=target_phase_id)
-            if graph:
+            if first_task:
+                graph = get_graph(phase_id=target_phase_id)
                 try:
                     deleted = graph.delete_phase_data(target_phase_id)
                     logger.info(f"Deleted {deleted} graph nodes/edges for phase {target_phase_id}")
@@ -338,9 +343,11 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
                         graph_cleaned = True
                 except Exception as e:
                     logger.warning(f"Graph cleanup failed for phase {target_phase_id}: {e}")
-        if not graph_cleaned:
-            print("   ℹ No graph data to clear (graph disabled or empty)")
-    except ImportError:
+            if not graph_cleaned:
+                print("   ℹ No graph data to clear (graph empty)")
+        except GraphUnavailableError:
+            logger.debug("FalkorDB unavailable for backtrack graph cleanup")
+    else:
         logger.debug("Graph module not available for backtrack cleanup")
 
     # Prompt to clear generated code

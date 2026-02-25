@@ -25,7 +25,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "parallel": validation_agents
         },
         "prd_analysis": analysis,
-        "selected_at": datetime.utcnow().isoformat() + "Z"
+        "selected_at": datetime.now(timezone.utc).isoformat() + "Z"
     }
 
     ensure_dir(agents_file.parent)
@@ -219,7 +219,7 @@ def _analyze_prd(prd_file: Path) -> Dict[str, Any]:
             "integration": False,
             "performance": False
         },
-        "analyzed_at": datetime.utcnow().isoformat() + "Z"
+        "analyzed_at": datetime.now(timezone.utc).isoformat() + "Z"
     }
 
     if not prd_file.exists():

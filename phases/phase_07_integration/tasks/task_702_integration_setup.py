@@ -7,7 +7,7 @@ Configure integration environment and review acceptance criteria.
 import sys
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -150,7 +150,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "total": criteria_count,
             "source": "PRD + specs"
         },
-        "setup_at": datetime.now().isoformat()
+        "setup_at": datetime.now(timezone.utc).isoformat()
     }
 
     setup_file = integration_dir / "setup.json"

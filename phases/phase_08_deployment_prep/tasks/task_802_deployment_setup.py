@@ -8,7 +8,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -144,7 +144,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "distribution": {
             "channels": channels
         },
-        "configured_at": datetime.utcnow().isoformat() + "Z"
+        "configured_at": datetime.now(timezone.utc).isoformat() + "Z"
     }
 
     write_json(setup_file, setup_data)

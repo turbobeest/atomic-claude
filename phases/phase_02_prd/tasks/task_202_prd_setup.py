@@ -15,7 +15,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -278,7 +278,7 @@ def save_setup(
             "description": scope_description
         },
         "focus_areas": focus_areas,
-        "setup_at": datetime.now().isoformat()
+        "setup_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_file(setup_file, json.dumps(setup_data, indent=2))

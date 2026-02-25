@@ -27,7 +27,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Set
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -1409,7 +1409,7 @@ If the code is safe, respond with just "PASS".
 def save_tdd_record(testing_dir: Path, task_id: str, record: Dict[str, Any]) -> None:
     """Write per-task JSON record to .claude/testing/tdd-t{id}.json."""
     record_file = testing_dir / f"tdd-t{task_id}.json"
-    record["saved_at"] = datetime.now().isoformat()
+    record["saved_at"] = datetime.now(timezone.utc).isoformat()
     write_file(record_file, json.dumps(record, indent=2))
 
 
@@ -1419,7 +1419,7 @@ def save_tdd_record(testing_dir: Path, task_id: str, record: Dict[str, Any]) -> 
 
 def save_progress(progress_file: Path, stats: Dict[str, Any]) -> None:
     """Write overall progress JSON."""
-    stats["updated_at"] = datetime.now().isoformat()
+    stats["updated_at"] = datetime.now(timezone.utc).isoformat()
     write_file(progress_file, json.dumps(stats, indent=2))
 
 
@@ -1770,7 +1770,7 @@ def _run_dag_parallel(
         "completed_ids": list(completed_ids),
         "mode": "live",
         "skip_execution": skip_execution,
-        "started_at": datetime.now().isoformat(),
+        "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
     # Wave tracking for failure rate checks
@@ -2014,7 +2014,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "refactor_cycles": 3,
             "verify_cycles": 3,
             "mode": "uat",
-            "completed_at": datetime.now().isoformat()
+            "completed_at": datetime.now(timezone.utc).isoformat()
         }
         write_file(progress_file, json.dumps(progress_data, indent=2))
 
@@ -2148,7 +2148,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if remaining_count == 0:
         print(print_green("  All tasks already completed."))
         stats = existing_progress
-        stats["completed_at"] = datetime.now().isoformat()
+        stats["completed_at"] = datetime.now(timezone.utc).isoformat()
         save_progress(progress_file, stats)
         return True
 
@@ -2232,7 +2232,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 "pilot_failed": True,
                 "pilot_message": pilot_msg,
                 "completed_ids": list(completed_ids),
-                "started_at": datetime.now().isoformat(),
+                "started_at": datetime.now(timezone.utc).isoformat(),
             })
 
             clear_input_buffer()
@@ -2289,7 +2289,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     print()
 
-    stats["completed_at"] = datetime.now().isoformat()
+    stats["completed_at"] = datetime.now(timezone.utc).isoformat()
     save_progress(progress_file, stats)
 
     success = stats["tasks_completed"] > 0

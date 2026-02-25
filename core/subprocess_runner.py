@@ -4,6 +4,7 @@ Subprocess Runner Module
 Executes external scripts and commands from Python orchestrators with proper environment setup.
 """
 
+import logging
 import os
 import subprocess
 import sys
@@ -11,6 +12,8 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 import signal
 import tempfile
+
+logger = logging.getLogger(__name__)
 
 
 def get_task_environment(phase_id: str, task_id: str) -> Dict[str, str]:
@@ -249,5 +252,6 @@ def make_script_executable(script_path: Path) -> bool:
         current_permissions = script_path.stat().st_mode
         script_path.chmod(current_permissions | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         return True
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to make script executable at %s: %s", script_path, e)
         return False

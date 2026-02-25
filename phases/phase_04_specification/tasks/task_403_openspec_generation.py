@@ -15,7 +15,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ def generate_stub_spec(task: Dict) -> Dict:
         "task_id": task_id,
         "task_title": task_title,
         "stub_mode": True,
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "test_strategy": {
             "unit_tests": [
                 {"name": f"test_t{task_id}_basic", "description": f"Basic test for {task_title}"}
@@ -390,7 +390,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "status": "complete",
             "specs_generated": 0,
             "mode": "uat" if uat_mode else "normal",
-            "generated_at": datetime.now().isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat()
         }
         write_file(output_dir / "openspec-generation.json", json.dumps(report, indent=2))
         return True
@@ -419,7 +419,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "status": "complete",
             "specs_generated": len(tasks),
             "mode": "uat",
-            "generated_at": datetime.now().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "specs": [f"spec-t{t.get('id', 0)}.json" for t in tasks]
         }
         write_file(output_dir / "openspec-generation.json", json.dumps(report, indent=2))
@@ -495,7 +495,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "mode": "parallel",
             "concurrency": MAX_CONCURRENT,
             "model": "opus",
-            "generated_at": datetime.now().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "specs": [f"spec-t{t.get('id', 0)}.json" for t in tasks]
         }
         write_file(output_dir / "openspec-generation.json", json.dumps(report, indent=2))
@@ -517,7 +517,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "status": "complete",
             "specs_generated": len(tasks),
             "mode": "stub-fallback",
-            "generated_at": datetime.now().isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat()
         }
         write_file(output_dir / "openspec-generation.json", json.dumps(report, indent=2))
 

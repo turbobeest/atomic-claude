@@ -9,7 +9,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -119,7 +119,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "tests_failed": 0,
             "summary": "All integration tests passed (UAT stub)",
             "success_rate": 100.0,
-            "executed_at": datetime.now().isoformat(),
+            "executed_at": datetime.now(timezone.utc).isoformat(),
             "mode": "uat",
             "test_suites": [
                 {"suite": "e2e", "total": 8, "passed": 8, "failed": 0},
@@ -196,7 +196,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "tests_failed": tests_failed,
         "summary": summary,
         "success_rate": success_rate,
-        "executed_at": datetime.now().isoformat(),
+        "executed_at": datetime.now(timezone.utc).isoformat(),
         "mode": "normal",
         "test_suites": test_results.get("test_details", [])
     }

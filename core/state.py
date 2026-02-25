@@ -33,7 +33,7 @@ import tempfile
 import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -402,8 +402,8 @@ class StateManager:
             'current_task': None,
             'phases': {},
             'metadata': {
-                'created_at': datetime.now().isoformat(),
-                'last_updated': datetime.now().isoformat()
+                'created_at': datetime.now(timezone.utc).isoformat(),
+                'last_updated': datetime.now(timezone.utc).isoformat()
             }
         }
 
@@ -479,7 +479,7 @@ class StateManager:
         # Ensure phase exists
         if phase_id not in self._state['phases']:
             self._state['phases'][phase_id] = {
-                'started_at': datetime.now().isoformat(),
+                'started_at': datetime.now(timezone.utc).isoformat(),
                 'tasks': {}
             }
 
@@ -489,11 +489,11 @@ class StateManager:
         self._state['phases'][phase_id]['tasks'][task_id] = {
             'name': task_name,
             'status': 'in_progress',
-            'started_at': datetime.now().isoformat(),
+            'started_at': datetime.now(timezone.utc).isoformat(),
         }
 
         self._state['current_task'] = task_id
-        self._state['metadata']['last_updated'] = datetime.now().isoformat()
+        self._state['metadata']['last_updated'] = datetime.now(timezone.utc).isoformat()
 
         if auto_save:
             self.save_state()
@@ -512,7 +512,7 @@ class StateManager:
         # Ensure phase exists
         if phase_id not in self._state['phases']:
             self._state['phases'][phase_id] = {
-                'started_at': datetime.now().isoformat(),
+                'started_at': datetime.now(timezone.utc).isoformat(),
                 'tasks': {}
             }
 
@@ -522,19 +522,19 @@ class StateManager:
 
         # Preserve started_at from mark_task_started() if it exists
         existing = self._state['phases'][phase_id]['tasks'].get(task_id, {})
-        started_at = existing.get('started_at', datetime.now().isoformat())
+        started_at = existing.get('started_at', datetime.now(timezone.utc).isoformat())
 
         # Update task
         self._state['phases'][phase_id]['tasks'][task_id] = {
             'name': task_name,
             'status': 'completed',
             'started_at': started_at,
-            'completed_at': datetime.now().isoformat(),
+            'completed_at': datetime.now(timezone.utc).isoformat(),
             'artifacts': artifacts or []
         }
 
         # Update metadata
-        self._state['metadata']['last_updated'] = datetime.now().isoformat()
+        self._state['metadata']['last_updated'] = datetime.now(timezone.utc).isoformat()
 
         # Clear current task
         self._state['current_task'] = None
@@ -557,7 +557,7 @@ class StateManager:
         # Ensure phase exists
         if phase_id not in self._state['phases']:
             self._state['phases'][phase_id] = {
-                'started_at': datetime.now().isoformat(),
+                'started_at': datetime.now(timezone.utc).isoformat(),
                 'tasks': {}
             }
 
@@ -569,12 +569,12 @@ class StateManager:
         self._state['phases'][phase_id]['tasks'][task_id] = {
             'name': task_name,
             'status': 'failed',
-            'failed_at': datetime.now().isoformat(),
+            'failed_at': datetime.now(timezone.utc).isoformat(),
             'error': error or 'Task execution failed'
         }
 
         # Update metadata
-        self._state['metadata']['last_updated'] = datetime.now().isoformat()
+        self._state['metadata']['last_updated'] = datetime.now(timezone.utc).isoformat()
 
         # Save (unless disabled for transactions)
         if auto_save:
@@ -583,13 +583,13 @@ class StateManager:
     def set_current_phase(self, phase_id: str) -> None:
         """Set current active phase."""
         self._state['current_phase'] = phase_id
-        self._state['metadata']['last_updated'] = datetime.now().isoformat()
+        self._state['metadata']['last_updated'] = datetime.now(timezone.utc).isoformat()
         self.save_state()
 
     def set_current_task(self, task_id: str) -> None:
         """Set current active task."""
         self._state['current_task'] = task_id
-        self._state['metadata']['last_updated'] = datetime.now().isoformat()
+        self._state['metadata']['last_updated'] = datetime.now(timezone.utc).isoformat()
         self.save_state()
 
     def mark_phase_complete(self, phase_id: str) -> None:
@@ -597,13 +597,13 @@ class StateManager:
         # Ensure phase exists
         if phase_id not in self._state['phases']:
             self._state['phases'][phase_id] = {
-                'started_at': datetime.now().isoformat(),
+                'started_at': datetime.now(timezone.utc).isoformat(),
                 'tasks': {}
             }
 
-        self._state['phases'][phase_id]['completed_at'] = datetime.now().isoformat()
+        self._state['phases'][phase_id]['completed_at'] = datetime.now(timezone.utc).isoformat()
         self._state['phases'][phase_id]['status'] = 'completed'
-        self._state['metadata']['last_updated'] = datetime.now().isoformat()
+        self._state['metadata']['last_updated'] = datetime.now(timezone.utc).isoformat()
         self.save_state()
 
     # ========================================================================
@@ -655,7 +655,7 @@ class StateManager:
             )
 
         return StateSnapshot(
-            timestamp=datetime.now().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             version=self.STATE_VERSION,
             phases=phases,
             current_phase=self._state.get('current_phase'),
@@ -676,7 +676,7 @@ class StateManager:
         from core.utils.file_ops import write_json
 
         snapshot = self.snapshot()
-        name = name or datetime.now().strftime('%Y%m%d_%H%M%S')
+        name = name or datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
         snapshot_file = self.snapshots_dir / f"{name}.json"
 
         write_json(snapshot_file, snapshot.to_dict())
@@ -819,8 +819,8 @@ class StateManager:
         # Add metadata if missing
         if 'metadata' not in state:
             state['metadata'] = {
-                'created_at': datetime.now().isoformat(),
-                'last_updated': datetime.now().isoformat()
+                'created_at': datetime.now(timezone.utc).isoformat(),
+                'last_updated': datetime.now(timezone.utc).isoformat()
             }
 
         # Normalize task status ("complete" -> "completed")
@@ -856,7 +856,7 @@ def task_running(phase_id: str, task_id: str, task_name: str, state_dir: Path = 
         "task": task_id,
         "name": task_name,
         "status": "running",
-        "started_at": datetime.now().isoformat()
+        "started_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_json(current_task_file, current_task)

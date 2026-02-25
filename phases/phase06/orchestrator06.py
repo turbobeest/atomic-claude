@@ -17,7 +17,7 @@ import logging
 import sys
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Ensure atomic-claude2 root is in path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -276,7 +276,7 @@ def create_closeout(phase_id: str, tasks: list):
     closeout = {
         "phase": phase_id,
         "status": "complete",
-        "completed_at": datetime.now().isoformat(),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
         "tasks_completed": len(tasks),
         "tasks": [
             {

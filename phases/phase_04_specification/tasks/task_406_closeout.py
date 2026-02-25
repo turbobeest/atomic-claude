@@ -9,7 +9,7 @@ import logging
 import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +193,7 @@ def generate_closeout_documents(
 
     md_content = f"""# Phase 4 Closeout: Specification
 
-**Completed:** {datetime.now().isoformat()}
+**Completed:** {datetime.now(timezone.utc).isoformat()}
 **Status:** COMPLETE
 
 ## Summary
@@ -257,7 +257,7 @@ python main.py run 5
         "phase": 4,
         "name": "Specification",
         "status": "complete",
-        "completed_at": datetime.now().isoformat(),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
         "spec_count": spec_count,
         "tasks_with_tdd": tasks_with_tdd,
         "total_subtasks": total_subtasks,

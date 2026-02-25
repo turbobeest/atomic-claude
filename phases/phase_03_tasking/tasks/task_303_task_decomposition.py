@@ -20,7 +20,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -493,7 +493,7 @@ def _merge_feature_tasks(
     return {
         "meta": {
             "project_name": project_name,
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
             "source": "prd-sectional",
             "version": "1.0"
         },
@@ -780,7 +780,7 @@ def _create_template_tasks(file_path: Path) -> None:
     template = {
         "meta": {
             "project_name": "Project",
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
             "source": "template",
             "version": "1.0"
         },

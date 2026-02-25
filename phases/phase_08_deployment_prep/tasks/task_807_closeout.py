@@ -9,7 +9,7 @@ import json
 import logging
 from pathlib import Path
 from typing import List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -60,7 +60,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         closeout_data = {
             "phase": "8-deployment-prep",
             "status": "complete",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "uat_mode": True
         }
         write_json(closeout_json, closeout_data)
@@ -196,7 +196,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     closeout_md = f"""# Phase 8 Closeout: Deployment Prep
 
-**Completed:** {datetime.now().isoformat()}
+**Completed:** {datetime.now(timezone.utc).isoformat()}
 **Status:** COMPLETE
 
 ## Summary
@@ -253,7 +253,7 @@ python main.py run 9
         "phase": 8,
         "name": "Deployment Prep",
         "status": "complete",
-        "completed_at": datetime.utcnow().isoformat() + "Z",
+        "completed_at": datetime.now(timezone.utc).isoformat() + "Z",
         "release": {
             "version": version
         },

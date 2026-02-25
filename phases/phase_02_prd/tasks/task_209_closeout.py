@@ -13,7 +13,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +105,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             for item in sorted(output_dir.iterdir()):
                 if item.is_file():
                     print(f"    • {item.name}")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to list output dir artifacts: %s", e)
         print()
         print(print_dim(f"  PRD location: {prd_file}"))
         print()
@@ -201,7 +201,8 @@ def run_closeout_checklist(
             else:
                 print("  " + print_yellow("[CRIT]") + " " + print_yellow("!") + f" PRD approval status: {approval_status}")
                 checklist.append(("PRD approved", "WARN"))
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read PRD approval file: %s", e)
             print("  " + print_yellow("[CRIT]") + " " + print_yellow("!") + " PRD approval file error")
             checklist.append(("PRD approved", "WARN"))
     else:
@@ -236,7 +237,8 @@ def run_closeout_checklist(
             else:
                 print("  " + print_red("[BLCK]") + " " + print_red("✗") + f" Audit has failures ({failed} failed)")
                 checklist.append(("Audit", "FAIL"))
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read audit file: %s", e)
             print("  " + print_yellow("[BLCK]") + " " + print_yellow("!") + " Audit file error")
             checklist.append(("Audit", "WARN"))
     else:
@@ -252,7 +254,8 @@ def run_closeout_checklist(
             val_status = validation_data.get('overall_status', 'UNKNOWN')
             print("  " + print_green("[BLCK]") + " " + print_green("✓") + f" Validation complete ({val_status})")
             checklist.append(("Validation", "PASS"))
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read validation file: %s", e)
             print("  " + print_yellow("[BLCK]") + " " + print_yellow("!") + " Validation file error")
             checklist.append(("Validation", "WARN"))
     else:
@@ -295,7 +298,7 @@ def generate_closeout_documents(
     # Generate markdown closeout
     markdown_content = f"""# Phase 2 Closeout: PRD
 
-**Completed:** {datetime.now().isoformat()}
+**Completed:** {datetime.now(timezone.utc).isoformat()}
 **Status:** COMPLETE
 
 ## Summary
@@ -351,7 +354,7 @@ Phase 3: Tasking (Task Decomposition)
         "phase": 2,
         "phase_name": "PRD",
         "status": "complete",
-        "completed_at": datetime.now().isoformat(),
+        "completed_at": datetime.now(timezone.utc).isoformat(),
         "metrics": {
             "prd_lines": prd_lines,
             "prd_sections": prd_sections

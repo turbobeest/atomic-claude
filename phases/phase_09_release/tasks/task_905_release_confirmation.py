@@ -8,7 +8,7 @@ import sys
 import json
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 # Add project root to path for imports
@@ -58,7 +58,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         release_dir.mkdir(parents=True, exist_ok=True)
         write_json(confirmation_file, {
             "confirmed": True,
-            "confirmed_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "confirmed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "confirmer": "UAT"
         })
 
@@ -207,7 +207,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "confirmer": confirmer_name,
         "version": version,
         "channel": channel,
-        "confirmed_at": datetime.now().isoformat()
+        "confirmed_at": datetime.now(timezone.utc).isoformat()
     })
 
     print(f"  {GREEN}{'━' * 110}{NC}")

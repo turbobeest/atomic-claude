@@ -14,7 +14,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -289,7 +289,7 @@ def save_agent_selection(
         "selected": selected_agents,
         "core": CORE_AGENTS,
         "additional": additional_agents,
-        "selected_at": datetime.now().isoformat()
+        "selected_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_file(agents_file, json.dumps(agents_data, indent=2))
