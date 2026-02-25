@@ -60,7 +60,7 @@ dashboard/             # Real-time web dashboard (Node.js/Express, port 3000)
 config/                # Configuration files
   models.json          # LLM provider and model configuration
 scripts/               # Utility scripts and audit runners
-docs/                  # Comprehensive documentation (100+ files)
+docs/                  # User-facing documentation
 examples/              # Example usage
 initialization/        # Setup procedures
 ```
@@ -105,7 +105,6 @@ Configured via `.env` (`ATOMIC_LLM_PROVIDER`, `ATOMIC_NETWORK_MODE`). See `.env.
 - Phase tasks: `phases/phase_NN_name/tasks/task_NNN_name.py` (called by orchestrators)
 - Both `phaseNN/` and `phase_NN_name/` directories are required (orchestrators + tasks)
 - State persisted in `.state/`, logs in `.logs/`, outputs in `.outputs/`
-- `reports/` is scratch work only
 - Agent definitions follow templates in `agents/templates/`
 - Phase outputs go to `.outputs/N-phase_name/`
 
