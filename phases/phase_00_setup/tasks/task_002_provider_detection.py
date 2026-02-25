@@ -108,6 +108,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # --- Step 4: Health-check all providers ---
     provider_health = _health_check_providers(secrets_file, output_dir)
 
+    # --- Step 4.5: Populate model registry ---
+    _populate_model_registry(atomic_root)
+
     # --- Step 5: Detect Ollama models per host ---
     ollama_models: Dict[str, List[str]] = {}
     for host in ollama_hosts:
@@ -697,6 +700,64 @@ def _detect_ollama_models_categorized(host: str) -> Dict[str, Any]:
         result[name] = {"size": size, "category": category}
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Model registry population
+# ---------------------------------------------------------------------------
+
+def _populate_model_registry(atomic_root: Path) -> None:
+    """Initialize the dynamic model registry: sync upstream + probe providers."""
+    try:
+        from core.llm.registry import get_registry, reset_registry
+    except ImportError:
+        logger.debug("Model registry not available")
+        return
+
+    print(print_cyan("  Model Registry:"))
+    print()
+
+    try:
+        reset_registry()  # Fresh start
+        registry = get_registry(atomic_root)
+        if registry is None:
+            print(print_dim("    Registry unavailable"))
+            print()
+            return
+
+        # Sync from models.dev
+        try:
+            count = registry.sync_upstream(force=True)
+            if count > 0:
+                print(print_green(f"    ✓ Synced {count} models from models.dev"))
+            else:
+                print(print_dim("    ○ No upstream models imported (cached or offline)"))
+        except Exception as e:
+            logger.debug("Registry upstream sync failed: %s", e)
+            print(print_dim("    ○ Upstream sync skipped (network unavailable)"))
+
+        # Probe local providers
+        try:
+            results = registry.probe_providers()
+            for provider, count in results.items():
+                if count > 0:
+                    print(print_green(f"    ✓ {provider}: {count} model(s) available"))
+                else:
+                    print(print_dim(f"    ○ {provider}: no models"))
+        except Exception as e:
+            logger.debug("Registry provider probe failed: %s", e)
+            print(print_dim("    ○ Provider probing skipped"))
+
+        # Summary
+        summary = registry.summarize_available()
+        print()
+        print(print_dim(f"    {summary}"))
+        print()
+
+    except Exception as e:
+        logger.debug("Model registry population failed: %s", e)
+        print(print_dim("    Registry population failed (non-fatal)"))
+        print()
 
 
 # ---------------------------------------------------------------------------

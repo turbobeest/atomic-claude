@@ -9,6 +9,15 @@ from typing import Dict, Set, Optional
 from enum import Enum
 from pydantic import BaseModel, ConfigDict
 
+# Lazy-safe import of the dynamic registry singleton.  If the registry
+# module hasn't been installed or is otherwise broken the rest of this
+# module still works — every call site treats _get_registry is None as
+# "registry unavailable".
+try:
+    from core.llm.registry import get_registry as _get_registry
+except ImportError:
+    _get_registry = None  # type: ignore[assignment]
+
 
 class ModelCapability(str, Enum):
     """Capabilities a model/provider might support."""
@@ -195,12 +204,25 @@ def get_model_context_window(model: str) -> int:
     """
     Get the context window (max input tokens) for a model.
 
+    Checks the dynamic model registry first; falls back to the static
+    MODEL_CONTEXT_WINDOWS dict when the registry is unavailable or has
+    no data for the requested model.
+
     Args:
         model: Model name or tier (e.g. "opus", "claude-opus-4-6")
 
     Returns:
         Context window size in tokens (defaults to 200_000 if unknown)
     """
+    try:
+        if _get_registry is not None:
+            reg = _get_registry()
+            if reg:
+                record = reg.find_by_model_id(model)
+                if record and record.context_window > 0:
+                    return record.context_window
+    except Exception:
+        pass
     return MODEL_CONTEXT_WINDOWS.get(model, 200_000)
 
 
@@ -208,12 +230,25 @@ def get_model_max_output(model: str) -> int:
     """
     Get the max output tokens for a model.
 
+    Checks the dynamic model registry first; falls back to the static
+    MODEL_MAX_OUTPUT dict when the registry is unavailable or has no
+    data for the requested model.
+
     Args:
         model: Model name or tier
 
     Returns:
         Max output tokens (defaults to 4_096 if unknown)
     """
+    try:
+        if _get_registry is not None:
+            reg = _get_registry()
+            if reg:
+                record = reg.find_by_model_id(model)
+                if record and record.max_output > 0:
+                    return record.max_output
+    except Exception:
+        pass
     return MODEL_MAX_OUTPUT.get(model, 4_096)
 
 
@@ -225,10 +260,22 @@ def model_supports(
     """
     Check if specific model supports a capability.
 
-    For extended thinking, checks per-model support.
+    For extended thinking, checks the dynamic registry first, then falls
+    back to the static EXTENDED_THINKING_MODELS set.
     Other capabilities use provider-level check.
     """
     if capability == ModelCapability.EXTENDED_THINKING:
+        # Check dynamic registry first
+        try:
+            if _get_registry is not None:
+                reg = _get_registry()
+                if reg:
+                    record = reg.find_by_model_id(model)
+                    if record:
+                        return record.supports_extended_thinking and provider_supports(provider, capability)
+        except Exception:
+            pass
+        # Fall back to static set
         if model not in EXTENDED_THINKING_MODELS:
             return False
     return provider_supports(provider, capability)

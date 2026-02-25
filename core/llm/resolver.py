@@ -30,6 +30,32 @@ CLAUDE_CODE_FAST_MODE_FORBIDDEN = True
 
 
 @dataclass(frozen=True)
+class TaskRequirements:
+    """What a task needs from its model — used for intelligent selection."""
+    needs_extended_thinking: bool = False
+    needs_vision: bool = False
+    needs_tool_use: bool = False
+    min_context_window: int = 0
+    risk_budget: float = 0.0  # 0.0 = never downgrade, 1.0 = freely downgrade
+    preferred_tier: Optional[str] = None  # From phase role resolution
+
+    @staticmethod
+    def for_phase_role(phase_id: str, task_id: str = None, graph=None) -> "TaskRequirements":
+        """Factory: build requirements from phase role + graph risk budget.
+
+        Uses the risk module to compute a risk budget from the knowledge graph.
+        """
+        risk_budget = 0.0
+        if graph and task_id:
+            try:
+                from core.llm.risk import compute_risk_budget
+                risk_budget = compute_risk_budget(task_id, graph)
+            except Exception:
+                pass
+        return TaskRequirements(risk_budget=risk_budget)
+
+
+@dataclass(frozen=True)
 class ResolvedModel:
     """Result of model resolution — everything needed to invoke a model."""
 
@@ -136,6 +162,7 @@ class ModelResolver:
         agent_name: str = None,
         override_tier: str = None,
         override_role: str = None,
+        requirements: TaskRequirements = None,
     ) -> ResolvedModel:
         """Main entry point.  Walks the 5-level hierarchy."""
         self._maybe_reload_config()
@@ -188,10 +215,77 @@ class ModelResolver:
 
         # Level 4 / Level 5: Global default
         tier = self._role_to_tier("primary")
+
+        # Intelligent downgrade: if risk_budget permits, try a cheaper tier
+        if requirements and requirements.risk_budget > 0.0:
+            provider_hint = (
+                self._config.get("llm", {}).get("primary_provider")
+                or os.environ.get("ATOMIC_LLM_PROVIDER")
+                or self._detect_bootstrap_provider()
+            )
+            downgraded = self._maybe_downgrade(tier, provider_hint, requirements)
+            if downgraded:
+                tier = downgraded
+
         return self._build(
             tier, role="primary", source="default",
             phase_id=phase_id, task_id=task_id,
         )
+
+    # ------------------------------------------------------------------
+    # Intelligent downgrade helpers
+    # ------------------------------------------------------------------
+
+    def _is_zero_marginal_cost(self, provider: Optional[str] = None) -> bool:
+        """Check if the active provider has zero marginal cost per token.
+
+        Claude Code (subscription) and Ollama (local) never pay per-token,
+        so downgrading gives worse output for the same price.
+        """
+        prov = (
+            provider
+            or self._config.get("llm", {}).get("primary_provider")
+            or os.environ.get("ATOMIC_LLM_PROVIDER")
+            or self._detect_bootstrap_provider()
+        )
+        return prov in ("claude-code", "ollama")
+
+    def _maybe_downgrade(
+        self,
+        tier: str,
+        provider: Optional[str],
+        requirements: TaskRequirements,
+    ) -> Optional[str]:
+        """Attempt to downgrade tier based on risk budget.
+
+        Returns a lower tier if safe, or None to keep current tier.
+
+        Rules:
+        - Zero-marginal-cost providers never downgrade
+        - risk_budget < 0.3: no downgrade
+        - risk_budget 0.3-0.7: opus -> sonnet
+        - risk_budget > 0.7: opus -> haiku, sonnet -> haiku
+        """
+        if self._is_zero_marginal_cost(provider):
+            return None
+
+        budget = requirements.risk_budget
+
+        if budget < 0.3:
+            return None
+
+        if budget <= 0.7:
+            if tier == "opus":
+                return "sonnet"
+            return None
+
+        # budget > 0.7
+        if tier == "opus":
+            return "haiku" if not requirements.needs_extended_thinking else "sonnet"
+        if tier == "sonnet":
+            return "haiku" if not requirements.needs_extended_thinking else None
+
+        return None
 
     # ------------------------------------------------------------------
     # Internals
@@ -466,10 +560,11 @@ def resolve_model(
     phase_id: str,
     task_id: str = None,
     agent_name: str = None,
+    requirements: "TaskRequirements" = None,
     **kwargs,
 ) -> ResolvedModel:
     """Convenience: resolve a model using the singleton resolver."""
-    return get_resolver().resolve(phase_id, task_id, agent_name, **kwargs)
+    return get_resolver().resolve(phase_id, task_id, agent_name, requirements=requirements, **kwargs)
 
 
 def reset_resolver() -> None:
