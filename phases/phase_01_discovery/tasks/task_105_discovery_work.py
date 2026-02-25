@@ -32,6 +32,15 @@ from core.state import StateManager
 from core.llm import invoke_llm as invoke
 from core.ui import phase_header, success, error, warning, info, step, wrap_text
 
+try:
+    from core.discovery.canvas import (
+        CanvasState, classify_exchange, render_canvas,
+        render_canvas_compact, suggest_next_topic, PRD_SECTIONS,
+    )
+    HAS_CANVAS = True
+except ImportError:
+    HAS_CANVAS = False
+
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
@@ -56,6 +65,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     prompts_dir.mkdir(parents=True, exist_ok=True)
 
+    # Load canvas from task 104 (or create fresh)
+    canvas = None
+    if HAS_CANVAS:
+        canvas_file = output_dir / "canvas.json"
+        if canvas_file.exists():
+            try:
+                canvas = CanvasState.from_dict(json.loads(canvas_file.read_text()))
+            except Exception as e:
+                logger.debug("Failed to load canvas: %s", e)
+        if canvas is None:
+            canvas = CanvasState()
+
     # UAT Mode: Skip interactive discovery
     if uat_mode:
         print()
@@ -63,6 +84,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print()
 
         _create_uat_discovery(approaches_file, consensus_file, deliberation_log)
+
+        if HAS_CANVAS:
+            canvas_file = output_dir / "canvas.json"
+            if not canvas_file.exists():
+                try:
+                    uat_canvas = CanvasState()
+                    uat_canvas.scores["vision"] = 0.6
+                    uat_canvas.scores["architecture"] = 0.3
+                    canvas_file.write_text(json.dumps(uat_canvas.to_dict(), indent=2))
+                except Exception as e:
+                    logger.debug("Failed to save UAT canvas: %s", e)
+
         success("Discovery conversation complete (UAT mode)")
         return True
 
@@ -158,6 +191,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     print("  Commands:")
+    print("    canvas      Show PRD coverage map")
     print("    generate    Generate/refine approaches")
     print("    synthesize  Get quick summary of discussion")
     print("    done        Conclude deliberation")
@@ -191,17 +225,57 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     while not deliberation_complete:
         # Show status bar with available commands
         status_parts = [f"Turn {turn}"]
+        if canvas:
+            try:
+                pct = int(canvas.overall_coverage * 100)
+                status_parts.append(f"Canvas: {pct}%")
+            except Exception:
+                pass
         if approaches_generated:
             status_parts.append("approaches ready")
         else:
             status_parts.append("no approaches yet")
+
+        # Show gaps in status
+        if canvas:
+            try:
+                empty = canvas.empty_sections
+                if empty:
+                    names = []
+                    for eid in empty[:3]:
+                        for s in PRD_SECTIONS:
+                            if s["id"] == eid:
+                                names.append(s["name"].split(" ")[0])
+                                break
+                    suffix = f" +{len(empty) - 3}" if len(empty) > 3 else ""
+                    status_parts.append(f"Gaps: {', '.join(names)}{suffix}")
+            except Exception:
+                pass
+
         print(f"  [{' │ '.join(status_parts)}]")
-        print(f"  Commands:  generate  │  synthesize  │  done")
+        print(f"  Commands:  canvas  │  generate  │  synthesize  │  done")
         print(f"  Or speak naturally to the panel.")
+
+        if canvas and turn > 1 and turn % 3 == 0:
+            try:
+                suggestion = suggest_next_topic(canvas)
+                if suggestion:
+                    print(f"  Suggested: {suggestion}")
+            except Exception:
+                pass
+
         print()
         user_input = input("  You: ").strip()
 
         if not user_input:
+            continue
+
+        # Canvas command: show coverage map (not a deliberation turn)
+        if user_input.lower() == 'canvas' and canvas:
+            try:
+                print(render_canvas(canvas))
+            except Exception as e:
+                logger.debug("Canvas render failed: %s", e)
             continue
 
         # Log user input
@@ -254,6 +328,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
 
+        # Canvas classification
+        if canvas:
+            try:
+                exchange_text = f"Human: {user_input}\nAgent: {response}"
+                classification = classify_exchange(exchange_text, prompts_dir, turn)
+                canvas.update(turn, classification, exchange_text)
+            except Exception as e:
+                logger.debug("Canvas classification failed: %s", e)
+
         # Record exchange substance and checkpoint periodically
         if mem:
             mem.conversation(f"Exchange {turn}: User: {user_input[:150]}")
@@ -285,6 +368,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     direction = consensus.get("agreed_direction", {}).get("approach", "No clear direction")
     print(f"  Agreed Direction: {direction}")
     print()
+
+    # Save canvas state
+    if canvas:
+        try:
+            canvas_file = output_dir / "canvas.json"
+            canvas_file.write_text(json.dumps(canvas.to_dict(), indent=2))
+        except Exception as e:
+            logger.debug("Failed to save canvas: %s", e)
 
     # Finalize log
     with open(deliberation_log, 'a') as f:

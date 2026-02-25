@@ -34,6 +34,15 @@ from core.state import StateManager
 from core.llm import invoke_llm as invoke
 from core.ui import phase_header, success, error, warning, info, step, wrap_text
 
+try:
+    from core.discovery.canvas import (
+        CanvasState, classify_exchange, render_canvas,
+        render_canvas_compact, suggest_next_topic,
+    )
+    HAS_CANVAS = True
+except ImportError:
+    HAS_CANVAS = False
+
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
@@ -64,6 +73,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print()
 
         _create_uat_dialogue(dialogue_output, conversation_log)
+        if HAS_CANVAS:
+            try:
+                canvas = CanvasState()
+                canvas.scores["vision"] = 0.8
+                canvas.scores["features"] = 0.4
+                canvas.scores["risks"] = 0.3
+                canvas_file = output_dir / "canvas.json"
+                canvas_file.write_text(json.dumps(canvas.to_dict(), indent=2))
+            except Exception as e:
+                logger.debug("Failed to save UAT canvas: %s", e)
         success("Opening dialogue complete (UAT mode)")
         return True
 
@@ -181,6 +200,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     gathered_vision = False
     gathered_impact = False
     gathered_constraints = False
+    canvas = CanvasState() if HAS_CANVAS else None
 
     while not conversation_complete:
         # Show turn count and hint
@@ -192,16 +212,37 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         if not gathered_constraints:
             topics_left.append("constraints")
 
-        if topics_left:
+        if canvas and turn > 1:
+            print(f"  [{turn} turns]  {render_canvas_compact(canvas)}  │  done to finish")
+        elif topics_left:
             print(f"  [{turn} turns]  Topics remaining: {', '.join(topics_left)}  │  done to finish")
         else:
             print(f"  [{turn} turns]  All topics covered  │  done to finish")
         print()
+
+        if canvas and turn > 0 and turn % 5 == 0:
+            print(render_canvas(canvas))
+
+        if canvas and turn > 2 and turn % 3 == 0:
+            try:
+                suggestion = suggest_next_topic(canvas)
+                if suggestion:
+                    print(f"  Suggested: {suggestion}")
+                    print()
+            except Exception as e:
+                logger.debug("Canvas suggestion failed: %s", e)
+
         human_response = input("  You: ").strip()
 
+        # Check for canvas command
+        input_lower = human_response.lower()
+        if input_lower == 'canvas' and canvas:
+            print(render_canvas(canvas))
+            continue  # Don't count as a dialogue turn
+
         # Check for exit
-        if human_response.lower() in ('done', 'finished', 'exit', 'quit', 'skip'):
-            if turn < 3 and human_response.lower() != 'skip':
+        if input_lower in ('done', 'finished', 'exit', 'quit', 'skip'):
+            if turn < 3 and input_lower != 'skip':
                 print("  (Talk a bit more, or type 'skip' to exit early)")
                 continue
             conversation_complete = True
@@ -248,6 +289,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         dialogue["conversation"].append({"role": "agent", "content": agent_response})
         turn += 1
 
+        # Canvas classification
+        if canvas:
+            try:
+                exchange_text = f"Human: {human_response}\nAgent: {agent_response}"
+                classification = classify_exchange(exchange_text, prompts_dir, turn)
+                canvas.update(turn, classification, exchange_text)
+            except Exception as e:
+                logger.debug("Canvas classification failed: %s", e)
+
         # Record conversation substance and checkpoint periodically
         if mem:
             mem.conversation(f"Turn {turn-1}: User: {human_response[:150]}")
@@ -256,7 +306,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 mem.checkpoint(f"Dialogue turns {max(1, turn-3)}-{turn}")
 
         # Suggest wrapping up after several turns
-        if turn >= 10 and gathered_constraints:
+        if canvas and turn >= 8 and canvas.overall_coverage > 0.3:
+            empty_count = len(canvas.empty_sections)
+            if empty_count == 0:
+                print("    (All PRD sections have some coverage. 'done' to proceed.)")
+            else:
+                print(f"    ({empty_count} PRD sections still empty. 'done' to proceed anyway, or keep going.)")
+            print()
+        elif turn >= 10 and gathered_constraints:
             print("    (We've covered a lot. Type 'done' if you're satisfied)")
             print()
 
@@ -299,6 +356,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     with open(dialogue_output, 'w') as f:
         json.dump(dialogue, f, indent=2)
+
+    if canvas:
+        try:
+            canvas_file = output_dir / "canvas.json"
+            canvas_file.write_text(json.dumps(canvas.to_dict(), indent=2))
+        except Exception as e:
+            logger.debug("Failed to save canvas: %s", e)
 
     print()
     print("━" * 60)

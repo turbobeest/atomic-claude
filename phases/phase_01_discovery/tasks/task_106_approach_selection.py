@@ -25,6 +25,14 @@ from core.config import Config
 from core.state import StateManager
 from core.ui import phase_header, success, error, warning, info, step, wrap_text
 
+try:
+    from core.discovery.canvas import (
+        CanvasState, render_canvas, generate_prd_preview,
+    )
+    HAS_CANVAS = True
+except ImportError:
+    HAS_CANVAS = False
+
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
@@ -74,6 +82,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if not consensus_file.exists():
         error("No consensus found. Run Discovery Conversation first.")
         return False
+
+    # Load canvas state if available
+    canvas = None
+    if HAS_CANVAS:
+        canvas_file = output_dir / "canvas.json"
+        if canvas_file.exists():
+            try:
+                canvas = CanvasState.from_dict(json.loads(canvas_file.read_text()))
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug("Failed to load canvas: %s", e)
 
     # Load consensus
     with open(consensus_file) as f:
@@ -269,6 +288,37 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print("  (Noted for the record - these concerns may resurface)")
         print()
 
+    # ── PRD Preview (canvas-based) ──
+    if canvas:
+        try:
+            print()
+            print("  " + "=" * 59)
+            print("  PRD PREVIEW — Based on Discovery Coverage")
+            print("  " + "=" * 59)
+            print()
+            print(render_canvas(canvas))
+
+            # Load consensus for preview context
+            preview_consensus = None
+            consensus_file_preview = output_dir / "consensus.json"
+            if consensus_file_preview.exists():
+                try:
+                    preview_consensus = json.loads(consensus_file_preview.read_text())
+                except Exception:
+                    pass
+
+            print(generate_prd_preview(canvas, preview_consensus))
+            print()
+
+            empty_count = len(canvas.empty_sections)
+            if empty_count > 0:
+                print(f"  Note: {empty_count} PRD section(s) have no direct discovery evidence.")
+                print("  The PRD author will infer these sections from available context.")
+                print()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug("PRD preview failed: %s", e)
+
     # ═══════════════════════════════════════════════════════════════
     # FINAL CONFIRMATION
     # ═══════════════════════════════════════════════════════════════
@@ -280,6 +330,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print("    [approve]   Lock in and proceed")
     print("    [review]    See full summary first")
     print("    [reopen]    Go back to deliberation")
+    if canvas:
+        print("    canvas    — Show PRD coverage map")
     print()
 
     while True:
@@ -295,13 +347,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             print(f"  Next Steps: {', '.join(next_steps)}")
             print(f"  Open Items: {', '.join(open_items)}")
             print()
+        elif final_action == "canvas" and canvas:
+            print(render_canvas(canvas))
+            print(generate_prd_preview(canvas))
         elif final_action == "reopen":
             print()
             print("  ! Returning to deliberation...")
             info("Direction not confirmed - reopen deliberation")
             return False
         else:
-            print("  Type 'approve', 'review', or 'reopen'")
+            print("  Type 'approve', 'review', 'reopen'" + (", or 'canvas'" if canvas else ""))
 
     # ═══════════════════════════════════════════════════════════════
     # SAVE FINALIZED DIRECTION
