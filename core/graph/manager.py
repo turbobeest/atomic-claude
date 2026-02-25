@@ -122,6 +122,24 @@ class GraphManager:
                 "TASK_DEPENDS_ON", "Task", id, "Task", dep_id,
             )
 
+    def update_task_status(self, task_id: Any, status: str) -> bool:
+        """Update a Task node's status field.
+
+        Args:
+            task_id: The task identifier
+            status: One of "pending", "in_progress", "done", "blocked"
+
+        Returns:
+            True if the node was found and updated
+
+        Raises:
+            ValueError: If status is not a valid value
+        """
+        valid_statuses = {"pending", "in_progress", "done", "blocked"}
+        if status not in valid_statuses:
+            raise ValueError(f"Invalid task status '{status}'; must be one of {valid_statuses}")
+        return self.writer.update_node("Task", task_id, {"status": status})
+
     def add_spec(self, task_id: Any, spec_data: dict) -> None:
         """Add a Spec node linked to its Task via HAS_SPEC."""
         spec_id = f"spec-{task_id}"

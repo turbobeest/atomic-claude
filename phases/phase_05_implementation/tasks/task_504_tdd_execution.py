@@ -41,6 +41,8 @@ from core.utils.cli_ui import (
     print_red, print_dim, print_magenta, prompt_user, clear_input_buffer
 )
 from core.utils.file_ops import ensure_dir, read_file, write_file
+from core.graph import get_graph
+from core.graph.exceptions import GraphUnavailableError
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +430,50 @@ def load_tasks(project_root: Path) -> List[Dict[str, Any]]:
     return [t for t in tasks if len(t.get("subtasks", [])) >= 4]
 
 
+def load_tasks_from_graph(graph) -> List[Dict[str, Any]]:
+    """Load TDD-eligible tasks from the knowledge graph.
+
+    Returns task dicts compatible with DAGScheduler interface.
+    Falls back to empty list if graph query fails.
+    """
+    try:
+        task_nodes = graph.reader.get_nodes("Task")
+        if not task_nodes:
+            return []
+
+        tasks = []
+        for node in task_nodes:
+            task_id = node.get("id")
+            if task_id is None:
+                continue
+
+            # Get dependencies via TASK_DEPENDS_ON edges
+            dep_nodes = graph.reader.get_neighbors("Task", task_id, "TASK_DEPENDS_ON", "out")
+            dep_ids = [str(d.get("id")) for d in dep_nodes if d.get("id") is not None]
+
+            # Get spec via HAS_SPEC edge for subtask info
+            spec_nodes = graph.reader.get_neighbors("Task", task_id, "HAS_SPEC", "out")
+
+            task_dict = {
+                "id": str(task_id),
+                "title": node.get("title", ""),
+                "description": node.get("description", ""),
+                "dependencies": dep_ids,
+                "subtasks": spec_nodes if len(spec_nodes) >= 4 else [],
+                "status": node.get("status", "pending"),
+                "priority": node.get("priority", "medium"),
+            }
+
+            # Only include tasks with enough subtasks/specs (same filter as load_tasks)
+            if len(task_dict["subtasks"]) >= 4 or len(spec_nodes) > 0:
+                tasks.append(task_dict)
+
+        return tasks
+    except Exception as e:
+        logger.debug("Failed to load tasks from graph: %s", e)
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Helper: load OpenSpecs
 # ---------------------------------------------------------------------------
@@ -458,6 +504,34 @@ def load_specs(project_root: Path) -> Dict[str, Dict[str, Any]]:
                 specs[str(task_id)] = spec_data
 
     return specs
+
+
+def load_specs_from_graph(graph) -> Dict[str, Dict[str, Any]]:
+    """Load OpenSpec data from the knowledge graph.
+
+    Returns dict keyed by task_id, compatible with existing spec format.
+    Falls back to empty dict if graph query fails.
+    """
+    try:
+        spec_nodes = graph.reader.get_nodes("Spec")
+        if not spec_nodes:
+            return {}
+
+        specs = {}
+        for node in spec_nodes:
+            task_id = str(node.get("task_id", ""))
+            if not task_id:
+                continue
+            specs[task_id] = {
+                "task_id": task_id,
+                "id": node.get("id", ""),
+                **{k: v for k, v in node.items() if k not in ("task_id", "id")},
+            }
+
+        return specs
+    except Exception as e:
+        logger.debug("Failed to load specs from graph: %s", e)
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -1731,6 +1805,7 @@ def _run_dag_parallel(
     max_workers: int = 4,
     source_registry: Optional[ProjectSourceRegistry] = None,
     token_budget: Optional[TokenBudget] = None,
+    graph=None,
 ) -> Dict[str, Any]:
     """Run TDD cycles in parallel respecting DAG dependencies.
 
@@ -1866,6 +1941,11 @@ def _run_dag_parallel(
                         continue
 
                     task_status[tid] = "running"
+                    if graph:
+                        try:
+                            graph.update_task_status(tid, "in_progress")
+                        except Exception:
+                            pass  # Non-blocking
                     live.update(_build_display())
 
                     task = task_map[tid]
@@ -1908,6 +1988,11 @@ def _run_dag_parallel(
                         stats["tasks_completed"] += 1
                         completed_ids.add(tid)
                         wave_completions += 1
+                        if graph:
+                            try:
+                                graph.update_task_status(task_id, "done")
+                            except Exception:
+                                pass  # Non-blocking
 
                         # Count cycles from record
                         if "red" in record:
@@ -1923,6 +2008,13 @@ def _run_dag_parallel(
                         task_status[tid] = "failed"
                         stats["tasks_failed"] += 1
                         wave_failures += 1
+                        if graph:
+                            try:
+                                graph.update_task_status(task_id, "blocked")
+                                for cascaded_id in cascaded:
+                                    graph.update_task_status(cascaded_id, "blocked")
+                            except Exception:
+                                pass  # Non-blocking
 
                         # Count partial cycles
                         if "red" in record:
@@ -2051,9 +2143,21 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # LIVE PATH: Full TDD Execution
     # =======================================================================
 
+    # --- Initialize knowledge graph ---
+    graph = None
+    try:
+        graph = get_graph(phase_id="5-implementation")
+    except GraphUnavailableError:
+        logger.debug("FalkorDB unavailable, using file-based task loading")
+
     # --- Load inputs ---
-    tasks = load_tasks(project_root)
-    specs = load_specs(project_root)
+    # Try graph-backed loading first, fall back to JSON
+    tasks = load_tasks_from_graph(graph) if graph else []
+    if not tasks:
+        tasks = load_tasks(project_root)
+    specs = load_specs_from_graph(graph) if graph else {}
+    if not specs:
+        specs = load_specs(project_root)
     agents_data = load_json_safe(output_dir / "selected-agents.json")
     setup = load_json_safe(output_dir / "tdd-setup.json")
 
@@ -2259,6 +2363,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         max_workers=workers,
         source_registry=source_registry,
         token_budget=token_budget,
+        graph=graph,
     )
 
     # Save source registry for resume
