@@ -74,8 +74,16 @@ CLAUDE_MAX_TURNS=25
         assert config["llm"]["max_turns"] == 25
 
     def test_load_from_json_files(self, temp_dir):
-        """Test loading configuration from JSON files."""
-        # Create output directory structure
+        """Test loading configuration from JSON files.
+
+        load_from_json_files looks at atomic_root.parent / .outputs,
+        so we create a child dir as atomic_root and put .outputs/ in temp_dir.
+        """
+        # atomic_root is a child of the project root
+        atomic_root = temp_dir / "atomic-claude"
+        atomic_root.mkdir()
+
+        # Create output directory structure at parent level
         output_dir = temp_dir / ".outputs" / "0-setup"
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -101,8 +109,8 @@ CLAUDE_MAX_TURNS=25
         with open(secrets_file, 'w') as f:
             json.dump(secrets, f)
 
-        # Load
-        loader = ConfigLoader(temp_dir)
+        # Load using child dir as atomic_root
+        loader = ConfigLoader(atomic_root)
         config = loader.load_from_json_files()
 
         assert config["project"]["name"] == "json-project"
@@ -286,13 +294,20 @@ class TestConfig:
         assert config.get_aws_profile() == "my-profile"
 
     def test_reload(self, temp_dir):
-        """Test hot-reloading configuration."""
-        config = Config(atomic_root=temp_dir)
+        """Test hot-reloading configuration.
+
+        load_from_json_files looks at atomic_root.parent / .outputs,
+        so we use a child dir as atomic_root.
+        """
+        atomic_root = temp_dir / "atomic-claude"
+        atomic_root.mkdir()
+
+        config = Config(atomic_root=atomic_root)
 
         # Initial value
         assert config.get("project.name") == "unknown"
 
-        # Create config file
+        # Create config file at parent level (where .outputs/ lives)
         output_dir = temp_dir / ".outputs" / "0-setup"
         output_dir.mkdir(parents=True, exist_ok=True)
 

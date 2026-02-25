@@ -186,6 +186,12 @@ def _build_curation_prompt(
     total_count: int,
 ) -> str:
     """Build the LLM prompt for audit curation."""
+    max_deliverable_chars = 8000
+    if len(deliverables) > max_deliverable_chars:
+        logger.warning("Deliverables truncated from %d to %d chars", len(deliverables), max_deliverable_chars)
+        truncated_deliverables = deliverables[:max_deliverable_chars]
+    else:
+        truncated_deliverables = deliverables
     return f"""You are selecting audits for Phase {phase_num} ({phase_id}).
 
 Your job: read the phase deliverables, understand what was produced, then
@@ -195,7 +201,7 @@ compliance, architecture, etc.) without redundancy. Prefer fewer, sharper
 audits over a broad sweep.
 
 PHASE DELIVERABLES:
-{deliverables[:8000]}
+{truncated_deliverables}
 
 AVAILABLE AUDITS ({total_count} total):
 {roster}
@@ -326,8 +332,8 @@ def _load_model_config() -> dict:
 def _detect_default_provider() -> str:
     """Detect the configured LLM provider for audit defaults."""
     try:
-        from core.config import Config
-        config = Config()
+        from core.config import get_config
+        config = get_config()
         name = config.get("llm.primary_provider", "api")
     except Exception as e:
         logger.debug("Failed to detect default provider: %s", e)

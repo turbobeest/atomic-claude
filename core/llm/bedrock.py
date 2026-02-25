@@ -35,6 +35,9 @@ from .base import (
 
 # Supported Bedrock Claude models
 BEDROCK_CLAUDE_MODELS = [
+    "anthropic.claude-opus-4-6-20250219-v1:0",
+    "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "anthropic.claude-haiku-4-5-20251001-v1:0",
     "anthropic.claude-3-opus-20240229-v1:0",
     "anthropic.claude-3-5-sonnet-20241022-v2:0",
     "anthropic.claude-3-5-sonnet-20240620-v1:0",
@@ -124,6 +127,9 @@ class BedrockProvider(BaseLLMProvider):
                 service_name="bedrock-runtime",
                 region_name=self.region
             )
+
+            # Cached bedrock management client (used by health_check)
+            self._mgmt_client = None
 
         except Exception as e:
             raise AuthenticationError(
@@ -466,13 +472,14 @@ class BedrockProvider(BaseLLMProvider):
             HealthStatus
         """
         try:
-            # List foundation models to verify access
-            bedrock_client = self.session.client(
-                service_name="bedrock",
-                region_name=self.region
-            )
+            # List foundation models to verify access (cached client)
+            if self._mgmt_client is None:
+                self._mgmt_client = self.session.client(
+                    service_name="bedrock",
+                    region_name=self.region
+                )
 
-            response = bedrock_client.list_foundation_models(
+            response = self._mgmt_client.list_foundation_models(
                 byProvider="Anthropic"
             )
 

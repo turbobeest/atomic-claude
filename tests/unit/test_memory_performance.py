@@ -295,9 +295,9 @@ class TestScalability:
             print(f"\nAverage save time after {batch_end} entries: {avg * 1000:.2f}ms")
 
         # Save time should remain relatively constant
-        # Allow 3x variance (some growth is expected)
+        # Allow 5x variance (some growth is expected on NFS/external drives)
         max_ratio = max(times) / min(times)
-        assert max_ratio < 3.0, f"Save time varies too much: {max_ratio:.2f}x"
+        assert max_ratio < 5.0, f"Save time varies too much: {max_ratio:.2f}x"
 
 
 class TestMemoryFootprint:

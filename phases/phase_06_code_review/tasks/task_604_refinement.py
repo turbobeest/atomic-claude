@@ -9,7 +9,7 @@ import sys
 import json
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_yellow("Run task 603 (Comprehensive Review) first"))
         return False
 
-    findings_data = json.loads(read_file(findings_file))
+    try:
+        findings_data = json.loads(read_file(findings_file))
+    except (json.JSONDecodeError, OSError) as e:
+        logger.error("Failed to parse findings file %s: %s", findings_file, e)
+        print(print_red(f"✗ Failed to read findings: {e}"))
+        return False
     totals = findings_data.get("totals", {})
     total_critical = totals.get("critical", 0)
     total_major = totals.get("major", 0)
@@ -165,6 +170,29 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     }
 
     write_file(refinement_file, json.dumps(refinement_data, indent=2))
+
+    # Generate refinement-report.md (expected by orchestrator artifact check)
+    refinement_report = output_dir / "refinement-report.md"
+    report_content = f"""# Refinement Report
+
+**Completed:** {datetime.now(timezone.utc).isoformat()}
+
+## Issues Resolved
+
+- **Critical Fixed:** {fixed_critical} / {total_critical}
+- **Major Fixed:** {fixed_major} / {total_major}
+- **Minor Fixed:** {fixed_minor} / {total_minor}
+
+## Test Verification
+
+- Tests passing: {tests_passing}
+- Total tests: {tests_total}
+
+## Status
+
+{"All critical and major issues resolved." if refinement_data["all_resolved"] else "Some issues remain -- review before proceeding."}
+"""
+    write_file(refinement_report, report_content)
 
     print(print_green("✓ Refinement complete"))
     return True
@@ -266,43 +294,26 @@ def _address_issues(findings_data: Dict, severity: str, fixes_dir: Path, atomic_
     return fixed_count
 
 
-def _apply_fix(finding: Dict, output_prefix: Path, atomic_root: Path) -> bool:
-    """Apply a fix for a finding."""
-    project_root = atomic_root.parent
-    # Load actual source code around the finding's line number
-    source_context = ""
-    finding_file = finding.get('file', 'unknown')
-    finding_line = finding.get('line', 0)
+def _resolve_source_path(finding_file: str, project_root: Path) -> Path:
+    """Resolve the source file path for a finding, trying multiple locations."""
+    if not finding_file or finding_file == 'unknown':
+        return Path(finding_file)
 
-    if finding_file and finding_file != 'unknown':
-        # Try to find the file relative to host project root first
-        source_path = project_root / finding_file
-        if not source_path.exists():
-            # Try .claude/testing (TDD output)
-            source_path = project_root / ".claude" / "testing" / finding_file
-        if not source_path.exists():
-            source_path = project_root / "src" / finding_file
-        if not source_path.exists():
-            # Try as-is (absolute or relative to cwd)
-            source_path = Path(finding_file)
+    candidates = [
+        project_root / finding_file,
+        project_root / ".claude" / "testing" / finding_file,
+        project_root / "src" / finding_file,
+        Path(finding_file),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return Path(finding_file)
 
-        if source_path.exists():
-            try:
-                source_lines = source_path.read_text().splitlines()
-                # Extract ~50 lines around the finding's line number
-                context_radius = 25
-                start_line = max(0, finding_line - context_radius - 1)
-                end_line = min(len(source_lines), finding_line + context_radius)
-                numbered_lines = []
-                for i, line in enumerate(source_lines[start_line:end_line], start=start_line + 1):
-                    marker = " >> " if i == finding_line else "    "
-                    numbered_lines.append(f"{marker}{i:4d} | {line}")
-                source_context = "\n".join(numbered_lines)
-            except Exception as e:
-                logger.debug("Failed to read source file %s: %s", source_path, e)
-                source_context = "(Unable to read source file)"
 
-    # Build fix prompt with actual code context
+def _build_fix_prompt(finding: Dict, source_context: str, finding_file: str,
+                      finding_line: int) -> str:
+    """Build the LLM prompt for a code fix request."""
     code_section = ""
     if source_context:
         code_section = f"""## Source Code (around line {finding_line})
@@ -313,7 +324,7 @@ def _apply_fix(finding: Dict, output_prefix: Path, atomic_root: Path) -> bool:
 
 """
 
-    prompt = f"""# Code Fix Request
+    return f"""# Code Fix Request
 
 You are a code-refiner agent. Apply a minimal, targeted fix for the issue described below.
 
@@ -349,10 +360,13 @@ Respond with ONLY valid JSON (no markdown wrapper):
 If you cannot safely generate a fix, set can_fix to false and explain why.
 """
 
+
+def _apply_llm_fix(prompt: str, output_prefix: Path, finding_file: str) -> bool:
+    """Send fix prompt to LLM and save the result."""
     try:
         response = invoke_llm(prompt=prompt, model="sonnet")
 
-        # Parse JSON
+        # Parse JSON — strip markdown fences if present
         if "```json" in response:
             start = response.find("```json") + 7
             end = response.find("```", start)
@@ -367,8 +381,37 @@ If you cannot safely generate a fix, set can_fix to false and explain why.
 
         return result.get("can_fix", False)
     except Exception as e:
-        logger.debug("Failed to apply fix for %s: %s", finding.get("file", "unknown"), e)
+        logger.debug("Failed to apply fix for %s: %s", finding_file, e)
         return False
+
+
+def _apply_fix(finding: Dict, output_prefix: Path, atomic_root: Path) -> bool:
+    """Apply a fix for a finding by resolving source, building prompt, and invoking LLM."""
+    project_root = atomic_root.parent
+    finding_file = finding.get('file', 'unknown')
+    finding_line = finding.get('line', 0)
+
+    # Resolve source file and extract context
+    source_context = ""
+    source_path = _resolve_source_path(finding_file, project_root)
+
+    if source_path.exists() and finding_file != 'unknown':
+        try:
+            source_lines = source_path.read_text().splitlines()
+            context_radius = 25
+            start_line = max(0, finding_line - context_radius - 1)
+            end_line = min(len(source_lines), finding_line + context_radius)
+            numbered_lines = []
+            for i, line in enumerate(source_lines[start_line:end_line], start=start_line + 1):
+                marker = " >> " if i == finding_line else "    "
+                numbered_lines.append(f"{marker}{i:4d} | {line}")
+            source_context = "\n".join(numbered_lines)
+        except (OSError, UnicodeDecodeError) as e:
+            logger.debug("Failed to read source file %s: %s", source_path, e)
+            source_context = "(Unable to read source file)"
+
+    prompt = _build_fix_prompt(finding, source_context, finding_file, finding_line)
+    return _apply_llm_fix(prompt, output_prefix, finding_file)
 
 
 def _run_test_verification(atomic_root: Path) -> tuple:
@@ -434,7 +477,7 @@ def _run_test_verification(atomic_root: Path) -> tuple:
     print()
 
     if tests_passing:
-        print(print_green(f"  Passing:  {tests_passed or 'all'}"))
+        print(print_green(f"  Passing:  {tests_passed if tests_passed > 0 else 'unknown (not parsed)'}"))
         print(print_green("  Failing:  0"))
         print()
         print(print_green("  ✓ All tests passing after refinements"))

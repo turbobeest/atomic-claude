@@ -16,6 +16,17 @@ from .schema import (
 
 logger = logging.getLogger(__name__)
 
+# Mapping of node labels to their primary ID property name.
+# Most node types use "id"; Spec nodes use "task_id".
+_NODE_ID_PROPERTY = {
+    "Spec": "task_id",
+}
+
+
+def _id_prop(label: str) -> str:
+    """Return the ID property name for a given node label."""
+    return _NODE_ID_PROPERTY.get(label, "id")
+
 
 class GraphWriter:
     """
@@ -69,7 +80,7 @@ class GraphWriter:
         cypher = f"CREATE (:{label_str} {{{props_str}}})"
 
         self.conn.query(cypher, params)
-        logger.debug(f"Created {label_str} node: id={merged.get('id')}")
+        logger.debug("Created %s node: id=%s", label_str, merged.get('id'))
 
     def update_node(self, label: str, node_id: Any,
                     updates: Dict[str, Any]) -> bool:
@@ -105,7 +116,7 @@ class GraphWriter:
         result = self.conn.query(cypher, params)
         updated = len(result.result_set) > 0
         if updated:
-            logger.debug(f"Updated {label_str} node: id={node_id}")
+            logger.debug("Updated %s node: id=%s", label_str, node_id)
         return updated
 
     def delete_node(self, label: str, node_id: Any) -> bool:
@@ -124,7 +135,7 @@ class GraphWriter:
         result = self.conn.query(cypher, {"node_id": node_id})
         deleted = result.result_set[0][0] > 0 if result.result_set else False
         if deleted:
-            logger.debug(f"Deleted {label_str} node: id={node_id}")
+            logger.debug("Deleted %s node: id=%s", label_str, node_id)
         return deleted
 
     def add_edge(self, rel_type: str, from_label: str, from_id: Any,
@@ -166,9 +177,9 @@ class GraphWriter:
         else:
             props_str = ""
 
-        # Use the 'id' property for Source/Finding/etc, 'task_id' for Spec
-        from_id_prop = "task_id" if from_str == "Spec" else "id"
-        to_id_prop = "task_id" if to_str == "Spec" else "id"
+        # Look up the ID property for each node label from the mapping
+        from_id_prop = _id_prop(from_str)
+        to_id_prop = _id_prop(to_str)
 
         cypher = (
             f"MATCH (a:{from_str} {{{from_id_prop}: $from_id}}), "
@@ -177,7 +188,7 @@ class GraphWriter:
         )
 
         self.conn.query(cypher, params)
-        logger.debug(f"Created {rel_str}: {from_str}({from_id}) -> {to_str}({to_id})")
+        logger.debug("Created %s: %s(%s) -> %s(%s)", rel_str, from_str, from_id, to_str, to_id)
 
     def delete_edge(self, rel_type: str, from_label: str, from_id: Any,
                     to_label: str, to_id: Any) -> bool:
@@ -191,8 +202,8 @@ class GraphWriter:
         from_str = from_label if isinstance(from_label, str) else from_label.value
         to_str = to_label if isinstance(to_label, str) else to_label.value
 
-        from_id_prop = "task_id" if from_str == "Spec" else "id"
-        to_id_prop = "task_id" if to_str == "Spec" else "id"
+        from_id_prop = _id_prop(from_str)
+        to_id_prop = _id_prop(to_str)
 
         cypher = (
             f"MATCH (a:{from_str} {{{from_id_prop}: $from_id}})"
@@ -235,11 +246,11 @@ class GraphWriter:
                 elif op_type == "delete_node":
                     self.delete_node(op["label"], op["node_id"])
                 else:
-                    logger.warning(f"Unknown bulk operation: {op_type}")
+                    logger.warning("Unknown bulk operation: %s", op_type)
                     continue
                 count += 1
             except Exception as e:
-                logger.error(f"Bulk op failed ({op_type}): {e}")
+                logger.error("Bulk op failed (%s): %s", op_type, e)
                 # Continue with remaining operations
         return count
 
@@ -262,7 +273,7 @@ class GraphWriter:
         )
         result = self.conn.query(cypher, {"phase": phase})
         deleted = result.result_set[0][0] if result.result_set else 0
-        logger.info(f"Deleted {deleted} nodes for phase '{phase}'")
+        logger.info("Deleted %d nodes for phase '%s'", deleted, phase)
         return deleted
 
     def ensure_indexes(self) -> None:
@@ -276,7 +287,7 @@ class GraphWriter:
             except Exception as e:
                 # Index may already exist
                 if "already indexed" not in str(e).lower():
-                    logger.debug(f"Index creation note for {label}.{prop}: {e}")
+                    logger.debug("Index creation note for %s.%s: %s", label, prop, e)
 
         for label, fields in FULLTEXT_INDEX_DEFINITIONS:
             try:
@@ -285,4 +296,4 @@ class GraphWriter:
                 self.conn.query(cypher)
             except Exception as e:
                 if "already indexed" not in str(e).lower():
-                    logger.debug(f"Fulltext index note for {label}: {e}")
+                    logger.debug("Fulltext index note for %s: %s", label, e)

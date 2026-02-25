@@ -288,6 +288,13 @@ class MemoryRecall:
 
         return len(matches) / len(keywords)
 
+    @staticmethod
+    def _ensure_aware(dt: datetime) -> datetime:
+        """Return a timezone-aware datetime; assumes UTC if naive."""
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
     def _recency_score(self, timestamp: datetime) -> float:
         """
         Calculate recency score with exponential decay.
@@ -295,14 +302,15 @@ class MemoryRecall:
         Recent entries score higher.
         """
         now = datetime.now(timezone.utc)
-        age = now - timestamp
+        age = now - self._ensure_aware(timestamp)
 
-        # Exponential decay: score = e^(-age/halflife)
-        # halflife = 7 days
+        # Exponential decay: score = e^(-decay_rate * age_days)
+        # halflife = 7 days, decay_rate = ln(2) / halflife
         halflife_days = 7.0
         decay_rate = math.log(2) / halflife_days
+        age_days = age.total_seconds() / 86400.0
 
-        score = math.exp(-age.total_seconds() / (halflife_days * 86400))
+        score = math.exp(-decay_rate * age_days)
 
         return min(1.0, score)
 

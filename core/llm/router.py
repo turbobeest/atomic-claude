@@ -6,6 +6,7 @@ Intelligent provider routing with fallback chains and health tracking.
 """
 
 import logging
+import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -115,6 +116,9 @@ class LLMRouter:
             )
         else:
             self._cache = None
+
+        # Thread safety for stats updates
+        self._stats_lock = threading.Lock()
 
         # Load balancing state
         self._round_robin_index: Dict[str, int] = defaultdict(int)
@@ -240,6 +244,7 @@ class LLMRouter:
             cached = self._cache.get(cache_key)
             if cached:
                 logger.debug(f"Cache hit for prompt: {prompt[:50]}...")
+                logger.info("Returning cached LLM response (tokens not re-tracked)")
                 return LLMResponse(**cached)
 
         # Get fallback chain
@@ -553,24 +558,26 @@ class LLMRouter:
             latency: Latency in seconds
             response: Response object
         """
-        stats = self._usage_stats[provider_name]
-        stats.total_requests += 1
+        with self._stats_lock:
+            stats = self._usage_stats[provider_name]
+            stats.total_requests += 1
 
-        # Update latency
-        if latency > 0:
-            total_latency = stats.avg_latency_ms * (stats.total_requests - 1)
-            stats.avg_latency_ms = (total_latency + latency * 1000) / stats.total_requests
+            # Update latency
+            if latency > 0:
+                total_latency = stats.avg_latency_ms * (stats.total_requests - 1)
+                stats.avg_latency_ms = (total_latency + latency * 1000) / stats.total_requests
 
-        # Update token usage
-        if response:
-            stats.input_tokens += response.usage.input_tokens
-            stats.output_tokens += response.usage.output_tokens
-            stats.cache_read_tokens += response.usage.cache_read_tokens
-            stats.cache_write_tokens += response.usage.cache_write_tokens
+            # Update token usage
+            if response:
+                usage = response.usage
+                stats.input_tokens += getattr(usage, 'input_tokens', 0) or 0
+                stats.output_tokens += getattr(usage, 'output_tokens', 0) or 0
+                stats.cache_read_tokens += getattr(usage, 'cache_read_tokens', 0) or 0
+                stats.cache_write_tokens += getattr(usage, 'cache_write_tokens', 0) or 0
 
-        # Reset failure count on success
-        if provider_name in self._failures:
-            self._failures[provider_name].failure_count = 0
+            # Reset failure count on success
+            if provider_name in self._failures:
+                self._failures[provider_name].failure_count = 0
 
     def _record_failure(self, provider_name: str, retryable: bool = False) -> None:
         """

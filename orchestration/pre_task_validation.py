@@ -14,54 +14,13 @@ Violations are HARD ERRORS - the pipeline stops until they're fixed.
 """
 
 import logging
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any
 import sys
 
 logger = logging.getLogger(__name__)
 
-
-# Allowed patterns in atomic-claude2 directory
-ALLOWED_PATTERNS = {
-    # Tool code
-    "core/**/*.py",
-    "phases/**/*.py",
-    "phases/**/*.sh",  # Task scripts (initially bash, then Python)
-    "orchestration/**/*.py",
-    "dashboard/**/*.js",
-    "dashboard/**/*.html",
-    "dashboard/**/*.css",
-    "main.py",
-
-    # Tool docs
-    "README.md",
-    "PROJECT-STRUCTURE.md",
-    "REFACTORING-PLAN*.md",
-    "docs/**/*.md",
-
-    # Tool config
-    "config/**/*.yaml",
-    "config/**/*.yml",
-    "dashboard/package.json",
-
-    # Runtime artifacts (OK)
-    ".outputs/**/*",
-    ".state/**/*",
-    ".logs/**/*",
-    "reports/**/*",  # Scratch work
-
-    # Python package files
-    "**/__init__.py",
-    "**/__pycache__/**",
-    "**/*.pyc",
-
-    # Git, IDE, OS files
-    ".git/**/*",
-    ".gitignore",
-    ".vscode/**/*",
-    ".idea/**/*",
-    ".DS_Store",
-}
 
 # Forbidden file types (project artifacts that should NEVER be in tool directory)
 FORBIDDEN_TYPES = {
@@ -343,7 +302,7 @@ def auto_cleanup() -> bool:
         dst = dst_dir / src.name
 
         try:
-            src.rename(dst)
+            shutil.move(str(src), str(dst))
             print(f"✓ Moved {violation['path']} → {dst}")
         except Exception as e:
             print(f"✗ Failed to move {violation['path']}: {e}")

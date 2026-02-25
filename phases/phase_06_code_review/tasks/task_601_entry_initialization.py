@@ -8,7 +8,6 @@ import logging
 import sys
 import json
 from pathlib import Path
-from typing import Dict, Any
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -75,6 +74,33 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     prompt_user("Press Enter to begin Code Review...")
     print()
 
+    # Write entry-context.json so downstream tasks (orchestrator) can find it
+    entry_context = output_dir / "entry-context.json"
+    ensure_dir(entry_context.parent)
+
+    # Gather Phase 5 verification data for context
+    phase5_summary = {}
+    if closeout_file.exists():
+        try:
+            phase5_data = json.loads(read_file(closeout_file))
+            phase5_summary = {
+                "status": phase5_data.get("status", "unknown"),
+                "tasks_completed": phase5_data.get("tasks_completed", 0),
+                "total_tasks": phase5_data.get("total_tasks", 0),
+            }
+        except (json.JSONDecodeError, OSError):
+            phase5_summary = {"status": "unknown"}
+
+    write_file(entry_context, json.dumps({
+        "status": "initialized",
+        "phase": "6-code-review",
+        "phase5_verification": phase5_summary,
+        "review_scope": {
+            "dimensions": ["deep_code", "architecture", "performance", "documentation"],
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }, indent=2))
+
     print(print_green("✓ Entry & Initialization complete"))
     return True
 
@@ -131,7 +157,7 @@ def _verify_phase_5(closeout_file: Path) -> bool:
     # Load closeout data
     try:
         closeout_data = json.loads(read_file(closeout_file))
-    except Exception as e:
+    except (json.JSONDecodeError, OSError) as e:
         logger.debug("Failed to parse Phase 5 closeout %s: %s", closeout_file, e)
         print(print_red("✗ Failed to read Phase 5 closeout"))
         return False

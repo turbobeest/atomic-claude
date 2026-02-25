@@ -5,31 +5,18 @@ Final confirmation and release notes review before executing release.
 """
 
 import sys
-import json
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.config import Config
-from core.state import StateManager
 from core.ui import success, error, warning, info, step
+from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, RED, YELLOW, NC
 from core.utils.file_ops import read_json, write_json
 
 logger = logging.getLogger(__name__)
-
-
-# ANSI color codes for formatted output
-CYAN = "\033[96m"
-DIM = "\033[2m"
-BOLD = "\033[1m"
-GREEN = "\033[92m"
-RED = "\033[91m"
-YELLOW = "\033[93m"
-NC = "\033[0m"
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -100,14 +87,57 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(f"    Package:     project-{version}.tar.gz")
     print()
 
-    # Count changelog entries (simulated)
+    # SIMULATED counts -- replace with CHANGELOG.md parsing
     features_count = 5
     fixes_count = 0
+    print(f"    {YELLOW}Note: Feature/fix counts are simulated{NC}")
 
     print(f"    Changelog:   {GREEN}{features_count} features{NC}, {DIM}{fixes_count} fixes{NC}")
     print(f"  {'─' * 110}")
     print()
 
+    # Get final confirmation
+    confirmed = _get_final_confirmation()
+    if not confirmed:
+        warning("Release aborted")
+        return False
+
+    # Review release notes
+    notes_feedback = _review_release_notes(version)
+
+    # Save release setup
+    setup_payload = {
+        "release": {
+            "version": version,
+            "type": release_type
+        },
+        "changelog": {
+            "features": features_count,
+            "fixes": fixes_count
+        },
+        "confirmed": True,
+        "setup_at": datetime.now(timezone.utc).isoformat()
+    }
+    if notes_feedback:
+        setup_payload["feedback"] = notes_feedback
+
+    write_json(release_setup_file, setup_payload)
+
+    # Save decision to context
+    decision_file = output_dir / "setup-decision.json"
+    decision_file.parent.mkdir(parents=True, exist_ok=True)
+    write_json(decision_file, {
+        "decision": f"Release v{version} confirmed for execution",
+        "type": "setup",
+        "artifact": str(release_setup_file)
+    })
+
+    success("Release Setup complete")
+    return True
+
+
+def _get_final_confirmation() -> bool:
+    """Get user confirmation to proceed with release. Returns False if aborted."""
     print(f"  {DIM}Proceed with release?{NC}")
     print()
     print(f"    {GREEN}[yes]{NC}          Proceed to release")
@@ -133,15 +163,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         except EOFError:
             logger.debug("Non-interactive mode: skipping review prompt")
         print()
+        return True
     elif proceed_choice == "abort":
         print()
-        warning("Release aborted")
         return False
 
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # RELEASE NOTES REVIEW
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    return True
 
+
+def _review_release_notes(version: str) -> str:
+    """Review release notes and collect feedback. Returns feedback string or empty."""
     print()
     print(f"  {BOLD}- RELEASE NOTES REVIEW{NC}")
     print()
@@ -174,6 +205,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         logger.debug("Non-interactive mode: defaulting to 'y'")
         notes_confirm = "y"
 
+    notes_feedback = ""
     if notes_confirm not in ["y", "Y"]:
         print()
         try:
@@ -183,31 +215,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             notes_feedback = ""
         print()
 
-    # Save release setup
-    write_json(release_setup_file, {
-        "release": {
-            "version": version,
-            "type": release_type
-        },
-        "changelog": {
-            "features": features_count,
-            "fixes": fixes_count
-        },
-        "confirmed": True,
-        "setup_at": datetime.now(timezone.utc).isoformat()
-    })
-
-    # Save decision to context
-    decision_file = output_dir / "setup-decision.json"
-    decision_file.parent.mkdir(parents=True, exist_ok=True)
-    write_json(decision_file, {
-        "decision": f"Release v{version} confirmed for execution",
-        "type": "setup",
-        "artifact": str(release_setup_file)
-    })
-
-    success("Release Setup complete")
-    return True
+    return notes_feedback
 
 
 if __name__ == "__main__":

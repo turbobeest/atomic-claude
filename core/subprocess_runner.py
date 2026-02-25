@@ -10,8 +10,6 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, Optional, Tuple
-import signal
-import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -123,8 +121,8 @@ def run_task_script(
         return result.returncode, stdout_text, stderr_text
 
     except subprocess.TimeoutExpired as e:
-        stdout_text = e.stdout.decode() if e.stdout else ""
-        stderr_text = e.stderr.decode() if e.stderr else ""
+        stdout_text = (e.stdout or "") if isinstance(e.stdout, str) else (e.stdout.decode() if e.stdout else "")
+        stderr_text = (e.stderr or "") if isinstance(e.stderr, str) else (e.stderr.decode() if e.stderr else "")
         print(f"  ⚠️  Task {task_id} timed out after {timeout}s")
         return 124, stdout_text, stderr_text
 
@@ -232,8 +230,8 @@ def run_bash_command(
         return result.returncode, stdout_text, stderr_text
 
     except subprocess.TimeoutExpired as e:
-        stdout_text = e.stdout.decode() if e.stdout else ""
-        stderr_text = e.stderr.decode() if e.stderr else ""
+        stdout_text = (e.stdout or "") if isinstance(e.stdout, str) else (e.stdout.decode() if e.stdout else "")
+        stderr_text = (e.stderr or "") if isinstance(e.stderr, str) else (e.stderr.decode() if e.stderr else "")
         return 124, stdout_text, stderr_text
 
     except Exception as e:

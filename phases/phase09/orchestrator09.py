@@ -44,32 +44,32 @@ UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
 
 # Task wrapper functions (call Python task modules)
 
-def task_901_wrapper(mem=None) -> bool:
+def task_901_wrapper(mem=None, **kwargs) -> bool:
     """Task 901: Entry initialization"""
     return task_901(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_902_wrapper(mem=None) -> bool:
+def task_902_wrapper(mem=None, **kwargs) -> bool:
     """Task 902: Release setup"""
     return task_902(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_903_wrapper(mem=None) -> bool:
+def task_903_wrapper(mem=None, **kwargs) -> bool:
     """Task 903: Agent selection"""
     return task_903(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_904_wrapper(mem=None) -> bool:
+def task_904_wrapper(mem=None, **kwargs) -> bool:
     """Task 904: Release execution"""
     return task_904(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_905_wrapper(mem=None) -> bool:
+def task_905_wrapper(mem=None, **kwargs) -> bool:
     """Task 905: Release confirmation"""
     return task_905(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_906_wrapper(mem=None) -> bool:
+def task_906_wrapper(mem=None, **kwargs) -> bool:
     """Task 906: Closeout"""
     return task_906(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
@@ -98,7 +98,7 @@ def run_phase(resume_at: str = None) -> bool:
     task_artifacts = {
         "901": ["entry-decision.json"],
         "902": ["setup-decision.json"],
-        "903": ["release-agents.json", "selected-agents.json", "agents-decision.json"],
+        "903": ["release-agents.json", "agents-decision.json"],
         "904": ["execution-decision.json"],
         "905": ["confirmation-decision.json"],
         "906": [],

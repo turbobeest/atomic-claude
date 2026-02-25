@@ -4,29 +4,19 @@ Task 901: Entry & Initialization
 Validate prerequisites and present phase objectives for the Release phase.
 """
 
-import sys
 import json
+import sys
 import logging
 from pathlib import Path
-from typing import Dict, Any
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.ui import success, error, warning, info, step
+from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, RED, YELLOW, NC
 from core.utils.file_ops import read_json, write_json
 
 logger = logging.getLogger(__name__)
-
-
-# ANSI color codes for formatted output
-CYAN = "\033[96m"
-DIM = "\033[2m"
-BOLD = "\033[1m"
-GREEN = "\033[92m"
-RED = "\033[91m"
-YELLOW = "\033[93m"
-NC = "\033[0m"
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -94,7 +84,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             else:
                 print(f"  {RED}[CRIT]{NC} {RED}✗{NC} Phase 8 not complete (status: {phase_8_status})")
                 all_valid = False
-        except Exception as e:
+        except (json.JSONDecodeError, OSError, KeyError) as e:
             logger.debug("Failed to read Phase 8 closeout: %s", e)
             print(f"  {RED}[CRIT]{NC} {RED}✗{NC} Failed to read Phase 8 closeout: {e}")
             all_valid = False

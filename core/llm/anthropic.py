@@ -154,12 +154,8 @@ class AnthropicProvider(BaseLLMProvider):
             "temperature": temperature,
         }
 
-        # Add system prompt if provided
-        if system_prompt:
-            request_kwargs["system"] = system_prompt
-
-        # Add prompt caching headers if enabled
-        if self.enable_caching and system_prompt:
+        # Add system prompt if provided (with optional prompt caching)
+        if system_prompt and self.enable_caching:
             request_kwargs["system"] = [
                 {
                     "type": "text",
@@ -167,6 +163,8 @@ class AnthropicProvider(BaseLLMProvider):
                     "cache_control": {"type": "ephemeral"}
                 }
             ]
+        elif system_prompt:
+            request_kwargs["system"] = system_prompt
 
         # Merge additional kwargs
         request_kwargs.update(kwargs)

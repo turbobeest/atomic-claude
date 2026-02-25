@@ -31,6 +31,12 @@ class TaskMemory:
 
     CATEGORIES = ("decision", "finding", "conversation", "configuration", "warning")
 
+    _LABELS_MAP = {
+        "finding": "Findings", "decision": "Decisions",
+        "configuration": "Configuration",
+        "conversation": "Conversation", "warning": "Warnings",
+    }
+
     def __init__(self, phase_id: str, task_id: str, task_name: str, flush_fn=None):
         self._entries: List[Tuple[str, str]] = []
         self.phase_id = phase_id
@@ -38,6 +44,34 @@ class TaskMemory:
         self.task_name = task_name
         self._flush_fn = flush_fn
         self._flushed_count: int = 0
+
+    @staticmethod
+    def _format_entries(entries: List[Tuple[str, str]], labels_map: Dict[str, str],
+                        categories: tuple) -> List[str]:
+        """Format a list of (category, text) entries into labelled sections.
+
+        Args:
+            entries: List of (category, text) tuples to format
+            labels_map: Mapping from category key to display label
+            categories: Ordered tuple of category keys
+
+        Returns:
+            List of formatted lines (no leading header — caller adds that)
+        """
+        grouped: Dict[str, List[str]] = {}
+        for category, text in entries:
+            grouped.setdefault(category, []).append(text)
+
+        lines: List[str] = []
+        for category in categories:
+            cat_entries = grouped.get(category, [])
+            if not cat_entries:
+                continue
+            lines.append("")
+            lines.append(f"{labels_map[category]}:")
+            for entry in cat_entries:
+                lines.append(f"- {entry}")
+        return lines
 
     def decision(self, text: str) -> None:
         """Record a user or system choice."""
@@ -75,25 +109,7 @@ class TaskMemory:
         header = (f"Task {self.task_id} ({self.task_name}) — {label}"
                   if label else f"Task {self.task_id} ({self.task_name}) progress")
         lines = [header]
-
-        grouped: Dict[str, List[str]] = {}
-        for category, text in new_entries:
-            grouped.setdefault(category, []).append(text)
-
-        labels_map = {
-            "finding": "Findings", "decision": "Decisions",
-            "configuration": "Configuration",
-            "conversation": "Conversation", "warning": "Warnings",
-        }
-
-        for category in self.CATEGORIES:
-            entries = grouped.get(category, [])
-            if not entries:
-                continue
-            lines.append("")
-            lines.append(f"{labels_map[category]}:")
-            for entry in entries:
-                lines.append(f"- {entry}")
+        lines.extend(self._format_entries(new_entries, self._LABELS_MAP, self.CATEGORIES))
 
         try:
             self._flush_fn(
@@ -117,31 +133,7 @@ class TaskMemory:
         Returns formatted content with task header and categorized entries.
         """
         lines = [f"Task {self.task_id} ({self.task_name}) completed."]
-
-        # Group entries by category, preserving order within each
-        grouped: Dict[str, List[str]] = {}
-        for category, text in self._entries:
-            grouped.setdefault(category, []).append(text)
-
-        # Category display names (plural)
-        labels = {
-            "finding": "Findings",
-            "decision": "Decisions",
-            "configuration": "Configuration",
-            "conversation": "Conversation",
-            "warning": "Warnings",
-        }
-
-        # Emit in a stable order
-        for category in self.CATEGORIES:
-            entries = grouped.get(category, [])
-            if not entries:
-                continue
-            lines.append("")
-            lines.append(f"{labels[category]}:")
-            for entry in entries:
-                lines.append(f"- {entry}")
-
+        lines.extend(self._format_entries(self._entries, self._LABELS_MAP, self.CATEGORIES))
         return "\n".join(lines)
 
     def build_metadata(self) -> Dict[str, Any]:

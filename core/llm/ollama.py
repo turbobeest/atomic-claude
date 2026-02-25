@@ -26,11 +26,7 @@ from .base import (
     APIError,
     ModelNotFoundError,
 )
-
-
-class ProviderUnavailableException(LLMError):
-    """Ollama provider is not available (service not running)."""
-    pass
+from .exceptions import ProviderUnavailableException
 
 
 # Tier-to-model mapping for Ollama (mirrors config/models.json).
@@ -92,6 +88,7 @@ class OllamaProvider(BaseLLMProvider):
         max_tokens: int = 4096,
         temperature: float = 1.0,
         timeout: int = 600,
+        _pull_attempted: bool = False,
         **kwargs
     ) -> LLMResponse:
         """
@@ -172,7 +169,7 @@ class OllamaProvider(BaseLLMProvider):
             raise LLMTimeoutError(
                 f"Ollama request timed out after {timeout}s",
                 provider="ollama"
-            )
+            ) from e
         except Exception as e:
             raise APIError(f"Ollama request failed: {e}", provider="ollama")
 
@@ -180,11 +177,11 @@ class OllamaProvider(BaseLLMProvider):
         if response_data.get("error"):
             error_msg = response_data["error"]
             if "model" in error_msg.lower() and "not found" in error_msg.lower():
-                if self.auto_pull:
-                    # Try to pull the model
+                if self.auto_pull and not _pull_attempted:
+                    # Try to pull the model (once only)
                     if self.pull_model(model):
                         # Retry after successful pull
-                        return self.invoke(prompt, system_prompt, model, max_tokens, temperature, timeout, **kwargs)
+                        return self.invoke(prompt, system_prompt, model, max_tokens, temperature, timeout, _pull_attempted=True, **kwargs)
                 raise ModelNotFoundError(f"Model not found: {model}", provider="ollama")
             raise APIError(error_msg, provider="ollama")
 
@@ -347,10 +344,8 @@ class OllamaProvider(BaseLLMProvider):
         Returns:
             Estimated token count
         """
-        # Simple approximation: split on whitespace
-        words = text.split()
-        # Rough estimate: 0.75 tokens per word on average
-        return int(len(words) * 0.75)
+        # Rough estimate: ~4 characters per token (matches other providers)
+        return len(text) // 4
 
     def health_check(self) -> HealthStatus:
         """

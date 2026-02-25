@@ -121,7 +121,7 @@ class TestCreate:
 
     @patch("core.worktree.subprocess.run")
     def test_create_with_base_branch(self, mock_run, manager_with_branch):
-        """base_branch is appended to the git worktree add command."""
+        """base_branch is verified then appended to the git worktree add command."""
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         result = manager_with_branch.create("504")
@@ -129,7 +129,14 @@ class TestCreate:
         expected_path = manager_with_branch.worktrees_dir / "task-504"
         assert result == expected_path
 
-        mock_run.assert_called_once_with(
+        # Source now verifies the base branch first, then creates the worktree
+        assert mock_run.call_count == 2
+        mock_run.assert_any_call(
+            ["git", "rev-parse", "--verify", "develop"],
+            cwd=str(manager_with_branch.project_root),
+            capture_output=True, text=True, timeout=10,
+        )
+        mock_run.assert_any_call(
             ["git", "worktree", "add", "-b", "wt/task-504", str(expected_path), "develop"],
             cwd=str(manager_with_branch.project_root),
             capture_output=True, text=True, timeout=30,
@@ -289,10 +296,11 @@ class TestMergeBack:
 
     @patch("core.worktree.subprocess.run")
     def test_merge_back_conflict(self, mock_run, manager):
-        """Merge returns non-zero (conflict) — returns False."""
+        """Merge returns non-zero (conflict) — aborts merge and returns False."""
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="abc1234 Add feature\n"),  # git log
             MagicMock(returncode=1, stderr="CONFLICT (content): Merge conflict in foo.py"),  # git merge
+            MagicMock(returncode=0),  # git merge --abort
         ]
 
         result = manager.merge_back("504")
@@ -310,10 +318,11 @@ class TestMergeBack:
 
     @patch("core.worktree.subprocess.run")
     def test_merge_back_merge_exception(self, mock_run, manager):
-        """git merge raises exception — returns False."""
+        """git merge raises exception — attempts abort and returns False."""
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="abc1234 Add feature\n"),  # git log
             OSError("git crashed"),                                    # git merge
+            MagicMock(returncode=0),                                   # git merge --abort
         ]
 
         result = manager.merge_back("504")

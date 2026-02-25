@@ -75,17 +75,21 @@ if PYDANTIC_AVAILABLE:
         """
         Standardized LLM response.
 
-        Returned by all providers.
+        Returned by all providers. The ``usage`` field accepts either a
+        ``TokenUsage`` dataclass (from ``base.py``) or a plain dict so
+        that both provider-level and router-level code work correctly.
         """
         content: str = Field(..., description="Response content")
         model: str = Field(..., description="Model used")
         provider: str = Field(..., description="Provider name")
-        usage: Dict[str, int] = Field(default_factory=dict, description="Token usage")
+        usage: Any = Field(default_factory=dict, description="Token usage (TokenUsage or dict)")
         finish_reason: Optional[str] = Field(None, description="Finish reason")
         stop_reason: Optional[str] = Field(None, description="Stop reason")
         latency_ms: Optional[int] = Field(None, description="Latency in milliseconds")
         timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Response timestamp")
         metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+        model_config = ConfigDict(arbitrary_types_allowed=True)
 
         @field_serializer('timestamp')
         def serialize_timestamp(self, v: datetime) -> str:
@@ -176,7 +180,7 @@ else:
         content: str
         model: str
         provider: str
-        usage: Dict[str, int] = field(default_factory=dict)
+        usage: Any = field(default_factory=dict)
         finish_reason: Optional[str] = None
         stop_reason: Optional[str] = None
         latency_ms: Optional[int] = None

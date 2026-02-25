@@ -37,8 +37,15 @@ from core.config import (
 
 @pytest.fixture
 def temp_atomic_root(tmp_path):
-    """Create temporary atomic root directory."""
-    return tmp_path
+    """Create temporary atomic root directory.
+
+    In the real deployment, atomic-claude2 lives inside a parent project
+    directory, and .outputs/ lives at the parent level. So atomic_root
+    is a child of the project root.
+    """
+    atomic_root = tmp_path / "atomic-claude"
+    atomic_root.mkdir()
+    return atomic_root
 
 
 @pytest.fixture
@@ -79,8 +86,13 @@ def sample_secrets():
 
 @pytest.fixture
 def setup_project_config(temp_atomic_root, sample_project_config, sample_secrets):
-    """Setup Phase 00 output files."""
-    outputs_dir = temp_atomic_root / ".outputs" / "0-setup"
+    """Setup Phase 00 output files.
+
+    Files go at atomic_root.parent / .outputs (the project root level),
+    matching the real directory layout where atomic-claude lives inside
+    a parent project directory.
+    """
+    outputs_dir = temp_atomic_root.parent / ".outputs" / "0-setup"
     outputs_dir.mkdir(parents=True)
 
     # Write project config
@@ -251,8 +263,8 @@ class TestConfig:
         config = Config(atomic_root=temp_atomic_root)
         initial_name = config.get_project_name()
 
-        # Create config file
-        outputs_dir = temp_atomic_root / ".outputs" / "0-setup"
+        # Create config file at parent level (where .outputs/ lives in production)
+        outputs_dir = temp_atomic_root.parent / ".outputs" / "0-setup"
         outputs_dir.mkdir(parents=True)
         with open(outputs_dir / "project-config.json", 'w') as f:
             json.dump({
@@ -420,7 +432,7 @@ class TestEdgeCases:
 
     def test_invalid_json_file(self, temp_atomic_root):
         """Test handling of invalid JSON files."""
-        outputs_dir = temp_atomic_root / ".outputs" / "0-setup"
+        outputs_dir = temp_atomic_root.parent / ".outputs" / "0-setup"
         outputs_dir.mkdir(parents=True)
 
         # Write invalid JSON
@@ -503,8 +515,8 @@ class TestConfigIntegration:
 
     def test_full_priority_chain(self, temp_atomic_root):
         """Test full priority chain: CLI > env > .env > JSON > defaults."""
-        # Setup JSON file
-        outputs_dir = temp_atomic_root / ".outputs" / "0-setup"
+        # Setup JSON file at parent level (where .outputs/ lives in production)
+        outputs_dir = temp_atomic_root.parent / ".outputs" / "0-setup"
         outputs_dir.mkdir(parents=True)
         with open(outputs_dir / "project-config.json", 'w') as f:
             json.dump({

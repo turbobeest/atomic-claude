@@ -9,12 +9,15 @@ Execute parallel code review across all dimensions:
 """
 
 import logging
+import shlex
 import sys
 import json
-import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from datetime import datetime, timezone
+
+# Maximum character budget for LLM prompts (M1, M5)
+_MAX_PROMPT_CHARS = 50000
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,26 @@ try:
     HAS_TEAM_SESSION = True
 except ImportError:
     HAS_TEAM_SESSION = False
+
+
+def _strip_json_fences(text: str) -> str:
+    """Strip markdown JSON code fences from LLM output.
+
+    Handles ```json ... ``` and bare ``` ... ``` wrappers.
+    """
+    stripped = text.strip()
+    if "```json" in stripped:
+        start = stripped.find("```json") + 7
+        end = stripped.find("```", start)
+        if end != -1:
+            return stripped[start:end].strip()
+    if stripped.startswith("```"):
+        first_nl = stripped.find("\n")
+        if first_nl != -1:
+            stripped = stripped[first_nl + 1:]
+        if stripped.endswith("```"):
+            stripped = stripped[:-3].strip()
+    return stripped
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -142,6 +165,9 @@ None (UAT stub)
 
     # Display and save results
     _display_and_save_results(results, findings_file, graph=graph)
+
+    # Generate review-report.md (expected by orchestrator artifact check)
+    _generate_review_report(results, output_dir)
 
     print(print_green("✓ Comprehensive Review complete"))
     return True
@@ -404,7 +430,7 @@ def _run_team_session_review(
     for dim_key, prompt_file in prompt_files.items():
         team.add_agent(
             agent_id=dim_key,
-            command=f"cat '{prompt_file}' | claude --print",
+            command=f"cat {shlex.quote(str(prompt_file))} | claude --print",
             cwd=str(project_root),
         )
 
@@ -421,17 +447,7 @@ def _run_team_session_review(
 
         if tr and tr.success and tr.output:
             try:
-                raw = tr.output.strip()
-                # Strip markdown fences if present
-                if "```json" in raw:
-                    start = raw.find("```json") + 7
-                    end = raw.find("```", start)
-                    raw = raw[start:end].strip()
-                elif raw.startswith("```"):
-                    raw = raw.split("\n", 1)[1]
-                    if raw.endswith("```"):
-                        raw = raw[:-3].strip()
-
+                raw = _strip_json_fences(tr.output)
                 parsed = json.loads(raw)
                 write_file(output_file, json.dumps(parsed, indent=2))
                 results[dim_key] = parsed
@@ -717,16 +733,29 @@ Respond with ONLY valid JSON (no markdown wrapper):
 def _execute_review(prompt: str, output_file: Path, model: str) -> Dict[str, Any]:
     """Execute a review by calling LLM."""
     try:
+        # Enforce prompt size cap (M1, M5)
+        if len(prompt) > _MAX_PROMPT_CHARS:
+            logger.warning("Prompt exceeds %d chars (%d); truncating code samples",
+                           _MAX_PROMPT_CHARS, len(prompt))
+            prompt = prompt[:_MAX_PROMPT_CHARS] + "\n\n[... truncated for token budget]\n"
+
         response = invoke_llm(prompt=prompt, model=model)
 
-        # Parse JSON from response
-        # Try to extract JSON from markdown if present
-        if "```json" in response:
-            start = response.find("```json") + 7
-            end = response.find("```", start)
-            response = response[start:end].strip()
+        # Strip markdown code fences from LLM response
+        response = _strip_json_fences(response)
 
         result = json.loads(response)
+
+        # Validate expected schema keys and types (M2)
+        for key in ("critical", "major", "minor", "suggestions"):
+            if key not in result:
+                logger.warning("LLM response missing expected key '%s'", key)
+                result[key] = 0
+            elif not isinstance(result[key], int):
+                logger.warning("LLM response key '%s' is not int, coercing", key)
+                result[key] = int(result[key])
+        if "findings" not in result or not isinstance(result["findings"], list):
+            result["findings"] = []
         write_file(output_file, json.dumps(result, indent=2))
 
         print(print_green("████████████████████████████████████████  Complete"))
@@ -815,6 +844,37 @@ def _display_and_save_results(results: Dict[str, Dict], findings_file: Path, gra
     # Write findings to graph
     if graph:
         _write_findings_to_graph(graph, findings_data)
+
+
+def _generate_review_report(results: Dict[str, Dict], output_dir: Path) -> None:
+    """Generate review-report.md summarizing findings across all dimensions."""
+    report_file = output_dir / "review-report.md"
+
+    sections = []
+    total_issues = 0
+    for dim_key, label in [("code", "Deep Code Review"), ("arch", "Architecture Compliance"),
+                            ("perf", "Performance Analysis"), ("doc", "Documentation Review")]:
+        dim = results.get(dim_key, {})
+        critical = dim.get("critical", 0)
+        major = dim.get("major", 0)
+        minor = dim.get("minor", 0)
+        suggestions = dim.get("suggestions", 0)
+        dim_total = critical + major + minor + suggestions
+        total_issues += dim_total
+
+        section = f"## {label}\n\n"
+        section += f"- Critical: {critical}\n- Major: {major}\n- Minor: {minor}\n- Suggestions: {suggestions}\n"
+        findings_list = dim.get("findings", [])
+        if findings_list:
+            section += "\n### Findings\n\n"
+            for f in findings_list[:10]:
+                sev = f.get("severity", "?")
+                desc = f.get("description", "No description")
+                section += f"- **[{sev}]** {desc}\n"
+        sections.append(section)
+
+    header = f"# Code Review Report\n\n**Total Issues:** {total_issues}\n\n"
+    write_file(report_file, header + "\n".join(sections))
 
 
 def _write_findings_to_graph(graph, findings_data: Dict) -> None:

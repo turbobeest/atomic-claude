@@ -205,11 +205,17 @@ class ConfigLoader:
 
         if 'CLAUDE_MAX_TURNS' in self.env_cache:
             config['llm'] = config.get('llm', {})
-            config['llm']['max_turns'] = int(self.env_cache['CLAUDE_MAX_TURNS'])
+            try:
+                config['llm']['max_turns'] = int(self.env_cache['CLAUDE_MAX_TURNS'])
+            except ValueError:
+                logger.warning("Invalid CLAUDE_MAX_TURNS value: %s (expected integer)", self.env_cache['CLAUDE_MAX_TURNS'])
 
         if 'CLAUDE_TIMEOUT' in self.env_cache:
             config['llm'] = config.get('llm', {})
-            config['llm']['timeout'] = int(self.env_cache['CLAUDE_TIMEOUT'])
+            try:
+                config['llm']['timeout'] = int(self.env_cache['CLAUDE_TIMEOUT'])
+            except ValueError:
+                logger.warning("Invalid CLAUDE_TIMEOUT value: %s (expected integer)", self.env_cache['CLAUDE_TIMEOUT'])
 
         # Secrets
         if 'AWS_REGION' in self.env_cache:
@@ -534,11 +540,6 @@ class Config:
         if self.get("secrets.bedrock_enabled"):
             return "bedrock"
 
-        # Check environment
-        env_provider = os.environ.get("CLAUDE_PROVIDER")
-        if env_provider:
-            return env_provider
-
         # Default
         return "max"
 
@@ -629,7 +630,9 @@ def get_config(atomic_root: Path = None, cli_args: Dict[str, Any] = None) -> Con
         Global Config instance
     """
     global _config_instance
-    if _config_instance is None or atomic_root is not None:
+    if _config_instance is None:
+        _config_instance = Config(atomic_root, cli_args)
+    elif atomic_root is not None and atomic_root != _config_instance.atomic_root:
         _config_instance = Config(atomic_root, cli_args)
     return _config_instance
 

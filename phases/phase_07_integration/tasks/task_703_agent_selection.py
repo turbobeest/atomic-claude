@@ -4,10 +4,12 @@ Task 703: Agent Selection
 Present and select integration testing agents for Phase 7.
 """
 
+import logging
 import sys
-import json
 from pathlib import Path
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -17,6 +19,88 @@ from core.utils.cli_ui import (
     print_red, print_dim, print_blue, print_magenta, prompt_user, clear_input_buffer
 )
 from core.utils.file_ops import write_json
+
+
+def _select_agent_for_role(
+    role_name: str, color_fn, options: list, default_idx: int = 0
+) -> str:
+    """Select an agent for a given role interactively.
+
+    Args:
+        role_name: Display name for the role
+        color_fn: Color function for display
+        options: List of "name:model" strings
+        default_idx: Index of the default option (0-based)
+
+    Returns:
+        Selected "name:model" string
+    """
+    print(color_fn(f"{role_name}:"))
+    for i, opt in enumerate(options):
+        prefix = print_green(f"  [{i + 1}] ") if i == default_idx else print_dim(f"  [{i + 1}] ")
+        label = f"{opt} - Recommended" if i == default_idx else opt
+        print(prefix + label)
+    print(print_yellow("  [c] ") + "Custom agent")
+    print()
+
+    choice = prompt_user(f"Select (default: {default_idx + 1}): ").strip() or str(default_idx + 1)
+
+    if choice.lower() == "c":
+        custom_name = prompt_user("Custom agent name: ").strip()
+        custom_model = prompt_user("Custom agent model (default: sonnet): ").strip() or "sonnet"
+        return f"{custom_name}:{custom_model}"
+
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(options):
+            return options[idx]
+    except ValueError:
+        pass
+
+    return options[default_idx]
+
+
+def _display_agent_roles() -> None:
+    """Display available integration agent roles."""
+    # E2E Test Runner
+    print(print_cyan("-" * 118))
+    print(print_bold("E2E TEST RUNNER"))
+    print()
+    print("  Executes end-to-end test suites across all user flows.")
+    print("  Validates complete system behavior from input to output.")
+    print(print_green("  Recommended: ") + "e2e-test-runner-phd (sonnet)")
+    print(print_cyan("-" * 118))
+    print()
+
+    # Acceptance Validator
+    print(print_magenta("-" * 118))
+    print(print_bold("ACCEPTANCE VALIDATOR"))
+    print()
+    print("  Validates each acceptance criterion from PRD.")
+    print("  Maps requirements to test evidence.")
+    print(print_green("  Recommended: ") + "acceptance-validator-phd (sonnet)")
+    print(print_magenta("-" * 118))
+    print()
+
+    # Performance Tester
+    print(print_yellow("-" * 118))
+    print(print_bold("PERFORMANCE TESTER"))
+    print()
+    print("  Benchmarks system against NFR targets.")
+    print("  Measures response times, memory, throughput.")
+    print(print_green("  Recommended: ") + "performance-tester-phd (haiku)")
+    print(print_yellow("-" * 118))
+    print()
+
+    # Integration Reporter
+    print(print_blue("-" * 118))
+    print(print_bold("INTEGRATION REPORTER"))
+    print()
+    print("  Generates comprehensive integration report.")
+    print("  Consolidates results from all testing agents.")
+    print(print_green("  Recommended: ") + "integration-reporter-phd (haiku)")
+    print(print_blue("-" * 118))
+    print()
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -60,45 +144,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_bold("  - AVAILABLE AGENTS"))
     print()
 
-    # E2E Test Runner
-    print(print_cyan("─" * 118))
-    print(print_bold("E2E TEST RUNNER"))
-    print()
-    print("  Executes end-to-end test suites across all user flows.")
-    print("  Validates complete system behavior from input to output.")
-    print(print_green("  Recommended: ") + "e2e-test-runner-phd (sonnet)")
-    print(print_cyan("─" * 118))
-    print()
-
-    # Acceptance Validator
-    print(print_magenta("─" * 118))
-    print(print_bold("ACCEPTANCE VALIDATOR"))
-    print()
-    print("  Validates each acceptance criterion from PRD.")
-    print("  Maps requirements to test evidence.")
-    print(print_green("  Recommended: ") + "acceptance-validator-phd (sonnet)")
-    print(print_magenta("─" * 118))
-    print()
-
-    # Performance Tester
-    print(print_yellow("─" * 118))
-    print(print_bold("PERFORMANCE TESTER"))
-    print()
-    print("  Benchmarks system against NFR targets.")
-    print("  Measures response times, memory, throughput.")
-    print(print_green("  Recommended: ") + "performance-tester-phd (haiku)")
-    print(print_yellow("─" * 118))
-    print()
-
-    # Integration Reporter
-    print(print_blue("─" * 118))
-    print(print_bold("INTEGRATION REPORTER"))
-    print()
-    print("  Generates comprehensive integration report.")
-    print("  Consolidates results from all testing agents.")
-    print(print_green("  Recommended: ") + "integration-reporter-phd (haiku)")
-    print(print_blue("─" * 118))
-    print()
+    _display_agent_roles()
 
     # ─────────────────────────────────────────────────────────────────────────
     # AGENT SELECTION
@@ -108,6 +154,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_bold("  - AGENT SELECTION"))
     print()
 
+    # PLACEHOLDER agent IDs -- validate against agent-manifest.json when available
     if uat_mode:
         # UAT mode: use defaults
         selected_agents = [
@@ -125,76 +172,32 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         clear_input_buffer()
         selected_agents = []
 
-        # E2E Test Runner selection
-        print(print_cyan("E2E Test Runner:"))
-        print(print_green("  [1] ") + "e2e-test-runner-phd (sonnet) - Recommended")
-        print(print_dim("  [2] ") + "e2e-test-runner (haiku) - Fast, standard")
-        print(print_yellow("  [c] ") + "Custom agent")
-        print()
-        e2e_choice = prompt_user("Select (default: 1): ").strip() or "1"
-
-        if e2e_choice.lower() == "c":
-            custom_name = prompt_user("Custom agent name: ").strip()
-            custom_model = prompt_user("Custom agent model (default: sonnet): ").strip() or "sonnet"
-            selected_agents.append(f"{custom_name}:{custom_model}")
-        elif e2e_choice == "2":
-            selected_agents.append("e2e-test-runner:haiku")
-        else:
-            selected_agents.append("e2e-test-runner-phd:sonnet")
+        selected_agents.append(_select_agent_for_role(
+            "E2E Test Runner", print_cyan,
+            ["e2e-test-runner-phd:sonnet", "e2e-test-runner:haiku"],
+            default_idx=0,
+        ))
         print()
 
-        # Acceptance Validator selection
-        print(print_magenta("Acceptance Validator:"))
-        print(print_green("  [1] ") + "acceptance-validator-phd (sonnet) - Recommended")
-        print(print_dim("  [2] ") + "acceptance-validator (haiku) - Fast, standard")
-        print(print_yellow("  [c] ") + "Custom agent")
-        print()
-        accept_choice = prompt_user("Select (default: 1): ").strip() or "1"
-
-        if accept_choice.lower() == "c":
-            custom_name = prompt_user("Custom agent name: ").strip()
-            custom_model = prompt_user("Custom agent model (default: sonnet): ").strip() or "sonnet"
-            selected_agents.append(f"{custom_name}:{custom_model}")
-        elif accept_choice == "2":
-            selected_agents.append("acceptance-validator:haiku")
-        else:
-            selected_agents.append("acceptance-validator-phd:sonnet")
+        selected_agents.append(_select_agent_for_role(
+            "Acceptance Validator", print_magenta,
+            ["acceptance-validator-phd:sonnet", "acceptance-validator:haiku"],
+            default_idx=0,
+        ))
         print()
 
-        # Performance Tester selection
-        print(print_yellow("Performance Tester:"))
-        print(print_green("  [1] ") + "performance-tester-phd (haiku) - Recommended")
-        print(print_dim("  [2] ") + "performance-tester-deep (sonnet) - Thorough")
-        print(print_yellow("  [c] ") + "Custom agent")
-        print()
-        perf_choice = prompt_user("Select (default: 1): ").strip() or "1"
-
-        if perf_choice.lower() == "c":
-            custom_name = prompt_user("Custom agent name: ").strip()
-            custom_model = prompt_user("Custom agent model (default: haiku): ").strip() or "haiku"
-            selected_agents.append(f"{custom_name}:{custom_model}")
-        elif perf_choice == "2":
-            selected_agents.append("performance-tester-deep:sonnet")
-        else:
-            selected_agents.append("performance-tester-phd:haiku")
+        selected_agents.append(_select_agent_for_role(
+            "Performance Tester", print_yellow,
+            ["performance-tester-phd:haiku", "performance-tester-deep:sonnet"],
+            default_idx=0,
+        ))
         print()
 
-        # Integration Reporter selection
-        print(print_blue("Integration Reporter:"))
-        print(print_green("  [1] ") + "integration-reporter-phd (haiku) - Recommended")
-        print(print_dim("  [2] ") + "integration-reporter-detailed (sonnet) - Comprehensive")
-        print(print_yellow("  [c] ") + "Custom agent")
-        print()
-        report_choice = prompt_user("Select (default: 1): ").strip() or "1"
-
-        if report_choice.lower() == "c":
-            custom_name = prompt_user("Custom agent name: ").strip()
-            custom_model = prompt_user("Custom agent model (default: haiku): ").strip() or "haiku"
-            selected_agents.append(f"{custom_name}:{custom_model}")
-        elif report_choice == "2":
-            selected_agents.append("integration-reporter-detailed:sonnet")
-        else:
-            selected_agents.append("integration-reporter-phd:haiku")
+        selected_agents.append(_select_agent_for_role(
+            "Integration Reporter", print_blue,
+            ["integration-reporter-phd:haiku", "integration-reporter-detailed:sonnet"],
+            default_idx=0,
+        ))
         print()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -209,7 +212,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_bold("SELECTED AGENTS"))
     print()
     for agent in selected_agents:
-        name, model = agent.split(":", 1)
+        parts = agent.split(":", 1)
+        name = parts[0]
+        model = parts[1] if len(parts) > 1 else "sonnet"
         print(print_green("  ✓ ") + f"{name} ({model})")
     print(print_dim("─" * 118))
     print()

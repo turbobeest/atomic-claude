@@ -4,8 +4,8 @@ Task 801: Entry & Initialization
 Validate prerequisites and present phase objectives.
 """
 
-import sys
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -72,7 +72,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             else:
                 print(print_red(f"  [CRIT] ✗ Phase 7 not complete (status: {phase_7_status})"))
                 all_valid = False
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             print(print_red(f"  [CRIT] ✗ Phase 7 closeout invalid: {e}"))
             all_valid = False
     else:

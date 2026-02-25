@@ -273,11 +273,11 @@ def test_error_injection_api_error(mock_provider):
 @pytest.mark.unit
 def test_error_injection_timeout(mock_provider):
     """Test timeout error injection."""
-    from core.llm.base import TimeoutError
+    from core.llm.base import LLMTimeoutError
 
     mock_provider.set_error_mode("timeout")
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(LLMTimeoutError):
         mock_provider.invoke("Test")
 
 

@@ -6,9 +6,8 @@ Runs E2E tests, acceptance validation, and performance benchmarks.
 """
 
 import sys
-import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict
 from datetime import datetime, timezone
 
 # Add project root to path for imports
@@ -32,6 +31,8 @@ def run_integration_tests(atomic_root: Path, setup_data: Dict) -> Dict:
     Returns:
         Dict with test results (tests_run, tests_passed, tests_failed)
     """
+    # STUB: Returns simulated results. Implement actual test execution
+    # (pytest, cargo test, etc.) for production use.
     test_environments = setup_data.get("test_environments", [])
     integration_points = setup_data.get("integration_points", [])
 
@@ -142,7 +143,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Load integration setup
     try:
         setup_data = read_json(setup_file)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
+    except (FileNotFoundError, ValueError) as e:
         print(print_red(f"  Integration setup not found: {e}"))
         print(print_red("  Run Task 702 (Integration Setup) first."))
         return False

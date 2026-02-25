@@ -86,7 +86,22 @@ class SandboxConfig:
                 pass
 
         new_settings = self.generate_settings()
-        existing.update(new_settings)
+
+        # Deep merge: append to arrays (dedup by pattern), update scalars
+        for key, value in new_settings.items():
+            if key in ("allowedTools", "deniedTools") and key in existing:
+                # Merge arrays: add new rules that aren't already present
+                existing_patterns = {
+                    (r.get("tool", ""), r.get("pattern", ""))
+                    for r in existing[key]
+                }
+                for rule in value:
+                    rule_key = (rule.get("tool", ""), rule.get("pattern", ""))
+                    if rule_key not in existing_patterns:
+                        existing[key].append(rule)
+                        existing_patterns.add(rule_key)
+            else:
+                existing[key] = value
 
         settings_file.write_text(json.dumps(existing, indent=2) + "\n")
         logger.info("Sandbox settings written to %s", settings_file)
@@ -125,6 +140,8 @@ class SandboxConfig:
             # No destructive git operations
             SandboxRule(tool="Bash", pattern="git push --force*"),
             SandboxRule(tool="Bash", pattern="git reset --hard*"),
+            SandboxRule(tool="Bash", pattern="git checkout .*"),
+            SandboxRule(tool="Bash", pattern="git branch -D*"),
             SandboxRule(tool="Bash", pattern="rm -rf *"),
             # No credential access
             SandboxRule(tool="Read", pattern="**/.env"),

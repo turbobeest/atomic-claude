@@ -176,8 +176,10 @@ def enrich_memory_with_llm(
             continue
 
     # 2. Discover additional output files (prompts, markdown, etc.)
-    if output_dir:
-        all_files = scan_output_files(output_dir)
+    # Cache scan result to avoid calling scan_output_files twice (Finding #36)
+    all_files = scan_output_files(output_dir) if output_dir else []
+
+    if output_dir and all_files:
         artifact_names = {Path(p).name for p in artifact_paths}
 
         # Prioritize prompts and markdown files (they contain the thought track)
@@ -208,11 +210,9 @@ def enrich_memory_with_llm(
     if not content_parts:
         return None
 
-    # Build file inventory for reference
+    # Build file inventory for reference (reuse cached scan)
     file_list = ""
-    if output_dir:
-        all_files = scan_output_files(output_dir)
-        if all_files:
+    if all_files:
             file_list = "\n## All Generated Files\n" + "\n".join(
                 f"- {f['name']} ({f['size']} bytes)" for f in all_files
             )
@@ -240,8 +240,9 @@ Create a structured summary with these sections (omit empty sections):
 Keep the total summary under 2000 characters. Be specific and factual — include names, numbers, and paths.
 Do NOT include generic boilerplate. Every line should carry information."""
 
+    import tempfile
+    output_file = None
     try:
-        import tempfile
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
             output_file = f.name
 
@@ -253,13 +254,25 @@ Do NOT include generic boilerplate. Every line should carry information."""
         )
 
         result = Path(output_file).read_text(encoding="utf-8").strip()
-        Path(output_file).unlink(missing_ok=True)
 
+        # Basic validation: ensure reasonable length and strip potential HTML/script tags
         if result and len(result) > 20:
+            import re
+            result = re.sub(r'<script[^>]*>.*?</script>', '', result, flags=re.DOTALL | re.IGNORECASE)
+            result = re.sub(r'<[^>]+>', '', result)
+            if len(result) > 5000:
+                result = result[:5000] + "\n... (truncated)"
             return f"Task {task_id} ({task_name}) completed.\n\n{result}"
 
     except Exception as e:
         logger.debug("LLM memory enrichment failed for task %s: %s", task_id, e)
+    finally:
+        # Ensure temp file is always cleaned up (Finding #34)
+        if output_file:
+            try:
+                Path(output_file).unlink(missing_ok=True)
+            except OSError:
+                pass
 
     return None
 

@@ -5,7 +5,6 @@ Present and select deployment preparation agents.
 """
 
 import sys
-import json
 from pathlib import Path
 from typing import List
 from datetime import datetime, timezone
@@ -138,8 +137,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print("  " + "─" * 110)
     print(print_bold("  SELECTED AGENTS"))
     print()
+    # PLACEHOLDER: Agent IDs should be validated against agent-manifest.json
     for agent in selected_agents:
-        agent_name, model = agent.split(":")
+        parts = agent.rsplit(":", 1)
+        agent_name = parts[0]
+        model = parts[1] if len(parts) > 1 else "sonnet"
         print(f"    ✓ {agent_name} ({model})")
     print("  " + "─" * 110)
     print()
@@ -148,7 +150,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     agents_data = {
         "phase": 8,
         "agents": selected_agents,
-        "selected_at": datetime.now(timezone.utc).isoformat() + "Z"
+        "selected_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -204,7 +206,7 @@ def _display_agent_options():
 
 def _select_agent(role_name: str, options: List[tuple], color_func) -> str:
     """Select an agent for a specific role."""
-    color_func(f"  {role_name}:")
+    print(color_func(f"  {role_name}:"))
     print()
 
     for choice, agent, desc in options:

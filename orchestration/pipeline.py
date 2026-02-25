@@ -60,6 +60,13 @@ from core.config import Config
 from core.memory import memory_init, memory_checkpoint, memory_handle_backtrack
 from core.utils.file_ops import write_json
 
+try:
+    from core.graph import get_graph
+    from core.graph.exceptions import GraphUnavailableError
+except ImportError:
+    get_graph = None
+    GraphUnavailableError = Exception
+
 logger = logging.getLogger(__name__)
 
 
@@ -291,7 +298,9 @@ class PhaseValidator:
                 continue
 
             # Check phase-level completion first (set by mark_phase_complete)
-            phase_state = self.state._state.get('phases', {}).get(dep_metadata.phase_id, {})
+            # NOTE: accessing _state directly — StateManager has no public getter for phase status
+            state_data = self.state._state
+            phase_state = state_data.get('phases', {}).get(dep_metadata.phase_id, {})
             if phase_state.get('status') == 'completed':
                 continue
 
@@ -318,7 +327,7 @@ class PhaseValidator:
                 continue
 
             closeout_file = (
-                self.atomic_root.parent / ".outputs" /
+                self.atomic_root / ".outputs" /
                 dep_metadata.phase_id / "closeout.json"
             )
 
@@ -332,7 +341,7 @@ class PhaseValidator:
 
     def _check_phase_0_complete(self) -> bool:
         """Check if Phase 0 is complete."""
-        phase_0_closeout = self.atomic_root.parent / ".outputs" / "0-setup" / "closeout.json"
+        phase_0_closeout = self.atomic_root / ".outputs" / "0-setup" / "closeout.json"
         return phase_0_closeout.exists()
 
 
@@ -513,12 +522,8 @@ class PhasePipeline:
         # Set current phase in state
         self.state.set_current_phase(metadata.phase_id)
 
-        # Initialize memory system (idempotent — safe to call multiple times)
-        try:
-            memory_init(self.atomic_root / ".state")
-        except Exception as e:
-            logger.warning("memory_init failed: %s", e, exc_info=True)
-            print(f"  [memory] init warning: {e}")
+        # Initialize memory system with FalkorDB graph support
+        self._setup_phase_memory()
 
         # Execute phase via orchestrator
         success = self._execute_phase_orchestrator(metadata, resume_at)
@@ -527,28 +532,8 @@ class PhasePipeline:
             print(f"\n❌ Phase {phase_num} failed or stopped.")
             return False
 
-        # Reload state from disk (orchestrator saved task completions via its own StateManager)
-        self.state._state = self.state.load_state()
-
-        # Mark phase complete
-        self.state.mark_phase_complete(metadata.phase_id)
-
-        # Memory checkpoint at phase boundary
-        try:
-            memory_checkpoint(
-                phase=metadata.phase_num,
-                phase_name=metadata.phase_name,
-                summary=f"Phase {metadata.phase_num} ({metadata.phase_name}) completed",
-                artifacts=[str(self.atomic_root.parent / ".outputs" / metadata.phase_id / "closeout.json")],
-                state_snapshot={"phase_id": metadata.phase_id, "completed_at": datetime.now(timezone.utc).isoformat()}
-            )
-        except Exception as e:
-            logger.warning("memory_checkpoint failed: %s", e, exc_info=True)
-            print(f"  [memory] checkpoint warning: {e}")
-
-        # Create closeout if required
-        if metadata.required_closeout:
-            self._ensure_closeout_exists(metadata)
+        # Finalize: closeout, state update, memory checkpoint
+        self._finalize_phase(metadata)
 
         print(f"\n✅ Phase {phase_num} complete!")
 
@@ -559,11 +544,13 @@ class PhasePipeline:
 
     def _is_phase_already_complete(self, metadata: PhaseMetadata) -> bool:
         """Check if a phase is already fully complete (status + closeout)."""
-        phase_state = self.state._state.get('phases', {}).get(metadata.phase_id, {})
+        # NOTE: accessing _state directly — StateManager has no public getter for phase status
+        state_data = self.state._state
+        phase_state = state_data.get('phases', {}).get(metadata.phase_id, {})
         if phase_state.get('status') != 'completed':
             return False
         # Also verify closeout file exists
-        closeout_file = self.atomic_root.parent / ".outputs" / metadata.phase_id / "closeout.json"
+        closeout_file = self._closeout_path(metadata.phase_id)
         return closeout_file.exists()
 
     def _handle_phase_transition(
@@ -629,11 +616,60 @@ class PhasePipeline:
             print(f"  Dependencies: {', '.join(map(str, metadata.dependencies))}")
         print("="*80 + "\n")
 
+    def _closeout_path(self, phase_id: str) -> Path:
+        """Return the canonical closeout file path for a phase."""
+        return self.atomic_root / ".outputs" / phase_id / "closeout.json"
+
+    def _setup_phase_memory(self) -> None:
+        """Initialize memory system with optional FalkorDB graph support."""
+        graph = None
+        if get_graph is not None:
+            try:
+                graph = get_graph(phase_id="pipeline")
+            except GraphUnavailableError:
+                logger.debug("FalkorDB unavailable for pipeline memory init")
+            except Exception as e:
+                logger.debug("Graph init failed for pipeline memory: %s", e)
+
+        try:
+            memory_init(self.atomic_root / ".state", graph=graph)
+        except Exception as e:
+            logger.warning("memory_init failed: %s", e, exc_info=True)
+            print(f"  [memory] init warning: {e}")
+
+    def _finalize_phase(self, metadata: PhaseMetadata) -> None:
+        """Write closeout, mark phase complete, and create memory checkpoint.
+
+        Closeout is written first so that a crash between steps does not
+        leave the phase marked complete without a closeout file.
+        """
+        # Reload state from disk (orchestrator saved task completions via its own StateManager)
+        # NOTE: accessing _state directly — StateManager has no public getter for bulk reload
+        self.state._state = self.state.load_state()
+
+        # Write closeout BEFORE marking phase complete (Finding #2)
+        if metadata.required_closeout:
+            self._ensure_closeout_exists(metadata)
+
+        # Mark phase complete (after closeout is safely on disk)
+        self.state.mark_phase_complete(metadata.phase_id)
+
+        # Memory checkpoint at phase boundary
+        try:
+            memory_checkpoint(
+                phase=metadata.phase_num,
+                phase_name=metadata.phase_name,
+                summary=f"Phase {metadata.phase_num} ({metadata.phase_name}) completed",
+                artifacts=[str(self._closeout_path(metadata.phase_id))],
+                state_snapshot={"phase_id": metadata.phase_id, "completed_at": datetime.now(timezone.utc).isoformat()}
+            )
+        except Exception as e:
+            logger.warning("memory_checkpoint failed: %s", e, exc_info=True)
+            print(f"  [memory] checkpoint warning: {e}")
+
     def _ensure_closeout_exists(self, metadata: PhaseMetadata) -> None:
         """Ensure closeout file exists for phase."""
-        closeout_file = (
-            self.atomic_root.parent / ".outputs" / metadata.phase_id / "closeout.json"
-        )
+        closeout_file = self._closeout_path(metadata.phase_id)
 
         if closeout_file.exists():
             return
@@ -677,7 +713,11 @@ class PhasePipeline:
             return False
 
         # Extract phase number from phase_id (e.g., "2-prd" -> 2)
-        phase_num = int(current_phase_id.split('-')[0])
+        try:
+            phase_num = int(current_phase_id.split('-')[0])
+        except (ValueError, IndexError):
+            print(f"❌ Cannot parse phase number from '{current_phase_id}'")
+            return False
 
         print(f"▶️  Resuming Phase {phase_num}")
         return self.run_phase(phase_num, resume_at=from_task)
@@ -737,7 +777,10 @@ class PhasePipeline:
         current_phase_id = self.state.get_current_phase()
         current_phase = None
         if current_phase_id:
-            current_phase = int(current_phase_id.split('-')[0])
+            try:
+                current_phase = int(current_phase_id.split('-')[0])
+            except (ValueError, IndexError):
+                logger.warning("Cannot parse phase number from '%s'", current_phase_id)
 
         # Count completed phases
         completed_phases = 0
@@ -800,9 +843,7 @@ class PhasePipeline:
             metadata = PHASE_REGISTRY[phase_num]
 
             # Check completion
-            closeout_file = (
-                self.atomic_root.parent / ".outputs" / metadata.phase_id / "closeout.json"
-            )
+            closeout_file = self._closeout_path(metadata.phase_id)
 
             if closeout_file.exists():
                 icon = "✅"

@@ -113,7 +113,7 @@ class TestProviderCapabilities:
         caps = get_provider_capabilities("anthropic")
         assert caps is not None
         assert caps.provider_name == "anthropic"
-        assert "claude-opus-4.6" in caps.available_models
+        assert "claude-opus-4-6" in caps.available_models
 
     def test_provider_supports(self):
         """Test checking provider support."""

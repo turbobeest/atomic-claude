@@ -1176,6 +1176,7 @@ class TestRunPhaseAudit:
         assert result is True
         assert "No audit column" in capsys.readouterr().out
 
+    @patch("core.audit._load_existing_evaluations", return_value=([], []))
     @patch("core.audit._remediation_loop",
            side_effect=lambda evals, *a, **kw: evals)
     @patch("core.audit._display_rich_results")
@@ -1186,7 +1187,7 @@ class TestRunPhaseAudit:
            side_effect=lambda a, d, pn, pid, uat_mode=False: a)
     @patch("core.audit._load_audit_inventory")
     def test_successful_audit(self, mock_load, _curation, _plan, mock_parallel,
-                              _display, _remediation, temp_dir, capsys):
+                              _display, _remediation, _existing, temp_dir, capsys):
         """Full audit: CSV → filter → curation → plan → evaluate → report."""
         mock_load.return_value = [
             {"audit_id": "a1", "audit_name": "Test", "severity": "high",
@@ -1203,7 +1204,11 @@ class TestRunPhaseAudit:
         out.mkdir()
         (out / "notes.md").write_text("# Phase notes")
 
-        with patch("core.audit._ATOMIC_ROOT", temp_dir):
+        # _ATOMIC_ROOT.parent is used for .outputs/ — set _ATOMIC_ROOT to a
+        # subdirectory so that .parent resolves back to temp_dir.
+        atomic_subdir = temp_dir / "atomic"
+        atomic_subdir.mkdir()
+        with patch("core.audit._ATOMIC_ROOT", atomic_subdir):
             result = run_phase_audit(1, "1-discovery", out)
 
         assert result is True
@@ -1224,6 +1229,7 @@ class TestRunPhaseAudit:
         assert "results" in report
         assert len(report["results"]) == 2
 
+    @patch("core.audit._load_existing_evaluations", return_value=([], []))
     @patch("core.audit._remediation_loop",
            side_effect=lambda evals, *a, **kw: evals)
     @patch("core.audit._display_rich_results")
@@ -1234,7 +1240,7 @@ class TestRunPhaseAudit:
            side_effect=lambda a, d, pn, pid, uat_mode=False: a)
     @patch("core.audit._load_audit_inventory")
     def test_all_pass(self, mock_load, _curation, _plan, mock_parallel,
-                      _display, _remediation, temp_dir):
+                      _display, _remediation, _existing, temp_dir):
         """All pass → overall PASS."""
         mock_load.return_value = [
             {"audit_id": "a1", "audit_name": "T", "severity": "high",
@@ -1244,7 +1250,9 @@ class TestRunPhaseAudit:
             _make_eval(audit_id="a1", status="pass"),
         ]
 
-        with patch("core.audit._ATOMIC_ROOT", temp_dir):
+        atomic_subdir = temp_dir / "atomic"
+        atomic_subdir.mkdir()
+        with patch("core.audit._ATOMIC_ROOT", atomic_subdir):
             run_phase_audit(1, "1-discovery", temp_dir)
 
         report = json.loads(
@@ -1252,6 +1260,7 @@ class TestRunPhaseAudit:
         )
         assert report["overall_status"] == "PASS"
 
+    @patch("core.audit._load_existing_evaluations", return_value=([], []))
     @patch("core.audit._remediation_loop",
            side_effect=lambda evals, *a, **kw: evals)
     @patch("core.audit._display_rich_results")
@@ -1262,7 +1271,7 @@ class TestRunPhaseAudit:
            side_effect=lambda a, d, pn, pid, uat_mode=False: a)
     @patch("core.audit._load_audit_inventory")
     def test_has_failure(self, mock_load, _curation, _plan, mock_parallel,
-                         _display, _remediation, temp_dir):
+                         _display, _remediation, _existing, temp_dir):
         """Any fail → overall FAIL."""
         mock_load.return_value = [
             {"audit_id": "a1", "audit_name": "T", "severity": "high",
@@ -1272,7 +1281,9 @@ class TestRunPhaseAudit:
             _make_eval(audit_id="a1", status="fail"),
         ]
 
-        with patch("core.audit._ATOMIC_ROOT", temp_dir):
+        atomic_subdir = temp_dir / "atomic"
+        atomic_subdir.mkdir()
+        with patch("core.audit._ATOMIC_ROOT", atomic_subdir):
             run_phase_audit(1, "1-discovery", temp_dir)
 
         report = json.loads(

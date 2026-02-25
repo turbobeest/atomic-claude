@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.config import Config
 from core.llm import invoke
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
@@ -493,7 +492,7 @@ def _merge_feature_tasks(
     return {
         "meta": {
             "project_name": project_name,
-            "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
             "source": "prd-sectional",
             "version": "1.0"
         },
@@ -780,7 +779,7 @@ def _create_template_tasks(file_path: Path) -> None:
     template = {
         "meta": {
             "project_name": "Project",
-            "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
             "source": "template",
             "version": "1.0"
         },

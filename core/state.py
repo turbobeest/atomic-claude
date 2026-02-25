@@ -185,19 +185,27 @@ class StateLock:
         Returns:
             True if acquired, False on timeout
         """
+        import time
+
         self.lock_file.parent.mkdir(parents=True, exist_ok=True)
 
-        try:
-            # Try fcntl first (Unix)
-            self.lock_fd = open(self.lock_file, 'w')
-            fcntl.flock(self.lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except (IOError, OSError):
-            # Lock held by another process or fcntl not available
-            if self.lock_fd:
-                self.lock_fd.close()
-                self.lock_fd = None
-            return False
+        deadline = time.monotonic() + timeout
+        retry_interval = 0.1  # 100ms between retries
+
+        while True:
+            try:
+                # Try fcntl (Unix)
+                self.lock_fd = open(self.lock_file, 'w')
+                fcntl.flock(self.lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
+            except (IOError, OSError):
+                # Lock held by another process or fcntl not available
+                if self.lock_fd:
+                    self.lock_fd.close()
+                    self.lock_fd = None
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(retry_interval)
 
     def release(self) -> None:
         """Release lock."""
@@ -259,7 +267,7 @@ class StateTransaction:
         else:
             # Success, commit
             self.commit()
-            return True
+            return False  # Do not suppress exceptions
 
     def mark_task_complete(self, phase_id: str, task_id: str, task_name: str) -> None:
         """Mark task as complete within transaction (defers save until commit)."""
@@ -390,8 +398,8 @@ class StateManager:
             # Clean up temp file on error
             try:
                 os.unlink(temp_path)
-            except Exception as e:
-                logger.debug("Failed to clean up temp state file %s: %s", temp_path, e)
+            except Exception as io_err:
+                logger.debug("Failed to clean up temp state file %s: %s", temp_path, io_err)
             raise IOError(f"Failed to save state: {e}")
 
     def _create_empty_state(self) -> Dict[str, Any]:

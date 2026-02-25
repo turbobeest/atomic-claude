@@ -323,9 +323,8 @@ def test_get_token_count(ollama_provider):
     """Test token counting."""
     text = "This is a test sentence with multiple words"
     count = ollama_provider.get_token_count(text)
-    # Should be approximately 0.75 * word_count
-    word_count = len(text.split())
-    expected = int(word_count * 0.75)
+    # Approximation: ~4 characters per token
+    expected = len(text) // 4
     assert count == expected
 
 

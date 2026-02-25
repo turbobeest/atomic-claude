@@ -27,6 +27,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     Returns:
         True if task completed successfully, False otherwise
     """
+    # mem available but not used -- audit results are not memory-worthy
     if uat_mode:
         print(print_yellow("UAT Mode: Skipping phase audit"))
         return True

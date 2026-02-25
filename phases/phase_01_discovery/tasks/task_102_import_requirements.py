@@ -14,7 +14,6 @@ Purpose:
   structured format for traceability throughout the pipeline.
 """
 
-import json
 import logging
 import re
 import sys
@@ -26,8 +25,6 @@ logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.config import Config
-from core.state import StateManager
 from core.ui import phase_header, success, error, warning, info, step
 from core.utils.file_ops import write_json
 

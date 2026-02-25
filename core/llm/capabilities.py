@@ -7,7 +7,14 @@ feature detection and graceful degradation.
 
 from typing import Dict, Set, Optional
 from enum import Enum
-from pydantic import BaseModel, ConfigDict
+try:
+    from pydantic import BaseModel, ConfigDict
+    _HAS_PYDANTIC = True
+except ImportError:
+    from dataclasses import dataclass as _dataclass, field as _field
+    BaseModel = object  # type: ignore[assignment,misc]
+    ConfigDict = lambda **kwargs: {}  # type: ignore[assignment,misc]
+    _HAS_PYDANTIC = False
 
 # Lazy-safe import of the dynamic registry singleton.  If the registry
 # module hasn't been installed or is otherwise broken the rest of this
@@ -31,20 +38,35 @@ class ModelCapability(str, Enum):
     ANALYSIS = "analysis"
 
 
-class ProviderCapabilities(BaseModel):
-    """Capabilities supported by a provider."""
-    provider_name: str
-    available_models: list[str]
-    capabilities: Set[ModelCapability]
-    max_tokens: int  # Default/fallback context window for provider
-    supports_system_prompt: bool = True
-    supports_multiple_images: bool = False
+if _HAS_PYDANTIC:
+    class ProviderCapabilities(BaseModel):
+        """Capabilities supported by a provider."""
+        provider_name: str
+        available_models: list[str]
+        capabilities: Set[ModelCapability]
+        max_tokens: int  # Default/fallback context window for provider
+        supports_system_prompt: bool = True
+        supports_multiple_images: bool = False
 
-    model_config = ConfigDict(use_enum_values=False)
+        model_config = ConfigDict(use_enum_values=False)
 
-    def supports(self, capability: ModelCapability) -> bool:
-        """Check if provider supports a capability."""
-        return capability in self.capabilities
+        def supports(self, capability: ModelCapability) -> bool:
+            """Check if provider supports a capability."""
+            return capability in self.capabilities
+else:
+    @_dataclass
+    class ProviderCapabilities:  # type: ignore[no-redef]
+        """Capabilities supported by a provider (dataclass fallback)."""
+        provider_name: str
+        available_models: list
+        capabilities: set
+        max_tokens: int
+        supports_system_prompt: bool = True
+        supports_multiple_images: bool = False
+
+        def supports(self, capability: ModelCapability) -> bool:
+            """Check if provider supports a capability."""
+            return capability in self.capabilities
 
 
 # ---------------------------------------------------------------------------
@@ -109,10 +131,10 @@ PROVIDER_CAPABILITIES = {
     "anthropic": ProviderCapabilities(
         provider_name="anthropic",
         available_models=[
-            "claude-opus-4.6",
-            "claude-sonnet-4.5",
-            "claude-sonnet-3.5",
-            "claude-haiku-3.5",
+            "claude-opus-4-6",
+            "claude-sonnet-4-5",
+            "claude-sonnet-3-5",
+            "claude-haiku-3-5",
         ],
         capabilities={
             ModelCapability.EXTENDED_THINKING,
@@ -132,9 +154,9 @@ PROVIDER_CAPABILITIES = {
     "claude-code": ProviderCapabilities(
         provider_name="claude-code",
         available_models=[
-            "claude-opus-4.6",
-            "claude-sonnet-4.5",
-            "claude-haiku-3.5",
+            "claude-opus-4-6",
+            "claude-sonnet-4-5",
+            "claude-haiku-3-5",
         ],
         capabilities={
             ModelCapability.EXTENDED_THINKING,

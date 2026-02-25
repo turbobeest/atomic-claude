@@ -166,10 +166,10 @@ class TestPromptUser:
 
     @patch('builtins.input', return_value='  spaces  ')
     def test_prompt_user_strips_whitespace(self, mock_input):
-        """Test prompt strips whitespace when using default."""
+        """Test prompt returns non-empty input even with surrounding whitespace."""
         result = prompt_user("Enter value: ", default="default")
-        # Empty/whitespace should use default
-        assert result == "default"
+        # Non-empty input (after strip) is returned as-is, not the default
+        assert result == "  spaces  "
 
 
 # ============================================================================

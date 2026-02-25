@@ -70,8 +70,9 @@ class CheckpointManager:
         # Get previous checkpoint
         previous_checkpoint = head.head_checkpoint if head else None
 
-        # Get relevant context from memory store
-        context = self.store.query(phase=f"{phase}-{phase_name.lower()}", limit=10)
+        # Get relevant context from memory store (convert to dicts for serialization)
+        context_entries = self.store.query(phase=f"{phase}-{phase_name.lower()}", limit=10)
+        context_dicts = [entry.model_dump() for entry in context_entries]
 
         # Create checkpoint
         checkpoint = Checkpoint(
@@ -83,7 +84,7 @@ class CheckpointManager:
             key_decisions=key_decisions or [],
             artifacts=artifacts or [],
             state_snapshot=state_snapshot or {},
-            context=context,
+            context=context_dicts,
             status=CheckpointStatus.VALID,
             previous_checkpoint=previous_checkpoint
         )
@@ -308,6 +309,11 @@ class CheckpointManager:
             "status": "valid",
             "created_at": datetime.now(timezone.utc).isoformat()
         })
+
+        # Prune to keep only the last 50 checkpoints in head tracking
+        MAX_HEAD_CHECKPOINTS = 50
+        if len(head.checkpoints) > MAX_HEAD_CHECKPOINTS:
+            head.checkpoints = head.checkpoints[-MAX_HEAD_CHECKPOINTS:]
 
         # Save head
         from core.utils.file_ops import write_json

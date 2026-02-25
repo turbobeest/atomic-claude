@@ -111,26 +111,27 @@ def wrap_text(text: str, width: int = 70, indent: str = "    ") -> list:
             result.append(indent + extra_indent + stripped)
         else:
             # Wrap within the line
+            # Continuation indent for structured lines (under the bullet)
+            cont_indent = extra_indent + '  ' if is_structured else extra_indent
             words = stripped.split()
             current = []
             length = 0
-            first = True
+            first_line = True
 
             for word in words:
                 if length + len(word) + len(current) > width and current:
-                    result.append(indent + extra_indent + ' '.join(current))
+                    line_indent = extra_indent if first_line else cont_indent
+                    result.append(indent + line_indent + ' '.join(current))
                     current = [word]
                     length = len(word)
-                    if first and is_structured:
-                        # Continuation lines get extra indent under the bullet
-                        extra_indent += '  '
-                        first = False
+                    first_line = False
                 else:
                     current.append(word)
                     length += len(word)
 
             if current:
-                result.append(indent + extra_indent + ' '.join(current))
+                line_indent = extra_indent if first_line else cont_indent
+                result.append(indent + line_indent + ' '.join(current))
 
     # Trim leading/trailing blank lines
     while result and result[0] == '':

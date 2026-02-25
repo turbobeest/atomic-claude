@@ -6,29 +6,19 @@ in the entire pipeline - project completion.
 """
 
 import sys
-import json
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import List
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.ui import success, error, warning, info, step
+from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, RED, YELLOW, NC
 from core.utils.file_ops import read_json, write_json, write_file
 
 logger = logging.getLogger(__name__)
-
-
-# ANSI color codes for formatted output
-CYAN = "\033[96m"
-DIM = "\033[2m"
-BOLD = "\033[1m"
-GREEN = "\033[92m"
-RED = "\033[91m"
-YELLOW = "\033[93m"
-NC = "\033[0m"
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -77,17 +67,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(f"  {DIM}Final phase closeout - completing project.{NC}")
     print()
 
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # CLOSEOUT CHECKLIST
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-    print()
-    print(f"  {BOLD}- CLOSEOUT CHECKLIST{NC}")
-    print()
-
-    checklist: List[str] = []
-    all_passed = True
-
     # Get data
     version = "0.1.0"
     channel = "internal"
@@ -107,6 +86,62 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             confirmation_status = confirmation_data.get("status", "pending")
         except Exception as e:
             logger.debug("Failed to read confirmation file: %s", e)
+
+    # Run checklist
+    checklist, all_passed = _run_checklist(release_dir, version, confirmation_status)
+
+    # Get approval
+    approved = _get_approval(all_passed)
+    if not approved:
+        return False
+
+    # Generate closeout documents
+    print()
+    print(f"  {BOLD}- GENERATING CLOSEOUT{NC}")
+    print()
+
+    closeout_md = _generate_closeout_md(checklist, version, channel, confirmation_status)
+    write_file(closeout_file, closeout_md)
+
+    write_json(closeout_json, {
+        "phase": 9,
+        "name": "Release",
+        "status": "complete",
+        "final_phase": True,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "release": {
+            "version": version,
+            "channel": channel
+        },
+        "confirmation_status": confirmation_status,
+        "checklist": checklist,
+        "artifacts": {
+            "setup": ".claude/release/setup.json",
+            "execution": ".claude/release/execution.json",
+            "confirmation": ".claude/release/confirmation.json",
+            "announcement": ".claude/release/announcement.md"
+        }
+    })
+
+    print(f"  {GREEN}✓{NC} Generated phase-09-closeout.md")
+    print(f"  {GREEN}✓{NC} Generated phase-09-closeout.json")
+    print()
+
+    # Display completion
+    _display_completion(version, channel)
+
+    success("Project Complete!")
+    return True
+
+
+def _run_checklist(release_dir: Path, version: str, confirmation_status: str) -> tuple:
+    """Run closeout checklist. Returns (checklist, all_passed)."""
+    print()
+    print(f"  {BOLD}- CLOSEOUT CHECKLIST{NC}")
+    print()
+
+    checklist: List[str] = []
+    all_passed = True
 
     # Check internal release notes
     announcement_file = release_dir / "announcement.md"
@@ -142,10 +177,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     print()
 
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # CLOSEOUT APPROVAL
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    return checklist, all_passed
 
+
+def _get_approval(all_passed: bool) -> bool:
+    """Get closeout approval from user. Returns True if approved."""
     print()
     print(f"  {BOLD}- CLOSEOUT APPROVAL{NC}")
     print()
@@ -179,23 +215,24 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             input("  Press Enter to continue to closeout...")
         except EOFError:
             logger.debug("Non-interactive mode: skipping closeout prompt")
+        return True
     elif closeout_choice == "hold":
         print()
         warning("Closeout held - phase not complete")
         return False
 
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # GENERATING CLOSEOUT
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    return True
 
-    print()
-    print(f"  {BOLD}- GENERATING CLOSEOUT{NC}")
-    print()
 
-    # Generate markdown closeout
+def _generate_closeout_md(
+    checklist: List[str], version: str, channel: str, confirmation_status: str
+) -> str:
+    """Generate markdown closeout document."""
     checklist_md_lines = []
     for item in checklist:
-        name, status = item.split(':')
+        parts = item.split(':', 1)
+        name = parts[0]
+        status = parts[1] if len(parts) > 1 else "UNKNOWN"
         if status == "PASS":
             checklist_md_lines.append(f"- [x] {name}")
         elif status == "WARN":
@@ -205,7 +242,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         else:
             checklist_md_lines.append(f"- [-] {name} (deferred)")
 
-    closeout_md = f"""# Phase 9 Closeout: Release (Final)
+    return f"""# Phase 9 Closeout: Release (Final)
 
 **Completed:** {datetime.now(timezone.utc).isoformat()}
 **Status:** COMPLETE
@@ -239,39 +276,12 @@ python main.py run 0
 
 *Project completed by ATOMIC CLAUDE*
 """
-    write_file(closeout_file, closeout_md)
 
-    # Generate JSON closeout
-    write_json(closeout_json, {
-        "phase": 9,
-        "name": "Release",
-        "status": "complete",
-        "final_phase": True,
-        "completed_at": datetime.now(timezone.utc).isoformat(),
-        "release": {
-            "version": version,
-            "channel": channel
-        },
-        "confirmation_status": confirmation_status,
-        "checklist": checklist,
-        "artifacts": {
-            "setup": ".claude/release/setup.json",
-            "execution": ".claude/release/execution.json",
-            "confirmation": ".claude/release/confirmation.json",
-            "announcement": ".claude/release/announcement.md"
-        }
-    })
 
-    print(f"  {GREEN}✓{NC} Generated phase-09-closeout.md")
-    print(f"  {GREEN}✓{NC} Generated phase-09-closeout.json")
+def _display_completion(version: str, channel: str):
+    """Display project completion banner."""
     print()
-
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # PROJECT COMPLETE
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-    print()
-    print(f"{GREEN}{'═' * 115}{NC}")
+    print(f"{GREEN}{'=' * 115}{NC}")
     print()
     print(f"  {BOLD}PROJECT COMPLETE{NC}")
     print()
@@ -285,7 +295,7 @@ python main.py run 0
     print(f"    .claude/closeout/phase-09-closeout.md")
     print(f"    .claude/release/")
     print()
-    print(f"{GREEN}{'═' * 115}{NC}")
+    print(f"{GREEN}{'=' * 115}{NC}")
     print()
     print(f"{CYAN}", end='')
     print("""   ___  ___  _  _  ___ ___    _ _____ _   _ _      _ _____ ___ ___  _  _ ___
@@ -299,11 +309,8 @@ python main.py run 0
     print(f"    For future projects:")
     print(f"      {CYAN}python main.py run 0{NC}")
     print()
-    print(f"{GREEN}{'═' * 115}{NC}")
+    print(f"{GREEN}{'=' * 115}{NC}")
     print()
-
-    success("Project Complete!")
-    return True
 
 
 if __name__ == "__main__":

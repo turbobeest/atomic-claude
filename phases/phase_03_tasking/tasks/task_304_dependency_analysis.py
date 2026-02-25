@@ -23,8 +23,6 @@ logger = logging.getLogger(__name__)
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.config import Config
-from core.state import StateManager
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, prompt_user, clear_input_buffer
@@ -187,7 +185,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     graph_data = {
         "levels": levels,
         "critical_path": _compute_critical_path(tasks, levels),
-        "generated_at": datetime.now(timezone.utc).isoformat() + "Z"
+        "generated_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     }
     write_file(graph_file, json.dumps(graph_data, indent=2))
 
@@ -401,7 +399,7 @@ def _generate_work_packages(tasks: List[Dict[str, Any]], levels: List[Dict[str, 
             "max_parallelism": max_parallelism,
             "total_tasks": len(tasks)
         },
-        "generated_at": datetime.now(timezone.utc).isoformat() + "Z"
+        "generated_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     }
 
 
@@ -490,7 +488,7 @@ def _build_analysis_data(
             "levels": levels,
             "critical_path": _compute_critical_path(tasks, levels)
         },
-        "analyzed_at": datetime.now(timezone.utc).isoformat() + "Z"
+        "analyzed_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     }
 
 

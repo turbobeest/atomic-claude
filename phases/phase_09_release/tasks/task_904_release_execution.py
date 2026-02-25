@@ -10,26 +10,17 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Optional
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.ui import success, error, warning, info, step
 from core.llm import invoke_llm
+from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, YELLOW, NC
 from core.utils.file_ops import read_json, write_json, read_file, write_file
 
 logger = logging.getLogger(__name__)
-
-
-# ANSI color codes for formatted output
-CYAN = "\033[96m"
-DIM = "\033[2m"
-BOLD = "\033[1m"
-GREEN = "\033[92m"
-RED = "\033[91m"
-YELLOW = "\033[93m"
-NC = "\033[0m"
 
 
 def find_agent_prompt(agent_name: str, agent_repo: Path) -> Optional[str]:
@@ -114,10 +105,29 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(f"  {DIM}Executing release to distribution channels.{NC}")
     print()
 
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # LOAD RELEASE AGENTS FROM TASK 903 SELECTION
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # Load release configuration and gather context
+    version, announcement_agent_prompt = _load_release_config(
+        setup_file, output_dir, atomic_root
+    )
+    project_context = _gather_context(project_root, atomic_root)
 
+    # Generate announcement
+    announcement_status = _generate_announcement(
+        version, project_context, announcement_agent_prompt,
+        prompts_dir, announcement_file
+    )
+
+    # Save results
+    _save_execution_results(
+        version, announcement_status, execution_file, output_dir
+    )
+
+    success("Release Execution complete")
+    return True
+
+
+def _load_release_config(setup_file: Path, output_dir: Path, atomic_root: Path) -> tuple:
+    """Load release configuration and agent prompts. Returns (version, agent_prompt)."""
     agents_file = output_dir / "release-agents.json"
 
     # Check embedded repo first (monorepo deployment), then env var, then default
@@ -134,11 +144,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
         try:
             agents_data = read_json(agents_file)
-
             agents_array = agents_data.get("agents", [])
 
             for agent_entry in agents_array:
-                agent_name = agent_entry.split(':')[0]
+                parts = agent_entry.split(':', 1)
+                agent_name = parts[0]
                 agent_prompt = find_agent_prompt(agent_name, agent_repo)
 
                 if agent_prompt:
@@ -163,7 +173,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         except Exception as e:
             logger.debug("Failed to read release setup: %s", e)
 
-    # Gather project context — load full content for informed release notes
+    return version, announcement_agent_prompt
+
+
+def _gather_context(project_root: Path, atomic_root: Path) -> str:
+    """Gather project context for release notes generation."""
     prd_file = project_root / "docs" / "prd" / "PRD.md"
     changelog_file = atomic_root / "CHANGELOG.md"
     project_context = ""
@@ -206,10 +220,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         project_context += "## Phase Outcomes (Phases 5-8)\n\n"
         project_context += "\n\n".join(phase_summaries) + "\n\n"
 
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # INTERNAL RELEASE NOTES
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    return project_context
 
+
+def _generate_announcement(
+    version: str, project_context: str, announcement_agent_prompt: str,
+    prompts_dir: Path, announcement_file: Path
+) -> str:
+    """Generate internal release announcement. Returns status string."""
     print()
     print(f"  {BOLD}- INTERNAL RELEASE NOTES{NC}")
     print()
@@ -251,17 +269,23 @@ Return as markdown suitable for internal distribution.
     print(f"  {DIM}[announcement-writer] Drafting internal release notes...{NC}")
     print()
 
-    # Call LLM for announcement
+    # Call LLM for announcement with retry
     announcement_content = ""
-    try:
-        # Use haiku for fast generation
-        announcement_content = invoke_llm(
-            prompt=prompt_content,
-            max_tokens=2000
-        )
-    except Exception as e:
-        print(f"  {YELLOW}⚠{NC}  LLM call failed: {e}")
-        print(f"  {DIM}Using fallback template{NC}")
+    for attempt in range(2):
+        try:
+            announcement_content = invoke_llm(
+                prompt=prompt_content,
+                model="haiku",
+                max_tokens=2000
+            )
+            if announcement_content:
+                break
+        except Exception as e:
+            if attempt == 0:
+                logger.debug("LLM attempt 1 failed, retrying: %s", e)
+            else:
+                print(f"  {YELLOW}⚠{NC}  LLM call failed after 2 attempts: {e}")
+                print(f"  {DIM}Using fallback template{NC}")
 
     # Generate internal release notes (using LLM response or fallback)
     if announcement_content:
@@ -293,8 +317,6 @@ Version {version} has been completed and is ready for internal use.
 - External release planning (if applicable)
 """)
 
-    announcement_status = "success"
-
     print(f"  {'─' * 110}")
     print(f"  {BOLD}INTERNAL RELEASE NOTES{NC}")
     print()
@@ -307,10 +329,14 @@ Version {version} has been completed and is ready for internal use.
     print(f"  {'─' * 110}")
     print()
 
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # EXECUTION SUMMARY
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    return "success"
 
+
+def _save_execution_results(
+    version: str, announcement_status: str,
+    execution_file: Path, output_dir: Path
+) -> None:
+    """Save execution record and decision context."""
     print()
     print(f"  {BOLD}- EXECUTION SUMMARY{NC}")
     print()
@@ -345,9 +371,6 @@ Version {version} has been completed and is ready for internal use.
         "type": "execution",
         "artifact": str(execution_file)
     })
-
-    success("Release Execution complete")
-    return True
 
 
 if __name__ == "__main__":

@@ -4,10 +4,9 @@ Task 802: Deployment Setup
 Configure release type, version, and distribution channels.
 """
 
+import re
 import sys
-import json
 from pathlib import Path
-from typing import Optional, List
 from datetime import datetime, timezone
 
 # Add project root to path for imports
@@ -59,79 +58,87 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_dim("  Configuring release type and distribution channels."))
     print()
 
-    # RELEASE TYPE
-    print()
-    print(print_bold("  - RELEASE TYPE"))
-    print()
-
-    print(print_dim("  Select the type of release:"))
-    print()
-    print("    [1] Major (x.0.0) - Breaking changes, new architecture")
-    print("    [2] Minor (0.x.0) - New features, backward compatible")
-    print("    [3] Patch (0.0.x) - Bug fixes, minor improvements")
-    print()
-
-    release_type_choice = prompt_user("  Select (default: 2): ") or "2"
-
-    release_type_map = {"1": "major", "2": "minor", "3": "patch"}
-    release_type = release_type_map.get(release_type_choice, "minor")
-
-    print()
-
-    # VERSION NUMBER
-    print()
-    print(print_bold("  - VERSION NUMBER"))
-    print()
-
-    version_map = {"major": "1.0.0", "minor": "0.1.0", "patch": "0.0.1"}
-    default_version = version_map.get(release_type, "0.1.0")
-
-    print(print_dim("  Enter version number (SemVer format):"))
-    print()
-    version_number = prompt_user(f"  Version (default: {default_version}): ") or default_version
-
-    print()
-
-    # DISTRIBUTION CHANNELS
-    print()
-    print(print_bold("  - DISTRIBUTION CHANNELS"))
-    print()
-
-    print(print_dim("  Select distribution channel:"))
-    print()
-    print("    [1] Internal only")
-    print()
-
-    channel_choice = prompt_user("  Select channel (default: 1): ") or "1"
-
-    channels = []
-    if "1" in channel_choice:
-        channels.append("internal")
-
-    print()
-
-    # RELEASE CONFIGURATION SUMMARY
-    print()
-    print(print_bold("  - RELEASE CONFIGURATION"))
-    print()
-
-    print("  " + "─" * 110)
-    print(print_bold("  RELEASE SETTINGS"))
-    print()
-    print(f"    Release Type:    {release_type}")
-    print(f"    Version:         {version_number}")
-    print(f"    Channels:        {', '.join(channels)}")
-    print("  " + "─" * 110)
-    print()
-
-    print(print_dim("  Confirm this configuration?"))
-    print()
-    config_confirm = prompt_user("  Confirm (default: y/n): ") or "y"
-
-    if config_confirm.lower() not in ["y", "yes"]:
+    while True:
+        # RELEASE TYPE
         print()
-        print(print_dim("  Re-running setup..."))
-        return execute(atomic_root, output_dir, uat_mode)
+        print(print_bold("  - RELEASE TYPE"))
+        print()
+
+        print(print_dim("  Select the type of release:"))
+        print()
+        print("    [1] Major (x.0.0) - Breaking changes, new architecture")
+        print("    [2] Minor (0.x.0) - New features, backward compatible")
+        print("    [3] Patch (0.0.x) - Bug fixes, minor improvements")
+        print()
+
+        release_type_choice = prompt_user("  Select (default: 2): ") or "2"
+
+        release_type_map = {"1": "major", "2": "minor", "3": "patch"}
+        release_type = release_type_map.get(release_type_choice, "minor")
+
+        print()
+
+        # VERSION NUMBER
+        print()
+        print(print_bold("  - VERSION NUMBER"))
+        print()
+
+        version_map = {"major": "1.0.0", "minor": "0.1.0", "patch": "0.0.1"}
+        default_version = version_map.get(release_type, "0.1.0")
+
+        print(print_dim("  Enter version number (SemVer format):"))
+        print()
+        while True:
+            version_number = prompt_user(f"  Version (default: {default_version}): ") or default_version
+            if re.match(r'^\d+\.\d+(\.\d+)?(-\w+)?$', version_number):
+                break
+            print(print_red("  Invalid version format. Use SemVer (e.g. 1.0.0, 0.1.0-beta)"))
+
+        print()
+
+        # DISTRIBUTION CHANNELS
+        print()
+        print(print_bold("  - DISTRIBUTION CHANNELS"))
+        print()
+
+        print(print_dim("  Select distribution channel:"))
+        print()
+        print("    [1] Internal only")
+        print()
+
+        channel_choice = prompt_user("  Select channel (default: 1): ") or "1"
+
+        channels = []
+        if "1" in channel_choice:
+            channels.append("internal")
+
+        print()
+
+        # RELEASE CONFIGURATION SUMMARY
+        print()
+        print(print_bold("  - RELEASE CONFIGURATION"))
+        print()
+
+        print("  " + "─" * 110)
+        print(print_bold("  RELEASE SETTINGS"))
+        print()
+        print(f"    Release Type:    {release_type}")
+        print(f"    Version:         {version_number}")
+        print(f"    Channels:        {', '.join(channels)}")
+        print("  " + "─" * 110)
+        print()
+
+        print(print_dim("  Confirm this configuration?"))
+        print()
+        config_confirm = prompt_user("  Confirm (default: y/n): ") or "y"
+
+        if config_confirm.lower() not in ["y", "yes"]:
+            print()
+            print(print_dim("  Re-running setup..."))
+            continue
+
+        # Confirmed - break out of loop
+        break
 
     print()
 
@@ -144,7 +151,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "distribution": {
             "channels": channels
         },
-        "configured_at": datetime.now(timezone.utc).isoformat() + "Z"
+        "configured_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     }
 
     write_json(setup_file, setup_data)

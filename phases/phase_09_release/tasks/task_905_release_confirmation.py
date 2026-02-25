@@ -5,29 +5,18 @@ Human gate for confirming release success.
 """
 
 import sys
-import json
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.ui import success, error, warning, info, step
+from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, RED, YELLOW, NC
 from core.utils.file_ops import read_json, write_json
 
 logger = logging.getLogger(__name__)
-
-
-# ANSI color codes for formatted output
-CYAN = "\033[96m"
-DIM = "\033[2m"
-BOLD = "\033[1m"
-GREEN = "\033[92m"
-RED = "\033[91m"
-YELLOW = "\033[93m"
-NC = "\033[0m"
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -69,15 +58,26 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(f"  {DIM}Human gate: Confirm release was successful.{NC}")
     print()
 
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # RELEASE STATUS
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # Load release status
+    version, channel, announcement_status = _load_release_status(execution_file)
 
+    # Display approval criteria
+    all_criteria_met = _display_approval_criteria(version, announcement_status)
+
+    # Handle confirmation interaction (loop replaces recursion)
+    result = _handle_confirmation(all_criteria_met, version, channel, confirmation_file, output_dir, mem=mem)
+
+    if result:
+        success("Release Confirmation complete")
+    return result
+
+
+def _load_release_status(execution_file: Path) -> tuple:
+    """Load release status from execution file. Returns (version, channel, announcement_status)."""
     print()
     print(f"  {BOLD}- RELEASE STATUS{NC}")
     print()
 
-    # Load execution data
     version = "0.1.0"
     channel = "internal"
     announcement_status = "success"
@@ -103,103 +103,106 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(f"  {'─' * 110}")
     print()
 
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # APPROVAL CRITERIA
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    return version, channel, announcement_status
 
+
+def _display_approval_criteria(version: str, announcement_status: str) -> bool:
+    """Display approval criteria. Returns True if all criteria met."""
     print()
     print(f"  {BOLD}- APPROVAL CRITERIA{NC}")
     print()
 
     all_criteria_met = True
 
-    # Check internal release notes
     if announcement_status == "success":
         print(f"  {GREEN}[CRIT]{NC} {GREEN}✓{NC} Internal release notes created")
     else:
         print(f"  {RED}[CRIT]{NC} {RED}✗{NC} Internal release notes failed")
         all_criteria_met = False
 
-    # Check version is set
     if version and version != "0.0.0":
         print(f"  {GREEN}[CRIT]{NC} {GREEN}✓{NC} Version number confirmed")
     else:
         print(f"  {RED}[CRIT]{NC} {RED}✗{NC} Version number not set")
         all_criteria_met = False
 
-    # Artifacts available
     print(f"  {GREEN}[BLCK]{NC} {GREEN}✓{NC} Distribution artifacts ready")
-
     print()
 
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # HUMAN GATE
-    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    return all_criteria_met
 
-    print()
-    print(f"  {BOLD}- HUMAN GATE: RELEASE CONFIRMATION{NC}")
-    print()
 
-    if all_criteria_met:
-        print(f"  {GREEN}{'━' * 110}{NC}")
-        print(f"  {GREEN}Internal release completed successfully.{NC}")
-        print(f"  {GREEN}{'━' * 110}{NC}")
-    else:
-        print(f"  {RED}{'━' * 110}{NC}")
-        print(f"  {RED}Some release steps failed. Review before confirming.{NC}")
-        print(f"  {RED}{'━' * 110}{NC}")
-
-    print()
-    print(f"  {DIM}Confirm internal release is complete?{NC}")
-    print()
-    print(f"    {GREEN}[confirm]{NC}     Release verified, proceed to closeout")
-    print(f"    {RED}[rollback]{NC}    Rollback the release")
-    print(f"    {YELLOW}[investigate]{NC} Investigate issues")
-    print()
-
-    try:
-        confirm_choice = input("  Choice (default: confirm): ").strip().lower() or "confirm"
-    except EOFError:
-        logger.debug("Non-interactive mode: defaulting to 'confirm'")
-        confirm_choice = "confirm"
-
-    if confirm_choice == "investigate":
+def _handle_confirmation(
+    all_criteria_met: bool, version: str, channel: str,
+    confirmation_file: Path, output_dir: Path, mem=None
+) -> bool:
+    """Handle the confirmation interaction loop. Returns True if confirmed."""
+    while True:
         print()
-        print(f"  {DIM}Investigation steps:{NC}")
-        print(f"    1. Review release notes: .claude/release/announcement.md")
-        print(f"    2. Check distribution artifacts in dist/")
-        print(f"    3. Verify version in execution log")
+        print(f"  {BOLD}- HUMAN GATE: RELEASE CONFIRMATION{NC}")
         print()
-        print(f"  {DIM}Execution log: .claude/release/execution.json{NC}")
+
+        if all_criteria_met:
+            print(f"  {GREEN}{'━' * 110}{NC}")
+            print(f"  {GREEN}Internal release completed successfully.{NC}")
+            print(f"  {GREEN}{'━' * 110}{NC}")
+        else:
+            print(f"  {RED}{'━' * 110}{NC}")
+            print(f"  {RED}Some release steps failed. Review before confirming.{NC}")
+            print(f"  {RED}{'━' * 110}{NC}")
+
         print()
+        print(f"  {DIM}Confirm internal release is complete?{NC}")
+        print()
+        print(f"    {GREEN}[confirm]{NC}     Release verified, proceed to closeout")
+        print(f"    {RED}[rollback]{NC}    Rollback the release")
+        print(f"    {YELLOW}[investigate]{NC} Investigate issues")
+        print()
+
         try:
-            input("  Press Enter after investigation...")
+            confirm_choice = input("  Choice (default: confirm): ").strip().lower() or "confirm"
         except EOFError:
-            logger.debug("Non-interactive mode: skipping investigation prompt")
-        print()
-        print(f"  {DIM}Returning to confirmation...{NC}")
-        # Recursive call to re-run confirmation
-        return execute(atomic_root, output_dir, uat_mode)
-    elif confirm_choice == "rollback":
-        print()
-        warning("Rollback initiated")
-        print(f"  {DIM}Manual rollback steps:{NC}")
-        print(f"    1. Remove release notes from .claude/release/")
-        print(f"    2. Revert version changes (if any)")
-        print()
-        return False
+            logger.debug("Non-interactive mode: defaulting to 'confirm'")
+            confirm_choice = "confirm"
+
+        if confirm_choice == "investigate":
+            print()
+            print(f"  {DIM}Investigation steps:{NC}")
+            print(f"    1. Review release notes: .claude/release/announcement.md")
+            print(f"    2. Check distribution artifacts in dist/")
+            print(f"    3. Verify version in execution log")
+            print()
+            print(f"  {DIM}Execution log: .claude/release/execution.json{NC}")
+            print()
+            try:
+                input("  Press Enter after investigation...")
+            except EOFError:
+                logger.debug("Non-interactive mode: skipping investigation prompt")
+            print()
+            print(f"  {DIM}Returning to confirmation...{NC}")
+            continue
+        elif confirm_choice == "rollback":
+            print()
+            warning("Rollback initiated")
+            print(f"  {DIM}Manual rollback steps:{NC}")
+            print(f"    1. Remove release notes from .claude/release/")
+            print(f"    2. Revert version changes (if any)")
+            print()
+            return False
+        else:
+            # confirm (or any other input)
+            break
 
     # Get confirmer name
     confirmer_name = "Human Operator"
-    if confirm_choice == "confirm":
-        print()
-        try:
-            confirmer_input = input("  Confirmer name: ").strip()
-            if confirmer_input:
-                confirmer_name = confirmer_input
-        except EOFError:
-            logger.debug("Non-interactive mode: using default confirmer name")
-        print()
+    print()
+    try:
+        confirmer_input = input("  Confirmer name: ").strip()
+        if confirmer_input:
+            confirmer_name = confirmer_input
+    except EOFError:
+        logger.debug("Non-interactive mode: using default confirmer name")
+    print()
 
     # Save confirmation
     write_json(confirmation_file, {
@@ -224,7 +227,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "artifact": str(confirmation_file)
     })
 
-    success("Release Confirmation complete")
     return True
 
 

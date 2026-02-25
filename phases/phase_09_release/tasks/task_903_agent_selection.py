@@ -5,32 +5,19 @@ Present and select release agents for announcement writing.
 """
 
 import sys
-import json
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import List
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.config import Config
-from core.state import StateManager
 from core.ui import success, error, warning, info, step
+from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, YELLOW, NC
 from core.utils.file_ops import write_json
 
 logger = logging.getLogger(__name__)
-
-
-# ANSI color codes for formatted output
-CYAN = "\033[96m"
-DIM = "\033[2m"
-BOLD = "\033[1m"
-GREEN = "\033[92m"
-RED = "\033[91m"
-YELLOW = "\033[93m"
-MAGENTA = "\033[95m"
-NC = "\033[0m"
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -164,7 +151,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(f"  {BOLD}SELECTED AGENTS{NC}")
     print()
     for agent in selected_agents:
-        name, model = agent.split(':')
+        parts = agent.split(':', 1)
+        name = parts[0]
+        model = parts[1] if len(parts) > 1 else "sonnet"
         print(f"    {GREEN}✓{NC} {name} ({model})")
     print(f"  {'─' * 110}")
     print()

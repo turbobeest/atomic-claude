@@ -80,6 +80,21 @@ class WorktreeManager:
 
         self._worktrees_dir.mkdir(parents=True, exist_ok=True)
 
+        # Verify the base branch exists before creating the worktree
+        if self.base_branch:
+            try:
+                verify = subprocess.run(
+                    ["git", "rev-parse", "--verify", self.base_branch],
+                    cwd=str(self.project_root),
+                    capture_output=True, text=True, timeout=10,
+                )
+                if verify.returncode != 0:
+                    logger.warning("Base branch '%s' does not exist", self.base_branch)
+                    return None
+            except (subprocess.SubprocessError, OSError) as e:
+                logger.warning("Failed to verify base branch '%s': %s", self.base_branch, e)
+                return None
+
         # Build the git worktree add command
         cmd = ["git", "worktree", "add", "-b", branch_name, str(wt_path)]
         if self.base_branch:
@@ -189,10 +204,25 @@ class WorktreeManager:
             )
             if result.returncode != 0:
                 logger.warning("Merge failed for task %s: %s", task_id, result.stderr.strip())
+                # Abort the failed merge to leave the repo in a clean state
+                subprocess.run(
+                    ["git", "merge", "--abort"],
+                    cwd=str(self.project_root),
+                    capture_output=True, text=True, timeout=10,
+                )
                 return False
             return True
         except (subprocess.SubprocessError, OSError) as e:
             logger.warning("Merge failed for task %s: %s", task_id, e)
+            # Attempt to abort merge in case it left the repo in a conflicted state
+            try:
+                subprocess.run(
+                    ["git", "merge", "--abort"],
+                    cwd=str(self.project_root),
+                    capture_output=True, text=True, timeout=10,
+                )
+            except (subprocess.SubprocessError, OSError):
+                pass
             return False
 
     def list_active(self) -> Dict[str, WorktreeInfo]:

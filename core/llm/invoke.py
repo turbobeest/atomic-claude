@@ -195,7 +195,7 @@ def _resolve_tier(model_id: str) -> str | None:
 def _track_tokens(response):
     """Update session token tracking file with usage and cost."""
     try:
-        tokens_file = Path(".state/session-tokens.json")
+        tokens_file = Path(os.environ.get("ATOMIC_ROOT", ".")) / ".state" / "session-tokens.json"
         if tokens_file.exists():
             data = json.loads(tokens_file.read_text())
         else:

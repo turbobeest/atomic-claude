@@ -38,7 +38,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Run phase audit
     return run_phase_audit(
         phase_num=8,
-        phase_id="8-deployment",
+        phase_id="8-deployment-prep",
         output_dir=output_dir,
     )
 

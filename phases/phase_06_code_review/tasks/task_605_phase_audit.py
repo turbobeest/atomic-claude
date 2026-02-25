@@ -31,7 +31,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # e.g., ".outputs/3-tasking" -> 3
     phase_name = output_dir.name
     if '-' in phase_name:
-        phase_num = int(phase_name.split('-')[0])
+        try:
+            phase_num = int(phase_name.split('-')[0])
+        except ValueError:
+            print(print_yellow("Could not parse phase number from output directory"))
+            return True  # Non-blocking
         phase_id = phase_name
     else:
         print(print_yellow("⚠️  Could not determine phase number from output directory"))

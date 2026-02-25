@@ -11,12 +11,15 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, Generator, Optional, Any
 
+from .exceptions import LLMException
+
 
 class HealthStatus(str, Enum):
     """Provider health status."""
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNAVAILABLE = "unavailable"
+    UNKNOWN = "unknown"
 
 
 @dataclass
@@ -71,8 +74,13 @@ class LLMResponse:
         }
 
 
-class LLMError(Exception):
-    """Base exception for LLM provider errors."""
+class LLMError(LLMException):
+    """Base exception for LLM provider errors.
+
+    Inherits from LLMException so that router-level ``except LLMException``
+    catches errors raised by any provider regardless of which hierarchy
+    they use.
+    """
 
     def __init__(self, message: str, provider: Optional[str] = None,
                  error_code: Optional[str] = None, retryable: bool = False):
@@ -103,7 +111,8 @@ class LLMTimeoutError(LLMError):
         super().__init__(message, provider, "timeout", retryable=True)
 
 
-TimeoutError = LLMTimeoutError  # noqa: A001 — backward compat
+# Backward-compatible alias
+TimeoutError = LLMTimeoutError  # noqa: A001
 
 
 class APIError(LLMError):

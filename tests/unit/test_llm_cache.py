@@ -186,7 +186,8 @@ class TestLLMCache:
         )
 
         assert key1 == key2
-        assert len(key1) == 64  # SHA256 hash
+        assert key1.startswith("sha256_")
+        assert len(key1) == 7 + 64  # "sha256_" prefix + SHA256 hex digest
 
         # Different params should generate different key
         key3 = LLMCache.make_cache_key(

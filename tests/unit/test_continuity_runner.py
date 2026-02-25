@@ -121,12 +121,12 @@ class TestContinuityTestRunner:
         assert runner.state_manager is not None
 
     def test_find_task_script_basic(self, runner, temp_dir):
-        """Test finding a task script."""
-        # Create a task script
-        phase_dir = temp_dir / "phases" / "phase00"
+        """Test finding a task script (Python module in phase_NN_name/tasks/)."""
+        # Create a Python task module matching the new search pattern
+        phase_dir = temp_dir / "phases" / "phase_00_setup" / "tasks"
         phase_dir.mkdir(parents=True)
-        task_script = phase_dir / "task001.sh"
-        task_script.write_text("#!/bin/bash\necho 'test'")
+        task_script = phase_dir / "task_001_mode_selection.py"
+        task_script.write_text("# task module")
 
         # Find it
         found = runner._find_task_script("0", "001")
@@ -138,12 +138,12 @@ class TestContinuityTestRunner:
         assert found is None
 
     def test_find_task_script_tasks_subdir(self, runner, temp_dir):
-        """Test finding task script in tasks/ subdirectory."""
-        # Create task in tasks subdir (Phase 2+ pattern)
-        phase_dir = temp_dir / "phases" / "phase02" / "tasks"
+        """Test finding task script in phase_NN_name/tasks/ directory."""
+        # Create task in phase_NN_name/tasks/ pattern
+        phase_dir = temp_dir / "phases" / "phase_02_prd" / "tasks"
         phase_dir.mkdir(parents=True)
-        task_script = phase_dir / "205-prd-authoring.sh"
-        task_script.write_text("#!/bin/bash\necho 'test'")
+        task_script = phase_dir / "task_205_prd_authoring.py"
+        task_script.write_text("# task module")
 
         # Find it
         found = runner._find_task_script("2", "205")
@@ -155,11 +155,11 @@ class TestContinuityTestRunner:
         # Mock successful execution
         mock_run.return_value = (0, "Success", "")
 
-        # Create task script
-        phase_dir = runner.atomic_root / "phases" / "phase00"
+        # Create Python task module matching the new search pattern
+        phase_dir = runner.atomic_root / "phases" / "phase_00_setup" / "tasks"
         phase_dir.mkdir(parents=True)
-        task_script = phase_dir / "task001.sh"
-        task_script.write_text("#!/bin/bash\necho 'test'")
+        task_script = phase_dir / "task_001_mode_selection.py"
+        task_script.write_text("# task module")
 
         result = runner._run_single_task(
             phase_id="0-setup",
@@ -178,11 +178,11 @@ class TestContinuityTestRunner:
         # Mock failed execution
         mock_run.return_value = (1, "", "Error occurred")
 
-        # Create task script
-        phase_dir = runner.atomic_root / "phases" / "phase00"
+        # Create Python task module matching the new search pattern
+        phase_dir = runner.atomic_root / "phases" / "phase_00_setup" / "tasks"
         phase_dir.mkdir(parents=True)
-        task_script = phase_dir / "task001.sh"
-        task_script.write_text("#!/bin/bash\nexit 1")
+        task_script = phase_dir / "task_001_mode_selection.py"
+        task_script.write_text("# task module")
 
         result = runner._run_single_task(
             phase_id="0-setup",
@@ -223,8 +223,9 @@ class TestContinuityTestRunner:
         with open(state_file, "w") as f:
             json.dump(state, f)
 
-        # Update runner's state manager
+        # Update runner's state manager: set the file path and reload in-memory state
         runner.state_manager.state_file = state_file
+        runner.state_manager._state = runner.state_manager.load_state()
 
         # Validate
         valid = runner._validate_state_transition("0-setup", "001")
@@ -258,13 +259,16 @@ class TestContinuityTestRunner:
 
         backup = runner._setup_mock_environment()
 
-        # Check mock vars are set
-        assert os.environ.get("ATOMIC_TEST_MODE") == "1"
-        assert os.environ.get("ATOMIC_MOCK_LLM") == "1"
-        assert os.environ.get("CLAUDE_PROVIDER") == "mock"
+        try:
+            # Check mock vars are set
+            assert os.environ.get("ATOMIC_TEST_MODE") == "1"
+            assert os.environ.get("ATOMIC_MOCK_LLM") == "1"
+            assert os.environ.get("CLAUDE_PROVIDER") == "mock"
 
-        # Backup should contain original values
-        assert isinstance(backup, dict)
+            # Backup should contain original values
+            assert isinstance(backup, dict)
+        finally:
+            runner._restore_environment(backup)
 
     def test_restore_environment(self, runner):
         """Test restoring environment."""

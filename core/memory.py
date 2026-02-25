@@ -8,6 +8,7 @@ TODO: Convert to pure Python implementation later (Phase 0/1 don't need it heavi
 """
 
 import logging
+import shlex
 import subprocess
 import os
 from pathlib import Path
@@ -59,8 +60,8 @@ def _call_memory_function(func_name: str, *args: str) -> tuple[int, str, str]:
     env["ATOMIC_OUTPUT_DIR"] = str(atomic_root.parent / ".outputs")
 
     # Build command: source memory.sh, then call function
-    args_str = " ".join(f'"{arg}"' for arg in args)
-    command = f'source "{memory_script}" && {func_name} {args_str}'
+    args_str = " ".join(shlex.quote(arg) for arg in args)
+    command = f'source {shlex.quote(str(memory_script))} && {func_name} {args_str}'
 
     try:
         result = subprocess.run(

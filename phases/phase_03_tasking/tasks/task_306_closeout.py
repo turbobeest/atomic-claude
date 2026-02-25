@@ -23,8 +23,6 @@ logger = logging.getLogger(__name__)
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.config import Config
-from core.state import StateManager
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, prompt_user, clear_input_buffer
@@ -344,7 +342,7 @@ def _generate_markdown_closeout(
     """Generate markdown closeout document."""
     content = f"""# Phase 3 Closeout: Tasking
 
-**Completed:** {datetime.now(timezone.utc).isoformat()}Z
+**Completed:** {datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}
 **Status:** COMPLETE
 
 ## Summary
@@ -419,7 +417,7 @@ def _generate_json_closeout(
         "phase": 3,
         "name": "Tasking",
         "status": "complete",
-        "completed_at": datetime.now(timezone.utc).isoformat() + "Z",
+        "completed_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         "task_count": metrics["task_count"],
         "high_priority_count": metrics["high_priority"],
         "package_count": metrics["package_count"],

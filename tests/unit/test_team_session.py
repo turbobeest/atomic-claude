@@ -217,14 +217,13 @@ class TestAddAgent:
     @patch("orchestration.team_session.subprocess.run", side_effect=OSError("fail"))
     @patch("orchestration.team_session.shutil.which", return_value="/usr/bin/tmux")
     def test_add_agent_exception(self, mock_which, mock_run, tmp_path):
-        """On subprocess error, agent tracked with 'failed' pane id."""
+        """On subprocess error, returns None (matches Optional[AgentPane] return type)."""
         session = TeamSession("test-sess", work_dir=tmp_path)
         session._session_started = True
 
         pane = session.add_agent("agent-1", "echo hello")
 
-        assert pane is not None
-        assert pane.pane_id == "failed"
+        assert pane is None
 
 
 # ---------------------------------------------------------------------------
@@ -432,7 +431,7 @@ class TestShutdown:
         assert len(session._results) == 0
 
     def test_shutdown_cleans_files(self, tmp_path):
-        """Shutdown removes .output files from work_dir."""
+        """Shutdown removes the entire work_dir (including all files)."""
         # Create some output files
         (tmp_path / "agent-a.output").write_text("data")
         (tmp_path / "agent-b.output").write_text("data")
@@ -444,10 +443,8 @@ class TestShutdown:
 
         session.shutdown()
 
-        assert not (tmp_path / "agent-a.output").exists()
-        assert not (tmp_path / "agent-b.output").exists()
-        # Non-.output files are not removed
-        assert (tmp_path / "unrelated.txt").exists()
+        # Entire work_dir is removed (temp directory cleanup)
+        assert not tmp_path.exists()
 
     @patch("orchestration.team_session.subprocess.run", side_effect=OSError("gone"))
     def test_shutdown_tolerates_tmux_error(self, mock_run, tmp_path):

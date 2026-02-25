@@ -40,6 +40,13 @@ from core.llm.base import (
     ModelNotFoundError,
 )
 
+# Get the ClientError/BotoCoreError that bedrock.py actually imported — this may
+# be the real botocore class if another test loaded the module first, or our mock
+# if we got here first.  Using the same class ensures `except ClientError` matches.
+import core.llm.bedrock as _bedrock_mod
+ClientError = getattr(_bedrock_mod, 'ClientError', mock_botocore.exceptions.ClientError)
+BotoCoreError = getattr(_bedrock_mod, 'BotoCoreError', mock_botocore.exceptions.BotoCoreError)
+
 
 @pytest.fixture
 def mock_boto3_session():
@@ -152,7 +159,7 @@ class TestBedrockProviderInvoke:
         # Assertions
         assert isinstance(response, LLMResponse)
         assert response.content == "Test response"
-        assert response.model == "anthropic.claude-3-5-sonnet-20241022-v2:0"  # Resolved from tier
+        assert response.model == "anthropic.claude-sonnet-4-5-20250929-v1:0"  # Resolved from tier
         assert response.provider == "aws-bedrock"
         assert response.usage.input_tokens == 10
         assert response.usage.output_tokens == 20
@@ -161,7 +168,7 @@ class TestBedrockProviderInvoke:
         # Check API was called correctly
         mock_client.invoke_model.assert_called_once()
         call_kwargs = mock_client.invoke_model.call_args[1]
-        assert call_kwargs["modelId"] == "anthropic.claude-3-5-sonnet-20241022-v2:0"
+        assert call_kwargs["modelId"] == "anthropic.claude-sonnet-4-5-20250929-v1:0"
 
         # Check request body
         request_body = json.loads(call_kwargs["body"])
@@ -214,7 +221,7 @@ class TestBedrockProviderInvoke:
 
     def test_invoke_access_denied_error(self, provider, mock_boto3_session):
         """Test access denied error."""
-        from botocore.exceptions import ClientError
+
         _, mock_client = mock_boto3_session
 
         error_response = {"Error": {"Code": "AccessDeniedException"}}
@@ -227,7 +234,7 @@ class TestBedrockProviderInvoke:
 
     def test_invoke_throttling_error(self, provider, mock_boto3_session):
         """Test throttling error."""
-        from botocore.exceptions import ClientError
+
         _, mock_client = mock_boto3_session
 
         error_response = {"Error": {"Code": "ThrottlingException"}}
@@ -238,7 +245,7 @@ class TestBedrockProviderInvoke:
 
     def test_invoke_throttling_with_retry(self, provider, mock_boto3_session):
         """Test throttling with successful retry."""
-        from botocore.exceptions import ClientError
+
         _, mock_client = mock_boto3_session
 
         # First call fails, second succeeds
@@ -264,7 +271,7 @@ class TestBedrockProviderInvoke:
 
     def test_invoke_model_not_ready(self, provider, mock_boto3_session):
         """Test model not ready error."""
-        from botocore.exceptions import ClientError
+
         _, mock_client = mock_boto3_session
 
         error_response = {"Error": {"Code": "ModelNotReadyException"}}
@@ -275,7 +282,7 @@ class TestBedrockProviderInvoke:
 
     def test_invoke_resource_not_found(self, provider, mock_boto3_session):
         """Test resource not found error."""
-        from botocore.exceptions import ClientError
+
         _, mock_client = mock_boto3_session
 
         error_response = {"Error": {"Code": "ResourceNotFoundException"}}
@@ -286,7 +293,7 @@ class TestBedrockProviderInvoke:
 
     def test_invoke_service_unavailable(self, provider, mock_boto3_session):
         """Test service unavailable error."""
-        from botocore.exceptions import ClientError
+
         _, mock_client = mock_boto3_session
 
         error_response = {"Error": {"Code": "ServiceUnavailableException"}}
@@ -297,7 +304,7 @@ class TestBedrockProviderInvoke:
 
     def test_invoke_botocore_error(self, provider, mock_boto3_session):
         """Test botocore connection error."""
-        from botocore.exceptions import BotoCoreError
+
         _, mock_client = mock_boto3_session
 
         mock_client.invoke_model.side_effect = BotoCoreError()
@@ -356,7 +363,7 @@ class TestBedrockProviderStream:
 
     def test_stream_access_denied(self, provider, mock_boto3_session):
         """Test streaming access denied error."""
-        from botocore.exceptions import ClientError
+
         _, mock_client = mock_boto3_session
 
         error_response = {"Error": {"Code": "AccessDeniedException"}}
@@ -369,7 +376,7 @@ class TestBedrockProviderStream:
 
     def test_stream_throttling(self, provider, mock_boto3_session):
         """Test streaming throttling error."""
-        from botocore.exceptions import ClientError
+
         _, mock_client = mock_boto3_session
 
         error_response = {"Error": {"Code": "ThrottlingException"}}
@@ -442,7 +449,7 @@ class TestBedrockProviderHealthCheck:
 
     def test_health_check_access_denied(self, provider, mock_boto3_session):
         """Test health check with access denied."""
-        from botocore.exceptions import ClientError
+
         mock_session, _ = mock_boto3_session
 
         mock_bedrock_client = Mock()
@@ -464,7 +471,7 @@ class TestBedrockProviderHealthCheck:
 
     def test_health_check_degraded(self, provider, mock_boto3_session):
         """Test health check degraded status."""
-        from botocore.exceptions import ClientError
+
         mock_session, _ = mock_boto3_session
 
         mock_bedrock_client = Mock()

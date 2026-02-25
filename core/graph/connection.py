@@ -102,8 +102,8 @@ class GraphConnection:
                 f"FalkorDB at {self._host}:{self._port} not responding"
             )
         self._connected = True
-        logger.info(f"Connected to FalkorDB graph '{self._graph_name}' "
-                     f"at {self._host}:{self._port}")
+        logger.info("Connected to FalkorDB graph '%s' at %s:%s",
+                     self._graph_name, self._host, self._port)
 
     def health_check(self) -> bool:
         """
@@ -180,12 +180,17 @@ class GraphConnection:
             try:
                 self._graph.delete()
             except Exception as e:
-                logger.warning(f"Failed to delete graph '{self._graph_name}': {e}")
+                logger.warning("Failed to delete graph '%s': %s", self._graph_name, e)
 
     def close(self):
-        """Close the connection."""
+        """Close the connection and release the underlying Redis client."""
         self._connected = False
         self._graph = None
+        if self._client is not None:
+            try:
+                self._client.connection.close()
+            except Exception as e:
+                logger.debug("Error closing FalkorDB client connection: %s", e)
         self._client = None
 
     @property

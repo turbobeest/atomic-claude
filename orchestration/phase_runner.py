@@ -8,6 +8,7 @@ Usage in orchestrators:
     from orchestration.phase_runner import run_phase_tasks, create_phase_closeout
 """
 
+import inspect
 import logging
 import os
 import traceback
@@ -102,7 +103,7 @@ def run_phase_tasks(
         if pre_header_fn:
             pre_header_fn()
 
-    state = StateManager()
+    state = StateManager(atomic_root=atomic_root)
     state.set_current_phase(phase_id)
 
     # Determine starting point
@@ -154,13 +155,22 @@ def run_phase_tasks(
         )
 
         try:
-            # Call task — pass graph if provided
+            # Call task — pass graph only if the function accepts it (Finding #26)
             if graph is not None:
-                success = task_func(mem, graph=graph)
+                try:
+                    sig = inspect.signature(task_func)
+                    accepts_graph = "graph" in sig.parameters
+                except (ValueError, TypeError):
+                    accepts_graph = False
+                if accepts_graph:
+                    success = task_func(mem, graph=graph)
+                else:
+                    success = task_func(mem)
             else:
                 success = task_func(mem)
 
-            if not success:
+            # Treat None as success; only explicit False is failure (Finding #28)
+            if success is False:
                 state.mark_task_failed(phase_id, task_id, task_name)
                 print(f"\n❌ Task {task_id} failed")
                 clear_current_task()
@@ -234,16 +244,19 @@ def run_phase_tasks(
     return True
 
 
-def create_phase_closeout(phase_id: str, tasks: List[TaskEntry]) -> None:
+def create_phase_closeout(phase_id: str, tasks: List[TaskEntry],
+                          output_dir: Optional[Path] = None) -> None:
     """
     Create standardized closeout.json for a completed phase.
 
     Args:
         phase_id: Phase identifier (e.g., "1-discovery")
         tasks: List of (task_id, task_name, task_func) tuples
+        output_dir: Phase output directory (defaults to ATOMIC_ROOT/.outputs/<phase_id>)
     """
-    atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
-    output_dir = atomic_root.parent / ".outputs" / phase_id
+    if output_dir is None:
+        atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
+        output_dir = atomic_root / ".outputs" / phase_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
     phase_num = int(phase_id.split("-")[0])

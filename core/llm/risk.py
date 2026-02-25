@@ -75,7 +75,9 @@ def compute_blast_radius(task_id: Any, graph) -> float:
 
     except Exception as e:
         logger.debug("compute_blast_radius failed for task %s: %s", task_id, e)
-        return 1.0  # Conservative: assume high blast radius on error
+        # Default to maximum blast radius on error (conservative) — forces
+        # the caller to use the most capable model when risk is unknown.
+        return 1.0
 
 
 def has_downstream_validation(task_id: Any, graph) -> bool:

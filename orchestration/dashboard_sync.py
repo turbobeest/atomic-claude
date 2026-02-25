@@ -6,15 +6,24 @@ Triggers dashboard refresh after task completion.
 Writes current-task.json, session-tokens.json, and errors.json for dashboard consumption.
 """
 
+import fcntl
 import json
 import logging
 import os
+import tempfile
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Sub-app ports (Finding #18)
+AUDIT_BROWSER_PORT = 5175
+AGENT_MANAGER_PORT = 5176
+SKILLS_BROWSER_PORT = 5177
+_SUBAPP_PORTS = (AGENT_MANAGER_PORT, AUDIT_BROWSER_PORT, SKILLS_BROWSER_PORT)
 
 try:
     import requests
@@ -22,9 +31,37 @@ except ImportError:
     requests = None
 
 
+def _get_state_dir(atomic_root: Optional[Path] = None) -> Path:
+    """Return the .state directory, resolving atomic_root from env if needed."""
+    if atomic_root is None:
+        atomic_root = Path(os.environ.get("ATOMIC_ROOT", "."))
+    return Path(atomic_root) / ".state"
+
+
+@contextmanager
+def _locked_file(filepath: Path, mode: str = "r+"):
+    """Context manager providing exclusive file locking via fcntl.flock.
+
+    Args:
+        filepath: Path to the file to lock
+        mode: File open mode ('r+' for read-modify-write, 'w' for write)
+    """
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    # Ensure file exists for r+ mode
+    if "r" in mode and not filepath.exists():
+        filepath.write_text("{}")
+    fh = open(filepath, mode)
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield fh
+    finally:
+        fcntl.flock(fh, fcntl.LOCK_UN)
+        fh.close()
+
+
 def write_current_task(phase_id: str, task_id: str, task_name: str,
                        resolved=None, provider: str = None, model: str = None,
-                       agent_roster=None):
+                       agent_roster=None, atomic_root: Optional[Path] = None):
     """Write current-task.json for dashboard status display.
 
     Args:
@@ -35,8 +72,9 @@ def write_current_task(phase_id: str, task_id: str, task_name: str,
         provider: Optional provider override (fallback if no resolved)
         model: Optional model tier override (fallback if no resolved)
         agent_roster: Optional list of (AgentEntry, ResolvedModel) tuples
+        atomic_root: Optional project root (defaults to ATOMIC_ROOT env or cwd)
     """
-    state_dir = Path(".state")
+    state_dir = _get_state_dir(atomic_root)
     state_dir.mkdir(parents=True, exist_ok=True)
 
     effort_level = None
@@ -93,43 +131,49 @@ def write_current_task(phase_id: str, task_id: str, task_name: str,
 
 
 def update_current_task_provider(provider: str, model: str = None,
-                                 phase_id: str = None):
+                                 phase_id: str = None,
+                                 atomic_root: Optional[Path] = None):
     """Update provider/model in current-task.json without replacing other fields.
 
     Called by task_001 once credentials are detected, before config exists.
+    Uses file locking to prevent concurrent access corruption.
     """
-    ct = Path(".state/current-task.json")
+    ct = _get_state_dir(atomic_root) / "current-task.json"
     if not ct.exists():
         return
     try:
-        data = json.loads(ct.read_text())
-        data["provider"] = provider
-        if model:
-            data["model"] = model
-        data["online"] = True
+        with _locked_file(ct, "r+") as fh:
+            content = fh.read()
+            data = json.loads(content)
+            data["provider"] = provider
+            if model:
+                data["model"] = model
+            data["online"] = True
 
-        # Use resolver for context_window (respects provider overrides)
-        context_window = None
-        max_output = None
-        if phase_id:
-            try:
-                from core.llm.resolver import resolve_model
-                rm = resolve_model(phase_id)
-                context_window = rm.context_window
-                max_output = rm.max_output
-                data["effort_level"] = rm.effort_level
-            except Exception as e:
-                logger.debug("Could not resolve model for phase %s: %s", phase_id, e)
+            # Use resolver for context_window (respects provider overrides)
+            context_window = None
+            max_output = None
+            if phase_id:
+                try:
+                    from core.llm.resolver import resolve_model
+                    rm = resolve_model(phase_id)
+                    context_window = rm.context_window
+                    max_output = rm.max_output
+                    data["effort_level"] = rm.effort_level
+                except Exception as e:
+                    logger.debug("Could not resolve model for phase %s: %s", phase_id, e)
 
-        if not context_window:
-            context_window, max_output = _get_model_limits(model)
+            if not context_window:
+                context_window, max_output = _get_model_limits(model)
 
-        if context_window:
-            data["context_window"] = context_window
-        if max_output:
-            data["max_output"] = max_output
+            if context_window:
+                data["context_window"] = context_window
+            if max_output:
+                data["max_output"] = max_output
 
-        ct.write_text(json.dumps(data, indent=2))
+            fh.seek(0)
+            fh.write(json.dumps(data, indent=2))
+            fh.truncate()
     except (json.JSONDecodeError, OSError) as e:
         logger.debug("Failed to update current-task.json: %s", e)
 
@@ -180,11 +224,26 @@ def _get_model_limits(model: Optional[str]) -> Tuple[Optional[int], Optional[int
         return None, None
 
 
-def clear_current_task():
-    """Clear current-task.json when task completes."""
-    ct = Path(".state/current-task.json")
+def clear_current_task(atomic_root: Optional[Path] = None):
+    """Clear current-task.json when task completes.
+
+    Uses atomic write (write empty to temp, rename) instead of direct
+    delete to avoid a race with the dashboard reader (Finding #19).
+    """
+    ct = _get_state_dir(atomic_root) / "current-task.json"
     if ct.exists():
-        ct.unlink()
+        try:
+            # Write empty marker to temp file, then atomically replace
+            fd, tmp = tempfile.mkstemp(dir=ct.parent, suffix=".tmp")
+            os.write(fd, b'{"active": false}')
+            os.close(fd)
+            os.replace(tmp, ct)
+        except OSError:
+            # Fallback: direct unlink
+            try:
+                ct.unlink()
+            except OSError:
+                pass
 
 
 def _get_dashboard_port() -> str:
@@ -235,8 +294,8 @@ def ensure_dashboard(atomic_root=None) -> bool:
     except Exception as e:
         logger.debug("Dashboard health check failed: %s", e)
 
-    # Check sub-apps (agent-manager:5175, audit-browser:5176, skills-browser:5177)
-    subapps_ok = all(_check_port_listening(p) for p in (5175, 5176, 5177))
+    # Check sub-apps (agent-manager, audit-browser, skills-browser)
+    subapps_ok = all(_check_port_listening(p) for p in _SUBAPP_PORTS)
 
     if main_ok and subapps_ok:
         return True
@@ -316,24 +375,33 @@ def stop_dashboard(atomic_root=None):
         logger.warning("Failed to stop dashboard: %s", e)
 
 
-def log_error(phase_id: str, task_id: str, error: str, traceback_str: str = None):
-    """Append error to .logs/errors.json."""
-    logs_dir = Path(".logs")
+def log_error(phase_id: str, task_id: str, error: str, traceback_str: str = None,
+              atomic_root: Optional[Path] = None):
+    """Append error to .logs/errors.json with file locking."""
+    if atomic_root is None:
+        atomic_root = Path(os.environ.get("ATOMIC_ROOT", "."))
+    logs_dir = Path(atomic_root) / ".logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     errors_file = logs_dir / "errors.json"
     try:
-        errors = json.loads(errors_file.read_text()) if errors_file.exists() else {"errors": []}
-    except json.JSONDecodeError:
-        errors = {"errors": []}
-    from core.utils.file_ops import write_json
-    errors["errors"].append({
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "phase": phase_id,
-        "task": task_id,
-        "error": error,
-        "traceback": traceback_str,
-    })
-    write_json(errors_file, errors)
+        with _locked_file(errors_file, "r+") as fh:
+            content = fh.read()
+            try:
+                errors = json.loads(content) if content.strip() else {"errors": []}
+            except json.JSONDecodeError:
+                errors = {"errors": []}
+            errors["errors"].append({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "phase": phase_id,
+                "task": task_id,
+                "error": error,
+                "traceback": traceback_str,
+            })
+            fh.seek(0)
+            fh.write(json.dumps(errors, indent=2))
+            fh.truncate()
+    except OSError as e:
+        logger.debug("Failed to log error to errors.json: %s", e)
 
 
 def sync_dashboard(phase_id: Optional[str] = None, task_id: Optional[str] = None):

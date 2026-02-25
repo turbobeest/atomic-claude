@@ -8,7 +8,7 @@ import logging
 import sys
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import List, Tuple
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ from core.utils.cli_ui import (
     print_red, print_dim, prompt_user, clear_input_buffer
 )
 from core.utils.file_ops import ensure_dir, read_file, write_file
+from core.memory import memory_save, MemoryEntryType
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -88,6 +89,128 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     return True
 
 
+def _load_review_metrics(findings_file: Path, refinement_file: Path) -> dict:
+    """Load review metrics from findings and refinement files.
+
+    Returns a dict with keys: critical_found, major_found, critical_fixed,
+    major_fixed, tests_passing.
+    """
+    metrics = {
+        "critical_found": 0,
+        "major_found": 0,
+        "critical_fixed": 0,
+        "major_fixed": 0,
+        "tests_passing": True,
+    }
+
+    if findings_file.exists():
+        try:
+            findings_data = json.loads(read_file(findings_file))
+            totals = findings_data.get("totals", {})
+            metrics["critical_found"] = totals.get("critical", 0)
+            metrics["major_found"] = totals.get("major", 0)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.debug("Failed to load findings from %s: %s", findings_file, e)
+
+    if refinement_file.exists():
+        try:
+            refinement_data = json.loads(read_file(refinement_file))
+            refinements = refinement_data.get("refinements", {})
+            metrics["critical_fixed"] = refinements.get("critical", {}).get("fixed", 0)
+            metrics["major_fixed"] = refinements.get("major", {}).get("fixed", 0)
+            test_verification = refinement_data.get("test_verification", {})
+            metrics["tests_passing"] = test_verification.get("all_passing", True)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.debug("Failed to load refinement report from %s: %s", refinement_file, e)
+
+    return metrics
+
+
+def _check_review_items(
+    findings_file: Path, metrics: dict
+) -> Tuple[List[Tuple[str, str]], bool]:
+    """Check review-related checklist items. Returns (items, all_passed)."""
+    items = []
+    all_passed = True
+
+    # Check code review complete
+    if findings_file.exists():
+        print(print_green("[CRIT] ✓") + " Code review complete")
+        items.append(("Code review complete", "PASS"))
+    else:
+        print(print_red("[CRIT] ✗") + " Code review not complete")
+        items.append(("Code review complete", "FAIL"))
+        all_passed = False
+
+    # Check critical issues resolved
+    if metrics["critical_fixed"] >= metrics["critical_found"]:
+        print(print_green(f"[CRIT] ✓ All critical issues resolved ({metrics['critical_fixed']}/{metrics['critical_found']})"))
+        items.append(("Critical issues resolved", "PASS"))
+    else:
+        print(print_red(f"[CRIT] ✗ Critical issues unresolved ({metrics['critical_fixed']}/{metrics['critical_found']})"))
+        items.append(("Critical issues resolved", "FAIL"))
+        all_passed = False
+
+    # Check major issues resolved
+    if metrics["major_fixed"] >= metrics["major_found"]:
+        print(print_green(f"[CRIT] ✓ All major issues resolved ({metrics['major_fixed']}/{metrics['major_found']})"))
+        items.append(("Major issues resolved", "PASS"))
+    else:
+        print(print_yellow(f"[CRIT] ! Major issues partially resolved ({metrics['major_fixed']}/{metrics['major_found']})"))
+        items.append(("Major issues resolved", "WARN"))
+
+    # Check tests passing
+    if metrics["tests_passing"]:
+        print(print_green("[BLCK] ✓") + " All tests passing after refinements")
+        items.append(("Tests passing", "PASS"))
+    else:
+        print(print_red("[BLCK] ✗") + " Tests failing after refinements")
+        items.append(("Tests passing", "FAIL"))
+        all_passed = False
+
+    return items, all_passed
+
+
+def _check_audit_item(audit_file: Path) -> Tuple[str, str]:
+    """Check audit checklist item. Returns (name, status) tuple."""
+    if not audit_file.exists():
+        print(print_yellow("[BLCK] !") + " Audit not completed")
+        return ("Audit", "SKIP")
+
+    try:
+        audit_data = json.loads(read_file(audit_file))
+        summary = audit_data.get("summary", {})
+        passed = summary.get("passed", 0)
+        failed = summary.get("failed", 0)
+        warnings = summary.get("warnings", 0)
+        total = passed + failed + warnings
+
+        if total == 0:
+            overall_status = audit_data.get("overall_status", "UNKNOWN")
+            if overall_status == "PASS":
+                print(print_green("[BLCK] ✓") + " Audit passed")
+                return ("Audit", "PASS")
+            elif overall_status in ["WARNING", "DEFERRED"]:
+                print(print_yellow(f"[BLCK] ! Audit: {overall_status}"))
+                return ("Audit", "WARN")
+            else:
+                print(print_red("[BLCK] ✗") + " Audit failed")
+                return ("Audit", "FAIL")
+        elif failed == 0 and warnings == 0:
+            print(print_green(f"[BLCK] ✓ Audit passed ({passed} passed)"))
+            return ("Audit", "PASS")
+        elif failed == 0:
+            print(print_yellow(f"[BLCK] ! Audit has warnings ({warnings} warnings)"))
+            return ("Audit", "WARN")
+        else:
+            print(print_red(f"[BLCK] ✗ Audit has failures ({failed} failed)"))
+            return ("Audit", "FAIL")
+    except (json.JSONDecodeError, OSError) as e:
+        logger.debug("Failed to parse audit file %s: %s", audit_file, e)
+        print(print_yellow("[BLCK] !") + " Audit not completed")
+        return ("Audit", "SKIP")
+
+
 def _run_closeout_checklist(
     findings_file: Path,
     refinement_file: Path,
@@ -98,109 +221,12 @@ def _run_closeout_checklist(
     print(print_bold("- CLOSEOUT CHECKLIST"))
     print()
 
-    checklist = []
-    all_passed = True
-
-    # Load metrics
-    critical_found = 0
-    major_found = 0
-    critical_fixed = 0
-    major_fixed = 0
-    tests_passing = True
-
-    if findings_file.exists():
-        try:
-            findings_data = json.loads(read_file(findings_file))
-            totals = findings_data.get("totals", {})
-            critical_found = totals.get("critical", 0)
-            major_found = totals.get("major", 0)
-        except Exception as e:
-            logger.debug("Failed to load findings from %s: %s", findings_file, e)
-
-    if refinement_file.exists():
-        try:
-            refinement_data = json.loads(read_file(refinement_file))
-            refinements = refinement_data.get("refinements", {})
-            critical_fixed = refinements.get("critical", {}).get("fixed", 0)
-            major_fixed = refinements.get("major", {}).get("fixed", 0)
-            test_verification = refinement_data.get("test_verification", {})
-            tests_passing = test_verification.get("all_passing", True)
-        except Exception as e:
-            logger.debug("Failed to load refinement report from %s: %s", refinement_file, e)
-
-    # Check code review complete
-    if findings_file.exists():
-        print(print_green("[CRIT] ✓") + " Code review complete")
-        checklist.append(("Code review complete", "PASS"))
-    else:
-        print(print_red("[CRIT] ✗") + " Code review not complete")
-        checklist.append(("Code review complete", "FAIL"))
-        all_passed = False
-
-    # Check critical issues resolved
-    if critical_fixed >= critical_found:
-        print(print_green(f"[CRIT] ✓ All critical issues resolved ({critical_fixed}/{critical_found})"))
-        checklist.append(("Critical issues resolved", "PASS"))
-    else:
-        print(print_red(f"[CRIT] ✗ Critical issues unresolved ({critical_fixed}/{critical_found})"))
-        checklist.append(("Critical issues resolved", "FAIL"))
-        all_passed = False
-
-    # Check major issues resolved
-    if major_fixed >= major_found:
-        print(print_green(f"[CRIT] ✓ All major issues resolved ({major_fixed}/{major_found})"))
-        checklist.append(("Major issues resolved", "PASS"))
-    else:
-        print(print_yellow(f"[CRIT] ! Major issues partially resolved ({major_fixed}/{major_found})"))
-        checklist.append(("Major issues resolved", "WARN"))
-
-    # Check tests passing
-    if tests_passing:
-        print(print_green("[BLCK] ✓") + " All tests passing after refinements")
-        checklist.append(("Tests passing", "PASS"))
-    else:
-        print(print_red("[BLCK] ✗") + " Tests failing after refinements")
-        checklist.append(("Tests passing", "FAIL"))
-        all_passed = False
+    metrics = _load_review_metrics(findings_file, refinement_file)
+    review_items, all_passed = _check_review_items(findings_file, metrics)
+    checklist = list(review_items)
 
     # Check audit
-    if audit_file.exists():
-        try:
-            audit_data = json.loads(read_file(audit_file))
-            summary = audit_data.get("summary", {})
-            passed = summary.get("passed", 0)
-            failed = summary.get("failed", 0)
-            warnings = summary.get("warnings", 0)
-            total = passed + failed + warnings
-
-            if total == 0:
-                # Try legacy format
-                overall_status = audit_data.get("overall_status", "UNKNOWN")
-                if overall_status == "PASS":
-                    print(print_green("[BLCK] ✓") + " Audit passed")
-                    checklist.append(("Audit", "PASS"))
-                elif overall_status in ["WARNING", "DEFERRED"]:
-                    print(print_yellow(f"[BLCK] ! Audit: {overall_status}"))
-                    checklist.append(("Audit", "WARN"))
-                else:
-                    print(print_red("[BLCK] ✗") + " Audit failed")
-                    checklist.append(("Audit", "FAIL"))
-            elif failed == 0 and warnings == 0:
-                print(print_green(f"[BLCK] ✓ Audit passed ({passed} passed)"))
-                checklist.append(("Audit", "PASS"))
-            elif failed == 0:
-                print(print_yellow(f"[BLCK] ! Audit has warnings ({warnings} warnings)"))
-                checklist.append(("Audit", "WARN"))
-            else:
-                print(print_red(f"[BLCK] ✗ Audit has failures ({failed} failed)"))
-                checklist.append(("Audit", "FAIL"))
-        except Exception as e:
-            logger.debug("Failed to parse audit file %s: %s", audit_file, e)
-            print(print_yellow("[BLCK] !") + " Audit not completed")
-            checklist.append(("Audit", "SKIP"))
-    else:
-        print(print_yellow("[BLCK] !") + " Audit not completed")
-        checklist.append(("Audit", "SKIP"))
+    checklist.append(_check_audit_item(audit_file))
 
     # Check review artifacts
     if findings_file.exists() and refinement_file.exists():
@@ -255,46 +281,12 @@ def _get_closeout_approval(all_passed: bool, review_dir: Path, uat_mode: bool) -
     return True
 
 
-def _generate_closeout_documents(
+def _generate_closeout_markdown(
     closeout_file: Path,
-    closeout_json: Path,
     checklist: List[Tuple[str, str]],
-    findings_file: Path,
-    refinement_file: Path
+    metrics: dict
 ) -> None:
-    """Generate closeout markdown and JSON documents."""
-    print()
-    print(print_bold("- GENERATING CLOSEOUT"))
-    print()
-
-    # Load metrics
-    critical_found = 0
-    major_found = 0
-    critical_fixed = 0
-    major_fixed = 0
-    tests_passing = "true"
-
-    if findings_file.exists():
-        try:
-            findings_data = json.loads(read_file(findings_file))
-            totals = findings_data.get("totals", {})
-            critical_found = totals.get("critical", 0)
-            major_found = totals.get("major", 0)
-        except Exception as e:
-            logger.debug("Failed to load findings for closeout from %s: %s", findings_file, e)
-
-    if refinement_file.exists():
-        try:
-            refinement_data = json.loads(read_file(refinement_file))
-            refinements = refinement_data.get("refinements", {})
-            critical_fixed = refinements.get("critical", {}).get("fixed", 0)
-            major_fixed = refinements.get("major", {}).get("fixed", 0)
-            test_verification = refinement_data.get("test_verification", {})
-            tests_passing = str(test_verification.get("all_passing", True)).lower()
-        except Exception as e:
-            logger.debug("Failed to load refinement for closeout from %s: %s", refinement_file, e)
-
-    # Generate markdown
+    """Generate closeout markdown document."""
     checklist_md = []
     for name, status in checklist:
         if status == "PASS":
@@ -305,6 +297,8 @@ def _generate_closeout_documents(
             checklist_md.append(f"- [ ] {name} (failed)")
         else:
             checklist_md.append(f"- [-] {name} (deferred)")
+
+    tests_passing = str(metrics["tests_passing"]).lower()
 
     markdown_content = f"""# Phase 6 Closeout: Code Review
 
@@ -317,10 +311,10 @@ Phase 6 (Code Review) has been completed. All implemented code has been reviewed
 
 ### Key Outcomes
 
-- **Critical Issues Found:** {critical_found}
-- **Critical Issues Fixed:** {critical_fixed}
-- **Major Issues Found:** {major_found}
-- **Major Issues Fixed:** {major_fixed}
+- **Critical Issues Found:** {metrics["critical_found"]}
+- **Critical Issues Fixed:** {metrics["critical_fixed"]}
+- **Major Issues Found:** {metrics["major_found"]}
+- **Major Issues Fixed:** {metrics["major_fixed"]}
 - **Tests Passing:** {tests_passing}
 
 ### Review Dimensions
@@ -365,8 +359,16 @@ python main.py run 7
 """
 
     write_file(closeout_file, markdown_content)
+    print(print_green("  ✓ Generated phase-06-closeout.md"))
 
-    # Generate JSON
+
+def _generate_closeout_json(
+    closeout_json: Path,
+    checklist: List[Tuple[str, str]],
+    metrics: dict
+) -> None:
+    """Generate closeout JSON document."""
+    tests_passing = str(metrics["tests_passing"]).lower()
     checklist_json = [f"{name}:{status}" for name, status in checklist]
 
     json_content = {
@@ -375,10 +377,10 @@ python main.py run 7
         "status": "complete",
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "findings": {
-            "critical_found": critical_found,
-            "critical_fixed": critical_fixed,
-            "major_found": major_found,
-            "major_fixed": major_fixed
+            "critical_found": metrics["critical_found"],
+            "critical_fixed": metrics["critical_fixed"],
+            "major_found": metrics["major_found"],
+            "major_fixed": metrics["major_fixed"],
         },
         "tests_passing": (tests_passing == "true"),
         "checklist": checklist_json,
@@ -391,42 +393,35 @@ python main.py run 7
     }
 
     write_file(closeout_json, json.dumps(json_content, indent=2))
-
-    print(print_green("  ✓ Generated phase-06-closeout.md"))
     print(print_green("  ✓ Generated phase-06-closeout.json"))
+
+
+def _generate_closeout_documents(
+    closeout_file: Path,
+    closeout_json: Path,
+    checklist: List[Tuple[str, str]],
+    findings_file: Path,
+    refinement_file: Path
+) -> None:
+    """Generate closeout markdown and JSON documents."""
+    print()
+    print(print_bold("- GENERATING CLOSEOUT"))
+    print()
+
+    metrics = _load_review_metrics(findings_file, refinement_file)
+    _generate_closeout_markdown(closeout_file, checklist, metrics)
+    _generate_closeout_json(closeout_json, checklist, metrics)
     print()
 
 
 def _memory_checkpoint(findings_file: Path, refinement_file: Path) -> None:
-    """Create memory checkpoint."""
-    # Load metrics for memory summary
-    critical_found = 0
-    major_found = 0
-    critical_fixed = 0
-    major_fixed = 0
-
-    if findings_file.exists():
-        try:
-            findings_data = json.loads(read_file(findings_file))
-            totals = findings_data.get("totals", {})
-            critical_found = totals.get("critical", 0)
-            major_found = totals.get("major", 0)
-        except Exception as e:
-            logger.debug("Failed to load findings for memory checkpoint from %s: %s", findings_file, e)
-
-    if refinement_file.exists():
-        try:
-            refinement_data = json.loads(read_file(refinement_file))
-            refinements = refinement_data.get("refinements", {})
-            critical_fixed = refinements.get("critical", {}).get("fixed", 0)
-            major_fixed = refinements.get("major", {}).get("fixed", 0)
-        except Exception as e:
-            logger.debug("Failed to load refinement for memory checkpoint from %s: %s", refinement_file, e)
+    """Create memory checkpoint and save to memory system."""
+    metrics = _load_review_metrics(findings_file, refinement_file)
 
     memory_summary = f"""PHASE 6 CODE REVIEW COMPLETE
 
-CRITICAL ISSUES: {critical_fixed} of {critical_found} fixed
-MAJOR ISSUES: {major_fixed} of {major_found} fixed
+CRITICAL ISSUES: {metrics['critical_fixed']} of {metrics['critical_found']} fixed
+MAJOR ISSUES: {metrics['major_fixed']} of {metrics['major_found']} fixed
 REVIEW STATUS: Complete
 
 KEY ARTIFACTS:
@@ -436,8 +431,25 @@ KEY ARTIFACTS:
 
 READY FOR: Phase 7 (Integration) - Integration and acceptance testing"""
 
-    # Note: In a full implementation, this would call memory system
-    print(print_dim(f"Memory checkpoint: {len(memory_summary)} chars"))
+    try:
+        memory_save(
+            phase="6-code-review",
+            task_id="606",
+            content=memory_summary,
+            tags=["phase-closeout", "code-review", "phase-6"],
+            entry_type=MemoryEntryType.PHASE_CLOSEOUT,
+            metadata={
+                "critical_found": metrics["critical_found"],
+                "critical_fixed": metrics["critical_fixed"],
+                "major_found": metrics["major_found"],
+                "major_fixed": metrics["major_fixed"],
+                "tests_passing": metrics["tests_passing"],
+            },
+        )
+        print(print_dim(f"Memory checkpoint saved: {len(memory_summary)} chars"))
+    except Exception as e:
+        logger.debug("Failed to save memory checkpoint: %s", e)
+        print(print_dim(f"Memory checkpoint: {len(memory_summary)} chars (save failed)"))
 
 
 def _display_session_end(closeout_file: Path, review_dir: Path) -> None:

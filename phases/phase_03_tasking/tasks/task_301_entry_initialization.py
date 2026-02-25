@@ -24,8 +24,6 @@ logger = logging.getLogger(__name__)
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.config import Config
-from core.state import StateManager
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, prompt_user, clear_input_buffer
@@ -204,7 +202,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "checks_passed": checks_passed,
         "checks_warned": checks_warned,
         "checks_failed": checks_failed,
-        "validated_at": datetime.now(timezone.utc).isoformat() + "Z"
+        "validated_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     })
 
     ensure_dir(validation_file.parent)

@@ -5,7 +5,6 @@ Configure integration environment and review acceptance criteria.
 """
 
 import sys
-import json
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -93,7 +92,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_dim("Loading acceptance criteria from PRD and specifications..."))
     print()
 
-    # Simulated acceptance criteria (in real implementation, would parse PRD)
+    # SIMULATED: Replace with actual PRD parsing when available
     criteria_count = 17
 
     print(print_dim("─" * 118))
@@ -125,6 +124,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_bold("  - NFR TARGETS"))
     print()
 
+    # SIMULATED: Replace with actual NFR targets from PRD when available
     print(print_dim("─" * 118))
     print(print_bold("PERFORMANCE TARGETS"))
     print()
@@ -155,6 +155,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     setup_file = integration_dir / "setup.json"
     write_json(setup_file, setup_data)
+
+    # Also write to output_dir so task_704 can find it (F2 path alignment)
+    ensure_dir(output_dir)
+    output_setup_file = output_dir / "integration-setup.json"
+    write_json(output_setup_file, setup_data)
 
     print(print_green("✓ Integration Setup complete"))
     return True

@@ -5,10 +5,9 @@ Generate closeout document and prepare for Phase 9 (Release).
 """
 
 import sys
-import json
 import logging
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 from datetime import datetime, timezone
 
 # Add project root to path for imports
@@ -60,7 +59,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         closeout_data = {
             "phase": "8-deployment-prep",
             "status": "complete",
-            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
             "uat_mode": True
         }
         write_json(closeout_json, closeout_data)
@@ -71,14 +70,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
     print(print_dim("  Final review before moving to Phase 9 (Release)."))
     print()
-
-    # CLOSEOUT CHECKLIST
-    print()
-    print(print_bold("  - CLOSEOUT CHECKLIST"))
-    print()
-
-    checklist = []
-    all_passed = True
 
     # Get data
     version = "0.1.0"
@@ -91,6 +82,73 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if approval_file.exists():
         approval_data = read_json(approval_file)
         approval_status = approval_data.get("status", "pending")
+
+    # Run checklist validation
+    checklist, all_passed = _validate_checklist(artifacts_file, approval_status)
+
+    # CLOSEOUT APPROVAL
+    print()
+    print(print_bold("  - CLOSEOUT APPROVAL"))
+    print()
+
+    if not all_passed:
+        print(print_yellow("  Some critical items need attention before closeout."))
+        print()
+
+    print(print_cyan("  Closeout options:"))
+    print()
+    print("    [approve] Approve closeout and proceed")
+    print("    [review]  Review specific artifacts")
+    print("    [hold]    Hold closeout for now")
+    print()
+
+    closeout_choice = prompt_user("  Choice (default: approve): ") or "approve"
+
+    if closeout_choice == "review":
+        print()
+        print(print_dim("  Key artifacts:"))
+        print("    dist/                            - Release packages")
+        print("    CHANGELOG.md                     - Version changelog")
+        print("    docs/                            - Documentation")
+        print("    .claude/deployment/setup.json    - Setup configuration")
+        print("    .claude/deployment/artifacts.json - Artifact record")
+        print("    .claude/deployment/approval.json  - Approval record")
+        print()
+        prompt_user("  Press Enter to continue to closeout...")
+        # Fall through to approval
+
+    elif closeout_choice == "hold":
+        print()
+        print(print_yellow("⚠  Closeout held - phase not complete"))
+        return False
+
+    # Generate closeout documents
+    closeout_md = _generate_closeout_markdown(checklist, version, approval_status)
+    write_file(closeout_file, closeout_md)
+
+    closeout_data = _generate_closeout_json(checklist, version, approval_status)
+    write_json(closeout_json, closeout_data)
+
+    print("  ✓ Generated phase-08-closeout.md")
+    print("  ✓ Generated phase-08-closeout.json")
+    print()
+
+    # Display session end
+    _display_session_end()
+
+    print(print_green("✓ Phase 8 closeout complete"))
+
+    return True
+
+
+def _validate_checklist(artifacts_file: Path, approval_status: str) -> tuple:
+    """Validate closeout checklist items. Returns (checklist, all_passed)."""
+    print()
+    print(print_bold("  - CLOSEOUT CHECKLIST"))
+    print()
+
+    checklist = []
+    all_passed = True
 
     # Check release package
     if artifacts_file.exists():
@@ -150,51 +208,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     print()
 
-    # CLOSEOUT APPROVAL
-    print()
-    print(print_bold("  - CLOSEOUT APPROVAL"))
-    print()
+    return checklist, all_passed
 
-    if not all_passed:
-        print(print_yellow("  Some critical items need attention before closeout."))
-        print()
 
-    print(print_cyan("  Closeout options:"))
-    print()
-    print("    [approve] Approve closeout and proceed")
-    print("    [review]  Review specific artifacts")
-    print("    [hold]    Hold closeout for now")
-    print()
-
-    closeout_choice = prompt_user("  Choice (default: approve): ") or "approve"
-
-    if closeout_choice == "review":
-        print()
-        print(print_dim("  Key artifacts:"))
-        print("    dist/                            - Release packages")
-        print("    CHANGELOG.md                     - Version changelog")
-        print("    docs/                            - Documentation")
-        print("    .claude/deployment/setup.json    - Setup configuration")
-        print("    .claude/deployment/artifacts.json - Artifact record")
-        print("    .claude/deployment/approval.json  - Approval record")
-        print()
-        prompt_user("  Press Enter to continue to closeout...")
-        # Fall through to approval
-
-    elif closeout_choice == "hold":
-        print()
-        print(print_yellow("⚠  Closeout held - phase not complete"))
-        return False
-
-    # GENERATING CLOSEOUT
-    print()
-    print(print_bold("  - GENERATING CLOSEOUT"))
-    print()
-
-    # Generate markdown closeout
+def _generate_closeout_markdown(checklist: List[str], version: str, approval_status: str) -> str:
+    """Generate markdown closeout document."""
     checklist_md = _format_checklist_markdown(checklist)
 
-    closeout_md = f"""# Phase 8 Closeout: Deployment Prep
+    return f"""# Phase 8 Closeout: Deployment Prep
 
 **Completed:** {datetime.now(timezone.utc).isoformat()}
 **Status:** COMPLETE
@@ -246,14 +267,14 @@ python main.py run 9
 *Phase 8 completed by ATOMIC CLAUDE*
 """
 
-    write_file(closeout_file, closeout_md)
 
-    # Generate JSON closeout
-    closeout_data = {
+def _generate_closeout_json(checklist: List[str], version: str, approval_status: str) -> dict:
+    """Generate JSON closeout data."""
+    return {
         "phase": 8,
         "name": "Deployment Prep",
         "status": "complete",
-        "completed_at": datetime.now(timezone.utc).isoformat() + "Z",
+        "completed_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         "release": {
             "version": version
         },
@@ -267,13 +288,9 @@ python main.py run 9
         "next_phase": 9
     }
 
-    write_json(closeout_json, closeout_data)
 
-    print("  ✓ Generated phase-08-closeout.md")
-    print("  ✓ Generated phase-08-closeout.json")
-    print()
-
-    # SESSION END
+def _display_session_end():
+    """Display session end information."""
     print()
     print(print_bold("  - SESSION END"))
     print()
@@ -292,16 +309,14 @@ python main.py run 9
     print(print_dim("  Package ready. Launch imminent."))
     print()
 
-    print(print_green("✓ Phase 8 closeout complete"))
-
-    return True
-
 
 def _format_checklist_markdown(checklist: List[str]) -> str:
     """Format checklist items as markdown."""
     lines = []
     for item in checklist:
-        name, status = item.split(":")
+        parts = item.split(":", 1)
+        name = parts[0]
+        status = parts[1] if len(parts) > 1 else "UNKNOWN"
         if status == "PASS":
             lines.append(f"- [x] {name}")
         elif status == "WARN":

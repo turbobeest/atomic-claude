@@ -5,11 +5,19 @@ Select agents for code review: deep-code-reviewer, arch-compliance,
 perf-analyzer, doc-reviewer, code-refiner.
 """
 
+import logging
 import sys
 import json
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Tuple
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
+
+# Model tier constants
+TIER_OPUS = "opus"
+TIER_SONNET = "sonnet"
+TIER_HAIKU = "haiku"
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -44,15 +52,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # UAT Mode Bypass
     if uat_mode:
         print(print_yellow("UAT Mode: Creating minimal valid output"))
+        # NOTE: Agent names here are display labels, not manifest IDs
+        # TODO: validate against agent-manifest.json
         write_file(agents_file, json.dumps({
             "agents": ["code-reviewer"],
             "count": 1,
             "review_agents": {
-                "deep_code": {"name": "code-reviewer", "model": "sonnet", "dimension": "code_quality"},
-                "architecture": {"name": "code-reviewer", "model": "sonnet", "dimension": "architecture"},
-                "performance": {"name": "code-reviewer", "model": "sonnet", "dimension": "performance"},
-                "documentation": {"name": "code-reviewer", "model": "sonnet", "dimension": "documentation"},
-                "refiner": {"name": "code-reviewer", "model": "sonnet", "dimension": "refinement"}
+                "deep_code": {"name": "code-reviewer", "model": TIER_SONNET, "dimension": "code_quality"},
+                "architecture": {"name": "code-reviewer", "model": TIER_SONNET, "dimension": "architecture"},
+                "performance": {"name": "code-reviewer", "model": TIER_SONNET, "dimension": "performance"},
+                "documentation": {"name": "code-reviewer", "model": TIER_SONNET, "dimension": "documentation"},
+                "refiner": {"name": "code-reviewer", "model": TIER_SONNET, "dimension": "refinement"}
             },
             "selected_at": datetime.now(timezone.utc).isoformat()
         }, indent=2))
@@ -76,13 +86,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     _display_selection_summary(agents)
 
     # Save agent selection
+    # NOTE: Agent names here are display labels, not manifest IDs
+    # TODO: validate against agent-manifest.json
     agent_data = {
         "review_agents": {
-            "deep_code": {"name": agents["deep"], "model": "opus", "dimension": "code_quality"},
-            "architecture": {"name": agents["arch"], "model": "sonnet", "dimension": "architecture"},
-            "performance": {"name": agents["perf"], "model": "sonnet", "dimension": "performance"},
-            "documentation": {"name": agents["doc"], "model": "haiku", "dimension": "documentation"},
-            "refiner": {"name": agents["refiner"], "model": "opus", "dimension": "refinement"}
+            "deep_code": {"name": agents["deep"], "model": TIER_OPUS, "dimension": "code_quality"},
+            "architecture": {"name": agents["arch"], "model": TIER_SONNET, "dimension": "architecture"},
+            "performance": {"name": agents["perf"], "model": TIER_SONNET, "dimension": "performance"},
+            "documentation": {"name": agents["doc"], "model": TIER_HAIKU, "dimension": "documentation"},
+            "refiner": {"name": agents["refiner"], "model": TIER_OPUS, "dimension": "refinement"}
         },
         "selected_at": datetime.now(timezone.utc).isoformat()
     }

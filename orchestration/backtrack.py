@@ -24,10 +24,12 @@ logger = logging.getLogger(__name__)
 atomic_root = Path(__file__).resolve().parent.parent
 
 
+from orchestration.pipeline import PHASE_REGISTRY
+
+# Derive PHASE_NAMES from the canonical PHASE_REGISTRY to avoid duplication
 PHASE_NAMES = {
-    0: "setup", 1: "discovery", 2: "prd", 3: "tasking",
-    4: "specification", 5: "implementation", 6: "code-review",
-    7: "integration", 8: "deployment-prep", 9: "release"
+    meta.phase_num: meta.phase_id.split("-", 1)[1]
+    for meta in PHASE_REGISTRY.values()
 }
 
 # Deliverable directories written to project_root (outside atomic-claude)
@@ -44,64 +46,47 @@ PROJECT_DELIVERABLES = {
 }
 
 
-def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
-    """
-    Reset pipeline to a specific phase/task.
+def _clear_directory_for_phases(base_dir: Path, phases: list, pattern_fn, label: str = "") -> None:
+    """Clear directories or files matching a pattern for a list of phases.
 
     Args:
-        phase: Phase number (0-9)
-        task: Optional task ID to reset to (e.g., "205")
-        force: If True, skip confirmation prompts (for programmatic use)
-
-    This will:
-    1. Reset state to target point
-    2. Clear all artifacts after target
-    3. Clear all phases after target
+        base_dir: Base directory to search in
+        phases: List of phase numbers to clear
+        pattern_fn: Callable(phase_num) -> list of (Path, is_glob) tuples to clear
+        label: Label for log messages
     """
-    # Validate phase number
-    if not isinstance(phase, int) or phase < 0 or phase > 9:
-        print(f"\n❌ Invalid phase number: {phase}. Must be 0-9.")
+    if not base_dir.exists():
         return
+    for p in phases:
+        targets = pattern_fn(p)
+        for target, is_glob in targets:
+            if is_glob:
+                for f in base_dir.glob(str(target)):
+                    if f.is_dir():
+                        shutil.rmtree(f)
+                    else:
+                        f.unlink()
+                    print(f"   ✓ Cleared {f.name if not f.is_dir() else f}" +
+                          (f" ({label})" if label else ""))
+            else:
+                full_path = base_dir / target if not target.is_absolute() else target
+                if full_path.exists():
+                    if full_path.is_dir():
+                        shutil.rmtree(full_path)
+                    else:
+                        full_path.unlink()
+                    print(f"   ✓ Cleared {full_path}" +
+                          (f" ({label})" if label else ""))
 
-    # Safety check: ensure we're in the right directory
-    if not (atomic_root / "main.py").exists():
-        raise RuntimeError(f"Safety check failed: {atomic_root} does not look like atomic-claude root")
 
-    phase_name = PHASE_NAMES.get(phase, f"phase-{phase}")
+def _clear_state(state: dict, state_file: Path, phase: int, phase_name: str,
+                 task: Optional[str], task_num: Optional[int],
+                 phases_to_clear: list) -> None:
+    """Clear state entries for rolled-back phases and update pointers.
 
-    print(f"\n🔄 Backtracking to Phase {phase}: {phase_name}" + (f", Task {task}" if task else ""))
-    print("\n⚠️  WARNING: This will DELETE all work after this point!")
-    print("   - State will be cleared")
-    print("   - Artifacts will be deleted")
-    print("   - Memory will be cleared")
-
-    if not force:
-        confirm = input("\nType 'yes' to confirm: ")
-
-        if confirm.lower() != "yes":
-            print("❌ Backtrack cancelled")
-            return
-
-    # Load state
-    state_file = atomic_root / ".state" / "task-state.json"
-    if not state_file.exists():
-        print("❌ No state file found")
-        return
-
-    with open(state_file) as f:
-        state = json.load(f)
-
-    # Determine what to clear
-    phases_to_clear = list(range(phase + 1, 10))
-
-    # Clear memory entries and invalidate checkpoints for rolled-back phases
-    try:
-        memory_init()
-        memory_handle_backtrack(phase)
-    except Exception as e:
-        logger.warning("Memory cleanup during backtrack failed: %s", e)
-
-    # Clear state for future phases
+    Modifies `state` dict in place. Does NOT write to disk (caller does that
+    after all cleanup is complete).
+    """
     print("\n📝 Clearing state...")
     for p in phases_to_clear:
         phase_id = f"{p}-{PHASE_NAMES[p]}"
@@ -109,20 +94,6 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
             del state["phases"][phase_id]
             print(f"   ✓ Cleared {phase_id}")
 
-    # Parse task number early (needed for artifact cleanup logic too)
-    task_num = None
-    if task:
-        task_num = int(task) if task.isdigit() else int(task.replace("task", ""))
-
-        # Validate task belongs to the target phase (e.g., Phase 1 tasks are 1xx)
-        expected_prefix = phase * 100
-        if not (expected_prefix < task_num <= expected_prefix + 99):
-            print(f"\n❌ Task {task} doesn't belong to Phase {phase}.")
-            print(f"   Phase {phase} tasks are numbered {expected_prefix + 1:03d}–{expected_prefix + 99:03d}")
-            print(f"   Example: python main.py backtrack {phase} {expected_prefix + 1:03d}")
-            return
-
-    # Reset the target phase's state
     target_phase_id = f"{phase}-{phase_name}"
     if task:
         # Task specified: clear tasks >= target, reset phase status
@@ -153,13 +124,15 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
     state["current_phase"] = target_phase_id
     state["current_task"] = None
 
-    # Save updated state
-    write_json(state_file, state)
 
-    # Clear artifacts
-    print("\n📁 Clearing artifacts...")
+def _clear_artifacts(phases_to_clear: list, phase: int, phase_name: str,
+                     task: Optional[str], task_num: Optional[int]) -> None:
+    """Clear output artifacts, deliverables, audit/closeout reports for rolled-back phases."""
     project_root = atomic_root.parent
     outputs_dir = atomic_root / ".outputs"
+    first_task = not task or (task_num is not None and task_num % 100 == 1)
+
+    print("\n📁 Clearing artifacts...")
 
     # Always wipe subsequent phases entirely
     for p in phases_to_clear:
@@ -170,9 +143,7 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
 
     # Target phase: wipe entirely if no task specified OR if the target
     # task is the first task in the phase (nothing before it to preserve).
-    # Otherwise preserve earlier tasks' artifacts.
     target_phase_dir = outputs_dir / f"{phase}-{phase_name}"
-    first_task = not task or (task_num is not None and task_num % 100 == 1)
     if first_task:
         if target_phase_dir.exists():
             shutil.rmtree(target_phase_dir)
@@ -180,25 +151,10 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
     else:
         print(f"   ℹ Preserved {target_phase_dir} (earlier task artifacts needed)")
 
-    # Clear memory: same logic — wipe target phase if first task or no task
-    memory_dir = atomic_root / ".state" / "memory"
-    for p in phases_to_clear:
-        phase_mem = memory_dir / f"phase-{p}"
-        if phase_mem.exists():
-            shutil.rmtree(phase_mem)
-            print(f"   ✓ Cleared memory for phase {p}")
-
-    if first_task:
-        target_mem = memory_dir / f"phase-{phase}"
-        if target_mem.exists():
-            shutil.rmtree(target_mem)
-            print(f"   ✓ Cleared memory for phase {phase}")
-
     # Clear project-root deliverables (written outside atomic-claude)
     print("\n📁 Clearing project deliverables...")
 
     # Clear pipeline-collected reference material if backtracking to/before task 004
-    # This prevents duplicate files on re-run of the material scan task.
     if phase == 0 and (not task or (task_num is not None and task_num <= 4)):
         collected_dir = project_root / "docs" / "reference" / "collected"
         if collected_dir.exists():
@@ -211,7 +167,7 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
             d = project_root / rel_dir
             if d.exists():
                 shutil.rmtree(d)
-                print(f"   ✓ Cleared {rel_dir}/ (Phase {p} deliverable)")
+                print(f"   ✓ Cleared {rel_dir}/ (Phase %s deliverable)" % p)
 
     # Clear target phase deliverables if resetting from the start
     if first_task:
@@ -219,7 +175,7 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
             d = project_root / rel_dir
             if d.exists():
                 shutil.rmtree(d)
-                print(f"   ✓ Cleared {rel_dir}/ (Phase {phase} deliverable)")
+                print(f"   ✓ Cleared {rel_dir}/ (Phase %s deliverable)" % phase)
 
     # Clear audit evaluation reports (.outputs/audits/phase-N/)
     audits_dir = outputs_dir / "audits"
@@ -297,7 +253,7 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
         if not remaining:
             print("   ✓ Cleared all memory debug logs")
         else:
-            print(f"   ✓ Cleared memory debug logs for rolled-back phases")
+            print("   ✓ Cleared memory debug logs for rolled-back phases")
 
     # Clear model overrides (user may want fresh selections)
     overrides_file = atomic_root / ".state" / "model-overrides.json"
@@ -311,46 +267,78 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
         shutil.rmtree(llm_cache_dir)
         print("   ✓ Cleared LLM response cache")
 
-    # Clear graph data for rolled-back phases
+
+def _clear_memory(phases_to_clear: list, phase: int, phase_name: str,
+                  task: Optional[str], task_num: Optional[int]) -> None:
+    """Clear memory entries and invalidate checkpoints for rolled-back phases."""
+    first_task = not task or (task_num is not None and task_num % 100 == 1)
+
+    # Clear memory entries and invalidate checkpoints
+    try:
+        memory_init()
+        memory_handle_backtrack(phase)
+    except Exception as e:
+        logger.warning("Memory cleanup during backtrack failed: %s", e)
+
+    # Clear memory file directories
+    memory_dir = atomic_root / ".state" / "memory"
+    for p in phases_to_clear:
+        phase_mem = memory_dir / f"phase-{p}"
+        if phase_mem.exists():
+            shutil.rmtree(phase_mem)
+            print(f"   ✓ Cleared memory for phase {p}")
+
+    if first_task:
+        target_mem = memory_dir / f"phase-{phase}"
+        if target_mem.exists():
+            shutil.rmtree(target_mem)
+            print(f"   ✓ Cleared memory for phase %s" % phase)
+
+
+def _clear_graph(phases_to_clear: list, phase: int, phase_name: str,
+                 task: Optional[str], task_num: Optional[int]) -> None:
+    """Clear FalkorDB graph data for rolled-back phases."""
+    first_task = not task or (task_num is not None and task_num % 100 == 1)
+    target_phase_id = f"{phase}-{phase_name}"
+
     try:
         from core.graph import get_graph
         from core.graph.exceptions import GraphUnavailableError
     except ImportError:
-        get_graph = None
-        GraphUnavailableError = None
-
-    if get_graph is not None:
-        try:
-            graph_cleaned = False
-            for p in phases_to_clear:
-                p_id = f"{p}-{PHASE_NAMES[p]}"
-                graph = get_graph(phase_id=p_id)
-                try:
-                    deleted = graph.delete_phase_data(p_id)
-                    logger.info(f"Deleted {deleted} graph nodes/edges for phase {p_id}")
-                    if deleted:
-                        print(f"   ✓ Cleared {deleted} graph nodes/edges for {p_id}")
-                        graph_cleaned = True
-                except Exception as e:
-                    logger.warning(f"Graph cleanup failed for phase {p_id}: {e}")
-            if first_task:
-                graph = get_graph(phase_id=target_phase_id)
-                try:
-                    deleted = graph.delete_phase_data(target_phase_id)
-                    logger.info(f"Deleted {deleted} graph nodes/edges for phase {target_phase_id}")
-                    if deleted:
-                        print(f"   ✓ Cleared {deleted} graph nodes/edges for {target_phase_id}")
-                        graph_cleaned = True
-                except Exception as e:
-                    logger.warning(f"Graph cleanup failed for phase {target_phase_id}: {e}")
-            if not graph_cleaned:
-                print("   ℹ No graph data to clear (graph empty)")
-        except GraphUnavailableError:
-            logger.debug("FalkorDB unavailable for backtrack graph cleanup")
-    else:
         logger.debug("Graph module not available for backtrack cleanup")
+        return
 
-    # Prompt to clear generated code
+    try:
+        graph_cleaned = False
+        for p in phases_to_clear:
+            p_id = f"{p}-{PHASE_NAMES[p]}"
+            graph = get_graph(phase_id=p_id)
+            try:
+                deleted = graph.delete_phase_data(p_id)
+                logger.info("Deleted %s graph nodes/edges for phase %s", deleted, p_id)
+                if deleted:
+                    print(f"   ✓ Cleared {deleted} graph nodes/edges for {p_id}")
+                    graph_cleaned = True
+            except Exception as e:
+                logger.warning("Graph cleanup failed for phase %s: %s", p_id, e)
+        if first_task:
+            graph = get_graph(phase_id=target_phase_id)
+            try:
+                deleted = graph.delete_phase_data(target_phase_id)
+                logger.info("Deleted %s graph nodes/edges for phase %s", deleted, target_phase_id)
+                if deleted:
+                    print(f"   ✓ Cleared {deleted} graph nodes/edges for {target_phase_id}")
+                    graph_cleaned = True
+            except Exception as e:
+                logger.warning("Graph cleanup failed for phase %s: %s", target_phase_id, e)
+        if not graph_cleaned:
+            print("   ℹ No graph data to clear (graph empty)")
+    except GraphUnavailableError:
+        logger.debug("FalkorDB unavailable for backtrack graph cleanup")
+
+
+def _prompt_code_cleanup(project_root: Path, force: bool) -> None:
+    """Prompt user to optionally clear generated code and tests."""
     print("\n🗂️  Generated code...")
     if force:
         clear_code = "n"
@@ -373,6 +361,88 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
             shutil.rmtree(tests_dir)
             tests_dir.mkdir()
             print("   ✓ Cleared ../tests/")
+
+
+def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
+    """
+    Reset pipeline to a specific phase/task.
+
+    Args:
+        phase: Phase number (0-9)
+        task: Optional task ID to reset to (e.g., "205")
+        force: If True, skip confirmation prompts (for programmatic use)
+
+    This will:
+    1. Clear memory entries and graph data for rolled-back phases
+    2. Clear all artifacts after target
+    3. Write updated state (last, so a crash mid-cleanup is safe)
+    """
+    # Validate phase number
+    if not isinstance(phase, int) or phase < 0 or phase > 9:
+        print(f"\n❌ Invalid phase number: {phase}. Must be 0-9.")
+        return
+
+    # Safety check: ensure we're in the right directory
+    if not (atomic_root / "main.py").exists():
+        raise RuntimeError(f"Safety check failed: {atomic_root} does not look like atomic-claude root")
+
+    phase_name = PHASE_NAMES.get(phase, f"phase-{phase}")
+
+    print(f"\n🔄 Backtracking to Phase {phase}: {phase_name}" + (f", Task {task}" if task else ""))
+    print("\n⚠️  WARNING: This will DELETE all work after this point!")
+    print("   - State will be cleared")
+    print("   - Artifacts will be deleted")
+    print("   - Memory will be cleared")
+
+    if not force:
+        confirm = input("\nType 'yes' to confirm: ")
+
+        if confirm.lower() != "yes":
+            print("❌ Backtrack cancelled")
+            return
+
+    # Load state
+    state_file = atomic_root / ".state" / "task-state.json"
+    if not state_file.exists():
+        print("❌ No state file found")
+        return
+
+    with open(state_file) as f:
+        state = json.load(f)
+
+    # Determine what to clear
+    phases_to_clear = list(range(phase + 1, 10))
+
+    # Parse task number early (needed for artifact cleanup logic too)
+    task_num = None
+    if task:
+        task_num = int(task) if task.isdigit() else int(task.replace("task", ""))
+
+        # Validate task belongs to the target phase (e.g., Phase 1 tasks are 1xx)
+        expected_prefix = phase * 100
+        if not (expected_prefix < task_num <= expected_prefix + 99):
+            print(f"\n❌ Task {task} doesn't belong to Phase {phase}.")
+            print(f"   Phase {phase} tasks are numbered {expected_prefix + 1:03d}–{expected_prefix + 99:03d}")
+            print(f"   Example: python main.py backtrack {phase} {expected_prefix + 1:03d}")
+            return
+
+    # Step 1: Clear memory and graph (safe — these are supplementary data)
+    _clear_memory(phases_to_clear, phase, phase_name, task, task_num)
+    _clear_graph(phases_to_clear, phase, phase_name, task, task_num)
+
+    # Step 2: Clear artifacts (file deletions)
+    _clear_artifacts(phases_to_clear, phase, phase_name, task, task_num)
+
+    # Step 3: Update state in memory (modify dict but don't write yet)
+    _clear_state(state, state_file, phase, phase_name, task, task_num, phases_to_clear)
+
+    # Step 4: Write state LAST so crash during cleanup doesn't leave
+    # state marked as backtracked while artifacts still exist (Finding #10, #11)
+    write_json(state_file, state)
+
+    # Step 5: Prompt for optional code cleanup
+    project_root = atomic_root.parent
+    _prompt_code_cleanup(project_root, force)
 
     # Show resume command
     print(f"\n✅ Backtrack complete!")

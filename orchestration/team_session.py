@@ -8,9 +8,9 @@ the operator to observe all agents working simultaneously.
 Falls back to ThreadPoolExecutor when tmux is unavailable.
 """
 
-import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -79,7 +79,7 @@ class TeamSession:
             True if session started (or tmux unavailable — will use fallback)
         """
         if not self.tmux_available:
-            logger.info("tmux not available; team session will use thread fallback")
+            logger.info("tmux not available — running agents in parallel threads")
             return True
 
         try:
@@ -129,10 +129,11 @@ class TeamSession:
             self._panes[agent_id] = pane
             return pane
 
-        # Wrap command to capture output
-        wrapped_cmd = f"({command}) > '{output_file}' 2>&1; echo '---DONE---' >> '{output_file}'"
+        # Wrap command to capture output (use shlex.quote for safety)
+        quoted_output = shlex.quote(str(output_file))
+        wrapped_cmd = f"({command}) > {quoted_output} 2>&1; echo '---DONE---' >> {quoted_output}"
         if cwd:
-            wrapped_cmd = f"cd '{cwd}' && {wrapped_cmd}"
+            wrapped_cmd = f"cd {shlex.quote(cwd)} && {wrapped_cmd}"
 
         try:
             if len(self._panes) == 0:
@@ -193,16 +194,7 @@ class TeamSession:
 
         except (subprocess.SubprocessError, OSError) as e:
             logger.warning("Failed to add agent pane %s: %s", agent_id, e)
-            # Still track for potential fallback
-            pane = AgentPane(
-                agent_id=agent_id,
-                pane_id="failed",
-                command=command,
-                cwd=cwd,
-                output_file=output_file,
-            )
-            self._panes[agent_id] = pane
-            return pane
+            return None
 
     def run_all(self, timeout: int = 600) -> Dict[str, TeamResult]:
         """Execute all agents and wait for completion.
@@ -228,9 +220,18 @@ class TeamSession:
         def _execute_agent(pane: AgentPane) -> TeamResult:
             start = time.monotonic()
             try:
+                # Use shell=False with shlex.split for simple commands;
+                # fall back to shell=True only for compound commands (pipes, &&, etc.)
+                cmd = pane.command
+                use_shell = any(c in cmd for c in ('|', '&&', '||', ';', '>', '<'))
+                if use_shell:
+                    # Command requires shell interpretation
+                    run_cmd = cmd
+                else:
+                    run_cmd = shlex.split(cmd)
                 proc = subprocess.run(
-                    pane.command,
-                    shell=True,
+                    run_cmd,
+                    shell=use_shell,
                     capture_output=True,
                     text=True,
                     timeout=timeout,
@@ -294,23 +295,35 @@ class TeamSession:
         start_time = time.monotonic()
         pending = set(self._panes.keys())
 
+        # Track file sizes for stability check (Finding #21)
+        prev_sizes: Dict[str, int] = {}
+
         while pending and (time.monotonic() - start_time) < timeout:
             for agent_id in list(pending):
                 pane = self._panes[agent_id]
                 if pane.output_file and pane.output_file.exists():
-                    content = pane.output_file.read_text()
-                    if "---DONE---" in content:
-                        # Agent finished
-                        output = content.replace("---DONE---", "").strip()
-                        duration = time.monotonic() - start_time
-                        results[agent_id] = TeamResult(
-                            agent_id=agent_id,
-                            success=True,  # We can't know return code from tmux easily
-                            output=output,
-                            duration=duration,
-                        )
-                        pane.status = "done"
-                        pending.discard(agent_id)
+                    try:
+                        current_size = pane.output_file.stat().st_size
+                    except OSError:
+                        continue
+                    prev_size = prev_sizes.get(agent_id, -1)
+                    prev_sizes[agent_id] = current_size
+
+                    # Only read when file size has stabilized (same as previous check)
+                    if current_size > 0 and current_size == prev_size:
+                        content = pane.output_file.read_text()
+                        if "---DONE---" in content:
+                            # Agent finished
+                            output = content.replace("---DONE---", "").strip()
+                            duration = time.monotonic() - start_time
+                            results[agent_id] = TeamResult(
+                                agent_id=agent_id,
+                                success=True,  # We can't know return code from tmux easily
+                                output=output,
+                                duration=duration,
+                            )
+                            pane.status = "done"
+                            pending.discard(agent_id)
 
             if pending:
                 time.sleep(1.0)
@@ -345,13 +358,9 @@ class TeamSession:
                 pass
             self._session_started = False
 
-        # Clean up output files
+        # Clean up output files and temp directory
         if self.work_dir.exists():
-            for f in self.work_dir.glob("*.output"):
-                try:
-                    f.unlink()
-                except OSError:
-                    pass
+            shutil.rmtree(self.work_dir, ignore_errors=True)
 
         self._panes.clear()
         self._results.clear()

@@ -100,6 +100,8 @@ class ModelResolver:
         self._config_mtime: float = self._get_config_mtime()
         self._overrides: Dict[str, Dict[str, Optional[str]]] = {}      # Session-wide (persisted)
         self._task_overrides: Dict[str, Dict[str, Optional[str]]] = {}  # Task-scoped (in-memory)
+        self._bootstrap_provider_cached: bool = False  # Whether bootstrap detection has run
+        self._bootstrap_provider: Optional[str] = None  # Cached bootstrap provider detection
         self._load_persisted_overrides()
 
     # ------------------------------------------------------------------
@@ -500,45 +502,40 @@ class ModelResolver:
         Checked once and cached.  Used during Phase 0 bootstrap when no
         project-config.json has been written yet.
         """
-        if hasattr(self, "_bootstrap_provider"):
+        if self._bootstrap_provider_cached:
             return self._bootstrap_provider
 
         import shutil
 
-        # 1. claude CLI on PATH → subscription
+        detected: Optional[str] = None
+
+        # 1. claude CLI on PATH -> subscription
         if shutil.which("claude"):
-            self._bootstrap_provider = "claude-code"
-            return self._bootstrap_provider
-
+            detected = "claude-code"
         # 2. Anthropic API key
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            self._bootstrap_provider = "anthropic"
-            return self._bootstrap_provider
-
+        elif os.environ.get("ANTHROPIC_API_KEY"):
+            detected = "anthropic"
         # 3. AWS credentials
-        if os.environ.get("AWS_PROFILE") or os.environ.get("AWS_ACCESS_KEY_ID"):
-            self._bootstrap_provider = "aws-bedrock"
-            return self._bootstrap_provider
+        elif os.environ.get("AWS_PROFILE") or os.environ.get("AWS_ACCESS_KEY_ID"):
+            detected = "aws-bedrock"
+        else:
+            # 4. .env file in project root
+            env_file = self._atomic_root / ".env"
+            if env_file.exists():
+                try:
+                    text = env_file.read_text()
+                    if "ATOMIC_LLM_PROVIDER=claude-code" in text:
+                        detected = "claude-code"
+                    elif "ANTHROPIC_API_KEY=" in text:
+                        detected = "anthropic"
+                    elif "AWS_PROFILE=" in text or "CLAUDE_CODE_USE_BEDROCK=" in text:
+                        detected = "aws-bedrock"
+                except OSError as e:
+                    logger.debug("Could not read .env for bootstrap provider detection: %s", e)
 
-        # 4. .env file in project root
-        env_file = self._atomic_root / ".env"
-        if env_file.exists():
-            try:
-                text = env_file.read_text()
-                if "ATOMIC_LLM_PROVIDER=claude-code" in text:
-                    self._bootstrap_provider = "claude-code"
-                    return self._bootstrap_provider
-                if "ANTHROPIC_API_KEY=" in text:
-                    self._bootstrap_provider = "anthropic"
-                    return self._bootstrap_provider
-                if "AWS_PROFILE=" in text or "CLAUDE_CODE_USE_BEDROCK=" in text:
-                    self._bootstrap_provider = "aws-bedrock"
-                    return self._bootstrap_provider
-            except OSError as e:
-                logger.debug("Could not read .env for bootstrap provider detection: %s", e)
-
-        self._bootstrap_provider = None
-        return None
+        self._bootstrap_provider = detected
+        self._bootstrap_provider_cached = True
+        return self._bootstrap_provider
 
 
 # ------------------------------------------------------------------

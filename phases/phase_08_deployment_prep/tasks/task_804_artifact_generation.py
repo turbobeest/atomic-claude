@@ -4,11 +4,11 @@ Task 804: Artifact Generation
 Generate release package, changelog, documentation, and installation guide.
 """
 
+import re
 import sys
-import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from datetime import datetime, timezone
 
 # Add project root to path for imports
@@ -18,9 +18,15 @@ from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, print_magenta, print_blue
 )
-from core.utils.file_ops import read_json, write_json, read_file
+from core.utils.file_ops import read_json, write_json, read_file, write_file
+from core.llm.invoke import invoke_llm
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_input(value: str) -> str:
+    """Sanitize input to alphanumeric, dots, and hyphens only."""
+    return re.sub(r'[^a-zA-Z0-9.\-]', '', value)
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -52,13 +58,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if uat_mode:
         print(print_dim("  UAT Mode: Creating minimal valid output"))
         artifacts_data = {
-            "artifacts": [
-                {"name": "release-package", "status": "generated"},
-                {"name": "changelog", "status": "generated"},
-                {"name": "documentation", "status": "generated"},
-                {"name": "installation-guide", "status": "generated"}
-            ],
-            "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
+            "release": {
+                "version": "0.1.0",
+                "type": "minor"
+            },
+            "artifacts": {
+                "package": {"name": "project-0.1.0", "status": "success"},
+                "changelog": {"file": "CHANGELOG.md", "status": "success"},
+                "documentation": {"files": ["docs/README.md"], "status": "success"},
+                "installation_guide": {"file": "docs/INSTALL.md", "status": "success"}
+            },
+            "generated_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
             "uat_mode": True
         }
         write_json(artifacts_file, artifacts_data)
@@ -143,7 +153,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 "status": install_result["status"]
             }
         },
-        "generated_at": datetime.now(timezone.utc).isoformat() + "Z"
+        "generated_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     }
 
     write_json(artifacts_file, artifacts_data)
@@ -159,14 +169,17 @@ def _generate_package(prompts_dir: Path, version: str, release_type: str, contex
     print(print_bold("  - RELEASE PACKAGING"))
     print()
 
+    safe_version = _sanitize_input(version)
+    safe_release_type = _sanitize_input(release_type)
+
     prompt = f"""# Release Packaging
 
 You are a release packager agent preparing distribution artifacts.
 
 ## Release Details
 
-- Version: {version}
-- Type: {release_type}
+- Version: {safe_version}
+- Type: {safe_release_type}
 
 ## Project Context
 
@@ -179,7 +192,7 @@ Analyze the project and determine packaging requirements. List the artifacts tha
 Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
 Output raw JSON:
 {{
-  "package_name": "project-{version}",
+  "package_name": "project-{safe_version}",
   "artifacts": ["list of artifact files"],
   "status": "success|failure",
   "notes": "any packaging notes"
@@ -189,14 +202,20 @@ Output raw JSON:
     print(print_dim("  [release-packager] Building release package..."))
     print()
 
-    # Simulate LLM call for now (would use invoke_llm in real implementation)
-    package_name = f"project-{version}"
+    # Invoke LLM for packaging analysis; fall back to template on failure
+    package_name = f"project-{safe_version}"
+    try:
+        llm_result = invoke_llm(prompt=prompt, model="sonnet")
+        if llm_result:
+            write_file(prompts_dir / "package-result.md", llm_result)
+    except Exception as e:
+        logger.debug("LLM call failed for packaging: %s", e)
 
     print("  " + "─" * 110)
     print(print_bold("  PACKAGE BUILD"))
     print()
     print(f"    Package Name:    {package_name}")
-    print(f"    Version:         {version}")
+    print(f"    Version:         {safe_version}")
     print("    Build Status:    SUCCESS")
     print()
     print(print_dim("    Artifacts:"))
@@ -216,13 +235,39 @@ def _generate_changelog(prompts_dir: Path, version: str, release_type: str, cont
     print(print_bold("  - CHANGELOG GENERATION"))
     print()
 
+    safe_version = _sanitize_input(version)
+    safe_release_type = _sanitize_input(release_type)
+
+    prompt = f"""# Changelog Generation
+
+You are a changelog writer agent. Generate a changelog entry for version {safe_version} ({safe_release_type} release).
+
+## Project Context
+
+{context}
+
+## Instructions
+
+Generate a Keep a Changelog format entry. Include Added, Changed, Fixed sections as appropriate.
+"""
+
     print(print_dim("  [changelog-writer] Generating changelog..."))
     print()
+
+    # Invoke LLM for changelog; fall back to template on failure
+    changelog_content = None
+    try:
+        changelog_content = invoke_llm(prompt=prompt, model="sonnet")
+    except Exception as e:
+        logger.debug("LLM call failed for changelog: %s", e)
+
+    if changelog_content:
+        write_file(prompts_dir / "changelog-result.md", changelog_content)
 
     print("  " + "─" * 110)
     print(print_bold("  CHANGELOG"))
     print()
-    print(f"    ## [{version}] - {datetime.now(timezone.utc).strftime('%Y-%m-%d')}")
+    print(f"    ## [{safe_version}] - {datetime.now(timezone.utc).strftime('%Y-%m-%d')}")
     print()
     print("    ### Added")
     print("    - Core functionality implementation")
@@ -244,8 +289,33 @@ def _generate_documentation(prompts_dir: Path, version: str, context: str) -> Di
     print(print_bold("  - DOCUMENTATION GENERATION"))
     print()
 
+    safe_version = _sanitize_input(version)
+
+    prompt = f"""# Documentation Generation
+
+You are a documentation generator agent. Create comprehensive user documentation for version {safe_version}.
+
+## Project Context
+
+{context}
+
+## Instructions
+
+Generate a documentation overview covering: project overview, usage guide, API reference, configuration, and troubleshooting.
+"""
+
     print(print_dim("  [documentation-generator] Creating user documentation..."))
     print()
+
+    # Invoke LLM for documentation; fall back to template on failure
+    docs_content = None
+    try:
+        docs_content = invoke_llm(prompt=prompt, model="sonnet")
+    except Exception as e:
+        logger.debug("LLM call failed for documentation: %s", e)
+
+    if docs_content:
+        write_file(prompts_dir / "documentation-result.md", docs_content)
 
     print("  " + "─" * 110)
     print(print_bold("  DOCUMENTATION"))
@@ -270,8 +340,33 @@ def _generate_installation_guide(prompts_dir: Path, version: str, context: str) 
     print(print_bold("  - INSTALLATION GUIDE"))
     print()
 
+    safe_version = _sanitize_input(version)
+
+    prompt = f"""# Installation Guide Generation
+
+You are an installation guide writer agent. Create an installation guide for version {safe_version}.
+
+## Project Context
+
+{context}
+
+## Instructions
+
+Generate a comprehensive installation guide with: prerequisites, quick start, manual installation, platform-specific notes, and troubleshooting.
+"""
+
     print(print_dim("  [installation-guide-writer] Creating installation guide..."))
     print()
+
+    # Invoke LLM for installation guide; fall back to template on failure
+    install_content = None
+    try:
+        install_content = invoke_llm(prompt=prompt, model="sonnet")
+    except Exception as e:
+        logger.debug("LLM call failed for installation guide: %s", e)
+
+    if install_content:
+        write_file(prompts_dir / "installation-guide-result.md", install_content)
 
     print("  " + "─" * 110)
     print(print_bold("  INSTALLATION GUIDE"))

@@ -17,6 +17,9 @@ from typing import Optional, Dict, Any, Tuple
 logger = logging.getLogger(__name__)
 
 
+_HASH_PREFIX = "sha256_"
+
+
 class LLMCache:
     """
     LRU cache for LLM responses with TTL and disk persistence.
@@ -76,8 +79,8 @@ class LLMCache:
         Returns:
             Cached response dict or None if not found/expired
         """
-        # Hash key if it's not a hash already
-        if len(key) != 64:  # Not a SHA256 hash
+        # Hash key if it's not already a prefixed hash
+        if not key.startswith(_HASH_PREFIX):
             key = self._hash_key(key)
 
         # Check memory cache first
@@ -121,7 +124,7 @@ class LLMCache:
             ttl: Optional TTL override (seconds)
         """
         # Hash key if needed
-        if len(key) != 64:
+        if not key.startswith(_HASH_PREFIX):
             key = self._hash_key(key)
 
         # Store in memory
@@ -142,7 +145,7 @@ class LLMCache:
             True if key existed
         """
         # Hash key if needed
-        if len(key) != 64:
+        if not key.startswith(_HASH_PREFIX):
             key = self._hash_key(key)
 
         # Remove from memory
@@ -325,13 +328,13 @@ class LLMCache:
         for key in sorted(kwargs.keys()):
             components.append(f"{key}={kwargs[key]}")
 
-        # Hash
+        # Hash with prefix for reliable detection
         key_str = "|".join(components)
-        return hashlib.sha256(key_str.encode()).hexdigest()
+        return _HASH_PREFIX + hashlib.sha256(key_str.encode()).hexdigest()
 
     def _hash_key(self, key: str) -> str:
-        """Hash a key to SHA256."""
-        return hashlib.sha256(key.encode()).hexdigest()
+        """Hash a key to a prefixed SHA256 string."""
+        return _HASH_PREFIX + hashlib.sha256(key.encode()).hexdigest()
 
     def _put(
         self,

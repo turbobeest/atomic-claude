@@ -144,21 +144,32 @@ class MemoryCompactor:
         # Sort by timestamp
         entries.sort(key=lambda e: e.timestamp)
 
-        # Use most recent entry as base
-        merged = entries[-1]
+        # Use most recent entry as base — create a NEW object to avoid mutating
+        # the existing entry still referenced in the store
+        base = entries[-1]
 
-        # Combine content
-        merged.content = "\n\n---\n\n".join(e.content for e in entries)
-
-        # Combine tags
+        # Combine tags from all entries
         all_tags = set()
         for entry in entries:
             all_tags.update(entry.tags)
-        merged.tags = list(all_tags)
 
-        # Update metadata
-        merged.metadata["merged_from"] = [e.id for e in entries[:-1]]
-        merged.metadata["merged_at"] = datetime.now(timezone.utc).isoformat()
+        # Build merged metadata
+        merged_metadata = dict(base.metadata)
+        merged_metadata["merged_from"] = [e.id for e in entries[:-1]]
+        merged_metadata["merged_at"] = datetime.now(timezone.utc).isoformat()
+
+        # Create a fresh MemoryEntry instead of modifying the original in place
+        merged = MemoryEntry(
+            id=base.id,
+            timestamp=base.timestamp,
+            entry_type=base.entry_type,
+            phase=base.phase,
+            task_id=base.task_id,
+            content="\n\n---\n\n".join(e.content for e in entries),
+            tags=list(all_tags),
+            metadata=merged_metadata,
+            relevance_score=base.relevance_score,
+        )
 
         # Save merged entry
         self.store.append(merged)

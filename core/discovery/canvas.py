@@ -322,6 +322,7 @@ def classify_exchange(
     exchange_text: str,
     prompts_dir: Path,
     turn: int,
+    model: str = "haiku",
 ) -> Dict[str, float]:
     """Classify a conversation exchange against PRD sections.
 
@@ -332,6 +333,7 @@ def classify_exchange(
         exchange_text: Combined user input + agent response
         prompts_dir: Directory for prompt/response files
         turn: Current turn number (for file naming)
+        model: LLM model tier to use (default "haiku")
 
     Returns:
         Dict mapping section_id -> relevance score (0.0-1.0).
@@ -343,8 +345,13 @@ def classify_exchange(
         logger.debug("LLM invoke not available for canvas classification")
         return {}
 
+    # Cap input length, truncating at the last space to avoid mid-word cuts
+    if len(exchange_text) > 2000:
+        truncated = exchange_text[:2000].rsplit(' ', 1)[0]
+    else:
+        truncated = exchange_text
     prompt = _CLASSIFY_PROMPT_TEMPLATE.format(
-        exchange_text=exchange_text[:2000]  # Cap input length
+        exchange_text=truncated
     )
 
     prompt_file = prompts_dir / f"canvas-classify-{turn}.md"
@@ -352,7 +359,7 @@ def classify_exchange(
 
     try:
         prompt_file.write_text(prompt)
-        invoke(str(prompt_file), str(output_file), "Classify exchange", model="haiku")
+        invoke(str(prompt_file), str(output_file), "Classify exchange", model=model)
 
         if not output_file.exists():
             return {}

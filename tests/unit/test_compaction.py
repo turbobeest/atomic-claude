@@ -8,7 +8,7 @@ import pytest
 import tempfile
 import shutil
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from core.memory.store import MemoryStore
 from core.memory.compaction import MemoryCompactor
@@ -47,7 +47,7 @@ def create_entry(
     """Helper to create test entry."""
     return MemoryEntry(
         id=entry_id,
-        timestamp=timestamp or datetime.now(),
+        timestamp=timestamp or datetime.now(timezone.utc),
         entry_type=entry_type,
         phase="0-setup",
         content=content,
@@ -73,7 +73,7 @@ class TestBasicCompaction:
         old_entry = create_entry(
             "test-1",
             "Old content",
-            timestamp=datetime.now() - timedelta(days=100),
+            timestamp=datetime.now(timezone.utc) - timedelta(days=100),
             relevance=0.1
         )
         store.append(old_entry)
@@ -94,7 +94,7 @@ class TestBasicCompaction:
         important_entry = create_entry(
             "test-1",
             "Important content",
-            timestamp=datetime.now() - timedelta(days=100),
+            timestamp=datetime.now(timezone.utc) - timedelta(days=100),
             relevance=0.9
         )
         store.append(important_entry)
@@ -108,7 +108,7 @@ class TestBasicCompaction:
         checkpoint = create_entry(
             "test-1",
             "Checkpoint",
-            timestamp=datetime.now() - timedelta(days=100),
+            timestamp=datetime.now(timezone.utc) - timedelta(days=100),
             relevance=0.1,
             entry_type=MemoryEntryType.CHECKPOINT
         )
@@ -131,10 +131,10 @@ class TestFindRedundant:
         """Test that identical entries are found."""
         # Add two nearly identical entries
         entry1 = create_entry("test-1", "This is test content")
-        entry1.timestamp = datetime.now() - timedelta(hours=1)
+        entry1.timestamp = datetime.now(timezone.utc) - timedelta(hours=1)
 
         entry2 = create_entry("test-2", "This is test content")
-        entry2.timestamp = datetime.now()
+        entry2.timestamp = datetime.now(timezone.utc)
 
         store.append(entry1)
         store.append(entry2)
@@ -162,10 +162,10 @@ class TestFindRedundant:
     def test_find_redundant_similar_entries(self, store, compactor):
         """Test that similar entries are found."""
         entry1 = create_entry("test-1", "Configuration setup for the project")
-        entry1.timestamp = datetime.now() - timedelta(hours=1)
+        entry1.timestamp = datetime.now(timezone.utc) - timedelta(hours=1)
 
         entry2 = create_entry("test-2", "Configuration setup for project")
-        entry2.timestamp = datetime.now()
+        entry2.timestamp = datetime.now(timezone.utc)
 
         store.append(entry1)
         store.append(entry2)
@@ -265,12 +265,12 @@ class TestPrioritize:
         old_entry = create_entry(
             "test-1",
             "Old content",
-            timestamp=datetime.now() - timedelta(days=100)
+            timestamp=datetime.now(timezone.utc) - timedelta(days=100)
         )
         recent_entry = create_entry(
             "test-2",
             "Recent content",
-            timestamp=datetime.now()
+            timestamp=datetime.now(timezone.utc)
         )
 
         store.append(old_entry)
@@ -304,7 +304,7 @@ class TestRemoveLowValue:
         low_value = create_entry(
             "test-1",
             "x",  # Short content
-            timestamp=datetime.now() - timedelta(days=100),
+            timestamp=datetime.now(timezone.utc) - timedelta(days=100),
             relevance=0.1,
             entry_type=MemoryEntryType.TASK_START
         )
@@ -313,7 +313,7 @@ class TestRemoveLowValue:
         high_value = create_entry(
             "test-2",
             "Important detailed content",
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             relevance=0.9,
             entry_type=MemoryEntryType.CHECKPOINT
         )
@@ -331,7 +331,7 @@ class TestRemoveLowValue:
         checkpoint = create_entry(
             "test-1",
             "Checkpoint",
-            timestamp=datetime.now() - timedelta(days=100),
+            timestamp=datetime.now(timezone.utc) - timedelta(days=100),
             relevance=0.1,
             entry_type=MemoryEntryType.CHECKPOINT
         )
@@ -399,13 +399,13 @@ class TestCalculateImportance:
         recent = create_entry(
             "test-1",
             "Recent content",
-            timestamp=datetime.now()
+            timestamp=datetime.now(timezone.utc)
         )
 
         old = create_entry(
             "test-2",
             "Old content",
-            timestamp=datetime.now() - timedelta(days=100)
+            timestamp=datetime.now(timezone.utc) - timedelta(days=100)
         )
 
         recent_importance = compactor._calculate_importance(recent)

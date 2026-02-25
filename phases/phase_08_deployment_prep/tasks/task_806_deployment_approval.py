@@ -5,7 +5,6 @@ Human gate for approving deployment artifacts.
 """
 
 import sys
-import json
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -45,8 +44,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_dim("  UAT Mode: Creating minimal valid output"))
         deployment_dir.mkdir(parents=True, exist_ok=True)
         approval_data = {
-            "approved": True,
-            "approved_at": datetime.now(timezone.utc).isoformat() + "Z",
+            "status": "approved",
+            "approved_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
             "approver": "UAT"
         }
         write_json(approval_file, approval_data)
@@ -149,7 +148,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     approval_choice = prompt_user("  Choice (default: approve): ") or "approve"
 
-    if approval_choice == "discuss":
+    while approval_choice == "discuss":
         print()
         print(print_dim("  Artifact locations:"))
         print("    dist/                      - Release packages")
@@ -161,9 +160,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         prompt_user("  Press Enter after review to continue...")
         print()
         print(print_dim("  Returning to approval..."))
-        return execute(atomic_root, output_dir, uat_mode)
+        print()
+        print(print_dim("  What would you like to do?"))
+        print()
+        print("    [approve]  Approve and proceed to Release")
+        print("    [revise]   Make changes to artifacts")
+        print("    [discuss]  Review specific details")
+        print()
+        approval_choice = prompt_user("  Choice (default: approve): ") or "approve"
 
-    elif approval_choice == "revise":
+    if approval_choice == "revise":
         print()
         print(print_yellow("⚠  Make revisions and re-run artifact generation"))
         print(print_dim("  After revisions, run: python main.py run 8"))
@@ -181,7 +187,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "approver": approver_name,
         "version": version,
         "artifacts_approved": ["package", "changelog", "documentation", "installation_guide"],
-        "approved_at": datetime.now(timezone.utc).isoformat() + "Z"
+        "approved_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     }
 
     write_json(approval_file, approval_data)

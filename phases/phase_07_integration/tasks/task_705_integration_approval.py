@@ -5,7 +5,6 @@ Human gate for approving integration test results.
 """
 
 import sys
-import json
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -13,6 +12,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
+    YELLOW, NC,
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, prompt_user, clear_input_buffer
 )
@@ -34,7 +34,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     project_root = atomic_root.parent
 
     integration_dir = project_root / ".claude" / "integration"
-    report_file = integration_dir / "integration-report.json"
+    report_file = output_dir / "integration-test-results.json"
     approval_file = integration_dir / "approval.json"
 
     print()
@@ -58,13 +58,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     if report_file.exists():
         report_data = read_json(report_file)
-        e2e_data = report_data.get("e2e_testing", {})
-        e2e_passed = e2e_data.get("passed", 8)
-        e2e_total = e2e_data.get("total", 8)
-        accept_data = report_data.get("acceptance", {})
-        criteria_passed = accept_data.get("passed", 17)
-        criteria_total = accept_data.get("total", 17)
-        overall_status = report_data.get("overall_status", "ready")
+        # integration-test-results.json uses different keys than the old integration-report.json
+        e2e_passed = report_data.get("tests_passed", e2e_passed)
+        e2e_total = report_data.get("tests_run", e2e_total)
+        # Look for acceptance data in test suites if available
+        for suite in report_data.get("test_suites", []):
+            if suite.get("suite") == "acceptance":
+                criteria_passed = suite.get("passed", criteria_passed)
+                criteria_total = suite.get("total", criteria_total)
+        overall_status = "ready" if report_data.get("tests_failed", 0) == 0 else "issues"
+    else:
+        print(f"{YELLOW}WARNING: Using default values -- integration report not found{NC}")
 
     print(print_dim("─" * 118))
     print(print_bold("INTEGRATION RESULTS"))
@@ -164,8 +168,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             print("  .claude/integration/integration-report.json")
             print()
             if integration_dir.exists():
-                import subprocess
-                subprocess.run(["ls", "-la", str(integration_dir)])
+                for f in sorted(integration_dir.iterdir()):
+                    print(f"  {f.name}")
             print()
             prompt_user("Press Enter after investigation to continue...")
             print()

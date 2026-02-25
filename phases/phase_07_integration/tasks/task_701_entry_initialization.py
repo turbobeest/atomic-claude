@@ -10,10 +10,9 @@ Prerequisites checked:
   - Testing artifacts present (optional)
 """
 
+import logging
 import sys
-import json
 from pathlib import Path
-from typing import Dict, Any
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -23,6 +22,8 @@ from core.utils.cli_ui import (
     print_red, print_dim, prompt_user
 )
 from core.utils.file_ops import read_json
+
+logger = logging.getLogger(__name__)
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -37,6 +38,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     Returns:
         True if task completed successfully, False otherwise
     """
+    # mem available but not used -- phase entry has no memory-worthy data
     project_root = atomic_root.parent
 
     closeout_file = atomic_root.parent / ".outputs" / "6-code-review" / "closeout.json"
@@ -65,7 +67,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Check Phase 6 closeout
     if closeout_file.exists():
-        closeout_data = read_json(closeout_file)
+        try:
+            closeout_data = read_json(closeout_file)
+        except (ValueError, OSError) as e:
+            logger.debug("Failed to read Phase 6 closeout %s: %s", closeout_file, e)
+            print(print_red("  [CRIT] ✗ Phase 6 closeout unreadable"))
+            all_valid = False
+            closeout_data = {}
         phase_6_status = closeout_data.get("status", "unknown")
         if phase_6_status == "complete" or "tasks_completed" in closeout_data:
             print(print_green("  [CRIT] ✓ Phase 6 (Code Review) complete"))

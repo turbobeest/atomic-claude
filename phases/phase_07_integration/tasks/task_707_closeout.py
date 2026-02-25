@@ -5,8 +5,8 @@ Generate closeout document and prepare for Phase 8 (Deployment Prep).
 """
 
 import sys
-import json
 from pathlib import Path
+from typing import List
 from datetime import datetime, timezone
 
 # Add project root to path for imports
@@ -19,48 +19,19 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import read_json, write_json, write_file, ensure_dir
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
-    """
-    Execute Task 707: Phase Closeout.
-
-    Args:
-        atomic_root: Path to atomic-claude root directory
-        output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
+def _build_checklist(
+    report_file: Path, approval_file: Path, audit_file: Path
+) -> tuple:
+    """Build closeout checklist from artifacts.
 
     Returns:
-        True if task completed successfully, False otherwise
+        (checklist, all_passed, metrics_dict) where checklist is a list of
+        "name:status" strings, all_passed is bool, and metrics_dict has
+        e2e/criteria/approval/audit data for the closeout documents.
     """
-    project_root = atomic_root.parent
-
-    closeout_dir = project_root / ".claude" / "closeout"
-    closeout_file = closeout_dir / "phase-07-closeout.md"
-    closeout_json = closeout_dir / "phase-07-closeout.json"
-    integration_dir = project_root / ".claude" / "integration"
-    report_file = integration_dir / "integration-report.json"
-    approval_file = integration_dir / "approval.json"
-    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-7" / "report.json"
-    if not audit_file.exists():
-        audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-7-report.json"
-
-    ensure_dir(closeout_dir)
-
-    print()
-    print(print_dim("Final review before moving to Phase 8 (Deployment Prep)."))
-    print()
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # CLOSEOUT CHECKLIST
-    # ─────────────────────────────────────────────────────────────────────────
-
-    print()
-    print(print_bold("  - CLOSEOUT CHECKLIST"))
-    print()
-
-    checklist = []
+    checklist: List[str] = []
     all_passed = True
 
-    # Get metrics
     e2e_passed = 8
     e2e_total = 8
     criteria_passed = 17
@@ -70,12 +41,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     if report_file.exists():
         report_data = read_json(report_file)
-        e2e_data = report_data.get("e2e_testing", {})
-        e2e_passed = e2e_data.get("passed", 8)
-        e2e_total = e2e_data.get("total", 8)
-        accept_data = report_data.get("acceptance", {})
-        criteria_passed = accept_data.get("passed", 17)
-        criteria_total = accept_data.get("total", 17)
+        e2e_passed = report_data.get("tests_passed", e2e_passed)
+        e2e_total = report_data.get("tests_run", e2e_total)
+        for suite in report_data.get("test_suites", []):
+            if suite.get("suite") == "acceptance":
+                criteria_passed = suite.get("passed", criteria_passed)
+                criteria_total = suite.get("total", criteria_total)
 
     if approval_file.exists():
         approval_data = read_json(approval_file)
@@ -140,64 +111,21 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_yellow("  [BLCK] ! Integration audit not completed"))
         checklist.append("Integration audit:SKIP")
 
-    print()
+    metrics = {
+        "e2e_passed": e2e_passed,
+        "e2e_total": e2e_total,
+        "criteria_passed": criteria_passed,
+        "criteria_total": criteria_total,
+        "approval_status": approval_status,
+        "audit_status": audit_status,
+    }
+    return checklist, all_passed, metrics
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # CLOSEOUT APPROVAL
-    # ─────────────────────────────────────────────────────────────────────────
 
-    print()
-    print(print_bold("  - CLOSEOUT APPROVAL"))
-    print()
-
-    if not all_passed:
-        print(print_yellow("Some critical items need attention before closeout."))
-        print()
-
-    if uat_mode:
-        print(print_yellow("UAT Mode: Auto-approving closeout"))
-        closeout_choice = "approve"
-    else:
-        print(print_cyan("Closeout options:"))
-        print()
-        print(print_green("  [approve] ") + "Approve closeout and proceed")
-        print(print_yellow("  [review]  ") + "Review specific artifacts")
-        print(print_red("  [hold]    ") + "Hold closeout for now")
-        print()
-
-        clear_input_buffer()
-        closeout_choice = prompt_user("Choice (default: approve): ").strip() or "approve"
-
-        if closeout_choice == "review":
-            print()
-            print(print_dim("Key artifacts:"))
-            print("  .claude/integration/e2e-results.json         - E2E test results")
-            print("  .claude/integration/acceptance-results.json  - Acceptance validation")
-            print("  .claude/integration/performance-results.json - Performance benchmarks")
-            print("  .claude/integration/integration-report.json  - Integration report")
-            print("  .claude/integration/approval.json            - Approval record")
-            print("  .outputs/audits/phase-7-report.json          - Audit results")
-            print()
-            if integration_dir.exists():
-                import subprocess
-                subprocess.run(["ls", "-la", str(integration_dir)])
-            print()
-            prompt_user("Press Enter to continue to closeout...")
-
-        elif closeout_choice == "hold":
-            print()
-            print(print_yellow("⚠  Closeout held - phase not complete"))
-            return False
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # GENERATING CLOSEOUT
-    # ─────────────────────────────────────────────────────────────────────────
-
-    print()
-    print(print_bold("  - GENERATING CLOSEOUT"))
-    print()
-
-    # Generate markdown closeout
+def _generate_closeout_markdown(
+    closeout_file: Path, checklist: List[str], metrics: dict
+) -> None:
+    """Generate the closeout markdown file."""
     checklist_md = []
     for item in checklist:
         name, status = item.split(":", 1)
@@ -221,10 +149,10 @@ Phase 7 (Integration) has been completed. All components have been integrated an
 
 ### Key Outcomes
 
-- **E2E Tests:** {e2e_passed} / {e2e_total} passing
-- **Acceptance Criteria:** {criteria_passed} / {criteria_total} validated
+- **E2E Tests:** {metrics['e2e_passed']} / {metrics['e2e_total']} passing
+- **Acceptance Criteria:** {metrics['criteria_passed']} / {metrics['criteria_total']} validated
 - **Performance:** All NFR targets met
-- **Approval Status:** {approval_status}
+- **Approval Status:** {metrics['approval_status']}
 
 ### Integration Dimensions
 
@@ -270,22 +198,25 @@ python main.py run 8
 
 *Phase 7 completed by ATOMIC CLAUDE*
 """
-
     write_file(closeout_file, closeout_content)
 
-    # Generate JSON closeout
+
+def _generate_closeout_json(
+    closeout_json: Path, checklist: List[str], metrics: dict
+) -> None:
+    """Generate the closeout JSON file."""
     closeout_data = {
         "phase": 7,
         "name": "Integration",
         "status": "complete",
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "results": {
-            "e2e_tests": {"passed": e2e_passed, "total": e2e_total},
-            "acceptance": {"passed": criteria_passed, "total": criteria_total},
+            "e2e_tests": {"passed": metrics["e2e_passed"], "total": metrics["e2e_total"]},
+            "acceptance": {"passed": metrics["criteria_passed"], "total": metrics["criteria_total"]},
             "performance": "all_passing"
         },
-        "approval_status": approval_status,
-        "audit_status": audit_status,
+        "approval_status": metrics["approval_status"],
+        "audit_status": metrics["audit_status"],
         "checklist": checklist,
         "artifacts": {
             "e2e_results": ".claude/integration/e2e-results.json",
@@ -297,8 +228,110 @@ python main.py run 8
         },
         "next_phase": 8
     }
-
     write_json(closeout_json, closeout_data)
+
+
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+    """
+    Execute Task 707: Phase Closeout.
+
+    Args:
+        atomic_root: Path to atomic-claude root directory
+        output_dir: Path to phase output directory
+        uat_mode: If True, bypass interactive prompts for testing
+
+    Returns:
+        True if task completed successfully, False otherwise
+    """
+    project_root = atomic_root.parent
+
+    closeout_dir = project_root / ".claude" / "closeout"
+    closeout_file = closeout_dir / "phase-07-closeout.md"
+    closeout_json = closeout_dir / "phase-07-closeout.json"
+    integration_dir = project_root / ".claude" / "integration"
+    report_file = output_dir / "integration-test-results.json"
+    approval_file = integration_dir / "approval.json"
+    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-7" / "report.json"
+    if not audit_file.exists():
+        audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-7-report.json"
+
+    ensure_dir(closeout_dir)
+
+    print()
+    print(print_dim("Final review before moving to Phase 8 (Deployment Prep)."))
+    print()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CLOSEOUT CHECKLIST
+    # ─────────────────────────────────────────────────────────────────────────
+
+    print()
+    print(print_bold("  - CLOSEOUT CHECKLIST"))
+    print()
+
+    checklist, all_passed, metrics = _build_checklist(
+        report_file, approval_file, audit_file
+    )
+
+    print()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CLOSEOUT APPROVAL
+    # ─────────────────────────────────────────────────────────────────────────
+
+    print()
+    print(print_bold("  - CLOSEOUT APPROVAL"))
+    print()
+
+    if not all_passed:
+        print(print_yellow("Some critical items need attention before closeout."))
+        print()
+
+    if uat_mode:
+        print(print_yellow("UAT Mode: Auto-approving closeout"))
+        closeout_choice = "approve"
+    else:
+        print(print_cyan("Closeout options:"))
+        print()
+        print(print_green("  [approve] ") + "Approve closeout and proceed")
+        print(print_yellow("  [review]  ") + "Review specific artifacts")
+        print(print_red("  [hold]    ") + "Hold closeout for now")
+        print()
+
+        clear_input_buffer()
+        closeout_choice = prompt_user("Choice (default: approve): ").strip() or "approve"
+
+        if closeout_choice == "review":
+            print()
+            print(print_dim("Key artifacts:"))
+            print("  .claude/integration/e2e-results.json         - E2E test results")
+            print("  .claude/integration/acceptance-results.json  - Acceptance validation")
+            print("  .claude/integration/performance-results.json - Performance benchmarks")
+            print("  .claude/integration/integration-report.json  - Integration report")
+            print("  .claude/integration/approval.json            - Approval record")
+            print("  .outputs/audits/phase-7-report.json          - Audit results")
+            print()
+            if integration_dir.exists():
+                for f in sorted(integration_dir.iterdir()):
+                    print(f"  {f.name}")
+            print()
+            prompt_user("Press Enter to continue to closeout...")
+
+        elif closeout_choice == "hold":
+            print()
+            print(print_yellow("Closeout held - phase not complete"))
+            return False
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # GENERATING CLOSEOUT
+    # ─────────────────────────────────────────────────────────────────────────
+
+    print()
+    print(print_bold("  - GENERATING CLOSEOUT"))
+    print()
+
+    _generate_closeout_markdown(closeout_file, checklist, metrics)
+    _generate_closeout_json(closeout_json, checklist, metrics)
 
     print(print_green("  ✓ Generated phase-07-closeout.md"))
     print(print_green("  ✓ Generated phase-07-closeout.json"))

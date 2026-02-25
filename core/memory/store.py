@@ -6,6 +6,7 @@ JSON-based storage with atomic writes, indexing, and compression.
 
 import json
 import logging
+import os
 import tempfile
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -45,6 +46,7 @@ class MemoryStore:
         self._entries: List[MemoryEntry] = []
         self._index: Dict[str, int] = {}  # entry_id -> list index
         self._loaded = False
+        self._last_mtime: float = 0.0  # Track file modification time for cache invalidation
 
     def initialize(self) -> None:
         """Create memory store structure."""
@@ -93,6 +95,16 @@ class MemoryStore:
         # Atomic move
         shutil.move(tmp_path, path)
 
+    def _is_cache_stale(self) -> bool:
+        """Check if the on-disk file has been modified since last load."""
+        if not self.memory_file.exists():
+            return False
+        try:
+            current_mtime = os.path.getmtime(self.memory_file)
+            return current_mtime > self._last_mtime
+        except OSError:
+            return False
+
     def _load(self) -> None:
         """Load memory entries from disk."""
         if not self.memory_file.exists():
@@ -111,6 +123,10 @@ class MemoryStore:
         }
 
         self._loaded = True
+        try:
+            self._last_mtime = os.path.getmtime(self.memory_file)
+        except OSError:
+            self._last_mtime = 0.0
 
     def _save(self) -> None:
         """Save memory entries to disk."""
@@ -120,8 +136,26 @@ class MemoryStore:
         }
         self._write_atomic(self.memory_file, data)
 
+        # Update mtime tracker so our own write doesn't trigger a stale-cache reload
+        try:
+            self._last_mtime = os.path.getmtime(self.memory_file)
+        except OSError:
+            pass
+
         # Save index
         self._write_atomic(self.index_file, self._index)
+
+    @staticmethod
+    def _ensure_aware(dt: datetime) -> datetime:
+        """Return a timezone-aware datetime; assumes UTC if naive."""
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    def _ensure_fresh(self) -> None:
+        """Reload from disk if not yet loaded or if the file changed externally."""
+        if not self._loaded or self._is_cache_stale():
+            self._load()
 
     def append(self, entry: MemoryEntry) -> None:
         """
@@ -204,9 +238,15 @@ class MemoryStore:
 
             md_content = "\n".join(lines)
 
-            # Append to existing file (or create new)
-            with open(file_path, 'a', encoding='utf-8') as f:
-                f.write(md_content)
+            # Atomic append: read existing, concatenate, write via temp+rename
+            existing = ""
+            if file_path.exists():
+                existing = file_path.read_text(encoding='utf-8')
+            combined = existing + md_content
+
+            tmp_path = file_path.with_suffix('.tmp')
+            tmp_path.write_text(combined, encoding='utf-8')
+            shutil.move(str(tmp_path), str(file_path))
 
         except Exception as e:
             # Never block the main memory operation
@@ -222,8 +262,7 @@ class MemoryStore:
         Returns:
             Memory entry or None if not found
         """
-        if not self._loaded:
-            self._load()
+        self._ensure_fresh()
 
         idx = self._index.get(entry_id)
         if idx is not None and 0 <= idx < len(self._entries):
@@ -253,8 +292,7 @@ class MemoryStore:
         Returns:
             List of matching entries
         """
-        if not self._loaded:
-            self._load()
+        self._ensure_fresh()
 
         results = []
 
@@ -297,10 +335,9 @@ class MemoryStore:
         Returns:
             Number of entries removed
         """
-        if not self._loaded:
-            self._load()
+        self._ensure_fresh()
 
-        cutoff_date = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=max_age_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=max_age_days)
         initial_count = len(self._entries)
 
         # Keep entries that are:
@@ -310,7 +347,7 @@ class MemoryStore:
         kept_entries = [
             entry for entry in self._entries
             if (
-                entry.timestamp >= cutoff_date or
+                self._ensure_aware(entry.timestamp) >= cutoff_date or
                 entry.relevance_score >= min_relevance or
                 entry.entry_type == MemoryEntryType.CHECKPOINT or
                 entry.entry_type == MemoryEntryType.PHASE_CLOSEOUT
@@ -338,8 +375,7 @@ class MemoryStore:
         Returns:
             Memory statistics
         """
-        if not self._loaded:
-            self._load()
+        self._ensure_fresh()
 
         # Count by phase
         entries_by_phase = defaultdict(int)
@@ -377,8 +413,7 @@ class MemoryStore:
         Args:
             path: Export file path
         """
-        if not self._loaded:
-            self._load()
+        self._ensure_fresh()
 
         data = {
             "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -403,8 +438,7 @@ class MemoryStore:
 
         entries = [MemoryEntry(**entry) for entry in data.get("entries", [])]
 
-        if not self._loaded:
-            self._load()
+        self._ensure_fresh()
 
         # Add entries (skip duplicates)
         existing_ids = set(self._index.keys())
@@ -427,8 +461,7 @@ class MemoryStore:
         Returns:
             Number of entries removed
         """
-        if not self._loaded:
-            self._load()
+        self._ensure_fresh()
 
         initial_count = len(self._entries)
 
