@@ -272,6 +272,93 @@ class GraphManager:
         return "\n".join(parts)
 
     # ========================================================================
+    # REVIEW FINDING OPERATIONS
+    # ========================================================================
+
+    def add_review_finding(self, id: Any, severity: str, category: str,
+                           description: str, review_dimension: str,
+                           file: str = None, line: int = None,
+                           recommendation: str = None,
+                           task_id: Any = None, requirement_id: Any = None,
+                           **kwargs) -> None:
+        """Add a ReviewFinding node to the graph.
+
+        Args:
+            id: Unique finding identifier
+            severity: One of "critical", "major", "minor", "suggestion"
+            category: Review category (e.g. "security", "logic", "algorithm")
+            description: Description of the finding
+            review_dimension: One of "deep_code", "architecture", "performance", "documentation"
+            file: Source file path (optional)
+            line: Line number (optional)
+            recommendation: How to fix (optional)
+            task_id: Link to Task via REVIEW_OF edge (optional)
+            requirement_id: Link to Requirement via VIOLATES edge (optional)
+        """
+        props = {
+            "id": id,
+            "severity": severity,
+            "category": category,
+            "description": description,
+            "review_dimension": review_dimension,
+            "phase": self.phase_id,
+            **kwargs,
+        }
+        if file:
+            props["file"] = file
+        if line is not None:
+            props["line"] = line
+        if recommendation:
+            props["recommendation"] = recommendation
+
+        self.writer.add_node("ReviewFinding", props)
+
+        if task_id is not None:
+            self.writer.add_edge(
+                "REVIEW_OF", "ReviewFinding", id, "Task", task_id,
+            )
+        if requirement_id is not None:
+            self.writer.add_edge(
+                "VIOLATES", "ReviewFinding", id, "Requirement", requirement_id,
+            )
+
+    def get_review_summary(self) -> Dict[str, int]:
+        """Get a summary of review findings by severity.
+
+        Returns:
+            Dict mapping severity to count, e.g. {"critical": 2, "major": 5, ...}
+        """
+        cypher = (
+            "MATCH (rf:ReviewFinding) "
+            "RETURN rf.severity AS severity, count(rf) AS cnt "
+            "ORDER BY severity"
+        )
+        result = self.conn.query(cypher)
+        summary = {"critical": 0, "major": 0, "minor": 0, "suggestion": 0}
+        for row in result.result_set:
+            if row[0] in summary:
+                summary[row[0]] = row[1]
+        return summary
+
+    def get_unresolved_findings(self, severity: str = None,
+                                 review_dimension: str = None) -> List[Dict]:
+        """Get unresolved review findings with optional filters.
+
+        Args:
+            severity: Filter by severity (optional)
+            review_dimension: Filter by review dimension (optional)
+
+        Returns:
+            List of ReviewFinding property dicts
+        """
+        filters = {"status": "open"}
+        if severity:
+            filters["severity"] = severity
+        if review_dimension:
+            filters["review_dimension"] = review_dimension
+        return self.reader.get_nodes("ReviewFinding", filters=filters)
+
+    # ========================================================================
     # MEMORY OPERATIONS
     # ========================================================================
 

@@ -26,6 +26,7 @@ class NodeLabel(str, Enum):
     MEMORY = "Memory"
     PHASE_CHECKPOINT = "PhaseCheckpoint"
     AUDIT = "Audit"
+    REVIEW_FINDING = "ReviewFinding"
 
 
 # ============================================================================
@@ -49,6 +50,8 @@ class RelType(str, Enum):
     SUPERSEDES = "SUPERSEDES"
     AUDIT_COVERS = "AUDIT_COVERS"
     COMMONLY_COMBINED = "COMMONLY_COMBINED"
+    REVIEW_OF = "REVIEW_OF"
+    VIOLATES = "VIOLATES"
 
 
 # ============================================================================
@@ -68,6 +71,7 @@ REQUIRED_PROPERTIES: Dict[str, List[str]] = {
     NodeLabel.MEMORY: ["id", "phase", "entry_type", "content"],
     NodeLabel.PHASE_CHECKPOINT: ["id", "phase", "phase_name", "summary"],
     NodeLabel.AUDIT: ["id", "name", "category", "subcategory", "tier"],
+    NodeLabel.REVIEW_FINDING: ["id", "severity", "category", "description"],
 }
 
 # Valid values for enumerated properties
@@ -117,6 +121,17 @@ VALID_VALUES: Dict[str, Dict[str, Set[str]]] = {
         "severity": {"critical", "high", "medium", "low"},
         "automatable": {"yes", "partial", "no", "full", "manual", "none", "minimal"},
     },
+    NodeLabel.REVIEW_FINDING: {
+        "severity": {"critical", "major", "minor", "suggestion"},
+        "category": {
+            "logic", "error_handling", "security", "code_quality",
+            "layer_separation", "dependency", "pattern", "module_boundary", "coupling",
+            "algorithm", "memory", "io", "caching", "concurrency",
+            "api_docs", "comments", "types", "examples", "accuracy",
+        },
+        "status": {"open", "resolved", "wont_fix", "deferred"},
+        "review_dimension": {"deep_code", "architecture", "performance", "documentation"},
+    },
 }
 
 # Optional properties with defaults
@@ -140,6 +155,10 @@ PROPERTY_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "severity": "medium",
         "automatable": "no",
         "category_number": 0,
+    },
+    NodeLabel.REVIEW_FINDING: {
+        "status": "open",
+        "phase": "6-code-review",
     },
 }
 
@@ -198,11 +217,11 @@ VALID_RELATIONSHIPS: Dict[str, tuple] = {
         {NodeLabel.SOURCE, NodeLabel.FINDING, NodeLabel.DECISION,
          NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK,
          NodeLabel.SPEC, NodeLabel.AGENT, NodeLabel.MEMORY,
-         NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT},
+         NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT, NodeLabel.REVIEW_FINDING},
         {NodeLabel.SOURCE, NodeLabel.FINDING, NodeLabel.DECISION,
          NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK,
          NodeLabel.SPEC, NodeLabel.AGENT, NodeLabel.MEMORY,
-         NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT},
+         NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT, NodeLabel.REVIEW_FINDING},
     ),
     RelType.AUDIT_COVERS: (
         {NodeLabel.AUDIT},
@@ -211,6 +230,14 @@ VALID_RELATIONSHIPS: Dict[str, tuple] = {
     RelType.COMMONLY_COMBINED: (
         {NodeLabel.AUDIT},
         {NodeLabel.AUDIT},
+    ),
+    RelType.REVIEW_OF: (
+        {NodeLabel.REVIEW_FINDING},
+        {NodeLabel.TASK, NodeLabel.SPEC, NodeLabel.FEATURE},
+    ),
+    RelType.VIOLATES: (
+        {NodeLabel.REVIEW_FINDING},
+        {NodeLabel.REQUIREMENT},
     ),
 }
 
@@ -264,6 +291,12 @@ INDEX_DEFINITIONS = [
     ("Audit", "tier"),
     ("Audit", "severity"),
     ("Audit", "category_number"),
+    # ReviewFinding lookups
+    ("ReviewFinding", "id"),
+    ("ReviewFinding", "severity"),
+    ("ReviewFinding", "category"),
+    ("ReviewFinding", "status"),
+    ("ReviewFinding", "review_dimension"),
 ]
 
 FULLTEXT_INDEX_DEFINITIONS = [
@@ -273,6 +306,7 @@ FULLTEXT_INDEX_DEFINITIONS = [
     ("Agent", ["name", "description"]),
     ("Memory", ["content", "tags_csv"]),
     ("Audit", ["name", "description_what", "description_why"]),
+    ("ReviewFinding", ["description", "recommendation"]),
 ]
 
 

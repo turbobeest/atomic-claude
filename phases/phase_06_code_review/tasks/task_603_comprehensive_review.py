@@ -27,6 +27,8 @@ from core.utils.cli_ui import (
 )
 from core.utils.file_ops import ensure_dir, read_file, write_file
 from core.llm import invoke_llm
+from core.graph import get_graph
+from core.graph.exceptions import GraphUnavailableError
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -42,6 +44,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         True if task completed successfully, False otherwise
     """
     project_root = atomic_root.parent
+
+    # Initialize graph (optional — findings still saved to JSON regardless)
+    graph = None
+    try:
+        graph = get_graph(phase_id="6-code-review")
+    except GraphUnavailableError:
+        logger.debug("FalkorDB unavailable; review findings will be JSON-only")
+
     review_dir = project_root / ".claude" / "reviews"
     findings_file = review_dir / "findings.json"
     prompts_dir = output_dir / "prompts"
@@ -118,7 +128,7 @@ None (UAT stub)
     results["doc"] = _documentation_review(code_sample, test_sample, prompts_dir, agents.get("doc"), project_context)
 
     # Display and save results
-    _display_and_save_results(results, findings_file)
+    _display_and_save_results(results, findings_file, graph=graph)
 
     print(print_green("✓ Comprehensive Review complete"))
     return True
@@ -614,7 +624,7 @@ def _execute_review(prompt: str, output_file: Path, model: str) -> Dict[str, Any
         return empty
 
 
-def _display_and_save_results(results: Dict[str, Dict], findings_file: Path) -> None:
+def _display_and_save_results(results: Dict[str, Dict], findings_file: Path, graph=None) -> None:
     """Display and save review results."""
     code_result = results.get("code", {})
     arch_result = results.get("arch", {})
@@ -686,6 +696,42 @@ def _display_and_save_results(results: Dict[str, Dict], findings_file: Path) -> 
     }
 
     write_file(findings_file, json.dumps(findings_data, indent=2))
+
+    # Write findings to graph
+    if graph:
+        _write_findings_to_graph(graph, findings_data)
+
+
+def _write_findings_to_graph(graph, findings_data: Dict) -> None:
+    """Write review findings as ReviewFinding nodes in the knowledge graph."""
+    dimension_map = {
+        "deep_code": "deep_code",
+        "architecture": "architecture",
+        "performance": "performance",
+        "documentation": "documentation",
+    }
+    count = 0
+    for dimension_key, dimension_label in dimension_map.items():
+        dimension_data = findings_data.get(dimension_key, {})
+        findings_list = dimension_data.get("findings", [])
+        for i, finding in enumerate(findings_list):
+            finding_id = f"rf-{dimension_key}-{i}"
+            try:
+                graph.add_review_finding(
+                    id=finding_id,
+                    severity=finding.get("severity", "minor"),
+                    category=finding.get("category", dimension_key),
+                    description=finding.get("description", ""),
+                    review_dimension=dimension_label,
+                    file=finding.get("file"),
+                    line=finding.get("line"),
+                    recommendation=finding.get("recommendation"),
+                )
+                count += 1
+            except Exception as e:
+                logger.debug("Failed to write ReviewFinding %s to graph: %s", finding_id, e)
+    if count:
+        logger.info("Wrote %d review findings to graph", count)
 
 
 if __name__ == "__main__":
