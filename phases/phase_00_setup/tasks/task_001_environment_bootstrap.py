@@ -326,6 +326,13 @@ def _get_install_cmd(tool: str, os_type: str) -> str:
         "cargo": {
             "*": "Install via rustup: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
         },
+        "tmux": {
+            "macos": "brew install tmux",
+            "debian": "sudo apt install tmux",
+            "redhat": "sudo dnf install tmux",
+            "arch": "sudo pacman -S tmux",
+            "windows": "See https://github.com/tmux/tmux/wiki/Installing",
+        },
     }
 
     tool_cmds = commands.get(tool, {})
@@ -345,6 +352,7 @@ def _show_required_tools(os_type: str) -> None:
         ("node", 18),  # Minimum version
         ("claude", None),
         ("docker", None),  # Required for FalkorDB knowledge graph
+        ("tmux", None),
         ("dot", None),  # graphviz
         ("cargo", None),  # Rust toolchain (installed via rustup)
     ]
@@ -389,7 +397,7 @@ def _recheck_required(os_type: str) -> None:
     """Recheck required tools (silent, just updates counters)."""
     global REQUIRED_TOTAL, REQUIRED_INSTALLED
 
-    tools = ["git", "jq", "node", "claude", "docker", "dot", "cargo"]
+    tools = ["git", "jq", "node", "claude", "docker", "tmux", "dot", "cargo"]
 
     for tool in tools:
         REQUIRED_TOTAL += 1

@@ -30,6 +30,12 @@ from core.llm import invoke_llm
 from core.graph import get_graph
 from core.graph.exceptions import GraphUnavailableError
 
+try:
+    from orchestration.team_session import TeamSession, TeamResult
+    HAS_TEAM_SESSION = True
+except ImportError:
+    HAS_TEAM_SESSION = False
+
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
@@ -122,10 +128,17 @@ None (UAT stub)
     print()
 
     results = {}
-    results["code"] = _deep_code_review(code_sample, prompts_dir, agents.get("deep"), project_context)
-    results["arch"] = _architecture_review(code_sample, prompts_dir, agents.get("arch"), project_context)
-    results["perf"] = _performance_review(code_sample, prompts_dir, agents.get("perf"), project_context)
-    results["doc"] = _documentation_review(code_sample, test_sample, prompts_dir, agents.get("doc"), project_context)
+
+    if HAS_TEAM_SESSION:
+        results = _run_team_session_review(
+            code_sample, test_sample, prompts_dir, agents,
+            project_context, project_root,
+        )
+    else:
+        results["code"] = _deep_code_review(code_sample, prompts_dir, agents.get("deep"), project_context)
+        results["arch"] = _architecture_review(code_sample, prompts_dir, agents.get("arch"), project_context)
+        results["perf"] = _performance_review(code_sample, prompts_dir, agents.get("perf"), project_context)
+        results["doc"] = _documentation_review(code_sample, test_sample, prompts_dir, agents.get("doc"), project_context)
 
     # Display and save results
     _display_and_save_results(results, findings_file, graph=graph)
@@ -332,6 +345,108 @@ def _load_project_context(atomic_root: Path) -> str:
                 context_parts.append(f"\n**OpenSpec Tasks:**\n" + "\n".join(spec_summary))
 
     return "\n".join(context_parts) if context_parts else ""
+
+
+def _run_team_session_review(
+    code_sample: Path, test_sample: Path, prompts_dir: Path,
+    agents: Dict[str, str], project_context: str, project_root: Path,
+) -> Dict[str, Dict[str, Any]]:
+    """Run all four review dimensions in parallel via TeamSession.
+
+    Writes each review prompt to a file, then launches them as parallel
+    agents through TeamSession (tmux panes or thread fallback).
+    Parses JSON results from agent output and returns the same structure
+    as the sequential path.
+    """
+    # Build prompts and write to disk so agents can consume them
+    dimensions = {
+        "code": {
+            "prompt": _build_code_review_prompt(code_sample, agents.get("deep"), project_context),
+            "label": "Deep Code Review",
+            "color_fn": print_cyan,
+        },
+        "arch": {
+            "prompt": _build_architecture_prompt(code_sample, agents.get("arch"), project_context),
+            "label": "Architecture Compliance",
+            "color_fn": print_magenta,
+        },
+        "perf": {
+            "prompt": _build_performance_prompt(code_sample, agents.get("perf"), project_context),
+            "label": "Performance Analysis",
+            "color_fn": print_yellow,
+        },
+        "doc": {
+            "prompt": _build_documentation_prompt(code_sample, test_sample, agents.get("doc"), project_context),
+            "label": "Documentation Review",
+            "color_fn": print_blue,
+        },
+    }
+
+    # Write prompt files and announce workers
+    prompt_files: Dict[str, Path] = {}
+    for idx, (dim_key, dim_info) in enumerate(dimensions.items(), 1):
+        prompt_file = prompts_dir / f"prompt-{dim_key}.txt"
+        write_file(prompt_file, dim_info["prompt"])
+        prompt_files[dim_key] = prompt_file
+        print(dim_info["color_fn"](f"    Worker {idx}: {dim_info['label']:<30}"))
+
+    print()
+    print(print_dim("Running via TeamSession (parallel)..."))
+    print()
+
+    # Set up team session
+    team = TeamSession(
+        session_name=f"review-{datetime.now().strftime('%H%M%S')}",
+        work_dir=prompts_dir,
+    )
+    team.start()
+
+    for dim_key, prompt_file in prompt_files.items():
+        team.add_agent(
+            agent_id=dim_key,
+            command=f"cat '{prompt_file}' | claude --print",
+            cwd=str(project_root),
+        )
+
+    team_results = team.run_all(timeout=300)
+    team.shutdown()
+
+    # Parse team results back into the expected Dict[str, Dict] structure
+    empty_result = {"critical": 0, "major": 0, "minor": 0, "suggestions": 0, "findings": []}
+    results: Dict[str, Dict[str, Any]] = {}
+
+    for dim_key in dimensions:
+        output_file = prompts_dir / f"review-{dim_key}.json"
+        tr = team_results.get(dim_key)
+
+        if tr and tr.success and tr.output:
+            try:
+                raw = tr.output.strip()
+                # Strip markdown fences if present
+                if "```json" in raw:
+                    start = raw.find("```json") + 7
+                    end = raw.find("```", start)
+                    raw = raw[start:end].strip()
+                elif raw.startswith("```"):
+                    raw = raw.split("\n", 1)[1]
+                    if raw.endswith("```"):
+                        raw = raw[:-3].strip()
+
+                parsed = json.loads(raw)
+                write_file(output_file, json.dumps(parsed, indent=2))
+                results[dim_key] = parsed
+                print(print_green(f"    {dimensions[dim_key]['label']:<30} Complete ({tr.duration:.1f}s)"))
+                continue
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning("Failed to parse TeamSession output for %s: %s", dim_key, e)
+
+        # Fallback: mark as empty on failure / timeout / parse error
+        error_detail = tr.error if tr else "no result"
+        print(print_yellow(f"    {dimensions[dim_key]['label']:<30} Fallback ({error_detail})"))
+        write_file(output_file, json.dumps(empty_result, indent=2))
+        results[dim_key] = dict(empty_result)
+
+    return results
 
 
 def _deep_code_review(code_file: Path, prompts_dir: Path, agent_name: str,

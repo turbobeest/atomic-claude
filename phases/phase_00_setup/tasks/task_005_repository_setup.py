@@ -31,6 +31,12 @@ from core.utils.cli_ui import (
 )
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
+try:
+    from core.sandbox import generate_sandbox_config
+    HAS_SANDBOX = True
+except ImportError:
+    HAS_SANDBOX = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -134,6 +140,19 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         skills_dir, skill_count, skill_sources,
         routing_config, ollama_configured,
     )
+
+    # Generate sandbox security config for Claude Code invocations
+    if HAS_SANDBOX:
+        try:
+            project_root = atomic_root.parent
+            sandbox = generate_sandbox_config(
+                project_root=project_root,
+                allow_network=False,
+            )
+            sandbox.write()
+            print(print_green("  ✓ Sandbox security config generated"))
+        except Exception as e:
+            logger.debug("Sandbox config generation failed: %s", e)
 
     # Show summary
     _show_summary(

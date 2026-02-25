@@ -44,6 +44,12 @@ from core.utils.file_ops import ensure_dir, read_file, write_file
 from core.graph import get_graph
 from core.graph.exceptions import GraphUnavailableError
 
+try:
+    from core.worktree import WorktreeManager
+    HAS_WORKTREE = True
+except ImportError:
+    HAS_WORKTREE = False
+
 
 # ---------------------------------------------------------------------------
 # Stack Profiles — single source of truth for language-specific behaviour
@@ -1833,6 +1839,17 @@ def _run_dag_parallel(
 
     scheduler = DAGScheduler(tasks, completed_ids)
 
+    # Worktree isolation for parallel safety
+    wt_manager = None
+    if HAS_WORKTREE:
+        try:
+            wt_manager = WorktreeManager(project_root)
+            if not wt_manager.is_available():
+                wt_manager = None
+                logger.debug("Git worktree not available; using shared directory")
+        except Exception:
+            wt_manager = None
+
     stats = {
         "tasks_total": total,
         "tasks_completed": len(completed_ids),
@@ -1951,10 +1968,17 @@ def _run_dag_parallel(
                     task = task_map[tid]
                     spec = specs.get(tid, {})
 
+                    # Use worktree for isolation if available
+                    task_project_root = project_root
+                    if wt_manager:
+                        wt_path = wt_manager.create(tid)
+                        if wt_path:
+                            task_project_root = wt_path
+
                     future = executor.submit(
                         _tdd_cycle_worker,
                         task, spec, testing_dir, agents, commands,
-                        skip_execution, atomic_root, profile, project_root,
+                        skip_execution, atomic_root, profile, task_project_root,
                         source_registry, token_budget,
                     )
                     active_futures[future] = tid
@@ -2026,6 +2050,12 @@ def _run_dag_parallel(
                             task_status[ctid] = "cascaded"
                             stats["tasks_cascaded"] = stats.get("tasks_cascaded", 0) + 1
 
+                    # Clean up worktree
+                    if wt_manager:
+                        if task_status[tid] == "done":
+                            wt_manager.merge_back(tid)
+                        wt_manager.remove(tid)
+
                     # Wave failure rate check (every 10 completions)
                     wave_total = wave_completions + wave_failures
                     if wave_total > 0 and wave_total % 10 == 0:
@@ -2049,6 +2079,10 @@ def _run_dag_parallel(
     if aborted:
         stats["aborted"] = True
         stats["abort_reason"] = "budget_exceeded"
+
+    # Clean up any remaining worktrees
+    if wt_manager:
+        wt_manager.cleanup_stale()
 
     return stats
 
