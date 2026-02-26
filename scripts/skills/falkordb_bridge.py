@@ -2,11 +2,11 @@
 """
 FalkorDB Bridge for Skill System
 
-Python bridge between bash scripts and FalkorDB graph for skill
+Python bridge between CLI and FalkorDB graph for skill
 selection, outcome logging, verification, and ingestion.
 
 Usage:
-    python scripts/skills/falkordb_bridge.py --action select --task "format code" --profile unrestricted --output /tmp/skills.json
+    python scripts/skills/falkordb_bridge.py --action select --task "format code" --profile cloud_full --output /tmp/skills.json
     python scripts/skills/falkordb_bridge.py --action log-outcome --task-id task_501 --success 0.9 --skills "fmt-markdown,validate-yaml"
     python scripts/skills/falkordb_bridge.py --action verify
     python scripts/skills/falkordb_bridge.py --action query-blocked --constraint "requires_internet=true"
@@ -32,140 +32,43 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from core.graph import get_graph, GraphUnavailableError  # noqa: E402
 from core.graph.schema import NodeLabel, RelType  # noqa: E402
+from core.skills.selector import SkillSelector  # noqa: E402
+from core.skills.learning import SkillLearning  # noqa: E402
 
 logger = logging.getLogger(__name__)
-
-# SDLC phase definitions (0-9)
-SDLC_PHASES = {
-    0: "Setup & Mode Selection",
-    1: "Discovery & Analysis",
-    2: "PRD Generation",
-    3: "Task Decomposition",
-    4: "Specification",
-    5: "Implementation",
-    6: "Code Review",
-    7: "Integration Testing",
-    8: "Deployment Preparation",
-    9: "Release",
-}
 
 
 def action_select(args):
     """
     3-stage skill selection with profile enforcement.
 
-    Stage 1: Try workflow match (MATCH (w:Workflow) WHERE w.task_pattern matches)
-    Stage 2: Graph traversal (MATCH (s:Skill)-[:BELONGS_TO]->(p:SDLCPhase))
-    Stage 3: Fulltext search on skill name/description
+    Delegates to core.skills.selector.SkillSelector for the actual
+    selection logic (workflow match -> structural traversal -> fulltext).
     """
-    graph = get_graph(phase_id="skill-select")
-    conn = graph.conn
-
     task = args.task or ""
 
-    # Profile can be a name or a JSON blob from bash scripts
-    raw_profile = args.profile or "standard"
+    # Profile can be a name or a JSON blob
+    raw_profile = args.profile or "cloud_full"
     try:
         profile_data = json.loads(raw_profile)
-        profile = profile_data.get("profile", "standard")
+        profile = profile_data.get("profile", "cloud_full")
     except (json.JSONDecodeError, TypeError):
         profile = raw_profile
 
-    result_skills = []
-    method = "none"
-    workflow_name = None
-
-    # Stage 1: Workflow match
-    cypher_workflow = (
-        "MATCH (w:Workflow) "
-        "WHERE toLower(w.task_pattern) CONTAINS toLower($task) "
-        "RETURN w.id AS wid, w.name AS wname, w.task_pattern AS wpattern "
-        "LIMIT 1"
+    selector = SkillSelector()
+    selection = selector.select(
+        task_prompt=task,
+        profile_name=profile,
+        project_id=args.project or "default",
     )
-    try:
-        wf_result = conn.query(cypher_workflow, {"task": task})
-        if wf_result.result_set:
-            wid = wf_result.result_set[0][0]
-            workflow_name = wf_result.result_set[0][1]
 
-            # Get skills in this workflow, ordered by STEP.order
-            cypher_wf_skills = (
-                "MATCH (w:Workflow {id: $wid})-[step:STEP]->(s:Skill) "
-                "WHERE $profile IN s.installable_in_profiles "
-                "RETURN s "
-                "ORDER BY step.order"
-            )
-            wf_skills_result = conn.query(cypher_wf_skills, {
-                "wid": wid,
-                "profile": profile,
-            })
-            for row in wf_skills_result.result_set:
-                node = row[0]
-                props = dict(node.properties) if hasattr(node, "properties") else node
-                result_skills.append(props)
-
-            if result_skills:
-                method = "workflow"
-    except Exception as e:
-        logger.debug("Workflow match failed: %s", e)
-
-    # Stage 2: Structural graph traversal (phase-based)
-    if not result_skills and args.project:
-        # Attempt to infer the SDLC phase from the project context
-        cypher_structural = (
-            "MATCH (s:Skill)-[:BELONGS_TO]->(p:SDLCPhase) "
-            "WHERE $profile IN s.installable_in_profiles "
-            "AND s.installed = true "
-            "RETURN DISTINCT s "
-            "ORDER BY s.times_used DESC "
-            "LIMIT 20"
-        )
-        try:
-            struct_result = conn.query(cypher_structural, {"profile": profile})
-            for row in struct_result.result_set:
-                node = row[0]
-                props = dict(node.properties) if hasattr(node, "properties") else node
-                result_skills.append(props)
-
-            if result_skills:
-                method = "structural"
-        except Exception as e:
-            logger.debug("Structural traversal failed: %s", e)
-
-    # Stage 3: Fulltext search on skill name/description
-    if not result_skills:
-        cypher_fulltext = (
-            "CALL db.idx.fulltext.queryNodes('Skill', $query) "
-            "YIELD node AS s "
-            "WHERE $profile IN s.installable_in_profiles "
-            "RETURN s "
-            "LIMIT 10"
-        )
-        try:
-            ft_result = conn.query(cypher_fulltext, {
-                "query": task,
-                "profile": profile,
-            })
-            for row in ft_result.result_set:
-                node = row[0]
-                props = dict(node.properties) if hasattr(node, "properties") else node
-                result_skills.append(props)
-
-            if result_skills:
-                method = "semantic"
-        except Exception as e:
-            logger.debug("Fulltext search failed: %s", e)
-
-    # If we got skills from multiple stages, mark method as combined
-    if method == "none" and result_skills:
-        method = "combined"
-
-    # Serialize skill properties for JSON output
+    # Serialize skills for JSON output
     serialized_skills = []
-    for s in result_skills:
+    for s in selection.skills:
+        d = s.model_dump() if hasattr(s, "model_dump") else dict(s)
+        # Ensure JSON-serializable types
         serialized = {}
-        for k, v in s.items():
-            # Ensure JSON-serializable types
+        for k, v in d.items():
             if isinstance(v, (str, int, float, bool, type(None))):
                 serialized[k] = v
             elif isinstance(v, list):
@@ -176,8 +79,8 @@ def action_select(args):
 
     output = {
         "skills": serialized_skills,
-        "method": method,
-        "workflow": workflow_name,
+        "method": selection.method,
+        "workflow": selection.workflow,
     }
 
     output_json = json.dumps(output, indent=2)
@@ -193,11 +96,9 @@ def action_log_outcome(args):
     """
     Record task outcome as an Episode node with USED_IN edges.
 
-    Updates running averages on Skill nodes.
+    Delegates to core.skills.learning.SkillLearning for the actual
+    episode creation and running average updates.
     """
-    graph = get_graph(phase_id="skill-outcome")
-    conn = graph.conn
-
     task_id = args.task_id
     success = float(args.success)
     skills_csv = args.skills or ""
@@ -205,69 +106,20 @@ def action_log_outcome(args):
     tokens = int(args.tokens) if args.tokens else 0
     duration = int(args.duration) if args.duration else 0
 
-    # Determine outcome category
-    if success >= 0.8:
-        outcome = "success"
-    elif success >= 0.4:
-        outcome = "partial"
-    else:
-        outcome = "failure"
-
-    # Create Episode node
-    episode_id = f"ep-{task_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-    episode_props = {
-        "id": episode_id,
-        "task_id": task_id,
-        "outcome": outcome,
-        "success_score": success,
-        "tokens_consumed": tokens,
-        "duration_ms": duration,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    # Use MERGE to be idempotent
-    cypher_episode = (
-        "MERGE (e:Episode {id: $id}) "
-        "SET e.task_id = $task_id, "
-        "e.outcome = $outcome, "
-        "e.success_score = $success_score, "
-        "e.tokens_consumed = $tokens_consumed, "
-        "e.duration_ms = $duration_ms, "
-        "e.created_at = $created_at"
+    learner = SkillLearning()
+    episode_id = learner.log_usage(
+        task_id=task_id,
+        skill_ids=skill_ids,
+        success_score=success,
+        tokens=tokens,
+        duration_ms=duration,
     )
-    conn.query(cypher_episode, episode_props)
-    print(f"Created Episode: {episode_id} (outcome={outcome}, score={success})")
 
-    # Create USED_IN edges and update skill running averages
-    for skill_id in skill_ids:
-        # Create USED_IN edge
-        cypher_used_in = (
-            "MATCH (s:Skill {id: $skill_id}), (e:Episode {id: $episode_id}) "
-            "MERGE (s)-[r:USED_IN]->(e) "
-            "SET r.success_score = $success_score"
-        )
-        conn.query(cypher_used_in, {
-            "skill_id": skill_id,
-            "episode_id": episode_id,
-            "success_score": success,
-        })
-
-        # Update running averages on the skill
-        cypher_update_avg = (
-            "MATCH (s:Skill {id: $skill_id}) "
-            "SET s.times_used = s.times_used + 1, "
-            "s.avg_success_score = "
-            "CASE WHEN s.times_used = 0 THEN $success "
-            "ELSE ((s.avg_success_score * s.times_used) + $success) / (s.times_used + 1) "
-            "END"
-        )
-        conn.query(cypher_update_avg, {
-            "skill_id": skill_id,
-            "success": success,
-        })
-        print(f"  Linked skill {skill_id} -> Episode {episode_id}")
-
-    print(f"Logged outcome for {len(skill_ids)} skills")
+    if episode_id:
+        print(f"Created Episode: {episode_id} (score={success})")
+        print(f"Logged outcome for {len(skill_ids)} skills")
+    else:
+        print("WARNING: Could not create episode (graph unavailable?)", file=sys.stderr)
 
 
 def action_verify(args):
@@ -402,12 +254,24 @@ def action_ingest(args):
         sys.exit(1)
 
     skills = catalog if isinstance(catalog, list) else catalog.get("skills", [])
-    profile = args.profile or "standard"
+    profile = args.profile or "cloud_full"
 
     print(f"Ingesting {len(skills)} skills (profile={profile})...")
 
     # Create SDLCPhase nodes (0-9)
-    for phase_num, phase_name in SDLC_PHASES.items():
+    sdlc_phases = {
+        0: "Setup & Mode Selection",
+        1: "Discovery & Analysis",
+        2: "PRD Generation",
+        3: "Task Decomposition",
+        4: "Specification",
+        5: "Implementation",
+        6: "Code Review",
+        7: "Integration Testing",
+        8: "Deployment Preparation",
+        9: "Release",
+    }
+    for phase_num, phase_name in sdlc_phases.items():
         phase_id = f"phase-{phase_num}"
         cypher_phase = (
             "MERGE (p:SDLCPhase {id: $id}) "
@@ -418,7 +282,7 @@ def action_ingest(args):
             "name": phase_name,
             "num": phase_num,
         })
-    print(f"  Created/updated {len(SDLC_PHASES)} SDLCPhase nodes")
+    print(f"  Created/updated {len(sdlc_phases)} SDLCPhase nodes")
 
     # Ingest each skill
     ingested = 0
@@ -430,7 +294,7 @@ def action_ingest(args):
         # Compute installable_in_profiles (stored as comma-separated string
         # for FalkorDB compatibility, but also as individual list for
         # the IN-check queries which use array containment)
-        installable = skill.get("installable_in_profiles", ["standard"])
+        installable = skill.get("installable_in_profiles", ["cloud_full"])
         if isinstance(installable, list):
             installable_csv = ",".join(installable)
         else:

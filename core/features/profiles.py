@@ -90,3 +90,41 @@ class EnvironmentProfile:
             )
 
         return profiles[name]()
+
+    @staticmethod
+    def skill_constraints(profile_name: str) -> dict:
+        """Return skill gating rules for a profile.
+
+        Each profile defines what skill attributes are acceptable:
+        - allow_internet: whether skills requiring network access are permitted
+        - allow_saas: whether skills requiring SaaS integrations are permitted
+        - max_risk: maximum acceptable risk level (None < Low < Medium < High)
+        """
+        constraints = {
+            "air_gapped": {
+                "allow_internet": False,
+                "allow_saas": False,
+                "max_risk": "Low",
+            },
+            "enterprise_secure": {
+                "allow_internet": True,
+                "allow_saas": False,
+                "max_risk": "Low",
+            },
+            "cloud_full": {
+                "allow_internet": True,
+                "allow_saas": True,
+                "max_risk": "Medium",
+            },
+            "development": {
+                "allow_internet": True,
+                "allow_saas": True,
+                "max_risk": "High",
+            },
+        }
+        if profile_name not in constraints:
+            raise ValueError(
+                f"Unknown profile: {profile_name}. "
+                f"Available: {list(constraints.keys())}"
+            )
+        return constraints[profile_name]

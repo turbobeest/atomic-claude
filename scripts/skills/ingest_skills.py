@@ -8,7 +8,7 @@ skills into FalkorDB as Skill nodes with SDLCPhase linkage.
 Usage:
     python scripts/skills/ingest_skills.py
     python scripts/skills/ingest_skills.py --catalog-file /path/to/catalog.json
-    python scripts/skills/ingest_skills.py --profile air-gapped
+    python scripts/skills/ingest_skills.py --profile cloud_full
 
 The script is idempotent: it uses MERGE (not CREATE) for all nodes and edges.
 """
@@ -33,11 +33,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.graph import get_graph, GraphUnavailableError  # noqa: E402
 from core.graph.schema import NodeLabel, RelType  # noqa: E402
+from core.skills.catalog import SKILL_CATALOG  # noqa: E402
+from core.skills.models import PROFILE_SKILL_RULES  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-# SDLC phase definitions (0-9)
-SDLC_PHASES = {
+# SDLC phase definitions are derived from the catalog skills' sdlc_phases.
+# Kept here for SDLCPhase node creation in the graph.
+_SDLC_PHASES = {
     0: "Setup & Mode Selection",
     1: "Discovery & Analysis",
     2: "PRD Generation",
@@ -52,6 +55,8 @@ SDLC_PHASES = {
 
 # Known skill compositions: pairs of skills that work well together.
 # Each entry is (skill_a_id, skill_b_id, co_occurrence_count, avg_combined_success).
+# These are seeded into COMPOSES_WITH edges; runtime discovery happens via
+# core.skills.learning.SkillLearning.discover_compositions().
 KNOWN_COMPOSITIONS = [
     # Formatting + validation is a common pairing
     ("fmt-markdown", "validate-yaml", 15, 0.92),
@@ -73,7 +78,7 @@ def resolve_active_profile(override: str = None) -> str:
     1. Explicit override from --profile argument
     2. .claude/active-profile.yaml file
     3. ATOMIC_PROFILE environment variable
-    4. Default: "standard"
+    4. Default: "cloud_full"
     """
     import os
 
@@ -96,12 +101,12 @@ def resolve_active_profile(override: str = None) -> str:
     if env_profile:
         return env_profile
 
-    return "standard"
+    return "cloud_full"
 
 
 def load_skill_catalog(catalog_file: str = None) -> list:
     """
-    Load the skill catalog from a file or from the skill_catalog module.
+    Load the skill catalog from a file or from core.skills.catalog.
 
     Args:
         catalog_file: Optional path to a JSON catalog file.
@@ -118,14 +123,15 @@ def load_skill_catalog(catalog_file: str = None) -> list:
             data = json.load(f)
         return data if isinstance(data, list) else data.get("skills", [])
 
-    # Try importing from skill_catalog module
+    # Import from core.skills.catalog (the single source of truth)
     try:
-        from scripts.skills.skill_catalog import SKILL_CATALOG
-        return SKILL_CATALOG
+        from core.skills.catalog import SKILL_CATALOG as catalog
+        # Convert SkillMetadata instances to dicts for graph ingestion
+        return [s.model_dump() if hasattr(s, "model_dump") else s for s in catalog]
     except ImportError:
         pass
 
-    # Try loading from a default location
+    # Try loading from a default JSON location as last resort
     default_paths = [
         PROJECT_ROOT / "scripts" / "skills" / "skill_catalog.json",
         PROJECT_ROOT / "config" / "skill_catalog.json",
@@ -142,37 +148,6 @@ def load_skill_catalog(catalog_file: str = None) -> list:
     for p in default_paths:
         print(f"    {p}", file=sys.stderr)
     return []
-
-
-def compute_installable_profiles(skill: dict) -> list:
-    """
-    Compute which environment profiles a skill can be installed in.
-
-    Logic:
-    - All skills work in "unrestricted" (no restrictions)
-    - "standard": internet + SaaS allowed, but no High risk
-    - "sensitive": internet for install, no SaaS, None/Low risk only
-    - "air-gapped": no internet, no SaaS, None/Low risk only
-    """
-    profiles = ["unrestricted"]  # unrestricted allows everything
-
-    requires_internet = skill.get("requires_internet", False)
-    requires_saas = skill.get("requires_saas", False)
-    risk_level = skill.get("risk_level", "None")
-
-    # standard: internet + SaaS, but no High risk
-    if risk_level not in ("High",):
-        profiles.append("standard")
-
-    # sensitive: internet for install, no SaaS, None/Low risk only
-    if not requires_saas and risk_level in ("None", "Low", None):
-        profiles.append("sensitive")
-
-    # air-gapped: no internet, no SaaS, None/Low risk only
-    if not requires_internet and not requires_saas and risk_level in ("None", "Low", None):
-        profiles.append("air-gapped")
-
-    return profiles
 
 
 def ingest(catalog_file: str = None, profile_override: str = None,
@@ -199,7 +174,7 @@ def ingest(catalog_file: str = None, profile_override: str = None,
 
     # Step 1: Create SDLCPhase nodes (0-9)
     print("\n--- Creating SDLCPhase nodes ---")
-    for phase_num, phase_name in SDLC_PHASES.items():
+    for phase_num, phase_name in _SDLC_PHASES.items():
         phase_id = f"phase-{phase_num}"
         cypher = (
             "MERGE (p:SDLCPhase {id: $id}) "
@@ -208,7 +183,7 @@ def ingest(catalog_file: str = None, profile_override: str = None,
         conn.query(cypher, {"id": phase_id, "name": phase_name, "num": phase_num})
         if verbose:
             print(f"  Phase {phase_num}: {phase_name}")
-    print(f"  Created/updated {len(SDLC_PHASES)} SDLCPhase nodes")
+    print(f"  Created/updated {len(_SDLC_PHASES)} SDLCPhase nodes")
 
     # Step 2: Ingest skills
     print("\n--- Ingesting Skill nodes ---")
@@ -221,10 +196,19 @@ def ingest(catalog_file: str = None, profile_override: str = None,
             logger.warning("Skipping skill with no id: %s", skill)
             continue
 
-        # Compute installable profiles
+        # Compute installable profiles using core model method
         installable = skill.get("installable_in_profiles")
+        if callable(installable):
+            installable = installable()
         if not installable:
-            installable = compute_installable_profiles(skill)
+            # Fallback: compute from PROFILE_SKILL_RULES
+            from core.skills.models import SkillMetadata as _SM
+            try:
+                sm = _SM(**{k: v for k, v in skill.items()
+                           if k in _SM.model_fields})
+                installable = sm.installable_in_profiles()
+            except Exception:
+                installable = ["cloud_full", "development"]
 
         installable_csv = ",".join(installable)
 
@@ -365,7 +349,7 @@ def main():
     )
     parser.add_argument(
         "--profile",
-        help="Override environment profile (default: auto-detect from .claude/active-profile.yaml)",
+        help="Override environment profile (default: auto-detect, fallback: cloud_full)",
     )
     parser.add_argument(
         "--verbose", "-v",

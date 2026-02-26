@@ -154,6 +154,42 @@ def run_phase_tasks(
             flush_fn=make_flush_fn(phase_id, task_id),
         )
 
+        # Pre-task: gravity assessment and skill selection
+        gravity_assessment = None
+        skill_selection = None
+        try:
+            from core.skills import GravityClassifier, SkillSelector
+            gravity_classifier = GravityClassifier()
+            skill_selector = SkillSelector()
+
+            gravity_assessment = gravity_classifier.assess(
+                task_prompt=task_name,
+                project_id=state.get("project.id", "default")
+                if hasattr(state, "get") else "default",
+            )
+            logger.info(
+                "Task %s gravity: %s (confidence=%.2f)",
+                task_id, gravity_assessment.gravity.value,
+                gravity_assessment.confidence,
+            )
+
+            # Resolve active profile
+            active_profile = os.environ.get("ATOMIC_ENV_PROFILE", "cloud_full")
+            skill_selection = skill_selector.select(
+                task_prompt=task_name,
+                profile_name=active_profile,
+                gravity=gravity_assessment.gravity,
+            )
+            if skill_selection.skills:
+                logger.info(
+                    "Task %s skills: %s (method=%s)",
+                    task_id,
+                    [s.id for s in skill_selection.skills],
+                    skill_selection.method,
+                )
+        except Exception as e:
+            logger.debug("Gravity/skill assessment skipped: %s", e)
+
         try:
             # Call task — pass graph only if the function accepts it (Finding #26)
             if graph is not None:
@@ -210,6 +246,26 @@ def run_phase_tasks(
                 )
             except Exception as e:
                 logger.warning("Memory save failed for task %s: %s", task_id, e)
+
+            # Post-task: log skill usage and gravity accuracy
+            if gravity_assessment and skill_selection and skill_selection.skills:
+                try:
+                    from core.skills import SkillLearning
+                    learning = SkillLearning()
+                    task_score = 1.0 if success is not False else 0.3
+                    learning.log_usage(
+                        task_id=task_id,
+                        skill_ids=[s.id for s in skill_selection.skills],
+                        success_score=task_score,
+                        gravity=gravity_assessment.gravity.value,
+                    )
+                    learning.log_gravity_accuracy(
+                        task_id=task_id,
+                        assessed_gravity=gravity_assessment.gravity,
+                        success_score=task_score,
+                    )
+                except Exception as e:
+                    logger.debug("Post-task skill learning skipped: %s", e)
 
         except Exception as e:
             state.mark_task_failed(phase_id, task_id, task_name, str(e))

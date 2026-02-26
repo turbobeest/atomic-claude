@@ -5,9 +5,9 @@ generate_profile_constraints.py — Generate .claude/rules/profile-constraints.m
 Reads the active environment profile and produces a rule file that tells
 Claude Code what it can and cannot do in this environment.
 
-Called by resolve-profile.sh after locking the profile, or standalone:
+Usage:
     python3 scripts/skills/generate_profile_constraints.py
-    python3 scripts/skills/generate_profile_constraints.py --profile air-gapped
+    python3 scripts/skills/generate_profile_constraints.py --profile air_gapped
 """
 
 import argparse
@@ -105,7 +105,7 @@ def _parse_val(val):
 # ── Constraint templates ──────────────────────────────────────────────────────
 
 PROFILE_CONSTRAINTS = {
-    "air-gapped": {
+    "air_gapped": {
         "title": "Air-Gapped Environment",
         "summary": "This environment has NO network connectivity. All operations must be fully offline.",
         "rules": [
@@ -120,8 +120,8 @@ PROFILE_CONSTRAINTS = {
             "File-based caching and local databases (SQLite, FalkorDB on localhost) are allowed",
         ],
     },
-    "sensitive": {
-        "title": "Sensitive Environment",
+    "enterprise_secure": {
+        "title": "Enterprise Secure Environment",
         "summary": "Internet is available for reading code and documentation only. No SaaS integrations.",
         "rules": [
             "DO NOT integrate with any external SaaS services (Jira, Slack, GitHub API, etc.)",
@@ -134,8 +134,8 @@ PROFILE_CONSTRAINTS = {
             "If a task requires SaaS integration, report it as blocked and suggest local alternatives",
         ],
     },
-    "standard": {
-        "title": "Standard Environment",
+    "cloud_full": {
+        "title": "Cloud Full Environment",
         "summary": "Full internet access. SaaS integrations allowed with approval. High-risk skills require explicit approval.",
         "rules": [
             "Internet access and package installation are allowed",
@@ -147,8 +147,8 @@ PROFILE_CONSTRAINTS = {
             "Prefer verified and well-known packages over obscure alternatives",
         ],
     },
-    "unrestricted": {
-        "title": "Unrestricted Environment (Development/Lab)",
+    "development": {
+        "title": "Development Environment (Lab)",
         "summary": "All skills and capabilities are available. This is a development or lab environment.",
         "rules": [
             "All internet access, SaaS integrations, and skill risk levels are permitted",
@@ -165,8 +165,8 @@ def generate_constraints_md(profile_name, profile_config=None):
     """Generate the profile-constraints.md content for a given profile."""
     constraints = PROFILE_CONSTRAINTS.get(profile_name)
     if constraints is None:
-        # Unknown profile — fall back to standard
-        constraints = PROFILE_CONSTRAINTS["standard"]
+        # Unknown profile -- fall back to cloud_full
+        constraints = PROFILE_CONSTRAINTS["cloud_full"]
 
     lines = [
         f"# Environment Profile Constraints: {constraints['title']}",
@@ -208,7 +208,7 @@ def generate_constraints_md(profile_name, profile_config=None):
 
     lines.append("---")
     lines.append("*This file is auto-generated. Do not edit manually.*")
-    lines.append("*Re-run `source scripts/skills/resolve-profile.sh` to regenerate.*")
+    lines.append("*Re-run `python3 scripts/skills/generate_profile_constraints.py` to regenerate.*")
     lines.append("")
 
     return "\n".join(lines)
@@ -238,9 +238,9 @@ def main():
         # Read from active profile
         active = read_yaml(ACTIVE_PROFILE_YAML)
         if active:
-            profile_name = active.get("profile", "standard")
+            profile_name = active.get("profile", "cloud_full")
         else:
-            profile_name = os.environ.get("ATOMIC_ENV_PROFILE", "standard")
+            profile_name = os.environ.get("ATOMIC_ENV_PROFILE", "cloud_full")
 
     # Read full profile config
     profiles = read_yaml(PROFILES_YAML)
