@@ -27,6 +27,10 @@ class NodeLabel(str, Enum):
     PHASE_CHECKPOINT = "PhaseCheckpoint"
     AUDIT = "Audit"
     REVIEW_FINDING = "ReviewFinding"
+    SKILL = "Skill"
+    SDLC_PHASE = "SDLCPhase"
+    EPISODE = "Episode"
+    WORKFLOW = "Workflow"
 
 
 # ============================================================================
@@ -52,6 +56,11 @@ class RelType(str, Enum):
     COMMONLY_COMBINED = "COMMONLY_COMBINED"
     REVIEW_OF = "REVIEW_OF"
     VIOLATES = "VIOLATES"
+    BELONGS_TO = "BELONGS_TO"
+    COMPOSES_WITH = "COMPOSES_WITH"
+    USED_IN = "USED_IN"
+    STEP = "STEP"
+    SKILL_DEPENDS_ON = "SKILL_DEPENDS_ON"
 
 
 # ============================================================================
@@ -72,6 +81,10 @@ REQUIRED_PROPERTIES: Dict[str, List[str]] = {
     NodeLabel.PHASE_CHECKPOINT: ["id", "phase", "phase_name", "summary"],
     NodeLabel.AUDIT: ["id", "name", "category", "subcategory", "tier"],
     NodeLabel.REVIEW_FINDING: ["id", "severity", "category", "description"],
+    NodeLabel.SKILL: ["id", "name", "category"],
+    NodeLabel.SDLC_PHASE: ["id", "name"],
+    NodeLabel.EPISODE: ["id", "task_id"],
+    NodeLabel.WORKFLOW: ["id", "name", "task_pattern"],
 }
 
 # Valid values for enumerated properties
@@ -132,6 +145,20 @@ VALID_VALUES: Dict[str, Dict[str, Set[str]]] = {
         "status": {"open", "resolved", "wont_fix", "deferred"},
         "review_dimension": {"deep_code", "architecture", "performance", "documentation"},
     },
+    NodeLabel.SKILL: {
+        "category": {
+            "formatting", "validation", "extraction", "git-ops", "file-ops",
+            "phase-checks", "doc-gen", "testing", "security", "architecture",
+            "deployment", "monitoring", "data", "api", "performance",
+            "accessibility", "planning", "debugging", "infrastructure",
+            "compliance", "custom",
+        },
+        "risk_level": {"None", "Low", "Medium", "High"},
+        "source": {"anthropic-official", "playbooks", "awesome-claude-code", "community", "tactical-builtin"},
+    },
+    NodeLabel.EPISODE: {
+        "outcome": {"success", "partial", "failure"},
+    },
 }
 
 # Optional properties with defaults
@@ -159,6 +186,27 @@ PROPERTY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     NodeLabel.REVIEW_FINDING: {
         "status": "open",
         "phase": "6-code-review",
+    },
+    NodeLabel.SKILL: {
+        "installed": False,
+        "requires_internet": False,
+        "requires_saas": False,
+        "risk_level": "None",
+        "times_used": 0,
+        "avg_success_score": 0.0,
+        "description": "",
+        "blocked_by_profile": "",
+        "content_hash": "",
+    },
+    NodeLabel.SDLC_PHASE: {},
+    NodeLabel.EPISODE: {
+        "success_score": 0.0,
+        "tokens_consumed": 0,
+        "duration_ms": 0,
+    },
+    NodeLabel.WORKFLOW: {
+        "times_used": 0,
+        "avg_success": 0.0,
     },
 }
 
@@ -217,11 +265,13 @@ VALID_RELATIONSHIPS: Dict[str, tuple] = {
         {NodeLabel.SOURCE, NodeLabel.FINDING, NodeLabel.DECISION,
          NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK,
          NodeLabel.SPEC, NodeLabel.AGENT, NodeLabel.MEMORY,
-         NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT, NodeLabel.REVIEW_FINDING},
+         NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT, NodeLabel.REVIEW_FINDING,
+         NodeLabel.SKILL, NodeLabel.SDLC_PHASE, NodeLabel.EPISODE, NodeLabel.WORKFLOW},
         {NodeLabel.SOURCE, NodeLabel.FINDING, NodeLabel.DECISION,
          NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK,
          NodeLabel.SPEC, NodeLabel.AGENT, NodeLabel.MEMORY,
-         NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT, NodeLabel.REVIEW_FINDING},
+         NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT, NodeLabel.REVIEW_FINDING,
+         NodeLabel.SKILL, NodeLabel.SDLC_PHASE, NodeLabel.EPISODE, NodeLabel.WORKFLOW},
     ),
     RelType.AUDIT_COVERS: (
         {NodeLabel.AUDIT},
@@ -239,6 +289,26 @@ VALID_RELATIONSHIPS: Dict[str, tuple] = {
         {NodeLabel.REVIEW_FINDING},
         {NodeLabel.REQUIREMENT},
     ),
+    RelType.BELONGS_TO: (
+        {NodeLabel.SKILL},
+        {NodeLabel.SDLC_PHASE},
+    ),
+    RelType.COMPOSES_WITH: (
+        {NodeLabel.SKILL},
+        {NodeLabel.SKILL},
+    ),
+    RelType.USED_IN: (
+        {NodeLabel.SKILL},
+        {NodeLabel.EPISODE},
+    ),
+    RelType.STEP: (
+        {NodeLabel.WORKFLOW},
+        {NodeLabel.SKILL},
+    ),
+    RelType.SKILL_DEPENDS_ON: (
+        {NodeLabel.SKILL},
+        {NodeLabel.SKILL},
+    ),
 }
 
 # Relationship properties
@@ -249,6 +319,9 @@ RELATIONSHIP_PROPERTIES: Dict[str, List[str]] = {
     RelType.CONFLICTS_WITH: ["description"],
     RelType.SPEC_INTERFACE: ["name", "direction", "schema_hash"],
     RelType.SUPERSEDES: ["superseded_at", "reason"],
+    RelType.COMPOSES_WITH: ["co_occurrence", "avg_combined_success"],
+    RelType.USED_IN: ["success_score"],
+    RelType.STEP: ["order", "optional"],
 }
 
 
@@ -297,6 +370,19 @@ INDEX_DEFINITIONS = [
     ("ReviewFinding", "category"),
     ("ReviewFinding", "status"),
     ("ReviewFinding", "review_dimension"),
+    # Skill lookups
+    ("Skill", "id"),
+    ("Skill", "category"),
+    ("Skill", "risk_level"),
+    ("Skill", "installed"),
+    ("Skill", "source"),
+    # SDLCPhase lookups
+    ("SDLCPhase", "id"),
+    # Episode lookups
+    ("Episode", "id"),
+    ("Episode", "task_id"),
+    # Workflow lookups
+    ("Workflow", "id"),
 ]
 
 FULLTEXT_INDEX_DEFINITIONS = [
@@ -307,6 +393,7 @@ FULLTEXT_INDEX_DEFINITIONS = [
     ("Memory", ["content", "tags_csv"]),
     ("Audit", ["name", "description_what", "description_why"]),
     ("ReviewFinding", ["description", "recommendation"]),
+    ("Skill", ["name", "description"]),
 ]
 
 
