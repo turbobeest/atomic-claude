@@ -161,7 +161,7 @@ def _handle_confirmation(
 
         try:
             confirm_choice = input("  Choice (default: confirm): ").strip().lower() or "confirm"
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             logger.debug("Non-interactive mode: defaulting to 'confirm'")
             confirm_choice = "confirm"
 
@@ -176,7 +176,7 @@ def _handle_confirmation(
             print()
             try:
                 input("  Press Enter after investigation...")
-            except EOFError:
+            except (EOFError, KeyboardInterrupt):
                 logger.debug("Non-interactive mode: skipping investigation prompt")
             print()
             print(f"  {DIM}Returning to confirmation...{NC}")
@@ -200,7 +200,7 @@ def _handle_confirmation(
         confirmer_input = input("  Confirmer name: ").strip()
         if confirmer_input:
             confirmer_name = confirmer_input
-    except EOFError:
+    except (EOFError, KeyboardInterrupt):
         logger.debug("Non-interactive mode: using default confirmer name")
     print()
 

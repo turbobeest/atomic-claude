@@ -138,8 +138,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             logger.debug("Failed to load corpus analysis: %s", e)
 
     if corpus_file.exists():
-        with open(corpus_file) as f:
-            corpus_data = json.load(f)
+        try:
+            with open(corpus_file) as f:
+                corpus_data = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse corpus file: %s", corpus_file)
+            corpus_data = {}
         materials = corpus_data.get("materials", [])
         material_count = len(materials)
         if material_count > 0:

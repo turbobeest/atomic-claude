@@ -471,8 +471,8 @@ def load_tasks_from_graph(graph) -> List[Dict[str, Any]]:
                 "priority": node.get("priority", "medium"),
             }
 
-            # Only include tasks with enough subtasks/specs (same filter as load_tasks)
-            if len(task_dict["subtasks"]) >= 4 or len(spec_nodes) > 0:
+            # Only include tasks with enough subtasks (same filter as load_tasks)
+            if len(task_dict["subtasks"]) >= 4:
                 tasks.append(task_dict)
 
         return tasks

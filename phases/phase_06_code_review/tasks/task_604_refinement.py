@@ -273,8 +273,12 @@ def _get_refinement_scope(critical: int, major: int, uat_mode: bool) -> str:
     print(print_dim("  [skip]") + "        Skip refinement entirely")
     print()
 
+    valid_scopes = {"critical", "major", "minor", "skip"}
     clear_input_buffer()
-    scope = prompt_user("Refinement scope (default: major): ").strip() or "major"
+    scope = prompt_user("Refinement scope (default: major): ").strip().lower() or "major"
+    if scope not in valid_scopes:
+        print(print_yellow(f"  ! Invalid scope '{scope}'. Defaulting to 'critical'."))
+        scope = "critical"
     return scope
 
 
@@ -300,9 +304,11 @@ def _display_refinement_strategy(scope: str) -> None:
 def _address_issues(findings_data: Dict, severity: str, fixes_dir: Path, atomic_root: Path) -> int:
     """Address issues of a specific severity."""
     # Extract findings of this severity from all dimensions
+    # _graph_findings_to_dict wraps dimensions under a "dimensions" key
+    dims = findings_data.get("dimensions", findings_data)
     all_findings = []
     for dimension in ["deep_code", "architecture", "performance", "documentation"]:
-        dimension_data = findings_data.get(dimension, {})
+        dimension_data = dims.get(dimension, {})
         findings = dimension_data.get("findings", [])
         all_findings.extend([f for f in findings if f.get("severity") == severity])
 

@@ -89,7 +89,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if graph:
         try:
             # Query Phase 1 findings and decisions from graph
-            phase1_graph_context = graph.reader.query_prd_context(section="vision", max_tokens=4000)
+            phase1_graph_context = graph.query_prd_context(section="vision", max_tokens=4000)
             if phase1_graph_context:
                 context["graph_context"] = phase1_graph_context
                 logger.info("Loaded Phase 1 context from knowledge graph")

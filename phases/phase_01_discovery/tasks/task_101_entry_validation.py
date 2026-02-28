@@ -231,7 +231,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 type="corpus",
                 title=material.get("name", "unknown"),
                 file_path=material.get("path", ""),
-                content_hash=str(hash(material.get("content", "")))[:16],
+                content_hash=str(hash(material.get("path", material.get("name", ""))))[:16],
             )
 
     # Record substantive memory

@@ -288,9 +288,11 @@ Return as markdown suitable for internal distribution.
                 print(f"  {DIM}Using fallback template{NC}")
 
     # Generate internal release notes (using LLM response or fallback)
+    used_fallback = False
     if announcement_content:
         write_file(announcement_file, announcement_content)
     else:
+        used_fallback = True
         write_file(announcement_file, f"""# Internal Release Notes - v{version}
 
 ## Release Summary
@@ -329,7 +331,7 @@ Version {version} has been completed and is ready for internal use.
     print(f"  {'─' * 110}")
     print()
 
-    return "success"
+    return "fallback" if used_fallback else "success"
 
 
 def _save_execution_results(

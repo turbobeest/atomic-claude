@@ -152,7 +152,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     try:
         input("  Press Enter to continue...")
-    except EOFError:
+    except (EOFError, KeyboardInterrupt):
         logger.debug("Non-interactive mode: skipping Enter prompt")
     print()
 

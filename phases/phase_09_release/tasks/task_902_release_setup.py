@@ -147,7 +147,7 @@ def _get_final_confirmation() -> bool:
 
     try:
         proceed_choice = input("  Choice (default: yes): ").strip().lower() or "yes"
-    except EOFError:
+    except (EOFError, KeyboardInterrupt):
         logger.debug("Non-interactive mode: defaulting to 'yes'")
         proceed_choice = "yes"
 
@@ -160,7 +160,7 @@ def _get_final_confirmation() -> bool:
         print()
         try:
             input("  Press Enter after review...")
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             logger.debug("Non-interactive mode: skipping review prompt")
         print()
         return True
@@ -201,7 +201,7 @@ def _review_release_notes(version: str) -> str:
 
     try:
         notes_confirm = input("  Accept (default: y/n): ").strip().lower() or "y"
-    except EOFError:
+    except (EOFError, KeyboardInterrupt):
         logger.debug("Non-interactive mode: defaulting to 'y'")
         notes_confirm = "y"
 
@@ -210,7 +210,7 @@ def _review_release_notes(version: str) -> str:
         print()
         try:
             notes_feedback = input("  Notes for modification: ")
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             logger.debug("Non-interactive mode: skipping notes feedback")
             notes_feedback = ""
         print()

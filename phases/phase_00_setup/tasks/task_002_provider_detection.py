@@ -248,7 +248,7 @@ def _load_env_file(env_file: Path, env_vars: Dict[str, str]) -> None:
                 line = line.strip()
                 if line and not line.startswith('#') and '=' in line:
                     key, value = line.split('=', 1)
-                    env_vars[key.strip()] = value.strip()
+                    env_vars[key.strip()] = value.strip().strip('"').strip("'")
     except Exception as e:
         print(print_yellow(f"  Failed to load .env: {e}"))
 

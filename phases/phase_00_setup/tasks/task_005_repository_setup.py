@@ -105,8 +105,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if inventory_file.exists():
         try:
             inventory = json.loads(read_file(inventory_file))
-            providers = inventory.get("providers", {})
-            ollama_info = providers.get("ollama", providers.get("Ollama", {}))
+            providers = inventory.get("provider_health", {})
+            ollama_info = providers.get("Ollama", {})
             ollama_status = ollama_info.get("status", "unavailable")
             ollama_configured = ollama_status in ("healthy", "degraded")
         except Exception as e:
@@ -1006,7 +1006,8 @@ def _handle_validation_failure() -> bool:
 
         if choice == 'r':
             print()
-            # Note: In real implementation, would recursively call execute()
+            print(print_yellow("  Please re-run this task to retry validation."))
+            print(print_dim("  (Recursive execute() calls are unsafe.)"))
             return False
         elif choice == 'c':
             print(print_yellow("Continuing with validation failures"))

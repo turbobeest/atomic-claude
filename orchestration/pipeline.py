@@ -315,6 +315,18 @@ class PhaseValidator:
                     f"Dependency phase {dep_phase_num} ({dep_metadata.phase_name}) "
                     f"has not been started"
                 )
+            else:
+                # Phase has tasks but none completed — not satisfied
+                has_completed = any(
+                    t.get('status') == 'completed'
+                    for t in phase_data.values()
+                    if isinstance(t, dict)
+                )
+                if not has_completed:
+                    errors.append(
+                        f"Dependency phase {dep_phase_num} ({dep_metadata.phase_name}) "
+                        f"has been started but has no completed tasks"
+                    )
 
         return errors
 

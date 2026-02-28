@@ -276,6 +276,7 @@ def _spec_worker(
                 logger.warning(
                     "Spec file spec-t%s.json is not valid JSON: %s", task_id, je
                 )
+                return (task_id, "invalid", time.monotonic() - start, str(je))
 
         return (task_id, "ok", time.monotonic() - start, None)
     except Exception as e:

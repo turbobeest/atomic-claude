@@ -116,7 +116,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         else:
             print(print_green("✓ No circular dependencies"))
 
-        print(print_green("✓ DAG structure verified"))
+        if validation_result["passed"]:
+            print(print_green("✓ DAG structure verified"))
         print()
 
         if validation_result["passed"]:

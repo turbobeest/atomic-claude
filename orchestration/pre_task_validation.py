@@ -226,6 +226,9 @@ def classify_violation(file_path: Path, acp_root: Path) -> Dict[str, Any]:
     # Check against forbidden types
     for forbidden_suffix, correct_loc in FORBIDDEN_TYPES.items():
         if suffix == forbidden_suffix or name.endswith(forbidden_suffix):
+            # Skip legitimate dashboard files (e.g., dashboard/server.js)
+            if "dashboard" in str(rel_path) and suffix == ".js":
+                continue
             return {
                 "path": str(rel_path),
                 "correct_location": correct_loc,

@@ -201,7 +201,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
         # Handle commands
         if user_input.lower() in ('browse', 'categories'):
-            _browse_categories(agent_manifest)
+            _browse_categories(manifest)
             continue
 
         if user_input.lower().startswith('add '):

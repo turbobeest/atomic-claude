@@ -133,8 +133,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Load expert agents
     agents_file = output_dir / "selected-agents.json"
     if agents_file.exists():
-        with open(agents_file) as f:
-            data = json.load(f)
+        try:
+            with open(agents_file) as f:
+                data = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse agents file: %s", agents_file)
+            data = {}
         experts = data.get("selected_experts", [])
         panel_agents.extend(experts[:3])  # Limit to 3 experts for focus
 

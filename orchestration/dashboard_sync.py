@@ -64,7 +64,8 @@ def _locked_file(filepath: Path, mode: str = "r+"):
             fcntl.flock(fh, fcntl.LOCK_EX)
         elif sys.platform == 'win32':
             import msvcrt
-            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1024)
+        fh.seek(0)
         yield fh
     finally:
         if _HAS_FCNTL:
@@ -72,7 +73,8 @@ def _locked_file(filepath: Path, mode: str = "r+"):
         elif sys.platform == 'win32':
             import msvcrt
             try:
-                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1024)
             except OSError:
                 pass
         fh.close()

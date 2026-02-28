@@ -132,12 +132,26 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
 
 def _find_closeout(atomic_root: Path, phase_name: str) -> Optional[Path]:
-    """Find closeout file for a phase."""
-    closeout_dir = atomic_root.parent / ".outputs" / phase_name
+    """Find closeout file for a phase.
+
+    Checks two locations:
+      1. .outputs/<phase_name>/closeout.json  (legacy)
+      2. .claude/closeout/phase-07-closeout.json  (written by task_707)
+    """
+    project_root = atomic_root.parent
+
+    # Primary: .outputs/<phase_name>/closeout.json
+    closeout_dir = project_root / ".outputs" / phase_name
     if closeout_dir.exists():
         closeout_file = closeout_dir / "closeout.json"
         if closeout_file.exists():
             return closeout_file
+
+    # Fallback: .claude/closeout/phase-07-closeout.json (task_707 writes here)
+    claude_closeout = project_root / ".claude" / "closeout" / "phase-07-closeout.json"
+    if claude_closeout.exists():
+        return claude_closeout
+
     return None
 
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Generator
 
-from .base import BaseLLMProvider, LLMResponse
+from .base import BaseLLMProvider, LLMResponse, TokenUsage
 from .cache import LLMCache
 from .exceptions import (
     LLMException,
@@ -245,6 +245,8 @@ class LLMRouter:
             if cached:
                 logger.debug(f"Cache hit for prompt: {prompt[:50]}...")
                 logger.info("Returning cached LLM response (tokens not re-tracked)")
+                if isinstance(cached.get("usage"), dict):
+                    cached["usage"] = TokenUsage(**cached["usage"])
                 return LLMResponse(**cached)
 
         # Get fallback chain
@@ -587,9 +589,10 @@ class LLMRouter:
             provider_name: Provider name
             retryable: Whether failure is retryable
         """
-        stats = self._usage_stats[provider_name]
-        stats.total_requests += 1
-        stats.failed_requests += 1
+        with self._stats_lock:
+            stats = self._usage_stats[provider_name]
+            stats.total_requests += 1
+            stats.failed_requests += 1
 
         # Update circuit breaker
         if provider_name not in self._failures:

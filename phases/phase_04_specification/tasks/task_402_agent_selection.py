@@ -340,6 +340,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     write_file(roster_file, json.dumps(roster_data, indent=2))
 
+    # Also write selected-agents.json to output_dir so the orchestrator can find it
+    ensure_dir(output_dir)
+    write_file(output_dir / "selected-agents.json", json.dumps({
+        "agents": selected_agents,
+        "mode": "interactive"
+    }, indent=2))
+
     print(print_green("✓ Agent Selection complete"))
 
     return True

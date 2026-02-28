@@ -15,6 +15,7 @@ import json
 import logging
 import re
 import shlex
+import tempfile
 from pathlib import Path
 from typing import Dict, Any, Tuple, List, Optional
 from datetime import datetime, timezone
@@ -236,8 +237,9 @@ def _run_coverage(
     safe_root = shlex.quote(str(project_root))
     if stack == "rust":
         # cargo tarpaulin
-        cmd = f"cd {safe_root} && cargo tarpaulin --out json --output-dir /tmp 2>&1"
-        coverage_json = Path("/tmp/tarpaulin-report.json")
+        tarpaulin_dir = tempfile.gettempdir()
+        cmd = f"cd {safe_root} && cargo tarpaulin --out json --output-dir {shlex.quote(tarpaulin_dir)} 2>&1"
+        coverage_json = Path(tarpaulin_dir) / "tarpaulin-report.json"
     elif stack == "python":
         cmd = f"cd {safe_root} && python -m pytest --cov --cov-report=json --cov-report=term -q 2>&1"
         coverage_json = project_root / "coverage.json"

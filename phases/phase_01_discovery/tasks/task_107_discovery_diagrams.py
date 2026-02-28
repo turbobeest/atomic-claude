@@ -292,16 +292,24 @@ def _load_approach_context(output_dir: Path) -> Dict[str, str]:
     # Load approach
     approach_file = output_dir / "selected-approach.json"
     if approach_file.exists():
-        with open(approach_file) as f:
-            data = json.load(f)
+        try:
+            with open(approach_file) as f:
+                data = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse approach file: %s", approach_file)
+            data = {}
         context["approach_name"] = data.get("direction", {}).get("summary", data.get("name", "unknown"))
         context["approach_summary"] = data.get("summary", "")
 
     # Load dialogue synthesis (full vision, constraints, impact)
     dialogue_file = output_dir / "dialogue.json"
     if dialogue_file.exists():
-        with open(dialogue_file) as f:
-            data = json.load(f)
+        try:
+            with open(dialogue_file) as f:
+                data = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse dialogue file: %s", dialogue_file)
+            data = {}
         synthesis = data.get("synthesis", {})
         vision = synthesis.get("vision", {})
         context["vision"] = vision.get("core_problem", "")

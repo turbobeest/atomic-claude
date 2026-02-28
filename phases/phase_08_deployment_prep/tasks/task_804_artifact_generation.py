@@ -222,12 +222,18 @@ Output raw JSON:
 
     # Invoke LLM for packaging analysis; fall back to template on failure
     package_name = f"project-{safe_version}"
+    llm_result = None
     try:
         llm_result = invoke_llm(prompt=prompt, model="sonnet")
         if llm_result:
             write_file(prompts_dir / "package-result.md", llm_result)
     except Exception as e:
         logger.debug("LLM call failed for packaging: %s", e)
+
+    result_file = prompts_dir / "package-result.md"
+    if not llm_result and not result_file.exists():
+        print(print_red("  ✗ Package generation failed: LLM returned no content"))
+        return {"package_name": package_name, "status": "failed", "reason": "LLM returned no content for packaging"}
 
     print("  " + "─" * 110)
     print(print_bold("  PACKAGE BUILD"))
@@ -282,6 +288,11 @@ Generate a Keep a Changelog format entry. Include Added, Changed, Fixed sections
     if changelog_content:
         write_file(prompts_dir / "changelog-result.md", changelog_content)
 
+    result_file = prompts_dir / "changelog-result.md"
+    if not changelog_content and not result_file.exists():
+        print(print_red("  ✗ Changelog generation failed: LLM returned no content"))
+        return {"status": "failed", "reason": "LLM returned no content for changelog"}
+
     print("  " + "─" * 110)
     print(print_bold("  CHANGELOG"))
     print()
@@ -335,6 +346,11 @@ Generate a documentation overview covering: project overview, usage guide, API r
     if docs_content:
         write_file(prompts_dir / "documentation-result.md", docs_content)
 
+    result_file = prompts_dir / "documentation-result.md"
+    if not docs_content and not result_file.exists():
+        print(print_red("  ✗ Documentation generation failed: LLM returned no content"))
+        return {"status": "failed", "reason": "LLM returned no content for documentation"}
+
     print("  " + "─" * 110)
     print(print_bold("  DOCUMENTATION"))
     print()
@@ -385,6 +401,11 @@ Generate a comprehensive installation guide with: prerequisites, quick start, ma
 
     if install_content:
         write_file(prompts_dir / "installation-guide-result.md", install_content)
+
+    result_file = prompts_dir / "installation-guide-result.md"
+    if not install_content and not result_file.exists():
+        print(print_red("  ✗ Installation guide generation failed: LLM returned no content"))
+        return {"status": "failed", "reason": "LLM returned no content for installation guide"}
 
     print("  " + "─" * 110)
     print(print_bold("  INSTALLATION GUIDE"))

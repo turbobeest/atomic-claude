@@ -313,16 +313,16 @@ def _find_agent_repo(atomic_root: Path) -> Path:
 
 
 def _find_agent_file(agent_name: str, agent_repo: Path) -> Optional[Path]:
-    """Find agent file in repository."""
-    # Try expert-agents first
-    agent_file = agent_repo / "expert-agents" / f"{agent_name}.md"
-    if agent_file.exists():
-        return agent_file
+    """Find agent file in repository (searches subdirectories)."""
+    # Try expert-agents first (agents live in category subdirectories)
+    matches = list(agent_repo.glob(f"expert-agents/**/{agent_name}.md"))
+    if matches:
+        return matches[0]
 
     # Try pipeline-agents
-    agent_file = agent_repo / "pipeline-agents" / f"{agent_name}.md"
-    if agent_file.exists():
-        return agent_file
+    matches = list(agent_repo.glob(f"pipeline-agents/**/{agent_name}.md"))
+    if matches:
+        return matches[0]
 
     return None
 

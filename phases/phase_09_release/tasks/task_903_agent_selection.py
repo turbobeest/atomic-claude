@@ -45,7 +45,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
         # Create minimal output that satisfies downstream tasks
         output_dir.mkdir(parents=True, exist_ok=True)
-        selected_agents_file = output_dir / "selected-agents.json"
+        selected_agents_file = output_dir / "release-agents.json"
         write_json(selected_agents_file, {
             "agents": ["announcement-writer-phd:haiku"],
             "count": 1
@@ -118,7 +118,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     try:
         ann_choice = input("  Select (default: 1): ").strip() or "1"
-    except EOFError:
+    except (EOFError, KeyboardInterrupt):
         logger.debug("Non-interactive mode: defaulting to '1'")
         ann_choice = "1"
 
@@ -131,7 +131,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             custom_name = input("  Custom agent name: ").strip()
             custom_model = input("  Custom agent model (default: haiku): ").strip() or "haiku"
             selected_agents.append(f"{custom_name}:{custom_model}")
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             logger.debug("Non-interactive mode: defaulting to announcement-writer-phd:haiku")
             selected_agents.append("announcement-writer-phd:haiku")
     else:

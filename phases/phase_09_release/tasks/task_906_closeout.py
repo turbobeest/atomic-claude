@@ -199,7 +199,7 @@ def _get_approval(all_passed: bool) -> bool:
 
     try:
         closeout_choice = input("  Choice (default: approve): ").strip().lower() or "approve"
-    except EOFError:
+    except (EOFError, KeyboardInterrupt):
         logger.debug("Non-interactive mode: defaulting to 'approve'")
         closeout_choice = "approve"
 
@@ -213,7 +213,7 @@ def _get_approval(all_passed: bool) -> bool:
         print()
         try:
             input("  Press Enter to continue to closeout...")
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             logger.debug("Non-interactive mode: skipping closeout prompt")
         return True
     elif closeout_choice == "hold":
