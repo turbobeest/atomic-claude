@@ -118,8 +118,6 @@ def run_phase(resume_at: str = None) -> bool:
 
 
 if __name__ == "__main__":
-    import sys
-
     resume_at = None
     if len(sys.argv) > 1:
         resume_at = sys.argv[1]

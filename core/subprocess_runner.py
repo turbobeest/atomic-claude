@@ -213,6 +213,8 @@ def run_bash_command(
         stdout = None
         stderr = None
 
+    # SECURITY: command is passed directly to bash -c. Only call this function
+    # with trusted input. Never pass unsanitized user input as the command string.
     try:
         result = subprocess.run(
             ["bash", "-c", command],

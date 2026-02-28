@@ -188,7 +188,10 @@ def _select_agent(role_name: str, color_func, recommended: str, alternatives: li
     choice = prompt_user("  Selection (default: 1): ").strip() or "1"
 
     if choice.lower() == 'c':
-        return prompt_user("  Enter custom agent name: ").strip()
+        agent_name = prompt_user("  Enter custom agent name: ").strip()
+        if not agent_name.strip():
+            agent_name = "code-reviewer"
+        return agent_name
 
     try:
         idx = int(choice)

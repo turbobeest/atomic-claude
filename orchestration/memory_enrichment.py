@@ -213,10 +213,13 @@ def enrich_memory_with_llm(
     # Build file inventory for reference (reuse cached scan)
     file_list = ""
     if all_files:
-            file_list = "\n## All Generated Files\n" + "\n".join(
-                f"- {f['name']} ({f['size']} bytes)" for f in all_files
-            )
+        file_list = "\n## All Generated Files\n" + "\n".join(
+            f"- {f['name']} ({f['size']} bytes)" for f in all_files
+        )
 
+    # NOTE: LLM input (content_parts) is not sanitized here. The output is sanitized
+    # below (HTML/script tag stripping, length truncation) as defense-in-depth against
+    # prompt injection or unexpected LLM output.
     prompt = f"""Summarize the following task outputs into a structured memory entry.
 This summary will be stored for future sessions to understand what this task accomplished.
 
@@ -330,8 +333,6 @@ def _summarize_json(path: Path) -> Optional[str]:
         return _summarize_material_manifest(data)
     elif filename == "env-validation":
         return _summarize_env_validation(data)
-    elif filename == "secrets":
-        return None  # Never summarize secrets
     elif filename == "selected-agents" or filename == "agent-roster":
         return _summarize_agent_selection(data)
     elif filename == "corpus" or filename == "corpus-analysis":

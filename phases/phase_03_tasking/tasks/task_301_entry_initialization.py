@@ -85,7 +85,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     if closeout_file.exists():
-        closeout = json.loads(read_file(closeout_file))
+        try:
+            closeout = json.loads(read_file(closeout_file))
+        except (json.JSONDecodeError, Exception) as e:
+            logger.debug("Could not parse closeout file: %s", e)
+            closeout = {}
         phase2_status = closeout.get("status", "unknown")
         if phase2_status == "complete" or "tasks_completed" in closeout:
             print(print_green(f"✓ Phase 2 closeout found (status: complete)"))
@@ -128,7 +132,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     if approval_file.exists():
-        approval = json.loads(read_file(approval_file))
+        try:
+            approval = json.loads(read_file(approval_file))
+        except (json.JSONDecodeError, Exception) as e:
+            logger.debug("Could not parse approval file: %s", e)
+            approval = {}
         approval_status = approval.get("status", "unknown")
         approver = approval.get("approver", "unknown")
         approved_at = approval.get("approved_at", "unknown")
@@ -472,7 +480,7 @@ def _append_env_vars(env_file: Path, lines: list) -> None:
             new_lines.append(line)
             continue
         key = line.split("=", 1)[0]
-        if key not in existing:
+        if not any(ex_line.startswith(key + "=") for ex_line in existing.splitlines()):
             new_lines.append(line)
 
     if not any(not l.startswith("#") for l in new_lines):
@@ -492,7 +500,7 @@ def _ensure_env_gitignored(project_root: Path) -> None:
     gitignore = project_root / ".gitignore"
     if gitignore.exists():
         content = read_file(gitignore)
-        if ".env" not in content:
+        if not any(line.strip() == ".env" for line in content.splitlines()):
             write_file(gitignore, content + "\n.env\n")
     else:
         write_file(gitignore, ".env\n")

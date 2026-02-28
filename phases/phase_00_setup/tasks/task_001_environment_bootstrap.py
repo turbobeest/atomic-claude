@@ -585,13 +585,19 @@ def _launch_dashboard(atomic_root: Path) -> None:
     try:
         env = os.environ.copy()
         env["ATOMIC_ROOT"] = str(atomic_root)
-        subprocess.Popen(
-            ["bash", str(dashboard_script)],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        try:
+            subprocess.Popen(
+                ["bash", str(dashboard_script)],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except FileNotFoundError:
+            print(print_yellow("  ! Dashboard requires bash (Git Bash or WSL)"))
+            print(print_dim("    Install Git for Windows or use WSL to enable the dashboard"))
+            print()
+            return
 
         # Wait for dashboard to be ready (up to 10s)
         ready = False
@@ -625,14 +631,15 @@ def _launch_dashboard(atomic_root: Path) -> None:
 def _get_hostname() -> str:
     """Get the best hostname/IP for dashboard access."""
     import socket
-    # Try to get a routable IP
+    # Try to get a routable IP (may fail on airgapped networks)
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(2)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
         return ip
-    except Exception as e:
+    except (OSError, socket.timeout) as e:
         logger.debug("Failed to detect routable IP: %s", e)
     # Fallback to hostname
     try:

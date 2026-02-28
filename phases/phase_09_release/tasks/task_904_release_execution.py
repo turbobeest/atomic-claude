@@ -5,6 +5,7 @@ Execute GitHub release, package publishing, and announcement generation.
 Currently focuses on internal release with announcement generation.
 """
 
+import re
 import sys
 import json
 import logging
@@ -244,9 +245,11 @@ def _generate_announcement(
         prompt_content = "# Announcement Writing\n\n"
         prompt_content += "You are an announcement writer agent drafting internal release notes.\n\n"
 
+    safe_version = re.sub(r'[^a-zA-Z0-9.\-]', '', version)[:50]
+
     prompt_content += f"""## Release Details
 
-- Version: {version}
+- Version: {safe_version}
 - Channel: internal
 
 ## Project Context

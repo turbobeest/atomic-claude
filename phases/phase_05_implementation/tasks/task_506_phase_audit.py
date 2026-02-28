@@ -26,6 +26,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, skip audit for testing
+        mem: Optional memory system instance (pipeline interface)
+        graph: Optional dependency graph instance. Accepted for interface
+               compatibility with the orchestrator's kwargs passthrough
+               but not used directly -- audit graph is loaded internally.
 
     Returns:
         True if audit completed or skipped (non-blocking)

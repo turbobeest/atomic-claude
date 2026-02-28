@@ -299,9 +299,9 @@ def _show_review(output_dir: Path, project_root: Path) -> None:
     print("  .taskmaster/reports/task-complexity-report.json")
     print()
 
-    import subprocess
     try:
-        subprocess.run(["ls", "-la", str(output_dir)], check=False)
+        for entry in sorted(output_dir.iterdir()):
+            print(f"  {entry.name}")
     except Exception as e:
         logger.debug("Could not list output directory: %s", e)
     print()

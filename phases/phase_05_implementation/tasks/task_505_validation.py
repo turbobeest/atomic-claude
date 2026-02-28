@@ -143,6 +143,8 @@ def _run_test_suite(
     Returns dict with tests_passed, tests_failed, tests_errors, or None if
     the test runner isn't available.
     """
+    # NOTE: shlex.quote is POSIX-only but this runs under Git Bash on
+    # Windows, where POSIX quoting is correct.
     safe_root = shlex.quote(str(project_root))
     if stack == "rust":
         cmd = f"cd {safe_root} && cargo test 2>&1"
@@ -216,6 +218,9 @@ def _run_test_suite(
 
     elif stack == "go":
         # Parse: ok or FAIL lines
+        # NOTE: Go's `go test ./...` reports per-package results, not
+        # individual test counts.  The passed/failed numbers here represent
+        # package-level pass/fail, not individual test functions.
         passed = len(re.findall(r"^ok\s+", output, re.MULTILINE))
         failed = len(re.findall(r"^FAIL\s+", output, re.MULTILINE))
         if passed > 0 or failed > 0:

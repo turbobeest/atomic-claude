@@ -8,6 +8,7 @@ Supports streaming, model pulling, and GPU acceleration.
 
 import json
 import logging
+import socket
 import time
 import urllib.request
 import urllib.error
@@ -119,12 +120,15 @@ class OllamaProvider(BaseLLMProvider):
         if model in OLLAMA_TIER_MAP:
             model = OLLAMA_TIER_MAP[model]
 
-        # Build combined prompt
+        # Build request using /api/generate endpoint.
+        # NOTE: This uses manual <system> tag injection rather than the /api/chat
+        # endpoint with proper messages format. A future refactor should migrate
+        # to /api/chat with {"role": "system", "content": ...} messages for
+        # better model compatibility.
         combined_prompt = prompt
         if system_prompt:
             combined_prompt = f"<system>{system_prompt}</system>\n\n{prompt}"
 
-        # Build request
         request_data = {
             "model": model,
             "prompt": combined_prompt,
@@ -165,7 +169,9 @@ class OllamaProvider(BaseLLMProvider):
                 )
             raise APIError(f"Ollama API error: {e}", provider="ollama")
 
-        except LLMTimeoutError as e:
+        except (socket.timeout, urllib.error.URLError) as e:
+            if isinstance(e, urllib.error.URLError) and not isinstance(e.reason, socket.timeout):
+                raise APIError(f"Ollama API error: {e}", provider="ollama")
             raise LLMTimeoutError(
                 f"Ollama request timed out after {timeout}s",
                 provider="ollama"
@@ -251,12 +257,11 @@ class OllamaProvider(BaseLLMProvider):
         if model in OLLAMA_TIER_MAP:
             model = OLLAMA_TIER_MAP[model]
 
-        # Build combined prompt
+        # Build request using /api/generate endpoint (see invoke() note about /api/chat)
         combined_prompt = prompt
         if system_prompt:
             combined_prompt = f"<system>{system_prompt}</system>\n\n{prompt}"
 
-        # Build request
         request_data = {
             "model": model,
             "prompt": combined_prompt,

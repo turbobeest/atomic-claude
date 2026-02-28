@@ -273,12 +273,6 @@ def _print_roster_table(
     ctx_col = 7   # "Context"
     eff_col = 6   # "Effort"
 
-    # Header
-    hdr = (
-        f"  \u250c\u2500{'Agent':\u2500<{agent_col}}\u2500\u252c\u2500{'Provider':\u2500<{prov_col}}\u2500"
-        f"\u252c\u2500{'Model':\u2500<{model_col}}\u2500\u252c\u2500{'Context':\u2500<{ctx_col}}\u2500"
-        f"\u252c\u2500{'Effort':\u2500<{eff_col}}\u2500\u2510"
-    )
     # The top border
     top = (
         f"  \u250c{'─' * (agent_col + 2)}\u252c{'─' * (prov_col + 2)}"
@@ -348,6 +342,8 @@ def _handle_override(
     5. Re-resolve and redisplay
     """
     resolver = get_resolver()
+    # NOTE: accessing resolver._defaults intentionally for display purposes —
+    # no public API exposes tier definitions and model ID mappings
     defaults = resolver._defaults
     tier_defs = defaults.get("tier_definitions", {})
     model_ids_map = defaults.get("model_ids", {})
@@ -617,6 +613,8 @@ def _get_provider_options(
 def _get_ollama_models(resolver) -> List[str]:
     """Get available Ollama model names from project config."""
     try:
+        # NOTE: accessing resolver._config intentionally for display purposes —
+        # no public API exposes the raw Ollama model list
         config = resolver._config
         ollama_cfg = config.get("providers", {}).get("ollama", {})
         if not ollama_cfg.get("enabled"):

@@ -91,6 +91,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     elif skip_choice == "skip":
         print()
         print(print_yellow("  ! Interview skipped - no interview data will be available"))
+        # Intentionally no artifact file written here. Downstream task_205
+        # handles the missing prd-interview.json file gracefully by using
+        # built-in defaults when the file is absent.
         return True
 
     # Conduct interview

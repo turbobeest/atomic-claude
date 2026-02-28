@@ -737,7 +737,13 @@ def _execute_review(prompt: str, output_file: Path, model: str) -> Dict[str, Any
         if len(prompt) > _MAX_PROMPT_CHARS:
             logger.warning("Prompt exceeds %d chars (%d); truncating code samples",
                            _MAX_PROMPT_CHARS, len(prompt))
-            prompt = prompt[:_MAX_PROMPT_CHARS] + "\n\n[... truncated for token budget]\n"
+            # Re-append the JSON output instruction after truncation so it is
+            # never lost when the prompt is cut short.
+            json_reminder = (
+                "\n\n[... truncated for token budget]\n\n"
+                "Respond with ONLY valid JSON (no markdown wrapper).\n"
+            )
+            prompt = prompt[:_MAX_PROMPT_CHARS] + json_reminder
 
         response = invoke_llm(prompt=prompt, model=model)
 

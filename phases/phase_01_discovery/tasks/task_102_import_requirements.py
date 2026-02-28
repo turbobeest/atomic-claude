@@ -241,8 +241,8 @@ def _find_rst_files(atomic_root: Path, max_files: int = 100) -> List[Path]:
     exclude_patterns = ['.git', '__pycache__', 'node_modules', '.venv', 'venv']
 
     for rst_file in atomic_root.rglob("*.rst"):
-        # Skip if in excluded directory
-        if any(pattern in str(rst_file) for pattern in exclude_patterns):
+        # Skip if in excluded directory (check path components, not substrings)
+        if any(pattern in rst_file.parts for pattern in exclude_patterns):
             continue
 
         rst_files.append(rst_file)

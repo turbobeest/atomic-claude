@@ -76,12 +76,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     approval_status = "pending"
 
     if setup_file.exists():
-        setup_data = read_json(setup_file)
-        version = setup_data.get("release", {}).get("version", "0.1.0")
+        try:
+            setup_data = read_json(setup_file)
+            version = setup_data.get("release", {}).get("version", "0.1.0")
+        except Exception as e:
+            logger.debug("Failed to read setup file: %s", e)
 
     if approval_file.exists():
-        approval_data = read_json(approval_file)
-        approval_status = approval_data.get("status", "pending")
+        try:
+            approval_data = read_json(approval_file)
+            approval_status = approval_data.get("status", "pending")
+        except Exception as e:
+            logger.debug("Failed to read approval file: %s", e)
 
     # Run checklist validation
     checklist, all_passed = _validate_checklist(artifacts_file, approval_status)
@@ -152,7 +158,12 @@ def _validate_checklist(artifacts_file: Path, approval_status: str) -> tuple:
 
     # Check release package
     if artifacts_file.exists():
-        artifacts_data = read_json(artifacts_file)
+        try:
+            artifacts_data = read_json(artifacts_file)
+        except Exception as e:
+            logger.debug("Failed to read artifacts file: %s", e)
+            print("  [CRIT] ✗ Artifacts file unreadable")
+            return [f"Artifacts file unreadable:FAIL"], False
         package_status = artifacts_data.get("artifacts", {}).get("package", {}).get("status", "unknown")
 
         if package_status == "success":
@@ -271,7 +282,7 @@ python main.py run 9
 def _generate_closeout_json(checklist: List[str], version: str, approval_status: str) -> dict:
     """Generate JSON closeout data."""
     return {
-        "phase": 8,
+        "phase": "8-deployment-prep",
         "name": "Deployment Prep",
         "status": "complete",
         "completed_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),

@@ -8,7 +8,6 @@ Abstract base class defining the interface for all LLM providers.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Dict, Generator, Optional, Any
 
 from .exceptions import (
@@ -17,14 +16,7 @@ from .exceptions import (
     RateLimitException,
     TimeoutException,
 )
-
-
-class HealthStatus(str, Enum):
-    """Provider health status."""
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    UNAVAILABLE = "unavailable"
-    UNKNOWN = "unknown"
+from .types import HealthStatus  # Canonical definition lives in types.py
 
 
 @dataclass
@@ -130,8 +122,11 @@ class LLMTimeoutError(LLMError, TimeoutException):
         LLMError.__init__(self, message, provider, "timeout", retryable=True)
 
 
-# Backward-compatible alias
-TimeoutError = LLMTimeoutError  # noqa: A001
+# Backward-compatible alias — intentionally shadows the builtin TimeoutError
+# so that existing ``except base.TimeoutError`` catch blocks continue to work.
+# New code should use LLMTimeoutError directly.
+LLMTimeout = LLMTimeoutError
+TimeoutError = LLMTimeoutError  # noqa: A001 - shadows builtin intentionally
 
 
 class APIError(LLMError):

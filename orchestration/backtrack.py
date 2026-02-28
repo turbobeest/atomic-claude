@@ -10,6 +10,7 @@ Allows users to go back to any point and start fresh by:
 """
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 import shutil
 import json
@@ -62,11 +63,12 @@ def _clear_directory_for_phases(base_dir: Path, phases: list, pattern_fn, label:
         for target, is_glob in targets:
             if is_glob:
                 for f in base_dir.glob(str(target)):
-                    if f.is_dir():
+                    was_dir = f.is_dir()
+                    if was_dir:
                         shutil.rmtree(f)
                     else:
                         f.unlink()
-                    print(f"   ✓ Cleared {f.name if not f.is_dir() else f}" +
+                    print(f"   ✓ Cleared {f if was_dir else f.name}" +
                           (f" ({label})" if label else ""))
             else:
                 full_path = base_dir / target if not target.is_absolute() else target
@@ -418,9 +420,23 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
     if task:
         task_num = int(task) if task.isdigit() else int(task.replace("task", ""))
 
-        # Validate task belongs to the target phase (e.g., Phase 1 tasks are 1xx)
+        # Validate task belongs to the target phase by checking actual task files
         expected_prefix = phase * 100
-        if not (expected_prefix < task_num <= expected_prefix + 99):
+        phase_name_for_dir = PHASE_NAMES.get(phase, f"phase-{phase}")
+        task_dir = atomic_root / "phases" / f"phase_{phase:02d}_{phase_name_for_dir}" / "tasks"
+        if task_dir.exists():
+            actual_task_nums = set()
+            for tf in task_dir.glob("task_*.py"):
+                try:
+                    actual_task_nums.add(int(tf.stem.split("_")[1]))
+                except (IndexError, ValueError):
+                    pass
+            if actual_task_nums and task_num not in actual_task_nums:
+                valid_range = sorted(actual_task_nums)
+                print(f"\n\u274c Task {task} doesn't exist in Phase {phase}.")
+                print(f"   Valid tasks: {', '.join(f'{t:03d}' for t in valid_range)}")
+                return
+        elif not (expected_prefix < task_num <= expected_prefix + 99):
             print(f"\n❌ Task {task} doesn't belong to Phase {phase}.")
             print(f"   Phase {phase} tasks are numbered {expected_prefix + 1:03d}–{expected_prefix + 99:03d}")
             print(f"   Example: python main.py backtrack {phase} {expected_prefix + 1:03d}")
@@ -432,9 +448,7 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
     backtrack_marker.write_text(json.dumps({
         "target_phase": phase,
         "target_task": task,
-        "started_at": __import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        ).isoformat(),
+        "started_at": datetime.now(timezone.utc).isoformat(),
     }))
 
     try:

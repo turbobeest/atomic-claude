@@ -390,8 +390,12 @@ class AnthropicProvider(BaseLLMProvider):
             Estimated token count
         """
         try:
-            # Use Anthropic's count_tokens method
-            count = self.client.count_tokens(text)
+            # Use Anthropic's count_tokens method (newer SDK versions require model param)
+            try:
+                count = self.client.count_tokens(text, model=model or self.config.get("default_model", "claude-sonnet-4-5-20250929"))
+            except TypeError:
+                # Older SDK version without model parameter
+                count = self.client.count_tokens(text)
             return count
         except Exception as e:
             # Fallback to rough estimate (4 chars per token)
@@ -424,7 +428,10 @@ class AnthropicProvider(BaseLLMProvider):
 
             # Use a lightweight API call: count_tokens costs no generation tokens
             # and validates both the API key and connectivity
-            self.client.count_tokens("health check")
+            try:
+                self.client.count_tokens("health check", model=self.config.get("default_model", "claude-sonnet-4-5-20250929"))
+            except TypeError:
+                self.client.count_tokens("health check")
             status = HealthStatus.HEALTHY
             self._health_cache = (status, time.time())
             return status

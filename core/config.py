@@ -229,7 +229,13 @@ class ConfigLoader:
         return config
 
     def load_from_dotenv(self) -> Dict[str, Any]:
-        """Load configuration from .env file."""
+        """Load configuration from .env file.
+
+        All key=value pairs are cached in self.env_cache for later lookup,
+        but only variables with ATOMIC_, CLAUDE_, or AWS_ prefixes are
+        mapped to config keys by load_from_env(). Custom-prefixed variables
+        remain accessible via self.env_cache[key] for direct lookup if needed.
+        """
         env_file = self.atomic_root / ".env"
         if not env_file.exists():
             return {}
@@ -247,10 +253,10 @@ class ConfigLoader:
                 key = key.strip()
                 value = value.strip().strip('"').strip("'")
 
-                # Store in env cache
+                # Store in env cache (all variables, regardless of prefix)
                 self.env_cache[key] = value
 
-        # Process like environment variables
+        # Process like environment variables (only ATOMIC_/CLAUDE_/AWS_ prefixes are mapped)
         return self.load_from_env()
 
     def load_from_json_files(self) -> Dict[str, Any]:
@@ -634,6 +640,9 @@ def get_config(atomic_root: Path = None, cli_args: Dict[str, Any] = None) -> Con
         _config_instance = Config(atomic_root, cli_args)
     elif atomic_root is not None and atomic_root != _config_instance.atomic_root:
         _config_instance = Config(atomic_root, cli_args)
+    elif cli_args is not None and cli_args != _config_instance.cli_args:
+        # cli_args changed on subsequent call; update the config
+        _config_instance = Config(atomic_root or _config_instance.atomic_root, cli_args)
     return _config_instance
 
 

@@ -217,6 +217,7 @@ def _track_tokens(response):
             output_toks = getattr(usage, 'output_tokens', 0) or 0
 
         if input_toks == 0 and output_toks == 0:
+            logger.debug("Token tracking skipped: no usage data (response type: %s)", type(response).__name__)
             return
 
         data["total_input_tokens"] += input_toks
@@ -260,7 +261,23 @@ def _track_tokens(response):
                 mdl["cost_usd"] += call_cost
 
         tokens_file.parent.mkdir(parents=True, exist_ok=True)
-        tokens_file.write_text(json.dumps(data, indent=2))
+        # Atomic write: write to temp file then rename to avoid corruption
+        # from concurrent processes (no file lock needed with atomic rename)
+        import tempfile
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=str(tokens_file.parent), suffix=".tmp", prefix="session-tokens-"
+        )
+        try:
+            with os.fdopen(tmp_fd, 'w') as tmp_f:
+                tmp_f.write(json.dumps(data, indent=2))
+            Path(tmp_path).replace(tokens_file)
+        except Exception:
+            # Clean up temp file on failure
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except Exception as e:
         logger.warning("Token tracking failed: %s", e)
 
@@ -349,6 +366,9 @@ class FeatureAwareLLMInvoker:
                 params["tools"] = params.get("tools", []) + [self._get_analysis_tool()]
             elif reason:
                 print(f"⚠️  Analysis tool disabled: {reason}")
+
+        # Remove 'prompt' from params to avoid duplicate kwarg (prompt is positional)
+        params.pop("prompt", None)
 
         # Invoke with processed parameters
         return self.provider.invoke(prompt, **params)

@@ -101,7 +101,7 @@ def validate_directory_pristine(phase_id: str, task_id: str) -> bool:
     print("="*80)
     print("\nOptions:")
     print("  1. Move files to correct locations manually")
-    print("  2. Run: python main.py cleanup (auto-fix)")
+    print("  2. Run: python orchestration/pre_task_validation.py cleanup (auto-fix)")
     print("  3. Delete files if they're mistakes\n")
 
     return False
@@ -173,6 +173,8 @@ def is_allowed_file(file_path: Path, acp_root: Path) -> bool:
     }
 
     # Check if in allowed top-level directory
+    if not rel_path.parts:
+        return True
     if rel_path.parts[0] in allowed_dirs:
         return True
 

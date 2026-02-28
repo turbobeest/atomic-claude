@@ -9,6 +9,7 @@ Uses ThreadPoolExecutor for concurrent generation with Rich live progress
 (mirrors task 403's _spec_worker + _run_parallel_specs pattern).
 """
 
+import copy
 import json
 import logging
 import re
@@ -191,6 +192,7 @@ def _parse_tdd_response(response: str, task_id: int) -> Optional[List[Dict]]:
             continue
         try:
             parsed = json.loads(candidate)
+            parsed = copy.deepcopy(parsed)
             if _validate_subtasks(parsed, task_id):
                 return parsed
         except (json.JSONDecodeError, ValueError):
@@ -202,6 +204,7 @@ def _parse_tdd_response(response: str, task_id: int) -> Optional[List[Dict]]:
     while idx != -1:
         try:
             parsed, end_idx = decoder.raw_decode(text, idx)
+            parsed = copy.deepcopy(parsed)
             if isinstance(parsed, list) and _validate_subtasks(parsed, task_id):
                 return parsed
         except (json.JSONDecodeError, ValueError):
@@ -219,7 +222,11 @@ def _extract_json_block(text: str) -> Optional[str]:
 
 
 def _validate_subtasks(parsed, task_id: int) -> bool:
-    """Check that parsed value is a list of 4 subtask dicts with required fields."""
+    """Check that parsed value is a list of 4 subtask dicts with required fields.
+
+    Note: This function may add missing 'spec_references' keys to items.
+    Callers should pass a deep copy if mutation of the original is undesirable.
+    """
     if not isinstance(parsed, list) or len(parsed) != 4:
         return False
 
@@ -509,7 +516,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             spec_file = openspec_dir / f"spec-t{task_id}.json"
             if not spec_file.exists():
                 try:
-                    spec_node = graph.reader.get_node("Spec", task_id)
+                    get_node = getattr(graph, 'get_node', None) or graph.reader.get_node
+                    spec_node = get_node("Spec", task_id)
                     if spec_node:
                         logger.info("Loaded spec for T%s from graph", task_id)
                         write_file(spec_file, json.dumps(spec_node, indent=2))

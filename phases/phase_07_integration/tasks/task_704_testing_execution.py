@@ -5,10 +5,13 @@ Execute integration tests against the assembled system.
 Runs E2E tests, acceptance validation, and performance benchmarks.
 """
 
+import logging
 import sys
 from pathlib import Path
 from typing import Dict
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))

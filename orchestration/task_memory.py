@@ -128,7 +128,11 @@ class TaskMemory:
             DecisionTrail instance (created on first access).
         """
         if self._trail is None:
-            from core.graph.decision_trail import DecisionTrail
+            try:
+                from core.graph.decision_trail import DecisionTrail
+            except ImportError:
+                logger.debug("DecisionTrail unavailable (core.graph.decision_trail not installed)")
+                return None
             self._trail = DecisionTrail(self.phase_id, self.task_id, self._graph)
         return self._trail
 

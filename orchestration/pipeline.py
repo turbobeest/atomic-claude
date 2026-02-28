@@ -804,8 +804,15 @@ class PhasePipeline:
             phase_data = self.state.get_phase_tasks(metadata.phase_id)
 
             if phase_data:
-                # Check if phase has completed status
-                if self.state.is_task_complete(metadata.phase_id, "001"):
+                # Check phase-level status from state
+                # NOTE: accessing _state directly — StateManager has no public getter for phase status
+                state_data = self.state._state
+                phase_state = state_data.get('phases', {}).get(metadata.phase_id, {})
+                phase_status = phase_state.get('status')
+
+                if phase_status == 'failed':
+                    failed_phases += 1
+                elif phase_status == 'completed' or self.state.is_task_complete(metadata.phase_id, "001"):
                     completed_phases += 1
                     last_completed = phase_num
 

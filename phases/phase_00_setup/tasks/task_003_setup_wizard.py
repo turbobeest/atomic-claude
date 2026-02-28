@@ -521,26 +521,46 @@ def _llm_invoke(prompt: str, env_vars: Dict[str, str]) -> Optional[str]:
     """
     Invoke LLM using the best available method.
     Tries: claude CLI > Anthropic SDK > Bedrock SDK > Ollama.
+    Each provider is attempted with 1 retry on transient failure.
     Returns response text or None.
     """
+    import time as _time
+
+    def _with_retry(fn, label: str) -> Optional[str]:
+        """Call fn() with one retry after a short delay."""
+        for attempt in range(2):
+            try:
+                result = fn()
+                if result is not None:
+                    return result
+            except Exception as e:
+                logger.debug("%s attempt %d failed: %s", label, attempt + 1, e)
+                if attempt == 0:
+                    _time.sleep(1)
+        return None
+
     # 1. Claude Code CLI (works with subscription -- no API key needed)
     #    NEVER pass --fast -- fast mode is strictly forbidden for Claude Code.
     #    Subscription is fixed-cost; fast mode degrades output for the same price.
-    try:
-        result = subprocess.run(
-            ['claude', '-p', prompt, '--output-format', 'text'],
-            capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except FileNotFoundError:
-        pass  # claude CLI not on PATH
-    except Exception as e:
-        logger.debug("claude CLI failed: %s", e)
+    def _try_claude_cli() -> Optional[str]:
+        try:
+            result = subprocess.run(
+                ['claude', '-p', prompt, '--output-format', 'text'],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except FileNotFoundError:
+            return None  # claude CLI not on PATH -- no point retrying
+        return None
+
+    r = _with_retry(_try_claude_cli, "claude CLI")
+    if r is not None:
+        return r
 
     # 2. Anthropic Python SDK
     if env_vars.get('ANTHROPIC_API_KEY'):
-        try:
+        def _try_anthropic() -> Optional[str]:
             from core.llm import AnthropicProvider
             provider = AnthropicProvider(config={
                 "api_key": env_vars['ANTHROPIC_API_KEY'],
@@ -550,13 +570,15 @@ def _llm_invoke(prompt: str, env_vars: Dict[str, str]) -> Optional[str]:
                 system_prompt="You extract structured project metadata. Output only JSON.",
                 model="haiku", max_tokens=1024, temperature=0.2, timeout=30,
             )
-            return response.content.strip()
-        except Exception as e:
-            logger.debug("AnthropicProvider failed: %s", e)
+            return response.content.strip() or None
+
+        r = _with_retry(_try_anthropic, "AnthropicProvider")
+        if r is not None:
+            return r
 
     # 3. AWS Bedrock
     if env_vars.get('AWS_PROFILE') or env_vars.get('AWS_ACCESS_KEY_ID'):
-        try:
+        def _try_bedrock() -> Optional[str]:
             from core.llm import BedrockProvider
             provider = BedrockProvider(config={
                 "aws_region": env_vars.get('AWS_REGION', 'us-east-1'),
@@ -567,20 +589,24 @@ def _llm_invoke(prompt: str, env_vars: Dict[str, str]) -> Optional[str]:
                 system_prompt="You extract structured project metadata. Output only JSON.",
                 model="haiku", max_tokens=1024, temperature=0.2, timeout=30,
             )
-            return response.content.strip()
-        except Exception as e:
-            logger.debug("BedrockProvider failed: %s", e)
+            return response.content.strip() or None
+
+        r = _with_retry(_try_bedrock, "BedrockProvider")
+        if r is not None:
+            return r
 
     # 4. Ollama
-    try:
+    def _try_ollama() -> Optional[str]:
         from core.llm import OllamaProvider
         provider = OllamaProvider(config={"host": "http://localhost:11434"})
         response = provider.invoke(
             prompt=prompt, max_tokens=1024, temperature=0.2, timeout=60,
         )
-        return response.content.strip()
-    except Exception as e:
-        logger.debug("OllamaProvider failed: %s", e)
+        return response.content.strip() or None
+
+    r = _with_retry(_try_ollama, "OllamaProvider")
+    if r is not None:
+        return r
 
     print(print_yellow("  AI suggestions unavailable -- using defaults"))
     return None

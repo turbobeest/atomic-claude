@@ -310,11 +310,11 @@ def detect_tech_stack_cascade(
 
 def _check_tool_availability(stack: str) -> Dict[str, bool]:
     """Check if build/test tools for the detected stack are installed."""
-    checks: Dict[str, str] = {
-        "rust": "cargo --version",
-        "python": "python3 --version",
-        "node": "node --version",
-        "go": "go version",
+    checks: Dict[str, List[str]] = {
+        "rust": ["cargo", "--version"],
+        "python": ["python3", "--version"],
+        "node": ["node", "--version"],
+        "go": ["go", "version"],
     }
 
     cmd = checks.get(stack)
@@ -323,20 +323,27 @@ def _check_tool_availability(stack: str) -> Dict[str, bool]:
 
     try:
         result = subprocess.run(
-            cmd.split(), capture_output=True, text=True, timeout=10,
+            cmd, capture_output=True, text=True, timeout=10,
         )
         available = result.returncode == 0
         version = result.stdout.strip() if available else None
-        return {"available": available, "command": cmd, "version": version}
+        return {"available": available, "command": " ".join(cmd), "version": version}
     except Exception as e:
         logger.debug("Tool availability check failed for %s: %s", cmd, e)
         return {"available": False, "command": cmd}
 
 
 def detect_cpu_count() -> int:
-    """Detect CPU count across platforms."""
+    """Detect CPU count across platforms (Windows, Linux, macOS)."""
+    import os
+
+    # os.cpu_count() is cross-platform (Windows, Linux, macOS)
+    count = os.cpu_count()
+    if count is not None and count > 0:
+        return count
+
+    # Shell fallbacks for edge cases (containers, unusual environments)
     try:
-        # Try nproc (Linux)
         result = subprocess.run(['nproc'], capture_output=True, text=True)
         if result.returncode == 0:
             return int(result.stdout.strip())
@@ -344,7 +351,6 @@ def detect_cpu_count() -> int:
         logger.debug("nproc not available: %s", e)
 
     try:
-        # Try sysctl (macOS)
         result = subprocess.run(['sysctl', '-n', 'hw.ncpu'], capture_output=True, text=True)
         if result.returncode == 0:
             return int(result.stdout.strip())

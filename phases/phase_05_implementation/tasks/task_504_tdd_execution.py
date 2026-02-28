@@ -364,7 +364,7 @@ def extract_multi_file_response(response: str) -> Dict[str, str]:
 # Helper: scan project tree for LLM context
 # ---------------------------------------------------------------------------
 
-def _scan_project_tree(project_root: Path, stack: str, max_depth: int = 4) -> str:
+def _scan_project_tree(project_root: Path, stack: str) -> str:
     """Scan actual project tree and return a manifest for LLM context."""
     manifest_lines = []
 
@@ -920,7 +920,10 @@ Output ONLY the {language} test code, no explanations. Wrap in ```{fence_lang} f
             f"{env_source}cd {shlex.quote(str(project_root))} && bash {shlex.quote(str(test_file))}", "5-implementation", "504", timeout=30,
         )
     else:
-        # Standard: run tests — expect them to FAIL
+        # Standard: run tests -- expect them to FAIL
+        # NOTE: For Go, `go test -- <file>` is non-standard; Go uses package
+        # paths not file names. This works for simple cases but may need
+        # adjustment for multi-package Go projects.
         test_cmd = f"{commands['test']} {test_file}"
         if commands["test"].startswith(("cargo", "go")):
             test_cmd = _make_project_cmd(f"{commands['test']} -- {test_file.stem}", project_root)
@@ -1962,8 +1965,8 @@ def _run_dag_parallel(
                     if graph:
                         try:
                             graph.update_task_status(tid, "in_progress")
-                        except Exception:
-                            pass  # Non-blocking
+                        except Exception as e:
+                            logger.debug("Graph update failed for %s: %s", tid, e)
                     live.update(_build_display())
 
                     task = task_map[tid]
@@ -1999,7 +2002,15 @@ def _run_dag_parallel(
 
                 for future in done_futures:
                     tid = active_futures.pop(future)
-                    result = future.result()
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        logger.error("TDD worker failed for task %s: %s", tid, e)
+                        task_status[tid] = "failed"
+                        stats["tasks_failed"] += 1
+                        completed_ids.add(tid)
+                        scheduler.complete(tid)
+                        continue
                     results[tid] = result
 
                     task_id, status, record, duration, error = result
@@ -2016,8 +2027,8 @@ def _run_dag_parallel(
                         if graph:
                             try:
                                 graph.update_task_status(task_id, "done")
-                            except Exception:
-                                pass  # Non-blocking
+                            except Exception as e:
+                                logger.debug("Graph update failed for %s: %s", task_id, e)
 
                         # Count cycles from record
                         if "red" in record:

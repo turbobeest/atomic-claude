@@ -299,7 +299,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 def _find_agent_repo(atomic_root: Path) -> Path:
     """Find agent repository location."""
     # Check embedded repo first
-    if (atomic_root.parent / "agents" / "agent-inventory.csv").exists():
+    if (atomic_root.parent / "agents" / "agent-manifest.json").exists():
         return atomic_root.parent / "agents"
 
     # Check environment variable
@@ -427,15 +427,17 @@ def _merge_feature_tasks(
     Returns:
         Merged tasks dict with re-numbered IDs and remapped dependencies.
     """
-    id_remap = {}  # (feature_idx, old_id) -> new_id
+    id_remap = {}  # (feature_idx, task_index) -> new_id
+    old_id_to_idx = {}  # (feature_idx, old_id) -> task_index (for dep lookup)
     next_id = 1
 
     # First pass: assign new sequential IDs and build remap table
     for feat_idx, (feature_id, tasks_data) in enumerate(feature_results):
         tasks = tasks_data.get("tasks", [])
-        for task in tasks:
+        for task_idx, task in enumerate(tasks):
             old_id = task.get("id", 0)
-            id_remap[(feat_idx, old_id)] = next_id
+            id_remap[(feat_idx, task_idx)] = next_id
+            old_id_to_idx[(feat_idx, old_id)] = task_idx
             task["id"] = next_id
             # Tag with source feature
             task.setdefault("tags", [])
@@ -451,10 +453,12 @@ def _merge_feature_tasks(
             old_deps = task.get("dependencies", [])
             new_deps = []
             for dep_id in old_deps:
-                # Try same-feature remap first
-                new_dep = id_remap.get((feat_idx, dep_id))
-                if new_dep is not None:
-                    new_deps.append(new_dep)
+                # Look up the task_idx for this old dep_id, then get new id
+                dep_task_idx = old_id_to_idx.get((feat_idx, dep_id))
+                if dep_task_idx is not None:
+                    new_dep = id_remap.get((feat_idx, dep_task_idx))
+                    if new_dep is not None:
+                        new_deps.append(new_dep)
                 # else: cross-feature dep — leave for task 304 dependency mapper
             task["dependencies"] = new_deps
             all_tasks.append(task)

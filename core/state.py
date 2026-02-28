@@ -241,7 +241,8 @@ class StateLock:
             pass
 
     def __enter__(self):
-        self.acquire()
+        if not self.acquire():
+            logger.warning("StateLock.acquire() returned False (timeout); proceeding without lock")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -804,7 +805,7 @@ class StateManager:
         self.save_state()
 
         # Clear outputs
-        outputs_dir = self.atomic_root.parent / ".outputs"
+        outputs_dir = self.atomic_root / ".outputs"
         if outputs_dir.exists():
             shutil.rmtree(outputs_dir)
 

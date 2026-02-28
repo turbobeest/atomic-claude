@@ -48,6 +48,11 @@ def get_closeout_metrics(
       - validation-report.json (produced by task 505)
       - tdd-progress.json (produced by task 504)
       - session-tokens.json (LLM token tracking)
+
+    NOTE: Metrics come from two sources — tdd-progress.json (task 504's live
+    counters) and validation-report.json (task 505's aggregated analysis).
+    Some fields (e.g. tasks_completed, cycle counts) may appear in both;
+    tdd-progress.json is the primary source, with validation as fallback.
     """
     validation = _load_json(validation_file)
     progress = _load_json(progress_file)
@@ -138,6 +143,11 @@ def build_checklist(
 ) -> Tuple[List[str], bool]:
     """
     Build closeout checklist from real metrics.
+
+    NOTE: This function intentionally mixes logic (pass/fail evaluation) with
+    presentation (printing colored status lines) because the checklist items
+    and their display are tightly coupled.  A future refactor could separate
+    them, but the current approach keeps the checklist rendering self-contained.
 
     Returns:
         Tuple of (checklist items, all_passed bool)

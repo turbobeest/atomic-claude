@@ -298,7 +298,7 @@ def _generate_closeout_markdown(
         else:
             checklist_md.append(f"- [-] {name} (deferred)")
 
-    tests_passing = str(metrics["tests_passing"]).lower()
+    tests_passing = bool(metrics["tests_passing"])
 
     markdown_content = f"""# Phase 6 Closeout: Code Review
 
@@ -368,7 +368,6 @@ def _generate_closeout_json(
     metrics: dict
 ) -> None:
     """Generate closeout JSON document."""
-    tests_passing = str(metrics["tests_passing"]).lower()
     checklist_json = [f"{name}:{status}" for name, status in checklist]
 
     json_content = {
@@ -382,7 +381,7 @@ def _generate_closeout_json(
             "major_found": metrics["major_found"],
             "major_fixed": metrics["major_fixed"],
         },
-        "tests_passing": (tests_passing == "true"),
+        "tests_passing": bool(metrics["tests_passing"]),
         "checklist": checklist_json,
         "artifacts": {
             "findings": ".claude/reviews/findings.json",
@@ -394,6 +393,12 @@ def _generate_closeout_json(
 
     write_file(closeout_json, json.dumps(json_content, indent=2))
     print(print_green("  ✓ Generated phase-06-closeout.json"))
+
+    # Also write to .outputs/ path for new-style consumers
+    outputs_closeout = closeout_json.parent.parent.parent / ".outputs" / "6-code_review" / "closeout.json"
+    ensure_dir(outputs_closeout.parent)
+    write_file(outputs_closeout, json.dumps(json_content, indent=2))
+    print(print_green("  ✓ Generated .outputs/6-code_review/closeout.json"))
 
 
 def _generate_closeout_documents(

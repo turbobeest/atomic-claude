@@ -9,11 +9,14 @@ Core agents:
   - prd-validator (sonnet) - Validate completeness
 """
 
+import logging
 import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -227,23 +230,32 @@ def list_available_agents() -> None:
     print()
 
     # Try to find agent repository
+    # NOTE: Uses Path.cwd() because this function has no access to atomic_root.
+    # The execute() caller could pass it, but for a display-only helper the
+    # current heuristic is acceptable.
     agent_repo = Path.cwd() / "agents"
     if not agent_repo.exists():
         agent_repo = Path.cwd().parent / "agents"
     if not agent_repo.exists():
         agent_repo = Path.cwd() / ".." / "atomic-claude" / "agents"
 
-    if agent_repo.exists():
-        print(print_dim("  Using built-in agents (external repository not configured)"))
-        print()
-        print("  " + print_bold("PRD-related built-in agents:"))
-        print("    • requirements-engineer")
-        print("    • prd-writer")
-        print("    • prd-validator")
-        print("    • security-requirements-analyst")
-        print("    • api-requirements-engineer")
-        print()
+    # Common agent list shown in both branches
+    builtin_agents = [
+        "requirements-engineer",
+        "prd-writer",
+        "prd-validator",
+        "security-requirements-analyst",
+        "api-requirements-engineer",
+    ]
 
+    print(print_dim("  Using built-in agents (external repository not configured)"))
+    print()
+    print("  " + print_bold("PRD-related built-in agents:"))
+    for agent_name in builtin_agents:
+        print(f"    • {agent_name}")
+
+    if agent_repo.exists():
+        print()
         # List pipeline agents if directory exists
         pipeline_dir = agent_repo / "pipeline-agents"
         if pipeline_dir.exists():
@@ -251,20 +263,10 @@ def list_available_agents() -> None:
             try:
                 agent_files = list(pipeline_dir.glob("*.md"))
                 for agent_file in sorted(agent_files)[:20]:
-                    agent_name = agent_file.stem
-                    print(f"    • {agent_name}")
+                    print(f"    • {agent_file.stem}")
             except Exception as e:
                 print(print_yellow(f"    ⚠ Error reading pipeline agents: {e}"))
             print()
-    else:
-        print(print_dim("  Using built-in agents (external repository not configured)"))
-        print()
-        print("  " + print_bold("PRD-related built-in agents:"))
-        print("    • requirements-engineer")
-        print("    • prd-writer")
-        print("    • prd-validator")
-        print("    • security-requirements-analyst")
-        print("    • api-requirements-engineer")
 
 
 def save_agent_selection(

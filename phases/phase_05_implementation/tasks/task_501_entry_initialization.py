@@ -108,6 +108,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Check tasks.json has TDD subtasks
     tasks_with_tdd = 0
     total_tasks = 0
+    tasks_data = None
     if tasks_file.exists():
         tasks_data = read_json(tasks_file)
         tasks = tasks_data.get("tasks", [])
@@ -152,10 +153,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_bold("TDD SUMMARY"))
     print()
 
-    # Calculate total subtasks
+    # Calculate total subtasks (reuse tasks_data from earlier read)
     total_subtasks = 0
-    if tasks_file.exists():
-        tasks_data = read_json(tasks_file)
+    if tasks_data:
         for task in tasks_data.get("tasks", []):
             total_subtasks += len(task.get("subtasks", []))
 

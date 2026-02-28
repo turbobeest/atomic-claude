@@ -14,7 +14,6 @@ the LLM-assisted revision flow (206b) runs, then validation re-runs automaticall
 """
 
 import logging
-import os
 import sys
 import json
 import re
@@ -323,6 +322,8 @@ def handle_structural_failure(prd_file: Path, sections_missing: List[str]) -> bo
 
     if choice == "path":
         new_path = prompt_user("  Path to PRD file: ").strip()
+        if new_path and not new_path.lower().endswith('.md'):
+            print(print_yellow(f"  ! Warning: '{Path(new_path).name}' does not have a .md extension. Expected a Markdown file."))
         if Path(new_path).exists():
             # Copy to expected location
             content = read_file(Path(new_path))
@@ -375,14 +376,14 @@ def validate_content(
     try:
         output_file = prompts_dir / "prd-validation-output.json"
 
-        success = invoke(
+        llm_result = invoke(
             prompt=prompt,
             output_file=str(output_file),
             model="sonnet",
             temperature=0.2
         )
 
-        if success and output_file.exists():
+        if llm_result and output_file.exists():
             content = read_file(output_file)
             # Extract JSON if wrapped in code fence
             content = extract_json(content)
@@ -508,7 +509,14 @@ Be constructive and specific in your recommendations.
 
 
 def extract_json(content: str) -> str:
-    """Extract JSON from LLM response."""
+    """Extract JSON from LLM response.
+
+    Note: The regex uses non-greedy matching (.*?) which returns the content
+    up to the FIRST closing ``` fence. This works correctly when there is a
+    single code block, but may truncate responses containing multiple fenced
+    blocks. This is acceptable because LLM validation responses should
+    contain exactly one JSON code block.
+    """
     if '```json' in content:
         match = re.search(r'```json\n(.*?)\n```', content, re.DOTALL)
         if match:

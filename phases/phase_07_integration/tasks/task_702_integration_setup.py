@@ -4,9 +4,12 @@ Task 702: Integration Setup
 Configure integration environment and review acceptance criteria.
 """
 
+import logging
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -54,9 +57,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     env_type = "development"
 
     if config_file.exists():
-        config_data = read_json(config_file)
-        project_name = config_data.get("project", {}).get("name", "Unknown")
-        env_type = config_data.get("environment", {}).get("type", "development")
+        try:
+            config_data = read_json(config_file)
+            project_name = config_data.get("project", {}).get("name", "Unknown")
+            env_type = config_data.get("environment", {}).get("type", "development")
+        except (ValueError, OSError) as e:
+            logger.warning("Failed to read project config %s: %s", config_file, e)
 
     print(print_dim("─" * 118))
     print(print_bold("ENVIRONMENT CONFIGURATION"))
@@ -140,11 +146,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     # Save setup configuration
+    env_confirmed = env_confirm.lower() in ["y", "yes"]
     setup_data = {
         "environment": {
             "project": project_name,
             "type": env_type,
-            "confirmed": True
+            "confirmed": env_confirmed,
+            "notes": env_notes,
         },
         "acceptance_criteria": {
             "total": criteria_count,

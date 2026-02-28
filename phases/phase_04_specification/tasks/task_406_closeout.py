@@ -163,19 +163,28 @@ def generate_closeout_documents(
     closeout_dir: Path,
     tasks_file: Path,
     specs_dir: Path,
-    checklist: List[Tuple[str, str]]
+    checklist: List[Tuple[str, str]],
+    closeout_time: str = None,
+    tasks_data: Dict = None,
+    spec_files: List[Path] = None,
 ) -> Tuple[Path, Path]:
     """Generate closeout markdown and JSON documents."""
     closeout_md = closeout_dir / "phase-04-closeout.md"
     closeout_json = closeout_dir / "phase-04-closeout.json"
 
-    # Load task data
-    tasks_data = json.loads(read_file(tasks_file))
+    if closeout_time is None:
+        closeout_time = datetime.now(timezone.utc).isoformat()
+
+    # Load task data (use provided data to avoid re-reading from disk)
+    if tasks_data is None:
+        tasks_data = json.loads(read_file(tasks_file))
     tasks = tasks_data.get("tasks", [])
     task_count = len(tasks)
 
     # Calculate metrics
-    spec_count = len(list(specs_dir.glob("spec-*.json")))
+    if spec_files is None:
+        spec_files = list(specs_dir.glob("spec-*.json"))
+    spec_count = len(spec_files)
     tasks_with_tdd = len([t for t in tasks if len(t.get("subtasks", [])) >= 4])
     total_subtasks = sum(len(t.get("subtasks", [])) for t in tasks)
 
@@ -193,7 +202,7 @@ def generate_closeout_documents(
 
     md_content = f"""# Phase 4 Closeout: Specification
 
-**Completed:** {datetime.now(timezone.utc).isoformat()}
+**Completed:** {closeout_time}
 **Status:** COMPLETE
 
 ## Summary
@@ -257,7 +266,7 @@ python main.py run 5
         "phase": 4,
         "name": "Specification",
         "status": "complete",
-        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": closeout_time,
         "spec_count": spec_count,
         "tasks_with_tdd": tasks_with_tdd,
         "total_subtasks": total_subtasks,
@@ -320,6 +329,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     ensure_dir(closeout_dir)
 
+    # Capture closeout time once for consistent timestamps
+    closeout_time = datetime.now(timezone.utc).isoformat()
+
+    # Cache spec file list to avoid repeated glob calls
+    spec_files = list(specs_dir.glob("spec-*.json")) if specs_dir.exists() else []
+
+    # Load tasks data once for reuse
+    tasks_data = json.loads(read_file(tasks_file))
+
     print()
     print(print_dim("  Final review before moving to Phase 5 (TDD Implementation)."))
     print()
@@ -361,9 +379,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print()
         if specs_dir.exists():
             print(print_dim("  Spec files:"))
-            for spec_file in list(specs_dir.glob("spec-*.json"))[:10]:
+            for spec_file in spec_files[:10]:
                 print(f"    {spec_file.name}")
-            if len(list(specs_dir.glob("spec-*.json"))) > 10:
+            if len(spec_files) > 10:
                 print(print_dim("    ... and more"))
         print()
         prompt_user("  Press Enter to continue to closeout...")
@@ -379,7 +397,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     closeout_md, closeout_json = generate_closeout_documents(
-        closeout_dir, tasks_file, specs_dir, checklist
+        closeout_dir, tasks_file, specs_dir, checklist,
+        closeout_time=closeout_time, tasks_data=tasks_data, spec_files=spec_files,
     )
 
     print(print_green(f"  ✓ Generated {closeout_md.name}"))
@@ -395,9 +414,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             logger.warning("Graph export failed: %s", e)
 
     # Memory Checkpoint (placeholder for future memory.py integration)
-    tasks_data = json.loads(read_file(tasks_file))
     tasks = tasks_data.get("tasks", [])
-    spec_count = len(list(specs_dir.glob("spec-*.json")))
+    spec_count = len(spec_files)
     tasks_with_tdd = len([t for t in tasks if len(t.get("subtasks", [])) >= 4])
     total_subtasks = sum(len(t.get("subtasks", [])) for t in tasks)
 

@@ -5,6 +5,8 @@ Human gate for approving deployment artifacts.
 """
 
 import sys
+import json
+import logging
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -16,6 +18,8 @@ from core.utils.cli_ui import (
     print_red, print_dim, prompt_user
 )
 from core.utils.file_ops import read_json, write_json
+
+logger = logging.getLogger(__name__)
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -69,7 +73,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     install_status = "success"
 
     if artifacts_file.exists():
-        artifacts_data = read_json(artifacts_file)
+        try:
+            artifacts_data = read_json(artifacts_file)
+        except (json.JSONDecodeError, Exception) as e:
+            logger.error("Failed to parse artifacts file: %s", e)
+            print(print_red(f"  ✗ Failed to parse artifacts file: {e}"))
+            return False
         version = artifacts_data.get("release", {}).get("version", "0.1.0")
         package_status = artifacts_data.get("artifacts", {}).get("package", {}).get("status", "unknown")
         changelog_status = artifacts_data.get("artifacts", {}).get("changelog", {}).get("status", "unknown")

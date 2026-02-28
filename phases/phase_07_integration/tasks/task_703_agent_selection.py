@@ -4,9 +4,12 @@ Task 703: Agent Selection
 Present and select integration testing agents for Phase 7.
 """
 
+import logging
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))

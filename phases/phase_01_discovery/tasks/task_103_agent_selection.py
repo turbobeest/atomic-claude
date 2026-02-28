@@ -98,8 +98,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         return True
 
     # Load manifest
-    with open(agent_manifest) as f:
-        manifest = json.load(f)
+    try:
+        with open(agent_manifest) as f:
+            manifest = json.load(f)
+    except json.JSONDecodeError as e:
+        logger.warning("Agent manifest is not valid JSON: %s: %s", agent_manifest, e)
+        print("  ! Agent manifest has invalid JSON - using defaults")
+        _use_builtin_agents(agents_output, roster_output)
+        return True
 
     total_agents = len(manifest.get("agents", []))
     print(f"  ✓ Agent repository found: {agent_repo}")
@@ -253,7 +259,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if confirm == 'n':
         print("  What would you like to change?")
         changes = input("  > ").strip()
-        print("  ✓ Changes noted for review")
+        # Intentional: changes are logged but not applied automatically.
+        # The user should re-run agent selection (backtrack) to modify the roster.
+        print(f"  Note: '{changes}' recorded but not applied automatically.")
+        print("  To modify the roster, re-run this task via: python main.py backtrack 1 103")
 
     # ═══════════════════════════════════════════════════════════════
     # STEP 6: SAVE OUTPUTS
@@ -596,7 +605,7 @@ def _use_builtin_agents(agents_output: Path, roster_output: Path) -> None:
 def _create_uat_agents(agents_output: Path, roster_output: Path, conversation_log: Path) -> None:
     """Create minimal agent files for UAT mode."""
     write_json(agents_output, {
-        "expert_agents": ["python-pro", "test-strategist", "backend-architect"],
+        "selected_experts": ["python-pro", "test-strategist", "backend-architect"],
         "selection_method": "uat_defaults"
     })
 

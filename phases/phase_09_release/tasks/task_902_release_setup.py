@@ -113,7 +113,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         },
         "changelog": {
             "features": features_count,
-            "fixes": fixes_count
+            "fixes": fixes_count,
+            "simulated": True
         },
         "confirmed": True,
         "setup_at": datetime.now(timezone.utc).isoformat()

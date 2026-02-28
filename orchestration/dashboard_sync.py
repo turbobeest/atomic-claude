@@ -60,11 +60,14 @@ def _locked_file(filepath: Path, mode: str = "r+"):
         filepath.write_text("{}")
     fh = open(filepath, mode)
     try:
-        if _HAS_FCNTL:
-            fcntl.flock(fh, fcntl.LOCK_EX)
-        elif sys.platform == 'win32':
-            import msvcrt
-            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1024)
+        try:
+            if _HAS_FCNTL:
+                fcntl.flock(fh, fcntl.LOCK_EX)
+            elif sys.platform == 'win32':
+                import msvcrt
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1024)
+        except OSError as e:
+            raise OSError(f"Failed to acquire lock on {filepath}: {e}") from e
         fh.seek(0)
         yield fh
     finally:
@@ -76,7 +79,7 @@ def _locked_file(filepath: Path, mode: str = "r+"):
                 fh.seek(0)
                 msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1024)
             except OSError:
-                pass
+                pass  # Unlock failure on Windows is non-fatal; file handle close releases it
         fh.close()
 
 
@@ -199,9 +202,9 @@ def update_current_task_provider(provider: str, model: str = None,
         logger.debug("Failed to update current-task.json: %s", e)
 
 
-def init_session_tokens():
+def init_session_tokens(atomic_root: Optional[Path] = None):
     """Initialize session-tokens.json at pipeline start so the dashboard has data immediately."""
-    state_dir = Path(".state")
+    state_dir = _get_state_dir(atomic_root)
     state_dir.mkdir(parents=True, exist_ok=True)
     tokens_file = state_dir / "session-tokens.json"
     if not tokens_file.exists():
@@ -455,14 +458,14 @@ def sync_dashboard(phase_id: Optional[str] = None, task_id: Optional[str] = None
             logger.debug("Dashboard refresh failed (server may not be running): %s", e)
 
 
-def validate_state_files() -> bool:
+def validate_state_files(atomic_root: Optional[Path] = None) -> bool:
     """
     Check state files for consistency.
 
     Returns:
         bool: True if state files are consistent
     """
-    state_dir = Path(".state")
+    state_dir = _get_state_dir(atomic_root)
     task_state_file = state_dir / "task-state.json"
     current_task_file = state_dir / "current-task.json"
 
@@ -492,11 +495,11 @@ def validate_state_files() -> bool:
         return False
 
 
-def fix_state_inconsistencies():
+def fix_state_inconsistencies(atomic_root: Optional[Path] = None):
     """
     Attempt to fix state file inconsistencies.
     """
-    state_dir = Path(".state")
+    state_dir = _get_state_dir(atomic_root)
     state_dir.mkdir(parents=True, exist_ok=True)
 
     task_state_file = state_dir / "task-state.json"
@@ -569,11 +572,19 @@ def start_dashboard():
 
     try:
         # Start dashboard in background
-        subprocess.Popen(
-            ["npm", "start"],
+        popen_kwargs = dict(
             cwd=dashboard_dir,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+        )
+        if sys.platform == 'win32':
+            popen_kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs['start_new_session'] = True
+
+        subprocess.Popen(
+            ["npm", "start"],
+            **popen_kwargs,
         )
 
         port = _get_dashboard_port()

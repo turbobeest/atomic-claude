@@ -47,10 +47,11 @@ def find_agent_repo(atomic_root: Path) -> Optional[Path]:
     return None
 
 
-def get_csv_model(agent_name: str, csv_path: Path) -> str:
-    """Get model tier for agent. CSV has no model column — return default.
+def get_csv_model() -> str:
+    """Return default model tier for agents.
 
-    Model assignment is handled by pipeline config, not agent inventory.
+    The agent-inventory.csv has no model column. Model assignment is handled
+    by pipeline config (config/models.json), not the agent inventory.
     """
     return "opus"
 
@@ -261,7 +262,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     red_choice = prompt_user("    Selection (default: 1): ").strip()
     red_choice = red_choice if red_choice else "1"
     red_agent = "test-strategist" if red_choice != "2" else "specification-agent"
-    red_model = get_csv_model(red_agent, csv_path) if csv_path else "opus"
+    red_model = get_csv_model()
     print()
 
     # GREEN agent
@@ -273,7 +274,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     green_choice = prompt_user("    Selection (default: 1): ").strip()
     green_choice = green_choice if green_choice else "1"
     green_agent = "tdd-implementation-agent" if green_choice != "2" else "specification-agent"
-    green_model = get_csv_model(green_agent, csv_path) if csv_path else "opus"
+    green_model = get_csv_model()
     print()
 
     # REFACTOR agent
@@ -285,7 +286,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     refactor_choice = prompt_user("    Selection (default: 1): ").strip()
     refactor_choice = refactor_choice if refactor_choice else "1"
     refactor_agent = "code-review-gate" if refactor_choice != "2" else "plan-guardian"
-    refactor_model = get_csv_model(refactor_agent, csv_path) if csv_path else "opus"
+    refactor_model = get_csv_model()
     print()
 
     # VERIFY agent
@@ -297,7 +298,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     verify_choice = prompt_user("    Selection (default: 1): ").strip()
     verify_choice = verify_choice if verify_choice else "1"
     verify_agent = "plan-guardian" if verify_choice != "2" else "code-review-gate"
-    verify_model = get_csv_model(verify_agent, csv_path) if csv_path else "opus"
+    verify_model = get_csv_model()
     print()
 
     # Optional: Expert Agents

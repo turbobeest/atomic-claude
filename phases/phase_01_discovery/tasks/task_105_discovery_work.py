@@ -663,7 +663,8 @@ Return ONLY valid JSON:
                 print(f"    [{approach['id']}] {approach['name']} ({approach.get('complexity', 'unknown')})")
                 print(f"        {approach['summary']}")
     except Exception as e:
-        print(f"  ! Generation failed: {e}")
+        logger.warning("Approach generation failed: %s", e)
+        print("  ! Approach generation failed. Check logs for details.")
     print()
 
 
@@ -749,8 +750,15 @@ Return ONLY valid JSON:
         invoke(str(prompt_file), str(output_file), "Final consensus", model="sonnet")
 
         if output_file.exists():
-            with open(output_file) as f:
-                return json.load(f)
+            raw = output_file.read_text().strip()
+            # Strip markdown code fences (```json ... ```) that LLMs sometimes add
+            if raw.startswith("```"):
+                # Remove opening fence (```json or ```)
+                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+                # Remove closing fence
+                if raw.endswith("```"):
+                    raw = raw[:-3].rstrip()
+            return json.loads(raw)
     except Exception as e:
         logger.debug("LLM consensus generation failed: %s", e)
 
@@ -773,7 +781,9 @@ def _create_uat_discovery(approaches_file: Path, consensus_file: Path, deliberat
         json.dump({
             "approaches": [
                 {
+                    "id": "A",
                     "name": "Phased Implementation",
+                    "summary": "UAT mode: Minimal approach for testing",
                     "description": "UAT mode: Minimal approach for testing",
                     "pros": ["Systematic validation"],
                     "cons": ["Simplified for testing"],
@@ -784,11 +794,14 @@ def _create_uat_discovery(approaches_file: Path, consensus_file: Path, deliberat
 
     with open(consensus_file, 'w') as f:
         json.dump({
-            "consensus": {
+            "agreed_direction": {
                 "approach": "Phased Implementation",
-                "key_decisions": ["UAT mode testing"],
-                "next_steps": ["Proceed to approach selection"]
-            }
+                "rationale": "UAT mode auto-generated consensus"
+            },
+            "key_decisions": ["UAT mode testing"],
+            "open_items": [],
+            "next_steps": ["Proceed to approach selection"],
+            "dissenting_views": []
         }, f, indent=2)
 
     deliberation_log.write_text("""## UAT Mode

@@ -188,9 +188,12 @@ class BedrockProvider(BaseLLMProvider):
         if system_prompt:
             request_body["system"] = system_prompt
 
-        # Merge additional kwargs
+        # Merge additional kwargs (filter to Bedrock-safe keys only)
+        _BEDROCK_SAFE_KEYS = {"prompt", "max_tokens", "temperature", "top_p", "top_k",
+                              "stop_sequences", "system", "messages", "tools",
+                              "tool_choice", "anthropic_version"}
         for key, value in kwargs.items():
-            if key not in ["model", "timeout"]:
+            if key in _BEDROCK_SAFE_KEYS and key not in request_body:
                 request_body[key] = value
 
         # Retry logic with exponential backoff
@@ -374,9 +377,12 @@ class BedrockProvider(BaseLLMProvider):
         if system_prompt:
             request_body["system"] = system_prompt
 
-        # Merge additional kwargs
+        # Merge additional kwargs (filter to Bedrock-safe keys only)
+        _BEDROCK_SAFE_KEYS = {"prompt", "max_tokens", "temperature", "top_p", "top_k",
+                              "stop_sequences", "system", "messages", "tools",
+                              "tool_choice", "anthropic_version"}
         for key, value in kwargs.items():
-            if key not in ["model", "timeout"]:
+            if key in _BEDROCK_SAFE_KEYS and key not in request_body:
                 request_body[key] = value
 
         try:

@@ -35,7 +35,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     project_root = atomic_root.parent
 
     agents_file = output_dir / "release-agents.json"
-    roster_file = project_root / ".claude" / "agent-roster.json"
 
     step("Agent Selection")
 

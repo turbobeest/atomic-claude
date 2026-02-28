@@ -4,9 +4,12 @@ Task 705: Integration Approval
 Human gate for approving integration test results.
 """
 
+import logging
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -58,7 +61,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     report_is_simulated = False
 
     if report_file.exists():
-        report_data = read_json(report_file)
+        try:
+            report_data = read_json(report_file)
+        except (ValueError, OSError) as e:
+            logger.warning("Failed to read integration report %s: %s", report_file, e)
+            report_data = {}
         # integration-test-results.json uses different keys than the old integration-report.json
         e2e_passed = report_data.get("tests_passed", e2e_passed)
         e2e_total = report_data.get("tests_run", e2e_total)
@@ -179,39 +186,41 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         approver_name = "UAT System"
         approval_choice = "approve"
     else:
-        print(print_dim("What would you like to do?"))
-        print()
-        print(print_green("  [approve]       ") + "Approve and proceed to audit")
-        print(print_cyan("  [investigate]   ") + "Look into specific results")
-        print(print_yellow("  [fix-and-rerun] ") + "Address issues and retest")
-        print()
+        approval_choice = None
+        while approval_choice != "approve":
+            print(print_dim("What would you like to do?"))
+            print()
+            print(print_green("  [approve]       ") + "Approve and proceed to audit")
+            print(print_cyan("  [investigate]   ") + "Look into specific results")
+            print(print_yellow("  [fix-and-rerun] ") + "Address issues and retest")
+            print()
 
-        clear_input_buffer()
-        approval_choice = prompt_user("Choice (default: approve): ").strip() or "approve"
+            clear_input_buffer()
+            approval_choice = prompt_user("Choice (default: approve): ").strip() or "approve"
 
-        if approval_choice == "investigate":
-            print()
-            print(print_dim("Investigation artifacts:"))
-            print("  .claude/integration/e2e-results.json")
-            print("  .claude/integration/acceptance-results.json")
-            print("  .claude/integration/performance-results.json")
-            print("  .claude/integration/integration-report.json")
-            print()
-            if integration_dir.exists():
-                for f in sorted(integration_dir.iterdir()):
-                    print(f"  {f.name}")
-            print()
-            prompt_user("Press Enter after investigation to continue...")
-            print()
-            # Recurse back to approval
-            return execute(atomic_root, output_dir, uat_mode)
+            if approval_choice == "investigate":
+                print()
+                print(print_dim("Investigation artifacts:"))
+                print("  .claude/integration/e2e-results.json")
+                print("  .claude/integration/acceptance-results.json")
+                print("  .claude/integration/performance-results.json")
+                print("  .claude/integration/integration-report.json")
+                print()
+                if integration_dir.exists():
+                    for f in sorted(integration_dir.iterdir()):
+                        print(f"  {f.name}")
+                print()
+                prompt_user("Press Enter after investigation to continue...")
+                print()
+                # Loop back to approval prompt
+                continue
 
-        elif approval_choice == "fix-and-rerun":
-            print()
-            print(print_yellow("⚠  Fix issues and re-run integration tests"))
-            print(print_dim("  After fixing, run: python main.py run 7 --resume-at=704"))
-            print()
-            return False
+            elif approval_choice == "fix-and-rerun":
+                print()
+                print(print_yellow("⚠  Fix issues and re-run integration tests"))
+                print(print_dim("  After fixing, run: python main.py run 7 --resume-at=704"))
+                print()
+                return False
 
         # Get approver name
         print()

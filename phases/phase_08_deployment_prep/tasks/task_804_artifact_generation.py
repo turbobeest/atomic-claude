@@ -98,6 +98,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         except Exception as e:
             logger.debug("Failed to read PRD file: %s", e)
 
+    # Limit project context size to avoid oversized LLM prompts
+    project_context = project_context[:8000]
+
     # Generate all artifacts
     package_result = _generate_package(prompts_dir, version, release_type, project_context)
     changelog_result = _generate_changelog(prompts_dir, version, release_type, project_context)
@@ -220,15 +223,20 @@ Output raw JSON:
     print(print_dim("  [release-packager] Building release package..."))
     print()
 
-    # Invoke LLM for packaging analysis; fall back to template on failure
+    # Invoke LLM for packaging analysis with retry; fall back to template on failure
     package_name = f"project-{safe_version}"
     llm_result = None
-    try:
-        llm_result = invoke_llm(prompt=prompt, model="sonnet")
-        if llm_result:
-            write_file(prompts_dir / "package-result.md", llm_result)
-    except Exception as e:
-        logger.debug("LLM call failed for packaging: %s", e)
+    for attempt in range(2):
+        try:
+            llm_result = invoke_llm(prompt=prompt, model="sonnet")
+            if llm_result:
+                write_file(prompts_dir / "package-result.md", llm_result)
+                break
+        except Exception as e:
+            if attempt == 0:
+                logger.debug("LLM attempt 1 failed for packaging, retrying: %s", e)
+            else:
+                logger.debug("LLM call failed for packaging after 2 attempts: %s", e)
 
     result_file = prompts_dir / "package-result.md"
     if not llm_result and not result_file.exists():
@@ -278,12 +286,18 @@ Generate a Keep a Changelog format entry. Include Added, Changed, Fixed sections
     print(print_dim("  [changelog-writer] Generating changelog..."))
     print()
 
-    # Invoke LLM for changelog; fall back to template on failure
+    # Invoke LLM for changelog with retry; fall back to template on failure
     changelog_content = None
-    try:
-        changelog_content = invoke_llm(prompt=prompt, model="sonnet")
-    except Exception as e:
-        logger.debug("LLM call failed for changelog: %s", e)
+    for attempt in range(2):
+        try:
+            changelog_content = invoke_llm(prompt=prompt, model="sonnet")
+            if changelog_content:
+                break
+        except Exception as e:
+            if attempt == 0:
+                logger.debug("LLM attempt 1 failed for changelog, retrying: %s", e)
+            else:
+                logger.debug("LLM call failed for changelog after 2 attempts: %s", e)
 
     if changelog_content:
         write_file(prompts_dir / "changelog-result.md", changelog_content)
@@ -336,12 +350,18 @@ Generate a documentation overview covering: project overview, usage guide, API r
     print(print_dim("  [documentation-generator] Creating user documentation..."))
     print()
 
-    # Invoke LLM for documentation; fall back to template on failure
+    # Invoke LLM for documentation with retry; fall back to template on failure
     docs_content = None
-    try:
-        docs_content = invoke_llm(prompt=prompt, model="sonnet")
-    except Exception as e:
-        logger.debug("LLM call failed for documentation: %s", e)
+    for attempt in range(2):
+        try:
+            docs_content = invoke_llm(prompt=prompt, model="sonnet")
+            if docs_content:
+                break
+        except Exception as e:
+            if attempt == 0:
+                logger.debug("LLM attempt 1 failed for documentation, retrying: %s", e)
+            else:
+                logger.debug("LLM call failed for documentation after 2 attempts: %s", e)
 
     if docs_content:
         write_file(prompts_dir / "documentation-result.md", docs_content)
@@ -392,12 +412,18 @@ Generate a comprehensive installation guide with: prerequisites, quick start, ma
     print(print_dim("  [installation-guide-writer] Creating installation guide..."))
     print()
 
-    # Invoke LLM for installation guide; fall back to template on failure
+    # Invoke LLM for installation guide with retry; fall back to template on failure
     install_content = None
-    try:
-        install_content = invoke_llm(prompt=prompt, model="sonnet")
-    except Exception as e:
-        logger.debug("LLM call failed for installation guide: %s", e)
+    for attempt in range(2):
+        try:
+            install_content = invoke_llm(prompt=prompt, model="sonnet")
+            if install_content:
+                break
+        except Exception as e:
+            if attempt == 0:
+                logger.debug("LLM attempt 1 failed for installation guide, retrying: %s", e)
+            else:
+                logger.debug("LLM call failed for installation guide after 2 attempts: %s", e)
 
     if install_content:
         write_file(prompts_dir / "installation-guide-result.md", install_content)

@@ -18,7 +18,6 @@ Features:
 import os
 import sys
 import json
-import subprocess
 import logging
 import urllib.request
 from pathlib import Path
@@ -64,12 +63,6 @@ try:
 except ImportError:
     HAS_OLLAMA = False
     OllamaProvider = None
-
-# Ollama model name patterns that indicate code-specialized models
-_CODE_MODEL_PATTERNS = [
-    "devstral", "granite-code", "codestral", "starcoder", "deepseek-coder",
-    "codellama", "codegemma", "codegeex", "qwen2.5-coder", "wizardcoder",
-]
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
@@ -282,16 +275,9 @@ def _detect_credentials(
         has_anthropic = True
         print(print_green("  Anthropic API key loaded"))
 
-    try:
-        result = subprocess.run(
-            ['curl', '-s', '--connect-timeout', '1', 'http://localhost:11434/api/tags'],
-            capture_output=True, timeout=2,
-        )
-        if result.returncode == 0:
-            has_ollama = True
-            print(print_green("  Ollama available"))
-    except Exception as e:
-        logger.debug("Ollama local detection failed: %s", e)
+    if _check_ollama_host("http://localhost:11434"):
+        has_ollama = True
+        print(print_green("  Ollama available"))
 
     return has_aws, has_anthropic, has_ollama
 
@@ -397,21 +383,11 @@ def _credential_wizard(
         # Ollama
         print()
         print(print_dim("  Checking Ollama at localhost:11434..."))
-        try:
-            result = subprocess.run(
-                ['curl', '-s', '--connect-timeout', '2', 'http://localhost:11434/api/tags'],
-                capture_output=True, timeout=3,
-            )
-            if result.returncode == 0:
-                has_ollama = True
-                print(print_green("  Ollama is running"))
-            else:
-                print(print_red("  Ollama not responding"))
-                print(print_dim("  Start it with: ollama serve"))
-                return None
-        except Exception as e:
-            logger.debug("Ollama connectivity check failed during wizard: %s", e)
-            print(print_red("  Ollama not reachable"))
+        if _check_ollama_host("http://localhost:11434"):
+            has_ollama = True
+            print(print_green("  Ollama is running"))
+        else:
+            print(print_red("  Ollama not responding"))
             print(print_dim("  Start it with: ollama serve"))
             return None
 
@@ -434,6 +410,13 @@ def _credential_wizard(
             os.chmod(env_file, 0o600)
         except Exception as e:
             logger.warning("Failed to set permissions on %s: %s", env_file, e)
+
+    # Sync written values into os.environ so downstream code sees them immediately
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith('#') and '=' in line:
+            k, v = line.split('=', 1)
+            os.environ[k.strip()] = v.strip()
 
     print()
     print(print_green(f"  Saved: {env_file}"))
@@ -666,40 +649,6 @@ def _list_ollama_models(host: str) -> List[str]:
     except Exception as e:
         logger.debug("Failed to list Ollama models on %s: %s", host, e)
         return []
-
-
-def _detect_ollama_models_categorized(host: str) -> Dict[str, Any]:
-    """
-    Query an Ollama server for installed models and categorize them.
-
-    Returns:
-        Dict mapping model name to {"size": bytes, "category": "code"|"general"}
-    """
-    try:
-        url = f"{host.rstrip('/')}/api/tags"
-        req = urllib.request.Request(url, method='GET')
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-    except Exception as e:
-        logger.debug("Ollama model detection failed for %s: %s", host, e)
-        return {}
-
-    result: Dict[str, Any] = {}
-    for model_info in data.get("models", []):
-        name = model_info.get("name", "")
-        size = model_info.get("size", 0)
-
-        # Categorize by name pattern
-        name_lower = name.lower()
-        category = "general"
-        for pattern in _CODE_MODEL_PATTERNS:
-            if pattern in name_lower:
-                category = "code"
-                break
-
-        result[name] = {"size": size, "category": category}
-
-    return result
 
 
 # ---------------------------------------------------------------------------

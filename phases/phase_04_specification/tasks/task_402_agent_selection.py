@@ -9,7 +9,8 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def load_agents_from_csv(csv_path: Path, category_filter: str = "06-09-implement
         return agents
 
     try:
-        with open(csv_path, 'r') as f:
+        with open(csv_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 if row.get('category', '') == category_filter:
@@ -51,7 +52,7 @@ def load_agents_from_csv(csv_path: Path, category_filter: str = "06-09-implement
     return agents
 
 
-def analyze_project_characteristics(tasks_file: Path) -> Dict[str, any]:
+def analyze_project_characteristics(tasks_file: Path) -> Dict[str, Any]:
     """Analyze tasks to determine project characteristics."""
     try:
         tasks_data = json.loads(read_file(tasks_file))
@@ -95,7 +96,7 @@ def analyze_project_characteristics(tasks_file: Path) -> Dict[str, any]:
         return {}
 
 
-def recommend_agents(characteristics: Dict[str, any]) -> Tuple[List[str], List[str]]:
+def recommend_agents(characteristics: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     """Recommend agents based on project characteristics."""
     # Core agents always recommended
     recommended = ["specification-agent", "tdd-implementation-agent"]
@@ -335,7 +336,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "agents": selected_agents,
         "task_count": task_count,
         "source": "agent-inventory.csv",
-        "confirmed_at": str(Path(__file__).stat().st_mtime)
+        "confirmed_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_file(roster_file, json.dumps(roster_data, indent=2))

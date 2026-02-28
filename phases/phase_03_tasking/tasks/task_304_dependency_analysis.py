@@ -79,7 +79,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Retry loop for validation (replaces recursive call)
     MAX_VALIDATION_RETRIES = 5
     for _retry in range(MAX_VALIDATION_RETRIES):
-        tasks_data = json.loads(read_file(tasks_file))
+        try:
+            tasks_data = json.loads(read_file(tasks_file))
+        except json.JSONDecodeError as e:
+            print(print_red(f"✗ Invalid JSON in tasks.json: {e}"))
+            return False
         tasks = tasks_data.get("tasks", [])
         task_count = len(tasks)
 
@@ -238,30 +242,40 @@ def _validate_dependencies(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
     # if topological sort can process all nodes)
     cycles: List[List[Any]] = []
 
-    # DFS-based cycle detection
+    # Iterative DFS-based cycle detection
     WHITE, GRAY, BLACK = 0, 1, 2
     color: Dict[Any, int] = {tid: WHITE for tid in valid_ids}
-    path: List[Any] = []
 
-    def _dfs(node: Any) -> None:
-        color[node] = GRAY
-        path.append(node)
-        for neighbor in adj.get(node, []):
-            if neighbor == node:
-                continue  # self-refs already counted
-            if color.get(neighbor) == GRAY:
-                # Found a cycle - extract it from path
-                cycle_start = path.index(neighbor)
-                cycle = path[cycle_start:] + [neighbor]
-                cycles.append(cycle)
-            elif color.get(neighbor) == WHITE:
-                _dfs(neighbor)
-        path.pop()
-        color[node] = BLACK
+    for start_id in valid_ids:
+        if color[start_id] != WHITE:
+            continue
+        # Stack entries: (node, neighbor_index, path_snapshot)
+        stack = [(start_id, 0)]
+        path: List[Any] = []
+        color[start_id] = GRAY
+        path.append(start_id)
 
-    for task_id in valid_ids:
-        if color[task_id] == WHITE:
-            _dfs(task_id)
+        while stack:
+            node, idx = stack[-1]
+            neighbors = adj.get(node, [])
+            if idx < len(neighbors):
+                stack[-1] = (node, idx + 1)
+                neighbor = neighbors[idx]
+                if neighbor == node:
+                    continue  # self-refs already counted
+                if color.get(neighbor) == GRAY:
+                    # Found a cycle - extract it from path
+                    cycle_start = path.index(neighbor)
+                    cycle = path[cycle_start:] + [neighbor]
+                    cycles.append(cycle)
+                elif color.get(neighbor) == WHITE:
+                    color[neighbor] = GRAY
+                    path.append(neighbor)
+                    stack.append((neighbor, 0))
+            else:
+                stack.pop()
+                path.pop()
+                color[node] = BLACK
 
     has_cycles = len(cycles) > 0
 
@@ -282,8 +296,8 @@ def _compute_levels(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     # Compute level for each task
     levels_map: Dict[int, int] = {}
 
-    # Iterative approach (max 20 iterations)
-    for _ in range(20):
+    # Iterative approach (max len(tasks)+1 iterations to handle any depth)
+    for _ in range(len(tasks) + 1):
         changed = False
         for task in tasks:
             task_id = task["id"]
@@ -309,7 +323,10 @@ def _compute_levels(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     levels_grouped: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     for task in tasks:
         task_id = task["id"]
-        level = levels_map.get(task_id, 0)
+        level = levels_map.get(task_id, None)
+        if level is None:
+            logger.debug("Task %s not resolved to a level, defaulting to 0", task_id)
+            level = 0
         levels_grouped[level].append({
             "id": task["id"],
             "title": task.get("title", "Untitled"),
@@ -341,10 +358,11 @@ def _show_complexity_distribution(tasks: List[Dict[str, Any]]) -> None:
     complex_count = sum(1 for t in tasks if t.get("estimated_complexity") == "complex")
     task_count = len(tasks)
 
-    # Visual bar (10 chars = 100%)
-    simple_bar = "█" * min(10, int(simple_count * 10 / task_count) + 1) if task_count > 0 else ""
-    moderate_bar = "█" * min(10, int(moderate_count * 10 / task_count) + 1) if task_count > 0 else ""
-    complex_bar = "█" * min(10, int(complex_count * 10 / task_count) + 1) if task_count > 0 else ""
+    # Visual bar (max 20 chars, proportional)
+    max_count = max(simple_count, moderate_count, complex_count, 1)
+    simple_bar = "█" * max(1, simple_count * 20 // max_count) if simple_count > 0 else ""
+    moderate_bar = "█" * max(1, moderate_count * 20 // max_count) if moderate_count > 0 else ""
+    complex_bar = "█" * max(1, complex_count * 20 // max_count) if complex_count > 0 else ""
 
     print(f"  Simple:   {simple_count:2d}  {print_green(simple_bar)}")
     print(f"  Moderate: {moderate_count:2d}  {print_yellow(moderate_bar)}")

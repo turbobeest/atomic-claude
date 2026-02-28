@@ -69,10 +69,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_cyan("Repository & System Setup"))
     print()
 
-    # Reset counters
+    # Reset counters and report cache
     CHECKS_PASS = 0
     CHECKS_FAIL = 0
     CHECKS_WARN = 0
+    global _report_cache, _report_cache_file
+    _report_cache = None
+    _report_cache_file = None
 
     # Initialize report
     report = {
@@ -129,6 +132,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     _assess_memory(report_file, os_type)
     _assess_storage(report_file, os_type)
     _assess_network(report_file)
+
+    # Flush cached report to disk before saving configuration
+    _flush_report(report_file)
 
     # Save configuration
     _save_configuration(
@@ -713,6 +719,18 @@ def _assess_memory(report_file: Path, os_type: str) -> None:
         except Exception as e:
             logger.debug("Linux memory detection failed: %s", e)
 
+    # Fallback for Windows (and any OS where above didn't work): try psutil
+    if total_mb == 0:
+        try:
+            import psutil
+            vm = psutil.virtual_memory()
+            total_mb = vm.total // (1024 * 1024)
+            avail_mb = vm.available // (1024 * 1024)
+        except ImportError:
+            logger.debug("psutil not available for memory detection")
+        except Exception as e:
+            logger.debug("psutil memory detection failed: %s", e)
+
     total_gb = total_mb // 1024
     avail_gb = avail_mb // 1024
 
@@ -748,21 +766,17 @@ def _assess_storage(report_file: Path, os_type: str) -> None:
     local_total = 0
     local_mount = "/"
 
-    if os_type in ["macos", "linux"]:
-        try:
-            result = subprocess.run(
-                ["df", "-k", "."],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                if len(lines) > 1:
-                    parts = lines[1].split()
-                    local_total = int(parts[1]) // (1024 * 1024)  # Convert to GB
-                    local_avail = int(parts[3]) // (1024 * 1024)
-                    local_mount = parts[-1]
-        except Exception as e:
-            logger.debug("Disk space detection failed: %s", e)
+    # Cross-platform: use shutil.disk_usage (works on all OSes)
+    try:
+        usage = shutil.disk_usage(".")
+        local_total = usage.total // (1024 * 1024 * 1024)  # Convert to GB
+        local_avail = usage.free // (1024 * 1024 * 1024)
+        if os_type == "windows":
+            local_mount = str(Path(".").resolve().anchor)
+        else:
+            local_mount = "/"
+    except Exception as e:
+        logger.debug("Disk space detection failed: %s", e)
 
     print(f"    Local ({local_mount}):")
     if local_total > 0:
@@ -789,36 +803,35 @@ def _assess_storage(report_file: Path, os_type: str) -> None:
 
 def _assess_network(report_file: Path) -> None:
     """Assess network connectivity."""
+    import time as _time
+    import urllib.request as _urllib_request
+
     print(print_cyan("  Network:"))
     print(print_dim("    Testing WAN connectivity..."))
 
-    # Simple connectivity test to Cloudflare
+    # Cross-platform connectivity test using urllib (no curl dependency)
     try:
-        result = subprocess.run(
-            ["curl", "-s", "-w", "%{time_connect}", "-o", "/dev/null",
-             "--connect-timeout", "5", "https://speed.cloudflare.com/"],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0:
-            latency_s = float(result.stdout.strip())
-            latency_ms = int(latency_s * 1000)
-            print(f"    WAN latency:  {latency_ms}ms (Cloudflare)")
+        start = _time.monotonic()
+        req = _urllib_request.Request("https://speed.cloudflare.com/", method="HEAD")
+        with _urllib_request.urlopen(req, timeout=5):
+            pass
+        latency_ms = int((_time.monotonic() - start) * 1000)
 
-            if latency_ms < 50:
-                print(print_green("    ✓ Excellent connection"))
-            elif latency_ms < 150:
-                print(print_green("    ✓ Good connection"))
-            else:
-                print(print_yellow("    ○ Moderate connection"))
+        print(f"    WAN latency:  {latency_ms}ms (Cloudflare)")
 
-            # Update report
-            _update_report_capability(report_file, "network", {
-                "wan": {
-                    "latency_ms": int(latency_ms)
-                }
-            })
+        if latency_ms < 50:
+            print(print_green("    ✓ Excellent connection"))
+        elif latency_ms < 150:
+            print(print_green("    ✓ Good connection"))
         else:
-            print(print_yellow("    ! Network connectivity test failed"))
+            print(print_yellow("    ○ Moderate connection"))
+
+        # Update report
+        _update_report_capability(report_file, "network", {
+            "wan": {
+                "latency_ms": latency_ms
+            }
+        })
     except Exception as e:
         logger.debug("Network connectivity test failed: %s", e)
         print(print_yellow("    ! Network connectivity test failed"))
@@ -831,24 +844,46 @@ def _assess_network(report_file: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def _add_check(report_file: Path, name: str, status: str, level: str, version: str) -> None:
-    """Add a check to the report."""
-    report = json.loads(read_file(report_file))
+    """Add a check to the report (uses in-memory cache, flushed by _flush_report)."""
+    report = _get_report_cache(report_file)
     report['checks'].append({
         "name": name,
         "status": status,
         "level": level,
         "version": version
     })
-    write_file(report_file, json.dumps(report, indent=2))
 
 
 def _update_report_capability(report_file: Path, capability: str, data: Dict[str, Any]) -> None:
-    """Update report with capability data."""
-    report = json.loads(read_file(report_file))
+    """Update report with capability data (uses in-memory cache, flushed by _flush_report)."""
+    report = _get_report_cache(report_file)
     if 'capabilities' not in report:
         report['capabilities'] = {}
     report['capabilities'][capability] = data
-    write_file(report_file, json.dumps(report, indent=2))
+
+
+# In-memory report cache to avoid re-reading/writing the file on every check
+_report_cache: Optional[Dict[str, Any]] = None
+_report_cache_file: Optional[Path] = None
+
+
+def _get_report_cache(report_file: Path) -> Dict[str, Any]:
+    """Get the cached report dict, loading from disk on first access."""
+    global _report_cache, _report_cache_file
+    if _report_cache is None or _report_cache_file != report_file:
+        try:
+            _report_cache = json.loads(read_file(report_file))
+        except Exception:
+            _report_cache = {"checks": [], "capabilities": {}}
+        _report_cache_file = report_file
+    return _report_cache
+
+
+def _flush_report(report_file: Path) -> None:
+    """Write the cached report dict to disk."""
+    global _report_cache
+    if _report_cache is not None:
+        write_file(report_file, json.dumps(_report_cache, indent=2))
 
 
 # ---------------------------------------------------------------------------
@@ -912,7 +947,11 @@ def _save_configuration(
     write_file(report_file, json.dumps(report, indent=2))
 
     # Update project config with repositories, providers, and system capabilities
-    config = json.loads(read_file(config_file))
+    try:
+        config = json.loads(read_file(config_file))
+    except (json.JSONDecodeError, FileNotFoundError, OSError) as e:
+        logger.warning("Failed to load project config, starting fresh: %s", e)
+        config = {}
     config['repositories'] = repos_config
     # Merge providers_config into existing providers (task_003 wrote effort_level,
     # chain_priority, models, phase_roles, etc. — don't overwrite those)

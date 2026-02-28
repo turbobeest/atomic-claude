@@ -266,7 +266,10 @@ def _spec_worker(
             raw = read_file(spec_file).strip()
             # Strip markdown code fences if present
             if raw.startswith("```"):
-                first_nl = raw.index("\n")
+                try:
+                    first_nl = raw.index("\n")
+                except ValueError:
+                    first_nl = len(raw)
                 raw = raw[first_nl + 1:]
                 if raw.endswith("```"):
                     raw = raw[:-3].strip()

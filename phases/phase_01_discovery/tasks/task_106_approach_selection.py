@@ -14,10 +14,13 @@ Outputs:
 """
 
 import json
+import logging
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, List
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
@@ -89,12 +92,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             try:
                 canvas = CanvasState.from_dict(json.loads(canvas_file.read_text()))
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).debug("Failed to load canvas: %s", e)
+                logger.debug("Failed to load canvas: %s", e)
 
     # Load consensus
-    with open(consensus_file) as f:
-        consensus = json.load(f)
+    try:
+        with open(consensus_file) as f:
+            consensus = json.load(f)
+    except json.JSONDecodeError as e:
+        error(f"Consensus file is not valid JSON: {consensus_file}")
+        logger.warning("Failed to parse consensus file %s: %s", consensus_file, e)
+        return False
 
     direction = consensus.get('agreed_direction', {}).get('approach', 'No direction specified')
     rationale = consensus.get('agreed_direction', {}).get('rationale', '')
@@ -314,8 +321,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 print("  The PRD author will infer these sections from available context.")
                 print()
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug("PRD preview failed: %s", e)
+            logger.debug("PRD preview failed: %s", e)
 
     # ═══════════════════════════════════════════════════════════════
     # FINAL CONFIRMATION

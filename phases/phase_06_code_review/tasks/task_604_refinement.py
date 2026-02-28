@@ -30,7 +30,7 @@ def _graph_findings_to_dict(findings: list) -> dict:
 
     Returns dict with 'totals' and 'dimensions' keys matching findings.json structure.
     """
-    totals = {"critical": 0, "major": 0, "minor": 0, "suggestion": 0}
+    totals = {"critical": 0, "major": 0, "minor": 0, "suggestions": 0}
     dimensions = {}
 
     for f in findings:
@@ -40,7 +40,7 @@ def _graph_findings_to_dict(findings: list) -> dict:
 
         dim = f.get("review_dimension", "general")
         if dim not in dimensions:
-            dimensions[dim] = {"findings": [], "totals": {"critical": 0, "major": 0, "minor": 0, "suggestion": 0}}
+            dimensions[dim] = {"findings": [], "totals": {"critical": 0, "major": 0, "minor": 0, "suggestions": 0}}
         dimensions[dim]["findings"].append(f)
         if severity in dimensions[dim]["totals"]:
             dimensions[dim]["totals"][severity] += 1
@@ -410,6 +410,14 @@ def _apply_llm_fix(prompt: str, output_prefix: Path, finding_file: str) -> bool:
             start = response.find("```json") + 7
             end = response.find("```", start)
             response = response[start:end].strip()
+        elif response.strip().startswith("```"):
+            stripped = response.strip()
+            first_nl = stripped.find("\n")
+            if first_nl != -1:
+                stripped = stripped[first_nl + 1:]
+            if stripped.endswith("```"):
+                stripped = stripped[:-3].strip()
+            response = stripped
 
         result = json.loads(response)
 
@@ -552,6 +560,8 @@ def _run_test_verification(atomic_root: Path) -> tuple:
                 timeout=60
             )
             tests_passing = (result.returncode == 0)
+    except FileNotFoundError as e:
+        logger.warning("Test tool not installed: %s", e)
     except Exception as e:
         logger.debug("Test verification failed: %s", e)
 

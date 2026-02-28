@@ -104,7 +104,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     write_file(closeout_file, closeout_md)
 
     write_json(closeout_json, {
-        "phase": 9,
+        "phase": "9-release",
         "name": "Release",
         "status": "complete",
         "final_phase": True,

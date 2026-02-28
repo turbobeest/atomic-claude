@@ -8,6 +8,7 @@ import json
 import logging
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -240,7 +241,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "low": low_priority
         },
         "existing_specs": existing_count,
-        "initialized_at": Path(__file__).stat().st_mtime
+        "initialized_at": datetime.now(timezone.utc).isoformat()
     }
 
     write_file(init_file, json.dumps(init_data, indent=2))

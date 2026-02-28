@@ -4,10 +4,13 @@ Task 707: Phase Closeout
 Generate closeout document and prepare for Phase 8 (Deployment Prep).
 """
 
+import logging
 import sys
 from pathlib import Path
 from typing import List
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -41,22 +44,31 @@ def _build_checklist(
     report_is_simulated = False
 
     if report_file.exists():
-        report_data = read_json(report_file)
-        e2e_passed = report_data.get("tests_passed", e2e_passed)
-        e2e_total = report_data.get("tests_run", e2e_total)
-        report_is_simulated = report_data.get("simulated", False)
-        for suite in report_data.get("test_suites", []):
-            if suite.get("suite") == "acceptance":
-                criteria_passed = suite.get("passed", criteria_passed)
-                criteria_total = suite.get("total", criteria_total)
+        try:
+            report_data = read_json(report_file)
+            e2e_passed = report_data.get("tests_passed", e2e_passed)
+            e2e_total = report_data.get("tests_run", e2e_total)
+            report_is_simulated = report_data.get("simulated", False)
+            for suite in report_data.get("test_suites", []):
+                if suite.get("suite") == "acceptance":
+                    criteria_passed = suite.get("passed", criteria_passed)
+                    criteria_total = suite.get("total", criteria_total)
+        except (ValueError, OSError) as e:
+            logger.warning("Failed to read report file %s: %s", report_file, e)
 
     if approval_file.exists():
-        approval_data = read_json(approval_file)
-        approval_status = approval_data.get("status", "pending")
+        try:
+            approval_data = read_json(approval_file)
+            approval_status = approval_data.get("status", "pending")
+        except (ValueError, OSError) as e:
+            logger.warning("Failed to read approval file %s: %s", approval_file, e)
 
     if audit_file.exists():
-        audit_data = read_json(audit_file)
-        audit_status = audit_data.get("overall_status", "UNKNOWN")
+        try:
+            audit_data = read_json(audit_file)
+            audit_status = audit_data.get("overall_status", "UNKNOWN")
+        except (ValueError, OSError) as e:
+            logger.warning("Failed to read audit file %s: %s", audit_file, e)
 
     # Check E2E tests
     if e2e_total == 0:
@@ -183,10 +195,7 @@ Integration was validated across multiple dimensions:
 
 | Artifact | Location |
 |----------|----------|
-| E2E Results | .claude/integration/e2e-results.json |
-| Acceptance Results | .claude/integration/acceptance-results.json |
-| Performance Results | .claude/integration/performance-results.json |
-| Integration Report | .claude/integration/integration-report.json |
+| Integration Test Results | .outputs/7-integration/integration-test-results.json |
 | Approval Record | .claude/integration/approval.json |
 | Phase Audit | .outputs/audits/phase-7-report.json |
 
@@ -236,10 +245,7 @@ def _generate_closeout_json(
         "audit_status": metrics["audit_status"],
         "checklist": checklist,
         "artifacts": {
-            "e2e_results": ".claude/integration/e2e-results.json",
-            "acceptance_results": ".claude/integration/acceptance-results.json",
-            "performance_results": ".claude/integration/performance-results.json",
-            "integration_report": ".claude/integration/integration-report.json",
+            "integration_test_results": ".outputs/7-integration/integration-test-results.json",
             "approval": ".claude/integration/approval.json",
             "audit": ".outputs/audits/phase-7-report.json"
         },
