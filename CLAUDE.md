@@ -117,7 +117,7 @@ Configured via `.env` (`ATOMIC_LLM_PROVIDER`, `ATOMIC_NETWORK_MODE`). See `.env.
 
 ## Deployments
 
-- **Main dev**: `/mnt/walnut-drive/dev/atomic-claude2` (this repo)
-- **Operational test**: `~/walnut-drive/dev/OHMDEVELOPMENT/PRD-403-FOO-PROCESSOR/atomic-claude`
+- **Main dev**: `W:\dev\atomic-claude` (this repo)
+- **Operational test**: `W:\dev\eloreum\atomic-claude`
   - Bug fixes should be applied to both repos
-  - PRD-403 is a live clone running against a real project
+  - eloreum is a live MVP build running against the pipeline

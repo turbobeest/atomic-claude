@@ -35,7 +35,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # e.g., ".outputs/3-tasking" -> 3
     phase_name = output_dir.name
     if '-' in phase_name:
-        phase_num = int(phase_name.split('-')[0])
+        try:
+            phase_num = int(phase_name.split('-')[0])
+        except (ValueError, IndexError):
+            phase_num = 0
         phase_id = phase_name
     else:
         print(print_yellow("⚠️  Could not determine phase number from output directory"))
@@ -49,8 +52,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         audit_context = query_audits_for_task(
             audit_graph, f"Phase {phase_num}: {phase_id}", phase=str(phase_num),
         )
-    except Exception:
-        pass  # Graceful degradation when audit graph unavailable
+    except Exception as e:
+        logger.debug("Audit graph unavailable: %s", e)
 
     # Run audit (non-blocking - returns True even if audit fails)
     result = run_phase_audit(phase_num, phase_id, output_dir, uat_mode,

@@ -34,7 +34,7 @@ from phases.phase_04_specification.tasks.task_406_closeout import execute as tas
 @pytest.fixture
 def temp_project_structure(tmp_path):
     """Create temporary project structure for Phase 4."""
-    atomic_root = tmp_path / "atomic-claude2"
+    atomic_root = tmp_path / "atomic-claude"
     project_root = tmp_path
 
     atomic_root.mkdir()

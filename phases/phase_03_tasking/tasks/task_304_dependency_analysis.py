@@ -76,42 +76,52 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_red(f"✗ Tasks file not found: {tasks_file}"))
         return False
 
-    tasks_data = json.loads(read_file(tasks_file))
-    tasks = tasks_data.get("tasks", [])
-    task_count = len(tasks)
+    # Retry loop for validation (replaces recursive call)
+    MAX_VALIDATION_RETRIES = 5
+    for _retry in range(MAX_VALIDATION_RETRIES):
+        tasks_data = json.loads(read_file(tasks_file))
+        tasks = tasks_data.get("tasks", [])
+        task_count = len(tasks)
 
-    if task_count == 0:
-        print(print_red("✗ No tasks found in tasks.json"))
-        return False
+        if task_count == 0:
+            print(print_red("✗ No tasks found in tasks.json"))
+            return False
 
-    # Dependency Validation
-    print(print_dim("─" * 100))
-    print()
-    print(print_bold("DEPENDENCY VALIDATION"))
-    print()
+        # Dependency Validation
+        print(print_dim("─" * 100))
+        print()
+        print(print_bold("DEPENDENCY VALIDATION"))
+        print()
 
-    validation_result = _validate_dependencies(tasks)
+        validation_result = _validate_dependencies(tasks)
 
-    if validation_result["invalid_refs"] > 0:
-        print(print_red(f"✗ Found {validation_result['invalid_refs']} invalid dependency references"))
-        validation_result["passed"] = False
-    else:
-        print(print_green("✓ All dependency references valid"))
+        if validation_result["invalid_refs"] > 0:
+            print(print_red(f"✗ Found {validation_result['invalid_refs']} invalid dependency references"))
+            validation_result["passed"] = False
+        else:
+            print(print_green("✓ All dependency references valid"))
 
-    if validation_result["self_refs"] > 0:
-        print(print_red(f"✗ Found {validation_result['self_refs']} self-referencing tasks"))
-        validation_result["passed"] = False
+        if validation_result["self_refs"] > 0:
+            print(print_red(f"✗ Found {validation_result['self_refs']} self-referencing tasks"))
+            validation_result["passed"] = False
 
-    if validation_result["root_count"] == 0 and task_count > 0:
-        print(print_red("✗ No root tasks found - possible circular dependency"))
-        validation_result["passed"] = False
-    else:
-        print(print_green("✓ No circular dependencies"))
+        if validation_result.get("cycles"):
+            print(print_red(f"✗ Circular dependencies detected: {len(validation_result['cycles'])} cycle(s)"))
+            for cycle in validation_result["cycles"][:5]:
+                print(print_red(f"  Cycle: {' -> '.join(str(n) for n in cycle)}"))
+            validation_result["passed"] = False
+        elif validation_result["root_count"] == 0 and task_count > 0:
+            print(print_red("✗ No root tasks found - possible circular dependency"))
+            validation_result["passed"] = False
+        else:
+            print(print_green("✓ No circular dependencies"))
 
-    print(print_green("✓ DAG structure verified"))
-    print()
+        print(print_green("✓ DAG structure verified"))
+        print()
 
-    if not validation_result["passed"]:
+        if validation_result["passed"]:
+            break
+
         print(print_red("Dependency validation failed."))
         print()
         print(print_yellow("  [fix]      ") + "Edit tasks.json to fix issues")
@@ -131,7 +141,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_dim("Edit .taskmaster/tasks/tasks.json to fix dependency issues."))
         print(print_dim("Press Enter when ready to re-validate..."))
         input()
-        return execute(atomic_root, output_dir, uat_mode, graph=graph)
+    else:
+        # Exhausted retries
+        print(print_red(f"✗ Validation failed after {MAX_VALIDATION_RETRIES} attempts"))
+        return False
 
     # Graph-based dependency validation (if available)
     if graph:
@@ -194,15 +207,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
 
 def _validate_dependencies(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Validate dependency graph."""
+    """Validate dependency graph including cycle detection via DFS."""
     valid_ids = {task["id"] for task in tasks}
     invalid_refs = 0
     self_refs = 0
     root_count = 0
 
+    # Build adjacency list (task -> its dependencies)
+    adj: Dict[Any, List[Any]] = {}
     for task in tasks:
         task_id = task["id"]
         deps = task.get("dependencies", [])
+        adj[task_id] = [d for d in deps if d in valid_ids]
 
         # Check for invalid references
         for dep in deps:
@@ -217,11 +233,43 @@ def _validate_dependencies(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not deps:
             root_count += 1
 
+    # Cycle detection using DFS (Kahn's-style: find cycles by checking
+    # if topological sort can process all nodes)
+    cycles: List[List[Any]] = []
+
+    # DFS-based cycle detection
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: Dict[Any, int] = {tid: WHITE for tid in valid_ids}
+    path: List[Any] = []
+
+    def _dfs(node: Any) -> None:
+        color[node] = GRAY
+        path.append(node)
+        for neighbor in adj.get(node, []):
+            if neighbor == node:
+                continue  # self-refs already counted
+            if color.get(neighbor) == GRAY:
+                # Found a cycle - extract it from path
+                cycle_start = path.index(neighbor)
+                cycle = path[cycle_start:] + [neighbor]
+                cycles.append(cycle)
+            elif color.get(neighbor) == WHITE:
+                _dfs(neighbor)
+        path.pop()
+        color[node] = BLACK
+
+    for task_id in valid_ids:
+        if color[task_id] == WHITE:
+            _dfs(task_id)
+
+    has_cycles = len(cycles) > 0
+
     return {
-        "passed": invalid_refs == 0 and self_refs == 0,
+        "passed": invalid_refs == 0 and self_refs == 0 and not has_cycles,
         "invalid_refs": invalid_refs,
         "self_refs": self_refs,
-        "root_count": root_count
+        "root_count": root_count,
+        "cycles": cycles,
     }
 
 

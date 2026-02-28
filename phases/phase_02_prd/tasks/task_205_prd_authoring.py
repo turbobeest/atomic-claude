@@ -11,12 +11,11 @@ a comprehensive PRD document section by section.
 """
 
 import logging
-import os
 import sys
 import json
 import re
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -257,7 +256,7 @@ Validate that the PRD phase can complete successfully in UAT mode.
 
 ## 1. Executive Summary
 
-This PRD documents the requirements for UAT testing of the atomic-claude2 pipeline.
+This PRD documents the requirements for UAT testing of the atomic-claude pipeline.
 
 ## 2. Technical Architecture
 
@@ -427,14 +426,25 @@ def generate_section(
     try:
         output_file = prompts_dir / f"gen{gen_num:02d}_output.md"
 
-        success = invoke(
+        # invoke() returns the LLM response as a string (not a bool).
+        # A non-empty string is truthy; an empty string or exception means failure.
+        llm_result = invoke(
             prompt=prompt,
             output_file=str(output_file),
             model="opus",  # Use Opus for PRD authoring
             temperature=0.3
         )
 
-        if success and output_file.exists():
+        # Normalise: result must be a string (guard against unexpected return types)
+        if isinstance(llm_result, dict):
+            content = json.dumps(llm_result)
+        elif llm_result is not None:
+            content = str(llm_result)
+        else:
+            content = ""
+
+        if content and output_file.exists():
+            # Re-read from file to pick up any normalisation done by invoke()
             content = read_file(output_file)
             content = extract_markdown(content)
             content = _strip_llm_preamble(content)

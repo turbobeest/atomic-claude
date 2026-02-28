@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.llm import invoke_llm as invoke
-from core.ui import phase_header, success, error, warning, info, step, wrap_text
+from core.ui import success, warning, info, step, wrap_text
 
 try:
     from core.discovery.canvas import (
@@ -633,7 +633,7 @@ def _create_uat_dialogue(dialogue_output: Path, conversation_log: Path) -> None:
                 "vision": {
                     "core_problem": "Validate Phase 00 and Phase 01 functionality",
                     "solution_concept": "User acceptance testing framework",
-                    "why_now": "Refactoring to atomic-claude2"
+                    "why_now": "Refactoring to atomic-claude"
                 },
                 "impact": {
                     "primary_impact": "Ensure phase transitions work correctly",

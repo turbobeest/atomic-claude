@@ -13,7 +13,7 @@ echo ""
 
 # Configuration
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TEST_DIR="/tmp/atomic-claude2-test-$(date +%s)"
+TEST_DIR="/tmp/atomic-claude-test-$(date +%s)"
 SAMPLE_DATA="$PROJECT_ROOT/test/fixtures/sample-project-taskflow.json"
 
 echo "Test Configuration:"
@@ -27,9 +27,9 @@ echo "==> Setting up test environment..."
 mkdir -p "$TEST_DIR"
 cd "$TEST_DIR"
 
-# Copy atomic-claude2
-cp -r "$PROJECT_ROOT" atomic-claude2
-cd atomic-claude2
+# Copy atomic-claude
+cp -r "$PROJECT_ROOT" atomic-claude
+cd atomic-claude
 
 # Clean state
 rm -rf .state .outputs .logs
@@ -247,7 +247,7 @@ echo "✓ Output generation verified"
 echo ""
 echo "Test directory: $TEST_DIR"
 echo "To inspect results:"
-echo "  cd $TEST_DIR/atomic-claude2"
+echo "  cd $TEST_DIR/atomic-claude"
 echo "  cat .state/task-state.json | jq ."
 echo "  ls -la .outputs/"
 echo ""

@@ -196,15 +196,18 @@ def _parse_tdd_response(response: str, task_id: int) -> Optional[List[Dict]]:
         except (json.JSONDecodeError, ValueError):
             continue
 
-    # Strategy 2: find first [ ... ] block
-    match = re.search(r'\[[\s\S]*\]', text)
-    if match:
+    # Strategy 2: use json.JSONDecoder to find the first valid JSON array
+    decoder = json.JSONDecoder()
+    idx = text.find('[')
+    while idx != -1:
         try:
-            parsed = json.loads(match.group())
-            if _validate_subtasks(parsed, task_id):
+            parsed, end_idx = decoder.raw_decode(text, idx)
+            if isinstance(parsed, list) and _validate_subtasks(parsed, task_id):
                 return parsed
         except (json.JSONDecodeError, ValueError):
             pass
+        # Try next '[' occurrence
+        idx = text.find('[', idx + 1)
 
     return None
 

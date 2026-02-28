@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
-    print_red, print_dim, prompt_user
+    print_dim, prompt_user
 )
 from core.utils.file_ops import read_json, write_json, ensure_dir
 

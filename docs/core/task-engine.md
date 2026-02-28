@@ -1,6 +1,6 @@
 # Task Execution Engine
 
-Complete guide to the Task Execution Engine for atomic-claude2.
+Complete guide to the Task Execution Engine for atomic-claude.
 
 ## Overview
 

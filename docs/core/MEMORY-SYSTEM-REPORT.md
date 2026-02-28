@@ -7,7 +7,7 @@
 
 ## Mission
 
-Build the Memory System for persistent context storage and recall in atomic-claude2.
+Build the Memory System for persistent context storage and recall in atomic-claude.
 
 ## Deliverables
 

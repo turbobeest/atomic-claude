@@ -50,17 +50,19 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     # Load report data
-    e2e_passed = 8
-    e2e_total = 8
-    criteria_passed = 17
-    criteria_total = 17
-    overall_status = "ready"
+    e2e_passed = 0
+    e2e_total = 0
+    criteria_passed = 0
+    criteria_total = 0
+    overall_status = "unknown"
+    report_is_simulated = False
 
     if report_file.exists():
         report_data = read_json(report_file)
         # integration-test-results.json uses different keys than the old integration-report.json
         e2e_passed = report_data.get("tests_passed", e2e_passed)
         e2e_total = report_data.get("tests_run", e2e_total)
+        report_is_simulated = report_data.get("simulated", False)
         # Look for acceptance data in test suites if available
         for suite in report_data.get("test_suites", []):
             if suite.get("suite") == "acceptance":
@@ -68,26 +70,37 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 criteria_total = suite.get("total", criteria_total)
         overall_status = "ready" if report_data.get("tests_failed", 0) == 0 else "issues"
     else:
-        print(f"{YELLOW}WARNING: Using default values -- integration report not found{NC}")
+        print(f"{YELLOW}WARNING: Integration report not found -- cannot verify test results{NC}")
+        overall_status = "missing"
 
     print(print_dim("─" * 118))
     print(print_bold("INTEGRATION RESULTS"))
     print()
 
     # E2E status
-    if e2e_passed == e2e_total:
+    if overall_status == "missing":
+        print(print_red("  E2E Tests:              UNKNOWN (report missing)"))
+    elif e2e_passed == e2e_total and e2e_total > 0:
         print(print_green(f"  E2E Tests:              {e2e_passed} / {e2e_total} PASSING"))
     else:
         print(print_red(f"  E2E Tests:              {e2e_passed} / {e2e_total} PASSING"))
 
     # Acceptance status
-    if criteria_passed == criteria_total:
+    if overall_status == "missing":
+        print(print_red("  Acceptance Criteria:    UNKNOWN (report missing)"))
+    elif criteria_passed == criteria_total and criteria_total > 0:
         print(print_green(f"  Acceptance Criteria:    {criteria_passed} / {criteria_total} MET"))
     else:
         print(print_red(f"  Acceptance Criteria:    {criteria_passed} / {criteria_total} MET"))
 
-    # Performance status
-    print(print_green("  Performance:            ALL TARGETS MET"))
+    # Performance status (no performance data in report yet -- flag as simulated if report is simulated)
+    if report_is_simulated:
+        print(print_yellow("  Performance:            NOT VERIFIED (simulated results)"))
+    else:
+        print(print_yellow("  Performance:            NOT VERIFIED (no benchmark data in report)"))
+
+    if report_is_simulated:
+        print(print_yellow("  Note:                   Test results are SIMULATED -- not from real test execution"))
 
     print()
     print(print_dim("─" * 118))
@@ -104,24 +117,41 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     all_criteria_met = True
 
     # Check E2E tests
-    if e2e_passed == e2e_total:
+    if overall_status == "missing":
+        print(print_red("  [CRIT] ✗ E2E tests unknown (integration report missing)"))
+        all_criteria_met = False
+    elif e2e_passed == e2e_total and e2e_total > 0:
         print(print_green("  [CRIT] ✓ All E2E tests passing"))
     else:
         print(print_red(f"  [CRIT] ✗ E2E tests failing ({e2e_total - e2e_passed} failures)"))
         all_criteria_met = False
 
     # Check acceptance criteria
-    if criteria_passed == criteria_total:
+    if overall_status == "missing":
+        print(print_red("  [CRIT] ✗ Acceptance criteria unknown (integration report missing)"))
+        all_criteria_met = False
+    elif criteria_passed == criteria_total and criteria_total > 0:
         print(print_green("  [CRIT] ✓ All acceptance criteria met"))
     else:
         print(print_red(f"  [CRIT] ✗ Acceptance criteria not met ({criteria_total - criteria_passed} failures)"))
         all_criteria_met = False
 
-    # Check performance
-    print(print_green("  [BLCK] ✓ Performance within NFR bounds"))
+    # Check performance -- no automated performance data available; flag accordingly
+    if report_is_simulated:
+        print(print_yellow("  [BLCK] ! Performance not verified (simulated results)"))
+        all_criteria_met = False
+    else:
+        print(print_yellow("  [BLCK] ! Performance not verified (no benchmark data in report)"))
 
-    # Check for critical issues
-    print(print_green("  [BLCK] ✓ No critical integration issues"))
+    # Check for critical issues -- flag simulated results so reviewer is aware
+    if report_is_simulated:
+        print(print_yellow("  [BLCK] ! Test results are simulated -- real execution required"))
+        all_criteria_met = False
+    elif overall_status == "missing":
+        print(print_red("  [BLCK] ✗ Integration report missing -- cannot verify results"))
+        all_criteria_met = False
+    else:
+        print(print_green("  [BLCK] ✓ No critical integration issues detected"))
 
     print()
 
@@ -195,8 +225,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "results": {
             "e2e": {"passed": e2e_passed, "total": e2e_total},
             "acceptance": {"passed": criteria_passed, "total": criteria_total},
-            "performance": "all_passing"
+            "performance": "not_verified"
         },
+        "results_simulated": report_is_simulated,
         "approved_at": datetime.now(timezone.utc).isoformat()
     }
 

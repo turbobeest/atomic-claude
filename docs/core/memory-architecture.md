@@ -1,6 +1,6 @@
 # Memory System Architecture
 
-Technical architecture documentation for the atomic-claude2 Memory System.
+Technical architecture documentation for the atomic-claude Memory System.
 
 ## Overview
 

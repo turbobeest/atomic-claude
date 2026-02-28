@@ -111,7 +111,7 @@ atomic-claude/
 
 **v2 (Python):**
 ```
-atomic-claude2/
+atomic-claude/
 ├── main.py                # Python entry point
 ├── core/                  # Python utilities
 │   ├── state.py
@@ -213,7 +213,7 @@ python3 --version
 
 **Install dependencies:**
 ```bash
-cd atomic-claude2
+cd atomic-claude
 pip install -r requirements.txt
 ```
 
@@ -267,17 +267,17 @@ git stash save "Pre-migration stash"
 ```bash
 # Clone alongside v1 (recommended)
 cd /path/to/projects
-git clone https://github.com/yourusername/atomic-claude2.git
+git clone https://github.com/yourusername/atomic-claude.git
 
 # Or clone as subdirectory
 cd /path/to/atomic-claude
-git clone https://github.com/yourusername/atomic-claude2.git ACP
+git clone https://github.com/yourusername/atomic-claude.git ACP
 ```
 
 ### Step 2: Install Dependencies
 
 ```bash
-cd atomic-claude2
+cd atomic-claude
 
 # Install Python dependencies
 pip install -r requirements.txt
@@ -745,7 +745,7 @@ bash tasks/task001.sh > /tmp/v1-output.txt 2>&1
 
 **v2:**
 ```bash
-cd atomic-claude2
+cd atomic-claude
 python main.py run 0 --resume-at=001 > /tmp/v2-output.txt 2>&1
 ```
 
@@ -941,7 +941,7 @@ npm run build
 git init
 
 # Or clone as git repo
-git clone /path/to/atomic-claude2
+git clone /path/to/atomic-claude
 ```
 
 ### Debug Mode
@@ -977,7 +977,7 @@ If migration fails or you need to revert:
 
 ```bash
 # Stop v2
-cd atomic-claude2
+cd atomic-claude
 # Ctrl+C or kill process
 
 # Return to v1
@@ -995,7 +995,7 @@ bash orchestrator.sh
 
 ```bash
 # 1. Stop v2
-cd atomic-claude2
+cd atomic-claude
 # Ctrl+C
 
 # 2. Restore v1 state from backup
@@ -1021,7 +1021,7 @@ If you made progress in v2 but need to go back to v1:
 
 ```bash
 # 1. Export v2 state
-cd atomic-claude2
+cd atomic-claude
 cp .state/task-state.json /tmp/v2-state.json
 
 # 2. Manually merge state into v1

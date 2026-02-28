@@ -28,9 +28,8 @@ logger = logging.getLogger(__name__)
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.config import Config
 from core.llm import invoke_llm as invoke
-from core.ui import phase_header, success, error, warning, info, step
+from core.ui import success, error, warning, info, step
 from core.utils.file_ops import write_json, write_file
 
 # Supported file extensions for corpus analysis

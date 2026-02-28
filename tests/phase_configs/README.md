@@ -1,6 +1,6 @@
 # Phase Test Configurations
 
-This directory contains test configuration files for each phase of the atomic-claude2 pipeline.
+This directory contains test configuration files for each phase of the atomic-claude pipeline.
 
 ## Configuration Format
 

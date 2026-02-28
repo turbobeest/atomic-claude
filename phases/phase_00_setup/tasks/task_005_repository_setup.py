@@ -3,7 +3,7 @@ Task 005: Repository & System Setup
 
 Verifies embedded resources (agents, audits, skills) and assesses system capabilities.
 
-Since v2.0, agents, audits, and skills are embedded in atomic-claude2 itself.
+Since v2.0, agents, audits, and skills are embedded in atomic-claude itself.
 This task verifies they're available, configures task routing based on provider
 inventory, validates git configuration, and performs a full system capability
 assessment (CPU, GPU, memory, storage, network).

@@ -1,6 +1,6 @@
-# Test Infrastructure - atomic-claude2
+# Test Infrastructure - atomic-claude
 
-Complete test infrastructure for validating the atomic-claude2 refactor.
+Complete test infrastructure for validating the atomic-claude refactor.
 
 ## Overview
 
@@ -381,10 +381,10 @@ Increase timeout in phase config:
 
 ### Import Errors
 
-Ensure you're running from the atomic-claude2 root:
+Ensure you're running from the atomic-claude root:
 
 ```bash
-cd /path/to/atomic-claude2
+cd /path/to/atomic-claude
 python tests/runners/continuity_runner.py 0
 ```
 

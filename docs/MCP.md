@@ -1,7 +1,7 @@
 # Model Context Protocol (MCP) Configuration
 
 **Last Updated:** February 10, 2026
-**Purpose:** Configure external tool integrations for atomic-claude2
+**Purpose:** Configure external tool integrations for atomic-claude
 
 ---
 
@@ -15,7 +15,7 @@ Model Context Protocol (MCP) is a universal adapter that connects Claude Code to
 
 ### Core Servers (Required)
 
-These MCPs are **required** for atomic-claude2's full functionality:
+These MCPs are **required** for atomic-claude's full functionality:
 
 #### 1. GitHub MCP ⭐
 **Purpose:** Native GitHub integration for PR creation, issue management, code review
@@ -272,7 +272,7 @@ npm install -g @modelcontextprotocol/server-gdrive
 
 ### Automatic (Recommended)
 
-Use the atomic-claude2 setup script:
+Use the atomic-claude setup script:
 
 ```bash
 # Interactive mode (recommended)
@@ -551,7 +551,7 @@ Error: Filesystem MCP denied access to /path/outside/project
 
 ## Future MCPs
 
-Planned for future atomic-claude2 versions:
+Planned for future atomic-claude versions:
 
 - **Docker MCP**: Container management
 - **Kubernetes MCP**: K8s deployment management
@@ -568,4 +568,4 @@ Planned for future atomic-claude2 versions:
 
 ---
 
-*Generated for atomic-claude2 on February 10, 2026*
+*Generated for atomic-claude on February 10, 2026*

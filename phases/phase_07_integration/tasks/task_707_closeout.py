@@ -32,17 +32,19 @@ def _build_checklist(
     checklist: List[str] = []
     all_passed = True
 
-    e2e_passed = 8
-    e2e_total = 8
-    criteria_passed = 17
-    criteria_total = 17
+    e2e_passed = 0
+    e2e_total = 0
+    criteria_passed = 0
+    criteria_total = 0
     approval_status = "pending"
     audit_status = "UNKNOWN"
+    report_is_simulated = False
 
     if report_file.exists():
         report_data = read_json(report_file)
         e2e_passed = report_data.get("tests_passed", e2e_passed)
         e2e_total = report_data.get("tests_run", e2e_total)
+        report_is_simulated = report_data.get("simulated", False)
         for suite in report_data.get("test_suites", []):
             if suite.get("suite") == "acceptance":
                 criteria_passed = suite.get("passed", criteria_passed)
@@ -57,7 +59,11 @@ def _build_checklist(
         audit_status = audit_data.get("overall_status", "UNKNOWN")
 
     # Check E2E tests
-    if e2e_passed == e2e_total:
+    if e2e_total == 0:
+        print(print_red(f"  [CRIT] ✗ E2E tests unknown (no report data)"))
+        checklist.append("E2E tests passing:FAIL")
+        all_passed = False
+    elif e2e_passed == e2e_total:
         print(print_green(f"  [CRIT] ✓ E2E tests passing ({e2e_passed}/{e2e_total})"))
         checklist.append("E2E tests passing:PASS")
     else:
@@ -66,7 +72,11 @@ def _build_checklist(
         all_passed = False
 
     # Check acceptance criteria
-    if criteria_passed == criteria_total:
+    if criteria_total == 0:
+        print(print_red(f"  [CRIT] ✗ Acceptance criteria unknown (no report data)"))
+        checklist.append("Acceptance criteria validated:FAIL")
+        all_passed = False
+    elif criteria_passed == criteria_total:
         print(print_green(f"  [CRIT] ✓ Acceptance criteria validated ({criteria_passed}/{criteria_total})"))
         checklist.append("Acceptance criteria validated:PASS")
     else:
@@ -74,9 +84,13 @@ def _build_checklist(
         checklist.append("Acceptance criteria validated:FAIL")
         all_passed = False
 
-    # Check performance
-    print(print_green("  [BLCK] ✓ Performance benchmarks met"))
-    checklist.append("Performance benchmarks met:PASS")
+    # Check performance -- no automated benchmark data; flag as unverified
+    if report_is_simulated:
+        print(print_yellow("  [BLCK] ! Performance not verified (simulated results)"))
+        checklist.append("Performance benchmarks met:WARN")
+    else:
+        print(print_yellow("  [BLCK] ! Performance benchmarks not verified (no benchmark data)"))
+        checklist.append("Performance benchmarks met:WARN")
 
     # Check integration report
     if report_file.exists():
@@ -118,6 +132,7 @@ def _build_checklist(
         "criteria_total": criteria_total,
         "approval_status": approval_status,
         "audit_status": audit_status,
+        "results_simulated": report_is_simulated,
     }
     return checklist, all_passed, metrics
 
@@ -138,20 +153,21 @@ def _generate_closeout_markdown(
         else:
             checklist_md.append(f"- [-] {name} (deferred)")
 
+    simulated_note = "\n> **WARNING:** Test results are SIMULATED. Real test execution required before production.\n" if metrics.get("results_simulated") else ""
     closeout_content = f"""# Phase 7 Closeout: Integration
 
 **Completed:** {datetime.now(timezone.utc).isoformat()}
 **Status:** COMPLETE
-
+{simulated_note}
 ## Summary
 
 Phase 7 (Integration) has been completed. All components have been integrated and validated end-to-end.
 
 ### Key Outcomes
 
-- **E2E Tests:** {metrics['e2e_passed']} / {metrics['e2e_total']} passing
-- **Acceptance Criteria:** {metrics['criteria_passed']} / {metrics['criteria_total']} validated
-- **Performance:** All NFR targets met
+- **E2E Tests:** {metrics['e2e_passed']} / {metrics['e2e_total']} passing{' (SIMULATED)' if metrics.get('results_simulated') else ''}
+- **Acceptance Criteria:** {metrics['criteria_passed']} / {metrics['criteria_total']} validated{' (SIMULATED)' if metrics.get('results_simulated') else ''}
+- **Performance:** Not verified (no benchmark data captured)
 - **Approval Status:** {metrics['approval_status']}
 
 ### Integration Dimensions
@@ -213,8 +229,9 @@ def _generate_closeout_json(
         "results": {
             "e2e_tests": {"passed": metrics["e2e_passed"], "total": metrics["e2e_total"]},
             "acceptance": {"passed": metrics["criteria_passed"], "total": metrics["criteria_total"]},
-            "performance": "all_passing"
+            "performance": "not_verified"
         },
+        "results_simulated": metrics.get("results_simulated", False),
         "approval_status": metrics["approval_status"],
         "audit_status": metrics["audit_status"],
         "checklist": checklist,

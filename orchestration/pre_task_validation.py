@@ -1,14 +1,14 @@
 """
 Pre-Task Validation Module
 
-FORCING FUNCTION: Ensures atomic-claude2 directory is pristine before each task runs.
+FORCING FUNCTION: Ensures atomic-claude directory is pristine before each task runs.
 
 This is a BLOCKER - tasks cannot proceed if project artifacts are found in the tool directory.
 
 Philosophy:
-- atomic-claude2 is a TOOL, not a project
+- atomic-claude is a TOOL, not a project
 - ALL project code must live in parent directory (../src/, ../tests/, ../docs/)
-- ONLY tool code and runtime artifacts allowed in atomic-claude2/
+- ONLY tool code and runtime artifacts allowed in atomic-claude/
 
 Violations are HARD ERRORS - the pipeline stops until they're fixed.
 """
@@ -64,7 +64,7 @@ FORBIDDEN_TYPES = {
 
 def validate_directory_pristine(phase_id: str, task_id: str) -> bool:
     """
-    BLOCKING validation: Ensure atomic-claude2 contains ONLY tool files.
+    BLOCKING validation: Ensure atomic-claude contains ONLY tool files.
 
     Args:
         phase_id: Current phase (e.g., "2-prd")
@@ -87,8 +87,8 @@ def validate_directory_pristine(phase_id: str, task_id: str) -> bool:
     print("\n" + "="*80)
     print("  🚨 PRE-TASK VALIDATION FAILED 🚨")
     print("="*80)
-    print(f"\nFound {len(violations)} project artifact(s) in atomic-claude2 directory!")
-    print("\n⚠️  atomic-claude2 is a TOOL, not a project.")
+    print(f"\nFound {len(violations)} project artifact(s) in atomic-claude directory!")
+    print("\n⚠️  atomic-claude is a TOOL, not a project.")
     print("   ALL project code must live in the parent directory.\n")
 
     for violation in violations:
@@ -109,7 +109,7 @@ def validate_directory_pristine(phase_id: str, task_id: str) -> bool:
 
 def find_violations() -> List[Dict[str, Any]]:
     """
-    Scan atomic-claude2 for project artifacts.
+    Scan atomic-claude for project artifacts.
 
     Returns:
         List of violations with path, correct location, and reason
@@ -149,7 +149,7 @@ def is_allowed_file(file_path: Path, acp_root: Path) -> bool:
 
     Args:
         file_path: Absolute path to file
-        acp_root: Root of atomic-claude2 directory
+        acp_root: Root of atomic-claude directory
 
     Returns:
         bool: True if file is allowed in tool directory
@@ -214,7 +214,7 @@ def classify_violation(file_path: Path, acp_root: Path) -> Dict[str, Any]:
 
     Args:
         file_path: Path to violating file
-        acp_root: Root of atomic-claude2 directory
+        acp_root: Root of atomic-claude directory
 
     Returns:
         dict: Violation info (path, correct_location, reason)

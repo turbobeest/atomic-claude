@@ -260,6 +260,23 @@ def _spec_worker(
             model="opus",
             timeout=600,
         )
+
+        # Validate the written file is valid JSON
+        if spec_file.exists():
+            raw = read_file(spec_file).strip()
+            # Strip markdown code fences if present
+            if raw.startswith("```"):
+                first_nl = raw.index("\n")
+                raw = raw[first_nl + 1:]
+                if raw.endswith("```"):
+                    raw = raw[:-3].strip()
+            try:
+                json.loads(raw)
+            except (json.JSONDecodeError, ValueError) as je:
+                logger.warning(
+                    "Spec file spec-t%s.json is not valid JSON: %s", task_id, je
+                )
+
         return (task_id, "ok", time.monotonic() - start, None)
     except Exception as e:
         # Fallback to stub spec
@@ -286,7 +303,6 @@ def _run_parallel_specs(
     console = Console()
     total = len(tasks)
     results: list[Optional[tuple]] = [None] * total
-    task_id_to_idx = {}
 
     STATUS_ICON = {"ok": "✅", "stub": "⚠️ "}
 
@@ -436,20 +452,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     # Load project context for LLM prompts
-    # If graph is available, use it for task-specific context enrichment
-    graph_context_cache = {}
-    if graph:
-        try:
-            for task in tasks:
-                task_id = task.get("id", 0)
-                context = graph.query_spec_context(task_id=task_id)
-                if context:
-                    graph_context_cache[task_id] = context
-            if graph_context_cache:
-                print(print_green(f"  ✓ Graph context loaded for {len(graph_context_cache)} tasks"))
-        except Exception as e:
-            logger.warning("Graph spec context query failed, using file context: %s", e)
-
     project_context = _load_project_context(atomic_root)
 
     # Extract canonical layout from PRD Section 7 for path consistency

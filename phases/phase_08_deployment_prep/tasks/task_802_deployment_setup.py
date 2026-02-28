@@ -109,7 +109,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         channel_choice = prompt_user("  Select channel (default: 1): ") or "1"
 
         channels = []
-        if "1" in channel_choice:
+        if channel_choice.strip() == "1":
             channels.append("internal")
 
         print()

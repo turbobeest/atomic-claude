@@ -11,7 +11,12 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, Generator, Optional, Any
 
-from .exceptions import LLMException
+from .exceptions import (
+    LLMException,
+    AuthenticationException,
+    RateLimitException,
+    TimeoutException,
+)
 
 
 class HealthStatus(str, Enum):
@@ -90,25 +95,39 @@ class LLMError(LLMException):
         self.retryable = retryable
 
 
-class AuthenticationError(LLMError):
-    """Authentication failed (invalid API key, etc.)."""
-    pass
+class AuthenticationError(LLMError, AuthenticationException):
+    """Authentication failed (invalid API key, etc.).
+
+    Inherits from both LLMError and AuthenticationException so that
+    ``except AuthenticationException`` in the router catches this.
+    """
+
+    def __init__(self, message: str, provider: Optional[str] = None):
+        LLMError.__init__(self, message, provider, "authentication_failed", retryable=False)
 
 
-class RateLimitError(LLMError):
-    """Rate limit exceeded."""
+class RateLimitError(LLMError, RateLimitException):
+    """Rate limit exceeded.
+
+    Inherits from both LLMError and RateLimitException so that
+    ``except RateLimitException`` in the router catches this.
+    """
 
     def __init__(self, message: str, provider: Optional[str] = None,
                  retry_after: Optional[int] = None):
-        super().__init__(message, provider, "rate_limit", retryable=True)
+        LLMError.__init__(self, message, provider, "rate_limit", retryable=True)
         self.retry_after = retry_after
 
 
-class LLMTimeoutError(LLMError):
-    """Request timed out."""
+class LLMTimeoutError(LLMError, TimeoutException):
+    """Request timed out.
+
+    Inherits from both LLMError and TimeoutException so that
+    ``except TimeoutException`` in the router catches this.
+    """
 
     def __init__(self, message: str, provider: Optional[str] = None):
-        super().__init__(message, provider, "timeout", retryable=True)
+        LLMError.__init__(self, message, provider, "timeout", retryable=True)
 
 
 # Backward-compatible alias

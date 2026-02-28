@@ -1,6 +1,6 @@
 # Test Runners
 
-This directory contains specialized test runners for validating different aspects of the atomic-claude2 system.
+This directory contains specialized test runners for validating different aspects of the atomic-claude system.
 
 ## Available Runners
 

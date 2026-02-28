@@ -5,8 +5,11 @@ AI-driven audit selection from audit repository.
 Wrapper around the Python audit system.
 """
 
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -33,7 +36,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if '-' in phase_name:
         try:
             phase_num = int(phase_name.split('-')[0])
-        except ValueError:
+        except (ValueError, IndexError):
             print(print_yellow("Could not parse phase number from output directory"))
             return True  # Non-blocking
         phase_id = phase_name
@@ -49,8 +52,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         audit_context = query_audits_for_task(
             audit_graph, f"Phase {phase_num}: {phase_id}", phase=str(phase_num),
         )
-    except Exception:
-        pass  # Graceful degradation when audit graph unavailable
+    except Exception as e:
+        logger.debug("Audit graph unavailable: %s", e)
 
     # Run audit (non-blocking - returns True even if audit fails)
     result = run_phase_audit(phase_num, phase_id, output_dir, uat_mode,

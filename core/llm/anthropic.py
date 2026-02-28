@@ -106,6 +106,10 @@ class AnthropicProvider(BaseLLMProvider):
         # Initialize client
         self.client = Anthropic(api_key=self.api_key)
 
+        # Cached health status to avoid repeated API calls
+        self._health_cache: Optional[tuple] = None  # (HealthStatus, timestamp)
+        self._health_cache_ttl = 300  # 5 minutes
+
     def invoke(
         self,
         prompt: str,
@@ -398,31 +402,48 @@ class AnthropicProvider(BaseLLMProvider):
         """
         Check Anthropic API health.
 
+        Uses a cached result (5-minute TTL) to avoid repeated API costs.
+        Validates the API key format first, then uses the models list endpoint
+        instead of sending a message (which consumes tokens).
+
         Returns:
             HealthStatus
         """
+        # Return cached result if still valid
+        if self._health_cache is not None:
+            cached_status, cached_time = self._health_cache
+            if (time.time() - cached_time) < self._health_cache_ttl:
+                return cached_status
+
         try:
-            # Make minimal API call to verify connectivity
-            response = self.client.messages.create(
-                model=self.default_model,
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=10,
-            )
+            # Quick format check — Anthropic keys start with "sk-ant-"
+            if not self.api_key or not self.api_key.startswith("sk-ant-"):
+                status = HealthStatus.UNAVAILABLE
+                self._health_cache = (status, time.time())
+                return status
 
-            if response and response.content:
-                return HealthStatus.HEALTHY
-
-            return HealthStatus.DEGRADED
+            # Use a lightweight API call: count_tokens costs no generation tokens
+            # and validates both the API key and connectivity
+            self.client.count_tokens("health check")
+            status = HealthStatus.HEALTHY
+            self._health_cache = (status, time.time())
+            return status
 
         except anthropic.AuthenticationError:
-            return HealthStatus.UNAVAILABLE
+            status = HealthStatus.UNAVAILABLE
+            self._health_cache = (status, time.time())
+            return status
 
         except anthropic.APIError:
-            return HealthStatus.DEGRADED
+            status = HealthStatus.DEGRADED
+            self._health_cache = (status, time.time())
+            return status
 
         except Exception as e:
             logger.debug("Anthropic health check failed: %s", e)
-            return HealthStatus.UNAVAILABLE
+            status = HealthStatus.UNAVAILABLE
+            self._health_cache = (status, time.time())
+            return status
 
     def get_supported_models(self) -> list:
         """

@@ -8,7 +8,7 @@
 ## Directory Tree
 
 ```
-atomic-claude2/
+atomic-claude/
 ├── main.py                           # Central orchestrator & CLI entry point
 ├── README.md                         # Project overview and quick start
 ├── PROJECT-STRUCTURE.md              # This file
@@ -294,7 +294,7 @@ python main.py reset
 - [ ] Extract all 60+ task scripts
 - [ ] Full integration testing
 - [ ] Documentation completion
-- [ ] Migration from atomic-claude to atomic-claude2
+- [ ] Migration from atomic-claude to atomic-claude
 
 ---
 

@@ -1,1 +1,1 @@
-"""End-to-end tests for atomic-claude2."""
+"""End-to-end tests for atomic-claude."""

@@ -285,7 +285,7 @@ class PhaseValidator:
     def _check_orchestrator_exists(self, metadata: PhaseMetadata) -> bool:
         """Check orchestrator module exists."""
         module_parts = metadata.module_path.split('.')
-        file_path = self.atomic_root / '/'.join(module_parts[:-1]) / f"{module_parts[-1]}.py"
+        file_path = self.atomic_root / Path(*module_parts[:-1]) / f"{module_parts[-1]}.py"
         return file_path.exists()
 
     def _validate_dependencies(self, metadata: PhaseMetadata) -> List[str]:

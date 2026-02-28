@@ -440,7 +440,7 @@ class TestIntegration(unittest.TestCase):
 
     def test_mock_phase_execution(self):
         """Test running a mock phase."""
-        # Note: This requires a working atomic-claude2 installation
+        # Note: This requires a working atomic-claude installation
         # and will actually try to run a phase
         # Skip in CI environments
         import os

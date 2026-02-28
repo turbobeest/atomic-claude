@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # MCP Server Setup Script
-# Installs and configures Model Context Protocol servers for atomic-claude2
+# Installs and configures Model Context Protocol servers for atomic-claude
 #
 # Usage:
 #   ./scripts/setup-mcp.sh                # Interactive mode

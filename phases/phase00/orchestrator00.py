@@ -17,7 +17,7 @@ import sys
 import os
 from pathlib import Path
 
-# Ensure atomic-claude2 root is in path
+# Ensure atomic-claude root is in path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 logger = logging.getLogger(__name__)

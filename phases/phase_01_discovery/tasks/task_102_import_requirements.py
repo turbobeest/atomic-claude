@@ -19,13 +19,13 @@ import re
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Set, Tuple
+from typing import Dict, Any, List, Set
 
 logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.ui import phase_header, success, error, warning, info, step
+from core.ui import success, error, warning, info, step
 from core.utils.file_ops import write_json
 
 

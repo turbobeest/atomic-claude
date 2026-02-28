@@ -25,7 +25,7 @@ def get_task_environment(phase_id: str, task_id: str) -> Dict[str, str]:
     Returns:
         Dict of environment variables
     """
-    # Get atomic-claude2 root
+    # Get atomic-claude root
     atomic_root = Path(__file__).parent.parent.resolve()
 
     # Start with current environment
@@ -91,7 +91,7 @@ def run_task_script(
     # Build environment
     env = get_task_environment(phase_id, task_id)
 
-    # Get atomic-claude2 root for working directory
+    # Get atomic-claude root for working directory
     atomic_root = Path(__file__).parent.parent.resolve()
 
     # Determine stdout/stderr handling
@@ -159,7 +159,7 @@ def run_task_script_streaming(
     # Build environment
     env = get_task_environment(phase_id, task_id)
 
-    # Get atomic-claude2 root for working directory
+    # Get atomic-claude root for working directory
     atomic_root = Path(__file__).parent.parent.resolve()
 
     print(f"  🔧 Executing: {script_path.name}")

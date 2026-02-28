@@ -932,7 +932,7 @@ This will:
 
 **`validate_directory_pristine(phase_id: str, task_id: str) -> bool`**
 
-BLOCKING validation: Ensure atomic-claude2 contains ONLY tool files.
+BLOCKING validation: Ensure atomic-claude contains ONLY tool files.
 
 ```python
 from orchestration.pre_task_validation import validate_directory_pristine
@@ -946,7 +946,7 @@ Returns `False` if project artifacts are found in tool directory, blocking task 
 
 **`find_violations() -> List[Dict[str, Any]]`**
 
-Scan atomic-claude2 for project artifacts.
+Scan atomic-claude for project artifacts.
 
 Returns list of violations with:
 - `path`: Relative path to violating file

@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from core.llm import invoke
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
-    print_red, print_dim, prompt_user
+    print_red, print_dim
 )
 from core.utils.file_ops import ensure_dir, read_file, write_file
 

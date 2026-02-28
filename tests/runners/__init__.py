@@ -1,7 +1,7 @@
 """
 Test Runners Module
 
-Provides phase-end test runners for validating atomic-claude2 phases.
+Provides phase-end test runners for validating atomic-claude phases.
 
 Available Runners:
 - ContinuityTestRunner: Validates seamless task-to-task execution

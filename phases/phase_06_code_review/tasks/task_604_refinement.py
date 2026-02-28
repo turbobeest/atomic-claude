@@ -447,6 +447,45 @@ def _apply_fix(finding: Dict, output_prefix: Path, atomic_root: Path) -> bool:
     return _apply_llm_fix(prompt, output_prefix, finding_file)
 
 
+def _parse_test_counts(output: str) -> tuple:
+    """Parse test counts from test runner output.
+
+    Supports cargo test, pytest, npm/jest, and go test output formats.
+    Returns (total, passed). Returns (0, 0) if no pattern matched.
+    """
+    import re
+
+    # cargo test: "test result: ok. 5 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out"
+    m = re.search(r'test result: \w+\.\s+(\d+) passed;\s+(\d+) failed', output)
+    if m:
+        passed = int(m.group(1))
+        failed = int(m.group(2))
+        return (passed + failed, passed)
+
+    # pytest: "5 passed, 2 failed" or "5 passed" or "== 10 passed in 1.5s =="
+    m = re.search(r'(\d+) passed', output)
+    if m:
+        passed = int(m.group(1))
+        m_failed = re.search(r'(\d+) failed', output)
+        failed = int(m_failed.group(1)) if m_failed else 0
+        return (passed + failed, passed)
+
+    # jest/npm: "Tests:  2 failed, 5 passed, 7 total"
+    m = re.search(r'Tests:\s+(?:\d+ \w+,\s+)*(\d+) passed,\s+(\d+) total', output)
+    if m:
+        passed = int(m.group(1))
+        total = int(m.group(2))
+        return (total, passed)
+
+    # go test: "ok" lines per package, or "FAIL" — count ok/FAIL lines
+    ok_count = len(re.findall(r'^ok\s+', output, re.MULTILINE))
+    fail_count = len(re.findall(r'^FAIL\s+', output, re.MULTILINE))
+    if ok_count + fail_count > 0:
+        return (ok_count + fail_count, ok_count)
+
+    return (0, 0)
+
+
 def _run_test_verification(atomic_root: Path) -> tuple:
     """Run test verification against the host project."""
     project_root = atomic_root.parent
@@ -461,6 +500,7 @@ def _run_test_verification(atomic_root: Path) -> tuple:
     tests_passing = True
     tests_total = 0
     tests_passed = 0
+    result = None
 
     try:
         # Try cargo test (Rust)
@@ -469,6 +509,7 @@ def _run_test_verification(atomic_root: Path) -> tuple:
                 ["cargo", "test"],
                 cwd=project_root,
                 capture_output=True,
+                text=True,
                 timeout=120
             )
             tests_passing = (result.returncode == 0)
@@ -479,6 +520,7 @@ def _run_test_verification(atomic_root: Path) -> tuple:
                 ["npm", "test"],
                 cwd=project_root,
                 capture_output=True,
+                text=True,
                 timeout=60
             )
             tests_passing = (result.returncode == 0)
@@ -489,6 +531,7 @@ def _run_test_verification(atomic_root: Path) -> tuple:
                 ["go", "test", "./..."],
                 cwd=project_root,
                 capture_output=True,
+                text=True,
                 timeout=120
             )
             tests_passing = (result.returncode == 0)
@@ -499,11 +542,18 @@ def _run_test_verification(atomic_root: Path) -> tuple:
                 ["python", "-m", "pytest", "-v"],
                 cwd=project_root,
                 capture_output=True,
+                text=True,
                 timeout=60
             )
             tests_passing = (result.returncode == 0)
     except Exception as e:
         logger.debug("Test verification failed: %s", e)
+
+    # Parse test counts from subprocess output
+    if result is not None:
+        stdout = (result.stdout or "") + (result.stderr or "")
+        tests_total, tests_passed = _parse_test_counts(stdout)
+        logger.debug("Parsed test counts: %d total, %d passed", tests_total, tests_passed)
 
     print("  ─" * 50)
     print(print_bold("TEST RESULTS"))

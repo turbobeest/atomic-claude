@@ -1,1 +1,1 @@
-"""Integration tests for atomic-claude2."""
+"""Integration tests for atomic-claude."""

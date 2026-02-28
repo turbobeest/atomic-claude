@@ -104,18 +104,27 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     docs_result = _generate_documentation(prompts_dir, version, project_context)
     install_result = _generate_installation_guide(prompts_dir, version, project_context)
 
+    # Determine overall success: all artifact generators must report success
+    all_succeeded = all(
+        r.get("status") == "success"
+        for r in [package_result, changelog_result, docs_result, install_result]
+    )
+
     # ARTIFACTS SUMMARY
     print()
     print(print_bold("  - ARTIFACTS SUMMARY"))
     print()
 
+    def _status_label(result: Dict[str, Any]) -> str:
+        return "ok" if result.get("status") == "success" else "FAILED"
+
     print("  " + "─" * 110)
     print(print_bold("  ARTIFACTS PREPARED"))
     print()
-    print(f"    [ok] Package: dist/{package_result['package_name']}.tar.gz")
-    print("    [ok] CHANGELOG.md generated")
-    print("    [ok] docs/README.md complete")
-    print("    [ok] docs/INSTALL.md tested")
+    print(f"    [{_status_label(package_result)}] Package: dist/{package_result['package_name']}.tar.gz")
+    print(f"    [{_status_label(changelog_result)}] CHANGELOG.md generated")
+    print(f"    [{_status_label(docs_result)}] docs/README.md complete")
+    print(f"    [{_status_label(install_result)}] docs/INSTALL.md tested")
     print("  " + "─" * 110)
     print()
 
@@ -156,7 +165,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "generated_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     }
 
-    write_json(artifacts_file, artifacts_data)
+    try:
+        write_json(artifacts_file, artifacts_data)
+    except Exception as e:
+        logger.error("Failed to write artifacts record: %s", e)
+        print(print_red(f"  ✗ Failed to save artifacts record: {e}"))
+        return False
+
+    if not all_succeeded:
+        print(print_red("✗ Artifact Generation completed with failures"))
+        return False
 
     print(print_green("✓ Artifact Generation complete"))
 

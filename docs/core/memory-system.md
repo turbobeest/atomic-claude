@@ -1,6 +1,6 @@
 ## Memory System - Complete Guide
 
-The Memory System provides persistent context storage and recall across phases and sessions in atomic-claude2.
+The Memory System provides persistent context storage and recall across phases and sessions in atomic-claude.
 
 ### Overview
 

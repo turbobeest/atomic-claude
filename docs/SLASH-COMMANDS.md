@@ -379,7 +379,7 @@ Slash commands work **within Claude Code sessions**, not from bash scripts.
 
 ```bash
 # Start interactive Claude Code session
-cd /path/to/atomic-claude2
+cd /path/to/atomic-claude
 claude
 
 # Now in Claude Code CLI:
@@ -411,4 +411,4 @@ claude
 
 ---
 
-*Generated for atomic-claude2 on February 10, 2026*
+*Generated for atomic-claude on February 10, 2026*

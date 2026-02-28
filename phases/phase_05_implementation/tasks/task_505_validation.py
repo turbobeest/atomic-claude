@@ -14,6 +14,7 @@ import sys
 import json
 import logging
 import re
+import shlex
 from pathlib import Path
 from typing import Dict, Any, Tuple, List, Optional
 from datetime import datetime, timezone
@@ -141,14 +142,15 @@ def _run_test_suite(
     Returns dict with tests_passed, tests_failed, tests_errors, or None if
     the test runner isn't available.
     """
+    safe_root = shlex.quote(str(project_root))
     if stack == "rust":
-        cmd = f"cd '{project_root}' && cargo test 2>&1"
+        cmd = f"cd {safe_root} && cargo test 2>&1"
     elif stack == "python":
-        cmd = f"cd '{project_root}' && python -m pytest --tb=no -q 2>&1"
+        cmd = f"cd {safe_root} && python -m pytest --tb=no -q 2>&1"
     elif stack == "node":
-        cmd = f"cd '{project_root}' && npx jest --no-coverage --silent 2>&1"
+        cmd = f"cd {safe_root} && npx jest --no-coverage --silent 2>&1"
     elif stack == "go":
-        cmd = f"cd '{project_root}' && go test ./... 2>&1"
+        cmd = f"cd {safe_root} && go test ./... 2>&1"
     else:
         return None
 
@@ -231,12 +233,13 @@ def _run_coverage(
     stack: str, project_root: Path
 ) -> Optional[Dict[str, Any]]:
     """Run coverage tool and parse results. Returns None if not available."""
+    safe_root = shlex.quote(str(project_root))
     if stack == "rust":
         # cargo tarpaulin
-        cmd = f"cd '{project_root}' && cargo tarpaulin --out json --output-dir /tmp 2>&1"
+        cmd = f"cd {safe_root} && cargo tarpaulin --out json --output-dir /tmp 2>&1"
         coverage_json = Path("/tmp/tarpaulin-report.json")
     elif stack == "python":
-        cmd = f"cd '{project_root}' && python -m pytest --cov --cov-report=json --cov-report=term -q 2>&1"
+        cmd = f"cd {safe_root} && python -m pytest --cov --cov-report=json --cov-report=term -q 2>&1"
         coverage_json = project_root / "coverage.json"
     else:
         return None

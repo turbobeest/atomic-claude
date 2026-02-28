@@ -161,7 +161,7 @@ Build Anthropic and AWS Bedrock LLM provider implementations following the BaseL
 ## File Structure
 
 ```
-atomic-claude2/
+atomic-claude/
 ├── core/
 │   └── llm/
 │       ├── __init__.py          # Module exports

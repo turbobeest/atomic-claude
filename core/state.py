@@ -27,8 +27,8 @@ Author: Phase 2 - State Management
 """
 
 import json
-import fcntl
 import logging
+import sys
 import tempfile
 import shutil
 from pathlib import Path
@@ -38,6 +38,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass, asdict
 from enum import Enum
 import os
+
+try:
+    import fcntl
+    _HAS_FCNTL = True
+except ImportError:
+    _HAS_FCNTL = False
+    if sys.platform == 'win32':
+        import msvcrt
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +176,7 @@ class StateLock:
     """
     File-based lock for concurrent state access.
 
-    Uses fcntl on Unix, fallback to mkdir on Windows.
+    Uses fcntl on Unix, msvcrt on Windows.
     """
 
     def __init__(self, lock_file: Path):
@@ -194,12 +202,14 @@ class StateLock:
 
         while True:
             try:
-                # Try fcntl (Unix)
                 self.lock_fd = open(self.lock_file, 'w')
-                fcntl.flock(self.lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if _HAS_FCNTL:
+                    fcntl.flock(self.lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                elif sys.platform == 'win32':
+                    msvcrt.locking(self.lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
                 return True
             except (IOError, OSError):
-                # Lock held by another process or fcntl not available
+                # Lock held by another process
                 if self.lock_fd:
                     self.lock_fd.close()
                     self.lock_fd = None
@@ -211,7 +221,13 @@ class StateLock:
         """Release lock."""
         if self.lock_fd:
             try:
-                fcntl.flock(self.lock_fd.fileno(), fcntl.LOCK_UN)
+                if _HAS_FCNTL:
+                    fcntl.flock(self.lock_fd.fileno(), fcntl.LOCK_UN)
+                elif sys.platform == 'win32':
+                    try:
+                        msvcrt.locking(self.lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass
                 self.lock_fd.close()
             except Exception as e:
                 logger.debug("Failed to release state lock: %s", e)

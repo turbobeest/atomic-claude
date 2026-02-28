@@ -1,7 +1,7 @@
 """
 Pytest Configuration and Fixtures
 
-Provides shared fixtures and configuration for atomic-claude2 tests.
+Provides shared fixtures and configuration for atomic-claude tests.
 """
 
 import json
@@ -19,7 +19,7 @@ import pytest
 
 @pytest.fixture(scope="session")
 def atomic_root() -> Path:
-    """Get the atomic-claude2 root directory."""
+    """Get the atomic-claude root directory."""
     return Path(__file__).parent.parent.resolve()
 
 
@@ -246,7 +246,7 @@ def sample_config() -> Dict:
         "project": {
             "name": "test-project",
             "directory": "/tmp/test-project",
-            "description": "Test project for atomic-claude2"
+            "description": "Test project for atomic-claude"
         },
         "provider": {
             "name": "anthropic",

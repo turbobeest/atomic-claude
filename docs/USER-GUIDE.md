@@ -1,6 +1,6 @@
 # Atomic Claude 2.0 - User Guide
 
-Complete guide for using atomic-claude2 to build software projects with AI assistance.
+Complete guide for using atomic-claude to build software projects with AI assistance.
 
 Version: 2.0
 Last Updated: 2026-02-07
@@ -106,8 +106,8 @@ ollama serve
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/atomic-claude2.git
-cd atomic-claude2
+git clone https://github.com/yourusername/atomic-claude.git
+cd atomic-claude
 
 # Install dependencies
 pip install -r requirements.txt
@@ -127,8 +127,8 @@ python main.py --help
 mkdir my-project
 cd my-project
 
-# Initialize atomic-claude2
-git clone https://github.com/yourusername/atomic-claude2.git ATOMIC-CLAUDE
+# Initialize atomic-claude
+git clone https://github.com/yourusername/atomic-claude.git ATOMIC-CLAUDE
 
 # Create project structure
 mkdir -p src tests docs
@@ -977,16 +977,16 @@ echo "- Task 205: Modified prompt for domain specifics" >> ../README.md
 ## Resources
 
 - [API Reference](API-REFERENCE.md) - Complete API documentation
-- [Developer Guide](DEVELOPER-GUIDE.md) - Extending atomic-claude2
+- [Developer Guide](DEVELOPER-GUIDE.md) - Extending atomic-claude
 - [CLAUDE.md](../CLAUDE.md) - Guidance for Claude Code
-- [GitHub](https://github.com/yourusername/atomic-claude2) - Source code & issues
+- [GitHub](https://github.com/yourusername/atomic-claude) - Source code & issues
 
 ---
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/atomic-claude2/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/atomic-claude2/discussions)
+- **Issues**: [GitHub Issues](https://github.com/yourusername/atomic-claude/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/atomic-claude/discussions)
 - **Email**: support@atomic-claude.com
 
 ---

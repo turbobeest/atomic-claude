@@ -1,6 +1,6 @@
 # Testing LLM Providers
 
-Comprehensive guide to testing LLM providers in atomic-claude2.
+Comprehensive guide to testing LLM providers in atomic-claude.
 
 ## Test Categories
 

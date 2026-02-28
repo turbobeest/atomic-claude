@@ -6,16 +6,22 @@ Triggers dashboard refresh after task completion.
 Writes current-task.json, session-tokens.json, and errors.json for dashboard consumption.
 """
 
-import fcntl
 import json
 import logging
 import os
+import sys
 import tempfile
 import urllib.request
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
+
+try:
+    import fcntl
+    _HAS_FCNTL = True
+except ImportError:
+    _HAS_FCNTL = False
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +46,9 @@ def _get_state_dir(atomic_root: Optional[Path] = None) -> Path:
 
 @contextmanager
 def _locked_file(filepath: Path, mode: str = "r+"):
-    """Context manager providing exclusive file locking via fcntl.flock.
+    """Context manager providing exclusive file locking.
+
+    Uses fcntl.flock on Unix, msvcrt.locking on Windows.
 
     Args:
         filepath: Path to the file to lock
@@ -52,10 +60,21 @@ def _locked_file(filepath: Path, mode: str = "r+"):
         filepath.write_text("{}")
     fh = open(filepath, mode)
     try:
-        fcntl.flock(fh, fcntl.LOCK_EX)
+        if _HAS_FCNTL:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+        elif sys.platform == 'win32':
+            import msvcrt
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
         yield fh
     finally:
-        fcntl.flock(fh, fcntl.LOCK_UN)
+        if _HAS_FCNTL:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+        elif sys.platform == 'win32':
+            import msvcrt
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
         fh.close()
 
 
@@ -321,13 +340,17 @@ def _restart_dashboard(atomic_root: Path, port: str) -> bool:
     env["ATOMIC_TASKS_PORT"] = port
 
     try:
-        subprocess.Popen(
-            ["bash", str(script)],
+        popen_kwargs = dict(
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
         )
+        if sys.platform == 'win32':
+            popen_kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs['start_new_session'] = True
+
+        subprocess.Popen(["bash", str(script)], **popen_kwargs)
     except Exception as e:
         logger.warning("Failed to start dashboard: %s", e)
         return False

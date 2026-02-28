@@ -426,23 +426,39 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
             print(f"   Example: python main.py backtrack {phase} {expected_prefix + 1:03d}")
             return
 
-    # Step 1: Clear memory and graph (safe — these are supplementary data)
-    _clear_memory(phases_to_clear, phase, phase_name, task, task_num)
-    _clear_graph(phases_to_clear, phase, phase_name, task, task_num)
+    # Write backtrack-in-progress marker so interrupted backtracks are detectable
+    backtrack_marker = atomic_root / ".state" / "backtrack-in-progress"
+    backtrack_marker.parent.mkdir(parents=True, exist_ok=True)
+    backtrack_marker.write_text(json.dumps({
+        "target_phase": phase,
+        "target_task": task,
+        "started_at": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).isoformat(),
+    }))
 
-    # Step 2: Clear artifacts (file deletions)
-    _clear_artifacts(phases_to_clear, phase, phase_name, task, task_num)
+    try:
+        # Step 1: Clear memory and graph (safe — these are supplementary data)
+        _clear_memory(phases_to_clear, phase, phase_name, task, task_num)
+        _clear_graph(phases_to_clear, phase, phase_name, task, task_num)
 
-    # Step 3: Update state in memory (modify dict but don't write yet)
-    _clear_state(state, state_file, phase, phase_name, task, task_num, phases_to_clear)
+        # Step 2: Clear artifacts (file deletions)
+        _clear_artifacts(phases_to_clear, phase, phase_name, task, task_num)
 
-    # Step 4: Write state LAST so crash during cleanup doesn't leave
-    # state marked as backtracked while artifacts still exist (Finding #10, #11)
-    write_json(state_file, state)
+        # Step 3: Update state in memory (modify dict but don't write yet)
+        _clear_state(state, state_file, phase, phase_name, task, task_num, phases_to_clear)
 
-    # Step 5: Prompt for optional code cleanup
-    project_root = atomic_root.parent
-    _prompt_code_cleanup(project_root, force)
+        # Step 4: Write state LAST so crash during cleanup doesn't leave
+        # state marked as backtracked while artifacts still exist (Finding #10, #11)
+        write_json(state_file, state)
+
+        # Step 5: Prompt for optional code cleanup
+        project_root = atomic_root.parent
+        _prompt_code_cleanup(project_root, force)
+    finally:
+        # Remove marker — backtrack is complete (or failed and state is untouched)
+        if backtrack_marker.exists():
+            backtrack_marker.unlink()
 
     # Show resume command
     print(f"\n✅ Backtrack complete!")

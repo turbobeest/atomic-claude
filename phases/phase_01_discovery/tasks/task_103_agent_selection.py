@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.llm import invoke_llm as invoke
-from core.ui import phase_header, success, error, warning, info, step, wrap_text
+from core.ui import success, warning, info, step, wrap_text
 from core.utils.file_ops import write_json
 
 

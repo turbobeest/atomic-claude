@@ -83,7 +83,7 @@ def run_phase_tasks(
         phase_id: Phase identifier (e.g., "0-setup", "1-discovery")
         tasks: List of (task_id, task_name, task_callable) tuples
         task_artifacts: Dict mapping task_id to expected artifact filenames
-        atomic_root: Path to atomic-claude2 root
+        atomic_root: Path to atomic-claude root
         output_dir: Phase output directory
         uat_mode: Whether running in UAT mode
         resume_at: Optional task ID to resume from

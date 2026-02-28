@@ -145,7 +145,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     _start_falkordb(atomic_root, uat_mode)
 
     # Record environment to config
-    _record_environment(config_file, os_type)
+    try:
+        _record_environment(config_file, os_type)
+    except Exception as e:
+        logger.error("Failed to record environment configuration: %s", e)
+        print(print_red(f"  ✗ Failed to save environment configuration: {e}"))
+        return False
 
     # Record substantive memory
     if mem:

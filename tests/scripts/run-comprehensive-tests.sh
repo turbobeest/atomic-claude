@@ -267,7 +267,7 @@ fi
 echo ""
 echo "For detailed results, see:"
 echo "  - Unit Tests: pytest output above"
-echo "  - Continuity: /tmp/atomic-claude2-test-*/atomic-claude2/"
+echo "  - Continuity: /tmp/atomic-claude-test-*/atomic-claude/"
 echo "  - Functional: .outputs/ directories"
 echo "  - UX/UI: test/uxui-evaluation-results.txt"
 echo ""

@@ -1,6 +1,6 @@
 # Adding New LLM Providers
 
-Guide to implementing a new LLM provider for atomic-claude2.
+Guide to implementing a new LLM provider for atomic-claude.
 
 ## Overview
 

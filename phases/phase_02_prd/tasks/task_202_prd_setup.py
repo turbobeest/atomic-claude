@@ -10,11 +10,10 @@ Steps:
 """
 
 import logging
-import os
 import sys
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -26,7 +25,7 @@ from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, print_magenta, prompt_user, clear_input_buffer
 )
-from core.utils.file_ops import ensure_dir, read_file, write_file
+from core.utils.file_ops import ensure_dir, write_file
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:

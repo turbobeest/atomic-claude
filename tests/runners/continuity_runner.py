@@ -84,7 +84,7 @@ class ContinuityTestRunner:
         Initialize the continuity test runner.
 
         Args:
-            atomic_root: Root directory of atomic-claude2 (defaults to detected root)
+            atomic_root: Root directory of atomic-claude (defaults to detected root)
         """
         self.atomic_root = atomic_root or Path(__file__).parent.parent.parent
         self.state_manager = StateManager(self.atomic_root / ".state")

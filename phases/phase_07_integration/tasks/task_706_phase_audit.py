@@ -5,8 +5,11 @@ AI-driven audit selection from audit repository.
 This task delegates to the audit system.
 """
 
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -40,8 +43,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         audit_context = query_audits_for_task(
             audit_graph, f"Phase 7: 7-integration", phase="7",
         )
-    except Exception:
-        pass  # Graceful degradation when audit graph unavailable
+    except Exception as e:
+        logger.debug("Audit graph unavailable: %s", e)
 
     # Delegate to audit system
     return run_phase_audit(

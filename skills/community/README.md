@@ -1,6 +1,6 @@
 # Community Skills
 
-This directory contains **65 third-party skills** from upstream repositories, tracked in the atomic-claude2 git repository for offline use.
+This directory contains **65 third-party skills** from upstream repositories, tracked in the atomic-claude git repository for offline use.
 
 ---
 
@@ -77,7 +77,7 @@ cd superpowers && git pull && cd ..
 cd trailofbits && git pull && cd ..
 cd ralph && git pull && cd ..
 
-# Commit updates to atomic-claude2
+# Commit updates to atomic-claude
 cd ../../..
 git add .claude/skills/community/
 git commit -m "Update community skills from upstream"
@@ -215,7 +215,7 @@ To add new community skills:
 
 1. Clone skill repository to `community/`
 2. Update `../SOURCES.md` with skill details
-3. Commit to atomic-claude2:
+3. Commit to atomic-claude:
    ```bash
    git add .claude/skills/community/<new-skill>
    git add .claude/skills/SOURCES.md

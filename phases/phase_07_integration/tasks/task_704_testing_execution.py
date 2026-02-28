@@ -50,7 +50,8 @@ def run_integration_tests(atomic_root: Path, setup_data: Dict) -> Dict:
         "suite": "e2e",
         "total": e2e_tests,
         "passed": e2e_passed,
-        "failed": e2e_tests - e2e_passed
+        "failed": e2e_tests - e2e_passed,
+        "simulated": True
     })
 
     # Acceptance tests
@@ -62,7 +63,8 @@ def run_integration_tests(atomic_root: Path, setup_data: Dict) -> Dict:
         "suite": "acceptance",
         "total": acceptance_tests,
         "passed": acceptance_passed,
-        "failed": acceptance_tests - acceptance_passed
+        "failed": acceptance_tests - acceptance_passed,
+        "simulated": True
     })
 
     # Performance benchmarks
@@ -74,7 +76,8 @@ def run_integration_tests(atomic_root: Path, setup_data: Dict) -> Dict:
         "suite": "performance",
         "total": perf_tests,
         "passed": perf_passed,
-        "failed": perf_tests - perf_passed
+        "failed": perf_tests - perf_passed,
+        "simulated": True
     })
 
     failed = total_tests - passed
@@ -83,7 +86,8 @@ def run_integration_tests(atomic_root: Path, setup_data: Dict) -> Dict:
         "tests_run": total_tests,
         "tests_passed": passed,
         "tests_failed": failed,
-        "test_details": test_details
+        "test_details": test_details,
+        "simulated": True
     }
 
 
@@ -122,10 +126,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             "success_rate": 100.0,
             "executed_at": datetime.now(timezone.utc).isoformat(),
             "mode": "uat",
+            "simulated": True,
             "test_suites": [
-                {"suite": "e2e", "total": 8, "passed": 8, "failed": 0},
-                {"suite": "acceptance", "total": 7, "passed": 7, "failed": 0},
-                {"suite": "performance", "total": 3, "passed": 3, "failed": 0}
+                {"suite": "e2e", "total": 8, "passed": 8, "failed": 0, "simulated": True},
+                {"suite": "acceptance", "total": 7, "passed": 7, "failed": 0, "simulated": True},
+                {"suite": "performance", "total": 3, "passed": 3, "failed": 0, "simulated": True}
             ]
         }
 
@@ -191,6 +196,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         summary = f"Integration tests have significant failures ({tests_failed}/{tests_run} failed)"
 
     # Write results
+    is_simulated = test_results.get("simulated", False)
     results = {
         "tests_run": tests_run,
         "tests_passed": tests_passed,
@@ -199,10 +205,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         "success_rate": success_rate,
         "executed_at": datetime.now(timezone.utc).isoformat(),
         "mode": "normal",
+        "simulated": is_simulated,
         "test_suites": test_results.get("test_details", [])
     }
 
     write_json(results_file, results)
+
+    if tests_failed > 0:
+        print(print_red("  Integration test execution complete with failures"))
+        return False
 
     print(print_green("  Integration test execution complete"))
     return True

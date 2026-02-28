@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.llm import invoke_llm as invoke
-from core.ui import phase_header, success, error, warning, info, step
+from core.ui import success, warning, step
 
 
 # Diagram type definitions
@@ -294,7 +294,7 @@ def _load_approach_context(output_dir: Path) -> Dict[str, str]:
     if approach_file.exists():
         with open(approach_file) as f:
             data = json.load(f)
-        context["approach_name"] = data.get("name", "unknown")
+        context["approach_name"] = data.get("direction", {}).get("summary", data.get("name", "unknown"))
         context["approach_summary"] = data.get("summary", "")
 
     # Load dialogue synthesis (full vision, constraints, impact)

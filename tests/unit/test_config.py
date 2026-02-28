@@ -39,7 +39,7 @@ from core.config import (
 def temp_atomic_root(tmp_path):
     """Create temporary atomic root directory.
 
-    In the real deployment, atomic-claude2 lives inside a parent project
+    In the real deployment, atomic-claude lives inside a parent project
     directory, and .outputs/ lives at the parent level. So atomic_root
     is a child of the project root.
     """

@@ -1,6 +1,6 @@
 # Atomic Claude 2.0 - Developer Guide
 
-Complete guide for developers working on atomic-claude2 or extending it with new phases and tasks.
+Complete guide for developers working on atomic-claude or extending it with new phases and tasks.
 
 Version: 2.0
 Last Updated: 2026-02-07
@@ -36,8 +36,8 @@ Last Updated: 2026-02-07
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/atomic-claude2.git
-cd atomic-claude2
+git clone https://github.com/yourusername/atomic-claude.git
+cd atomic-claude
 
 # Install dependencies
 pip install -r requirements.txt
@@ -57,7 +57,7 @@ python main.py run 0
 ## Project Structure
 
 ```
-atomic-claude2/
+atomic-claude/
 ├── main.py                  # Entry point
 │
 ├── core/                    # Core modules (DO NOT MOVE)
@@ -136,10 +136,10 @@ Create a `.env` file:
 
 ```bash
 # Core paths
-ATOMIC_ROOT=/path/to/atomic-claude2
-ATOMIC_OUTPUT_DIR=/path/to/atomic-claude2/.outputs
-ATOMIC_STATE_DIR=/path/to/atomic-claude2/.state
-ATOMIC_LOG_DIR=/path/to/atomic-claude2/.logs
+ATOMIC_ROOT=/path/to/atomic-claude
+ATOMIC_OUTPUT_DIR=/path/to/atomic-claude/.outputs
+ATOMIC_STATE_DIR=/path/to/atomic-claude/.state
+ATOMIC_LOG_DIR=/path/to/atomic-claude/.logs
 
 # LLM configuration
 CLAUDE_PROVIDER=max                     # max, api, ollama, bedrock
@@ -242,7 +242,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-# Ensure atomic-claude2 root is in path
+# Ensure atomic-claude root is in path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.state import StateManager
@@ -1171,7 +1171,7 @@ python main.py backtrack 2
 
 #### Issue: Directory purity violation
 
-**Cause**: Project files in atomic-claude2 directory
+**Cause**: Project files in atomic-claude directory
 
 **Fix**:
 ```bash
@@ -1214,7 +1214,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 ### Issue: "Module not found"
 
-**Solution**: Ensure atomic-claude2 root is in Python path
+**Solution**: Ensure atomic-claude root is in Python path
 
 ```python
 import sys
@@ -1256,13 +1256,13 @@ python orchestration/pre_task_validation.py cleanup  # Auto-fix
 - [API Reference](API-REFERENCE.md) - Complete API documentation
 - [User Guide](USER-GUIDE.md) - User documentation
 - [CLAUDE.md](../CLAUDE.md) - Guidance for Claude Code
-- [GitHub Issues](https://github.com/yourusername/atomic-claude2/issues) - Bug reports & feature requests
+- [GitHub Issues](https://github.com/yourusername/atomic-claude/issues) - Bug reports & feature requests
 
 ---
 
 ## Questions?
 
-When working on atomic-claude2:
+When working on atomic-claude:
 1. **Read CLAUDE.md** - Architecture guidance
 2. **Check existing code** - Follow established patterns
 3. **Write tests** - Ensure quality

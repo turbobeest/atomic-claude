@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.ui import phase_header, success, error, warning, info, step
+from core.ui import success, warning, step
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
@@ -279,7 +279,7 @@ def _get_approach_name(output_dir: Path) -> str:
         try:
             with open(approach_file) as f:
                 data = json.load(f)
-            return data.get('name', 'N/A')
+            return data.get('direction', {}).get('summary', data.get('name', 'N/A'))
         except Exception as e:
             logger.debug("Failed to read approach file: %s", e)
     return "N/A"
@@ -305,7 +305,7 @@ def _get_agent_count(output_dir: Path) -> int:
         try:
             with open(agents_file) as f:
                 data = json.load(f)
-            return len(data.get('selected', []))
+            return len(data.get('selected_experts', data.get('selected', [])))
         except Exception as e:
             logger.debug("Failed to read agents file: %s", e)
     return 0

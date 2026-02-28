@@ -3,16 +3,16 @@
 ## Dual-Repository Setup
 
 ### Development Instance (This Repo)
-- **Location**: `/Users/jamesterbeest/dev/atomic-claude`
+- **Location**: `W:\dev\atomic-claude`
 - **Branch**: `python`
 - **Purpose**: Primary development, debugging, and feature implementation
 - **Upstream**: https://github.com/turbobeest/atomic-claude
 
 ### Operational Instance
-- **Location**: `/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/atomic-claude`
-- **Purpose**: Live operational testing against real projects
+- **Location**: `W:\dev\eloreum\atomic-claude`
+- **Purpose**: Live operational testing against real projects (eloreum MVP)
 - **Sync**: Bug fixes and features should be applied to BOTH repos
-- **Status**: ✅ Configured (2026-02-18)
+- **Status**: Pending setup (2026-02-28)
 - **Setup**: Cloned from python branch, embedded in host project
 - **Dashboard**: Correctly detects host project context (verified)
 
@@ -55,12 +55,12 @@ This includes:
 
 ### Initial Setup (Completed 2026-02-18)
 
-**Location**: `/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/`
+**Location**: `W:\dev\eloreum\`
 
-**Steps Performed**:
+**Steps**:
 ```bash
 # 1. Initialize host project as git repo
-cd /Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER
+cd W:\dev\eloreum
 git init
 
 # 2. Clone atomic-claude
@@ -81,20 +81,19 @@ git add -A && git commit -m "Initial project setup with atomic-claude"
 ```
 
 ### Path Detection Verification
-✅ **Dashboard correctly detects host project**:
-- ATOMIC_ROOT: `/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/atomic-claude`
-- PROJECT_ROOT: `/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER`
-- PID files: `/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/.state/dashboard/`
+**Dashboard should correctly detect host project**:
+- ATOMIC_ROOT: `W:\dev\eloreum\atomic-claude`
+- PROJECT_ROOT: `W:\dev\eloreum`
+- PID files: `W:\dev\eloreum\.state\dashboard\`
 
 **Test commands**:
 ```bash
 # Start dashboard from host project root
-cd /Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER
+cd W:\dev\eloreum
 bash atomic-claude/dashboard/start-dashboard.sh
 
 # Verify path detection
 curl http://127.0.0.1:5174/api/root
-# Returns: {"root":"/Users/.../CUI-ENGAGEMENT-MANAGER/atomic-claude"}
 
 # Check PID file location
 ls .state/dashboard/
@@ -103,8 +102,8 @@ ls .state/dashboard/
 
 ### Running Pipeline in Operational Instance
 ```bash
-# From CUI-ENGAGEMENT-MANAGER root
-cd /Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER
+# From eloreum root
+cd W:\dev\eloreum
 
 # Run phase
 python atomic-claude/main.py run <phase>
@@ -117,9 +116,9 @@ python atomic-claude/main.py backtrack <phase> <task>
 ```
 
 **All artifacts go to host project**:
-- `.state/` - Pipeline state for CUI-ENGAGEMENT-MANAGER
-- `.outputs/` - Working artifacts for CUI-ENGAGEMENT-MANAGER
-- `.logs/` - Execution logs for CUI-ENGAGEMENT-MANAGER
+- `.state/` - Pipeline state for eloreum
+- `.outputs/` - Working artifacts for eloreum
+- `.logs/` - Execution logs for eloreum
 
 ## Workflow Best Practices
 
@@ -133,7 +132,7 @@ When fixing bugs or adding features:
    - Commit to git
 
 2. **Replicate to operational instance**
-   - Apply same changes to `/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/atomic-claude`
+   - Apply same changes to `W:\dev\eloreum\atomic-claude`
    - Test in operational context
    - Verify against real project requirements
 
@@ -151,10 +150,11 @@ When fixing bugs or adding features:
 # In dev repo
 git add <files>
 git commit -m "Fix: description"
+git push origin python
 
 # In operational repo (if needed)
-cd /Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/atomic-claude
-# Apply same changes or copy files
+cd W:\dev\eloreum\atomic-claude
+git pull origin python
 ```
 
 ### 4. Common Operations
@@ -162,11 +162,11 @@ cd /Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/atomic-claude
 #### Check Status Across Both Repos
 ```bash
 # Dev repo
-cd /Users/jamesterbeest/dev/atomic-claude
+cd W:\dev\atomic-claude
 python main.py status
 
 # Operational repo
-cd /Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/atomic-claude
+cd W:\dev\eloreum\atomic-claude
 python main.py status
 ```
 
@@ -174,25 +174,25 @@ python main.py status
 
 **IMPORTANT**: The dashboard should ONLY run from the operational repo, not from the dev repo!
 
-**In DEV repo** (`/Users/jamesterbeest/dev/atomic-claude`):
+**In DEV repo** (`W:\dev\atomic-claude`):
 - Dashboard should be **OFF** during normal operations
 - Only start it temporarily when testing/debugging dashboard features
 - This repo is for developing atomic-claude itself, not running it
 
-**In OPERATIONAL repo** (`/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER`):
+**In OPERATIONAL repo** (`W:\dev\eloreum`):
 - Dashboard should be **ON** and monitors the host project
 - Start from host project root, NOT from inside atomic-claude/
 
 ```bash
-# From CUI-ENGAGEMENT-MANAGER root:
-cd /Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER
+# From eloreum root:
+cd W:\dev\eloreum
 bash atomic-claude/dashboard/start-dashboard.sh
 
-# Dashboard monitors CUI-ENGAGEMENT-MANAGER/.state/, .outputs/, .logs/
+# Dashboard monitors eloreum/.state/, .outputs/, .logs/
 # NOT atomic-claude's internal state
 
 # View dashboard
-open http://127.0.0.1:5174
+start http://127.0.0.1:5174
 
 # Sub-apps:
 # - Agent Manager: http://127.0.0.1:5175
@@ -352,5 +352,5 @@ When core systems change (config, state, LLM routing, orchestration):
 
 ---
 
-**Last Updated**: 2026-02-18
-**Current Focus**: Initial setup and dual-repo coordination
+**Last Updated**: 2026-02-28
+**Current Focus**: Operational testing with eloreum MVP

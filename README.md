@@ -4,7 +4,7 @@ Python-based SDLC pipeline with phased orchestration, LLM routing, memory, and a
 
 ## Project Status
 
-⚠️ **Operational Testing** - Pipeline is functional but under active testing.
+⚠️ **Operational Testing** - Pipeline is functional and entering live operational testing.
 
 **For Early Adopters:**
 - Expect to encounter bugs in current tasks
@@ -38,7 +38,9 @@ bash dashboard/start-dashboard.sh
 bash dashboard/stop-dashboard.sh
 
 # View in browser
-open http://127.0.0.1:5174
+# macOS: open http://127.0.0.1:5174
+# Windows: start http://127.0.0.1:5174
+# Linux: xdg-open http://127.0.0.1:5174
 ```
 
 ### Testing
@@ -239,4 +241,4 @@ MIT
 
 - **GitHub**: https://github.com/turbobeest/atomic-claude
 - **Issues**: https://github.com/turbobeest/atomic-claude/issues
-- **Branch**: `python` (active development)
+- **Branches**: `python` (active development), `main` (stable)

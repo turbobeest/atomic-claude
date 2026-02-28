@@ -20,6 +20,7 @@ Parallel DAG engine that:
 import logging
 import os
 import re
+import shlex
 import sys
 import json
 import time
@@ -650,7 +651,7 @@ def _make_project_cmd(cmd: str, project_root: Path) -> str:
     So that `cargo test`, `go test`, etc. run in the right directory.
     """
     env_source = 'test -f "$HOME/.cargo/env" && . "$HOME/.cargo/env"; '
-    return f"{env_source}cd '{project_root}' && {cmd}"
+    return f"{env_source}cd {shlex.quote(str(project_root))} && {cmd}"
 
 
 # ---------------------------------------------------------------------------
@@ -916,7 +917,7 @@ Output ONLY the {language} test code, no explanations. Wrap in ```{fence_lang} f
         # Run the verification script from project root (uses relative paths)
         env_source = 'test -f "$HOME/.cargo/env" && . "$HOME/.cargo/env"; '
         exit_code, stdout, stderr = run_bash_command(
-            f"{env_source}cd '{project_root}' && bash '{test_file}'", "5-implementation", "504", timeout=30,
+            f"{env_source}cd {shlex.quote(str(project_root))} && bash {shlex.quote(str(test_file))}", "5-implementation", "504", timeout=30,
         )
     else:
         # Standard: run tests — expect them to FAIL
@@ -1148,7 +1149,7 @@ If unsure of the project layout, place files in src/ or the appropriate module d
             if verify_script.exists():
                 env_source = 'test -f "$HOME/.cargo/env" && . "$HOME/.cargo/env"; '
                 exit_code, stdout, stderr = run_bash_command(
-                    f"{env_source}cd '{project_root}' && bash '{verify_script}'", "5-implementation", "504", timeout=30,
+                    f"{env_source}cd {shlex.quote(str(project_root))} && bash {shlex.quote(str(verify_script))}", "5-implementation", "504", timeout=30,
                 )
                 if exit_code == 0:
                     if not quiet:

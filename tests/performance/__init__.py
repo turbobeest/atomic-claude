@@ -1,1 +1,1 @@
-"""Performance tests for atomic-claude2."""
+"""Performance tests for atomic-claude."""

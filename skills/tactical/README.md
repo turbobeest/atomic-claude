@@ -219,7 +219,7 @@ atomic_invoke "agents/expert-agents/.../python-pro.md" "output.txt" \
 
 ```bash
 # Start Claude Code
-cd /Users/jamesterbeest/dev/atomic-claude2
+cd /Users/jamesterbeest/dev/atomic-claude
 claude
 
 # Use slash command
@@ -475,5 +475,5 @@ A: Keeps main session clean. Skill work is disposable, shouldn't pollute strateg
 
 ---
 
-*Skills catalog for atomic-claude2*
+*Skills catalog for atomic-claude*
 *Phase 1 implemented: February 10, 2026*

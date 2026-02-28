@@ -1,6 +1,6 @@
 # Memory System - Usage Examples
 
-Real-world examples of using the Memory System in atomic-claude2.
+Real-world examples of using the Memory System in atomic-claude.
 
 ## Example 1: Basic Task Memory
 
