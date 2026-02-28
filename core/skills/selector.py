@@ -1,6 +1,7 @@
 """Graph-aware skill selection engine with gravity-based filtering."""
 
 import logging
+import math
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -102,14 +103,19 @@ class SkillSelector:
             except Exception as e:
                 logger.debug("Workflow match failed: %s", e)
 
-        # Stage 2: Structural traversal (phase-based)
+        # Stage 2: Structural traversal (phase-based, quality-weighted)
         if not result_skills:
-            # Ported from falkordb_bridge.py action_select Stage 2
+            # Quality-weighted ordering: avg_success_score * log(times_used + 1)
+            # High quality + moderate use beats low quality + heavy use
             cypher = (
                 "MATCH (s:Skill)-[:BELONGS_TO]->(p:SDLCPhase) "
                 "WHERE s.installed = true "
-                "RETURN DISTINCT s "
-                "ORDER BY s.times_used DESC "
+                "WITH DISTINCT s, "
+                "CASE WHEN s.times_used > 0 "
+                "THEN s.avg_success_score * log(toFloat(s.times_used) + 1.0) "
+                "ELSE 0.0 END AS quality_score "
+                "RETURN s "
+                "ORDER BY quality_score DESC "
                 "LIMIT $limit"
             )
             try:
@@ -202,19 +208,25 @@ class SkillSelector:
         for skill in SKILL_CATALOG:
             if profile_name not in skill.installable_in_profiles():
                 continue
-            # Simple keyword match score
-            score = 0
+            # Keyword relevance score
+            relevance = 0
             name_lower = skill.name.lower()
             desc_lower = skill.description.lower()
             for word in prompt_lower.split():
                 if len(word) < 3:
                     continue
                 if word in name_lower:
-                    score += 2
+                    relevance += 2
                 if word in desc_lower:
-                    score += 1
-            if score > 0:
-                scored.append((score, skill))
+                    relevance += 1
+            if relevance > 0:
+                # Quality multiplier: avg_success_score * log(times_used + 1)
+                if skill.times_used > 0:
+                    quality = skill.avg_success_score * math.log(skill.times_used + 1)
+                else:
+                    quality = 0.5  # Neutral prior for unused skills
+                combined = relevance * max(quality, 0.1)
+                scored.append((combined, skill))
 
         scored.sort(key=lambda x: x[0], reverse=True)
         skills = [s for _, s in scored[:params["max_skills"]]]

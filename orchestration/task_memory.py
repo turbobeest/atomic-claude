@@ -44,6 +44,10 @@ class TaskMemory:
         self.task_name = task_name
         self._flush_fn = flush_fn
         self._flushed_count: int = 0
+        # Skill context (set by phase_runner after skill selection)
+        self._skill_context: Optional[str] = None
+        self._skill_selection = None
+        self._gravity: Optional[str] = None
 
     @staticmethod
     def _format_entries(entries: List[Tuple[str, str]], labels_map: Dict[str, str],
@@ -92,6 +96,33 @@ class TaskMemory:
     def warning(self, text: str) -> None:
         """Record an issue or concern."""
         self._entries.append(("warning", text))
+
+    def set_skill_context(self, context: str, skill_selection, gravity: str) -> None:
+        """Attach skill context from phase_runner after skill selection.
+
+        Args:
+            context: Formatted skill text for LLM prompts.
+            skill_selection: Raw SkillSelection object.
+            gravity: Gravity level string (e.g. "light", "standard", "intensive").
+        """
+        self._skill_context = context
+        self._skill_selection = skill_selection
+        self._gravity = gravity
+
+    @property
+    def skill_context(self) -> Optional[str]:
+        """Formatted skill context string, or None if not set."""
+        return self._skill_context
+
+    @property
+    def skill_selection(self):
+        """Raw SkillSelection object, or None if not set."""
+        return self._skill_selection
+
+    @property
+    def gravity_level(self) -> Optional[str]:
+        """Gravity level string, or None if not set."""
+        return self._gravity
 
     def checkpoint(self, label: str = "") -> None:
         """Flush entries accumulated since last checkpoint to persistent memory.
@@ -149,8 +180,13 @@ class TaskMemory:
         for category, text in self._entries:
             grouped.setdefault(category, []).append(text)
 
-        return {
+        meta = {
             "task_memory": grouped,
             "phase_id": self.phase_id,
             "task_id": self.task_id,
         }
+        if self._skill_selection and self._skill_selection.skills:
+            meta["skills_used"] = [s.id for s in self._skill_selection.skills]
+        if self._gravity:
+            meta["gravity"] = self._gravity
+        return meta

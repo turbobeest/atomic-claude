@@ -190,6 +190,25 @@ def run_phase_tasks(
         except Exception as e:
             logger.debug("Gravity/skill assessment skipped: %s", e)
 
+        # Format skill context and attach to mem + context var
+        if skill_selection and skill_selection.skills and gravity_assessment:
+            try:
+                from core.skills.context_formatter import (
+                    format_skill_context, set_active_skill_context,
+                )
+                skill_ctx = format_skill_context(
+                    skill_selection, gravity_assessment.gravity,
+                )
+                if skill_ctx:
+                    mem.set_skill_context(
+                        skill_ctx, skill_selection,
+                        gravity_assessment.gravity.value,
+                    )
+                    set_active_skill_context(skill_ctx)
+                    logger.info("Skill context attached to mem for task %s", task_id)
+            except Exception as e:
+                logger.debug("Skill context formatting skipped: %s", e)
+
         try:
             # Call task — pass graph only if the function accepts it (Finding #26)
             if graph is not None:
@@ -204,6 +223,13 @@ def run_phase_tasks(
                     success = task_func(mem)
             else:
                 success = task_func(mem)
+
+            # Clear skill context var after task execution
+            try:
+                from core.skills.context_formatter import set_active_skill_context
+                set_active_skill_context(None)
+            except Exception:
+                pass
 
             # Treat None as success; only explicit False is failure (Finding #28)
             if success is False:
@@ -251,8 +277,16 @@ def run_phase_tasks(
             if gravity_assessment and skill_selection and skill_selection.skills:
                 try:
                     from core.skills import SkillLearning
+                    from core.skills.scoring import compute_task_score
                     learning = SkillLearning()
-                    task_score = 1.0 if success is not False else 0.3
+                    task_score = compute_task_score(
+                        success=(success is not False),
+                        task_id=task_id,
+                        expected_artifacts=task_artifacts.get(task_id, []),
+                        actual_artifacts=artifacts,
+                        mem_entry_count=len(mem._entries),
+                        gravity=gravity_assessment.gravity.value,
+                    )
                     learning.log_usage(
                         task_id=task_id,
                         skill_ids=[s.id for s in skill_selection.skills],

@@ -302,6 +302,18 @@ class FeatureAwareLLMInvoker:
         """
         params = kwargs.copy()
 
+        # Auto-inject skill context into system_prompt
+        try:
+            from core.skills.context_formatter import get_active_skill_context
+            skill_ctx = get_active_skill_context()
+            if skill_ctx:
+                existing = params.get("system_prompt") or ""
+                params["system_prompt"] = (
+                    f"{existing}\n\n{skill_ctx}".strip() if existing else skill_ctx
+                )
+        except Exception:
+            pass  # Skill context injection is best-effort
+
         # Extended thinking
         if use_extended_thinking:
             can_use, reason = self._can_use_extended_thinking()
