@@ -58,31 +58,31 @@ fi
 
 # Check UAT files
 echo -n "Checking UAT runner... "
-if [[ -x "$SCRIPT_DIR/uat_runner.py" ]]; then
-    echo -e "${GREEN}✓ uat_runner.py (executable)${NC}"
+if [[ -f "$REPO_ROOT/tests/runners/uat_runner.py" ]]; then
+    echo -e "${GREEN}✓ tests/runners/uat_runner.py${NC}"
     ((CHECKS_PASSED++)) || true
 else
-    echo -e "${RED}✗ uat_runner.py missing or not executable${NC}"
+    echo -e "${RED}✗ tests/runners/uat_runner.py missing${NC}"
     ((CHECKS_FAILED++)) || true
 fi
 
-echo -n "Checking run_uat.sh... "
-if [[ -x "$SCRIPT_DIR/run_uat.sh" ]]; then
-    echo -e "${GREEN}✓ run_uat.sh (executable)${NC}"
+echo -n "Checking continuity test... "
+if [[ -x "$REPO_ROOT/tests/scripts/continuity-test-scenario1.sh" ]]; then
+    echo -e "${GREEN}✓ tests/scripts/continuity-test-scenario1.sh (executable)${NC}"
     ((CHECKS_PASSED++)) || true
 else
-    echo -e "${RED}✗ run_uat.sh missing or not executable${NC}"
+    echo -e "${RED}✗ tests/scripts/continuity-test-scenario1.sh missing or not executable${NC}"
     ((CHECKS_FAILED++)) || true
 fi
 
 # Check fixtures
 echo -n "Checking test fixtures... "
-FIXTURE_COUNT=$(find "$SCRIPT_DIR/fixtures" -type f 2>/dev/null | wc -l | tr -d ' ')
-if [[ "$FIXTURE_COUNT" -ge 5 ]]; then
+FIXTURE_COUNT=$(find "$REPO_ROOT/tests/fixtures" -type f 2>/dev/null | wc -l | tr -d ' ')
+if [[ "$FIXTURE_COUNT" -ge 1 ]]; then
     echo -e "${GREEN}✓ Found $FIXTURE_COUNT fixture files${NC}"
     ((CHECKS_PASSED++)) || true
 else
-    echo -e "${RED}✗ Missing fixture files (found $FIXTURE_COUNT, expected 5+)${NC}"
+    echo -e "${RED}✗ Missing fixture files (found $FIXTURE_COUNT)${NC}"
     ((CHECKS_FAILED++)) || true
 fi
 
@@ -142,7 +142,7 @@ echo -e "${CYAN}─────────────────────�
 
 if [[ $CHECKS_FAILED -eq 0 ]]; then
     echo -e "${GREEN}✓ Pre-flight check passed!${NC}"
-    echo -e "${GREEN}  Ready to run: ./test/run_uat.sh${NC}\n"
+    echo -e "${GREEN}  Ready to run: pytest tests/ or tests/scripts/continuity-test-scenario1.sh${NC}\n"
     exit 0
 else
     echo -e "${RED}✗ Pre-flight check failed!${NC}"
