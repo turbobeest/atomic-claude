@@ -314,6 +314,18 @@ class FeatureAwareLLMInvoker:
         except Exception:
             pass  # Skill context injection is best-effort
 
+        # Auto-inject graph context into system_prompt
+        try:
+            from core.graph.context_injector import get_active_graph_context
+            graph_ctx = get_active_graph_context()
+            if graph_ctx:
+                existing = params.get("system_prompt") or ""
+                params["system_prompt"] = (
+                    f"{existing}\n\n{graph_ctx}".strip() if existing else graph_ctx
+                )
+        except Exception:
+            pass  # Graph context injection is best-effort
+
         # Extended thinking
         if use_extended_thinking:
             can_use, reason = self._can_use_extended_thinking()
@@ -364,6 +376,30 @@ class FeatureAwareLLMInvoker:
             Response chunks from LLM
         """
         params = kwargs.copy()
+
+        # Auto-inject skill context into system_prompt
+        try:
+            from core.skills.context_formatter import get_active_skill_context
+            skill_ctx = get_active_skill_context()
+            if skill_ctx:
+                existing = params.get("system_prompt") or ""
+                params["system_prompt"] = (
+                    f"{existing}\n\n{skill_ctx}".strip() if existing else skill_ctx
+                )
+        except Exception:
+            pass
+
+        # Auto-inject graph context into system_prompt
+        try:
+            from core.graph.context_injector import get_active_graph_context
+            graph_ctx = get_active_graph_context()
+            if graph_ctx:
+                existing = params.get("system_prompt") or ""
+                params["system_prompt"] = (
+                    f"{existing}\n\n{graph_ctx}".strip() if existing else graph_ctx
+                )
+        except Exception:
+            pass
 
         # Apply same feature handling as invoke
         if use_extended_thinking:

@@ -209,6 +209,29 @@ def run_phase_tasks(
             except Exception as e:
                 logger.debug("Skill context formatting skipped: %s", e)
 
+        # Format graph context (agents, traceability, memory) and set context var
+        if graph is not None and gravity_assessment:
+            try:
+                from core.graph.context_injector import (
+                    build_graph_context, set_active_graph_context,
+                )
+                graph_ctx = build_graph_context(
+                    graph=graph,
+                    phase_id=phase_id,
+                    task_id=task_id,
+                    task_name=task_name,
+                    gravity=gravity_assessment.gravity,
+                    roster=roster if not is_infrastructure_task(task_name) else None,
+                )
+                if graph_ctx:
+                    set_active_graph_context(graph_ctx)
+                    logger.info(
+                        "Graph context attached for task %s (%d chars)",
+                        task_id, len(graph_ctx),
+                    )
+            except Exception as e:
+                logger.debug("Graph context assembly skipped: %s", e)
+
         try:
             # Call task — pass graph only if the function accepts it (Finding #26)
             if graph is not None:
@@ -224,10 +247,15 @@ def run_phase_tasks(
             else:
                 success = task_func(mem)
 
-            # Clear skill context var after task execution
+            # Clear context vars after task execution
             try:
                 from core.skills.context_formatter import set_active_skill_context
                 set_active_skill_context(None)
+            except Exception:
+                pass
+            try:
+                from core.graph.context_injector import set_active_graph_context
+                set_active_graph_context(None)
             except Exception:
                 pass
 

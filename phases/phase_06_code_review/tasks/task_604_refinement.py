@@ -25,7 +25,30 @@ from core.utils.file_ops import ensure_dir, read_file, write_file
 from core.llm import invoke_llm
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def _graph_findings_to_dict(findings: list) -> dict:
+    """Convert graph ReviewFinding dicts to the format expected by the refinement logic.
+
+    Returns dict with 'totals' and 'dimensions' keys matching findings.json structure.
+    """
+    totals = {"critical": 0, "major": 0, "minor": 0, "suggestion": 0}
+    dimensions = {}
+
+    for f in findings:
+        severity = f.get("severity", "minor")
+        if severity in totals:
+            totals[severity] += 1
+
+        dim = f.get("review_dimension", "general")
+        if dim not in dimensions:
+            dimensions[dim] = {"findings": [], "totals": {"critical": 0, "major": 0, "minor": 0, "suggestion": 0}}
+        dimensions[dim]["findings"].append(f)
+        if severity in dimensions[dim]["totals"]:
+            dimensions[dim]["totals"][severity] += 1
+
+    return {"totals": totals, "dimensions": dimensions}
+
+
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 604: Refinement.
 
@@ -77,18 +100,28 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     ensure_dir(fixes_dir)
 
-    # Load findings
-    if not findings_file.exists():
-        print(print_yellow("! No findings file found"))
-        print(print_yellow("Run task 603 (Comprehensive Review) first"))
-        return False
+    # Load findings -- prefer graph, fall back to JSON file
+    findings_data = None
+    if graph:
+        try:
+            unresolved = graph.get_unresolved_findings()
+            if unresolved:
+                findings_data = _graph_findings_to_dict(unresolved)
+                logger.info("Loaded %d unresolved findings from graph", len(unresolved))
+        except Exception as e:
+            logger.debug("Graph findings unavailable, falling back to JSON: %s", e)
 
-    try:
-        findings_data = json.loads(read_file(findings_file))
-    except (json.JSONDecodeError, OSError) as e:
-        logger.error("Failed to parse findings file %s: %s", findings_file, e)
-        print(print_red(f"✗ Failed to read findings: {e}"))
-        return False
+    if findings_data is None:
+        if not findings_file.exists():
+            print(print_yellow("! No findings file found"))
+            print(print_yellow("Run task 603 (Comprehensive Review) first"))
+            return False
+        try:
+            findings_data = json.loads(read_file(findings_file))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error("Failed to parse findings file %s: %s", findings_file, e)
+            print(print_red(f"✗ Failed to read findings: {e}"))
+            return False
     totals = findings_data.get("totals", {})
     total_critical = totals.get("critical", 0)
     total_major = totals.get("major", 0)

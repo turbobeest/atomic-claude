@@ -62,12 +62,12 @@ def task_603_wrapper(mem=None, **kwargs) -> bool:
 
 def task_604_wrapper(mem=None, **kwargs) -> bool:
     """Task 604: Refinement"""
-    return task_604(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_604(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=kwargs.get("graph"))
 
 
 def task_605_wrapper(mem=None, **kwargs) -> bool:
     """Task 605: Phase audit"""
-    return task_605(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_605(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=kwargs.get("graph"))
 
 
 def task_606_wrapper(mem=None, **kwargs) -> bool:

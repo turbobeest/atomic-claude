@@ -1722,6 +1722,7 @@ def _curate_audit_selection(
     phase_num: int,
     phase_id: str,
     uat_mode: bool = False,
+    audit_context: str = "",
 ) -> list[dict]:
     """
     LLM-curated audit selection.
@@ -1741,6 +1742,9 @@ def _curate_audit_selection(
     prompt = _build_curation_prompt(
         roster, deliverables, phase_num, phase_id, len(audits)
     )
+
+    if audit_context:
+        prompt = f"## Graph-Recommended Audits\n{audit_context}\n\n{prompt}"
 
     selected_ids: list[str] = []
     rationale = ""
@@ -2074,6 +2078,7 @@ def run_phase_audit(
     phase_id: str,
     output_dir: Path,
     uat_mode: bool = False,
+    audit_context: str = "",
 ) -> bool:
     """
     Run LLM-driven audit for a phase.
@@ -2141,7 +2146,8 @@ def run_phase_audit(
     deliverables = _gather_deliverables(output_dir, extra_dirs=extra_dirs)
 
     # 3. LLM-curated audit selection
-    audits = _curate_audit_selection(audits, deliverables, phase_num, phase_id, uat_mode)
+    audits = _curate_audit_selection(audits, deliverables, phase_num, phase_id, uat_mode,
+                                     audit_context=audit_context)
     if not audits:
         print("⚠️  Audit skipped by user")
         return True
@@ -2447,5 +2453,7 @@ class AuditManager:
         phase_num: int,
         phase_id: str,
         uat_mode: bool = False,
+        audit_context: str = "",
     ) -> bool:
-        return run_phase_audit(phase_num, phase_id, self.output_dir, uat_mode)
+        return run_phase_audit(phase_num, phase_id, self.output_dir, uat_mode,
+                               audit_context=audit_context)

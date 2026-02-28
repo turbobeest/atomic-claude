@@ -25,6 +25,11 @@ from .audit_loader import (
     query_audits_for_task,
     get_audit_stats,
 )
+from .context_injector import (
+    build_graph_context,
+    set_active_graph_context,
+    get_active_graph_context,
+)
 
 
 def get_graph(phase_id: str = "unknown", host: str = None,
@@ -59,4 +64,8 @@ __all__ = [
     "CycleDetectedError",
     "QueryError",
     "NodeNotFoundError",
+    # Context injector
+    "build_graph_context",
+    "set_active_graph_context",
+    "get_active_graph_context",
 ]

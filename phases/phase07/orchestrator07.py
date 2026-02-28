@@ -74,7 +74,7 @@ def task_705_wrapper(mem=None, **kwargs) -> bool:
 
 def task_706_wrapper(mem=None, **kwargs) -> bool:
     """Task 706: Phase audit"""
-    return task_706(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_706(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=kwargs.get("graph"))
 
 
 def task_707_wrapper(mem=None, **kwargs) -> bool:

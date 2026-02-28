@@ -42,8 +42,20 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_yellow("⚠️  Could not determine phase number from output directory"))
         return True  # Non-blocking
 
+    # Query audit graph for relevant audits
+    audit_context = ""
+    try:
+        from core.graph.audit_loader import get_audit_graph, query_audits_for_task
+        audit_graph = get_audit_graph()
+        audit_context = query_audits_for_task(
+            audit_graph, f"Phase {phase_num}: {phase_id}", phase=str(phase_num),
+        )
+    except Exception:
+        pass  # Graceful degradation when audit graph unavailable
+
     # Run audit (non-blocking - returns True even if audit fails)
-    result = run_phase_audit(phase_num, phase_id, output_dir, uat_mode)
+    result = run_phase_audit(phase_num, phase_id, output_dir, uat_mode,
+                             audit_context=audit_context)
 
     if result:
         print(print_green("✓ Phase audit complete"))

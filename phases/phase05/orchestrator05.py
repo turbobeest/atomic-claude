@@ -71,9 +71,9 @@ def task_505_wrapper(mem=None) -> bool:
     return task_505_validation.execute(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_506_wrapper(mem=None) -> bool:
+def task_506_wrapper(mem=None, **kwargs) -> bool:
     """Task 506: Phase audit"""
-    return task_506_phase_audit.execute(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_506_phase_audit.execute(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=kwargs.get("graph"))
 
 
 def task_507_wrapper(mem=None) -> bool:

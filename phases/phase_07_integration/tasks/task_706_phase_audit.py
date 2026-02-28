@@ -15,7 +15,7 @@ from core.audit import run_phase_audit
 from core.utils.cli_ui import print_yellow
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 706: Phase Audit.
 
@@ -32,11 +32,23 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_yellow("UAT Mode: Skipping phase audit"))
         return True
 
+    # Query audit graph for relevant audits
+    audit_context = ""
+    try:
+        from core.graph.audit_loader import get_audit_graph, query_audits_for_task
+        audit_graph = get_audit_graph()
+        audit_context = query_audits_for_task(
+            audit_graph, f"Phase 7: 7-integration", phase="7",
+        )
+    except Exception:
+        pass  # Graceful degradation when audit graph unavailable
+
     # Delegate to audit system
     return run_phase_audit(
         phase_num=7,
         phase_id="7-integration",
         output_dir=output_dir,
+        audit_context=audit_context,
     )
 
 

@@ -14,7 +14,7 @@ from core.utils.cli_ui import print_bold, print_dim, print_green
 from core.audit import run_phase_audit
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 805: Phase Audit.
 
@@ -35,11 +35,23 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_green("✓ UAT bypass complete"))
         return True
 
+    # Query audit graph for relevant audits
+    audit_context = ""
+    try:
+        from core.graph.audit_loader import get_audit_graph, query_audits_for_task
+        audit_graph = get_audit_graph()
+        audit_context = query_audits_for_task(
+            audit_graph, f"Phase 8: 8-deployment-prep", phase="8",
+        )
+    except Exception:
+        pass  # Graceful degradation when audit graph unavailable
+
     # Run phase audit
     return run_phase_audit(
         phase_num=8,
         phase_id="8-deployment-prep",
         output_dir=output_dir,
+        audit_context=audit_context,
     )
 
 
