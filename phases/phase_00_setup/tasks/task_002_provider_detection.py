@@ -420,7 +420,10 @@ def _credential_wizard(
 
     print()
     print(print_green(f"  Saved: {env_file}"))
-    print(print_dim("  (permissions: owner read/write only)"))
+    if os.name != 'nt':
+        print(print_dim("  (permissions: owner read/write only)"))
+    else:
+        print(print_dim("  (permissions may need to be restricted manually on Windows)"))
 
     return has_aws, has_anthropic, has_ollama
 
@@ -613,12 +616,16 @@ def _configure_ollama_hosts(
             print()
 
     # Write updated hosts back to secrets
-    if existing_hosts and secrets_file.exists():
+    if existing_hosts:
         try:
-            secrets = json.loads(read_file(secrets_file))
+            if secrets_file.exists():
+                secrets = json.loads(read_file(secrets_file))
+            else:
+                secrets = {}
             secrets['ollama_hosts'] = existing_hosts
             # Remove legacy single-host key
             secrets.pop('ollama_host', None)
+            ensure_dir(secrets_file.parent)
             write_file(secrets_file, json.dumps(secrets, indent=2))
         except Exception as e:
             logger.debug("Failed to write updated Ollama hosts to secrets: %s", e)

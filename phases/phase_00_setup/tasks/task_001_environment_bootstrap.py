@@ -37,6 +37,7 @@ from core.utils.file_ops import ensure_dir, write_file
 
 
 # Global counters for summary
+# NOTE: Not thread-safe. Only intended for single-threaded execute() calls.
 REQUIRED_TOTAL = 0
 REQUIRED_INSTALLED = 0
 RECOMMENDED_TOTAL = 0
@@ -189,6 +190,9 @@ def _detect_os() -> str:
     """
     Detect operating system.
 
+    NOTE: A simplified copy exists in task_005_repository_setup._detect_os().
+    Not consolidated because these tasks run independently and the duplication is minor.
+
     Returns:
         OS type (macos, debian, redhat, arch, linux, windows, unknown)
     """
@@ -240,7 +244,10 @@ def _check_tool(tool: str) -> Optional[str]:
         if tool == "git":
             result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
-                return result.stdout.split()[2]
+                parts = result.stdout.split()
+                if len(parts) >= 3:
+                    return parts[2]
+                return result.stdout.strip() or "installed"
         elif tool == "jq":
             result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
@@ -438,7 +445,6 @@ def _show_recommended_tools(os_type: str) -> None:
         else:
             descs = {
                 "gh": "GitHub CLI",
-                "docker": "Required for FalkorDB knowledge graph",
             }
             desc = descs.get(tool, tool)
             print(print_yellow(f"    ○ {tool} - {desc}"))
@@ -633,11 +639,10 @@ def _get_hostname() -> str:
     import socket
     # Try to get a routable IP (may fail on airgapped networks)
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(2)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(2)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
         return ip
     except (OSError, socket.timeout) as e:
         logger.debug("Failed to detect routable IP: %s", e)

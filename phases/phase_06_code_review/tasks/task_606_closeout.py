@@ -395,10 +395,10 @@ def _generate_closeout_json(
     print(print_green("  ✓ Generated phase-06-closeout.json"))
 
     # Also write to .outputs/ path for new-style consumers
-    outputs_closeout = closeout_json.parent.parent.parent / ".outputs" / "6-code_review" / "closeout.json"
+    outputs_closeout = closeout_json.parent.parent.parent / ".outputs" / "6-code-review" / "closeout.json"
     ensure_dir(outputs_closeout.parent)
     write_file(outputs_closeout, json.dumps(json_content, indent=2))
-    print(print_green("  ✓ Generated .outputs/6-code_review/closeout.json"))
+    print(print_green("  ✓ Generated .outputs/6-code-review/closeout.json"))
 
 
 def _generate_closeout_documents(

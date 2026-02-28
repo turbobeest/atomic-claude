@@ -8,8 +8,17 @@ degradation when features are unavailable.
 import json
 import logging
 import os
+import sys
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, Dict, Any, Iterator
+
+try:
+    import fcntl
+    _HAS_FCNTL = True
+except ImportError:
+    _HAS_FCNTL = False
 
 logger = logging.getLogger(__name__)
 
@@ -192,23 +201,47 @@ def _resolve_tier(model_id: str) -> str | None:
     return None
 
 
-def _track_tokens(response):
-    """Update session token tracking file with usage and cost."""
-    try:
-        tokens_file = Path(os.environ.get("ATOMIC_ROOT", ".")) / ".state" / "session-tokens.json"
-        if tokens_file.exists():
-            data = json.loads(tokens_file.read_text())
-        else:
-            data = {
-                "total_input_tokens": 0,
-                "total_output_tokens": 0,
-                "estimated_cost_usd": 0,
-                "cost_available": True,
-                "by_provider": {},
-                "by_model": {},
-            }
+@contextmanager
+def _locked_tokens_file(filepath: Path):
+    """Context manager providing exclusive file locking for token tracking.
 
-        # Extract usage
+    Uses fcntl.flock on Unix, msvcrt.locking on Windows.
+    """
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    if not filepath.exists():
+        filepath.write_text("{}")
+    fh = open(filepath, "r+", encoding="utf-8")
+    try:
+        try:
+            if _HAS_FCNTL:
+                fcntl.flock(fh, fcntl.LOCK_EX)
+            elif sys.platform == 'win32':
+                import msvcrt
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1024)
+        except OSError as e:
+            raise OSError(f"Failed to acquire lock on {filepath}: {e}") from e
+        fh.seek(0)
+        yield fh
+    finally:
+        if _HAS_FCNTL:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+        elif sys.platform == 'win32':
+            import msvcrt
+            try:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1024)
+            except OSError:
+                pass
+        fh.close()
+
+
+def _track_tokens(response):
+    """Update session token tracking file with usage and cost.
+
+    Uses file locking to prevent lost updates under concurrency.
+    """
+    try:
+        # Extract usage early so we can bail before acquiring the lock
         input_toks = 0
         output_toks = 0
         if hasattr(response, 'usage'):
@@ -220,64 +253,70 @@ def _track_tokens(response):
             logger.debug("Token tracking skipped: no usage data (response type: %s)", type(response).__name__)
             return
 
-        data["total_input_tokens"] += input_toks
-        data["total_output_tokens"] += output_toks
-
-        # Determine provider and model
-        provider_name = getattr(response, 'provider', None) or "unknown"
-        model_id = getattr(response, 'model', None) or "unknown"
-
-        # Track by_provider
-        if provider_name not in data["by_provider"]:
-            data["by_provider"][provider_name] = {
-                "input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
-            }
-        prov = data["by_provider"][provider_name]
-        prov["input_tokens"] += input_toks
-        prov["output_tokens"] += output_toks
-
-        # Track by_model
-        if model_id not in data["by_model"]:
-            data["by_model"][model_id] = {
-                "input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
-            }
-        mdl = data["by_model"][model_id]
-        mdl["input_tokens"] += input_toks
-        mdl["output_tokens"] += output_toks
-
-        # Calculate cost (skip for subscription/local providers)
-        if provider_name in _NO_COST_PROVIDERS:
-            data["cost_available"] = False
-        else:
-            tier = _resolve_tier(model_id)
-            if tier and tier in _MODEL_PRICING:
-                pricing = _MODEL_PRICING[tier]
-                call_cost = (
-                    (input_toks / 1_000_000) * pricing["input"]
-                    + (output_toks / 1_000_000) * pricing["output"]
-                )
-                data["estimated_cost_usd"] += call_cost
-                prov["cost_usd"] += call_cost
-                mdl["cost_usd"] += call_cost
-
+        tokens_file = Path(os.environ.get("ATOMIC_ROOT", ".")) / ".state" / "session-tokens.json"
         tokens_file.parent.mkdir(parents=True, exist_ok=True)
-        # Atomic write: write to temp file then rename to avoid corruption
-        # from concurrent processes (no file lock needed with atomic rename)
-        import tempfile
-        tmp_fd, tmp_path = tempfile.mkstemp(
-            dir=str(tokens_file.parent), suffix=".tmp", prefix="session-tokens-"
-        )
-        try:
-            with os.fdopen(tmp_fd, 'w') as tmp_f:
-                tmp_f.write(json.dumps(data, indent=2))
-            Path(tmp_path).replace(tokens_file)
-        except Exception:
-            # Clean up temp file on failure
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+
+        _empty_data = {
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "estimated_cost_usd": 0,
+            "cost_available": True,
+            "by_provider": {},
+            "by_model": {},
+        }
+
+        with _locked_tokens_file(tokens_file) as fh:
+            raw = fh.read()
+            data = json.loads(raw) if raw.strip() else dict(_empty_data)
+
+            # Ensure expected keys exist (defensive against truncated files)
+            for key, default in _empty_data.items():
+                data.setdefault(key, default)
+
+            data["total_input_tokens"] += input_toks
+            data["total_output_tokens"] += output_toks
+
+            # Determine provider and model
+            provider_name = getattr(response, 'provider', None) or "unknown"
+            model_id = getattr(response, 'model', None) or "unknown"
+
+            # Track by_provider
+            if provider_name not in data["by_provider"]:
+                data["by_provider"][provider_name] = {
+                    "input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
+                }
+            prov = data["by_provider"][provider_name]
+            prov["input_tokens"] += input_toks
+            prov["output_tokens"] += output_toks
+
+            # Track by_model
+            if model_id not in data["by_model"]:
+                data["by_model"][model_id] = {
+                    "input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
+                }
+            mdl = data["by_model"][model_id]
+            mdl["input_tokens"] += input_toks
+            mdl["output_tokens"] += output_toks
+
+            # Calculate cost (skip for subscription/local providers)
+            if provider_name in _NO_COST_PROVIDERS:
+                data["cost_available"] = False
+            else:
+                tier = _resolve_tier(model_id)
+                if tier and tier in _MODEL_PRICING:
+                    pricing = _MODEL_PRICING[tier]
+                    call_cost = (
+                        (input_toks / 1_000_000) * pricing["input"]
+                        + (output_toks / 1_000_000) * pricing["output"]
+                    )
+                    data["estimated_cost_usd"] += call_cost
+                    prov["cost_usd"] += call_cost
+                    mdl["cost_usd"] += call_cost
+
+            # Write back while holding the lock
+            fh.seek(0)
+            fh.truncate()
+            fh.write(json.dumps(data, indent=2))
     except Exception as e:
         logger.warning("Token tracking failed: %s", e)
 

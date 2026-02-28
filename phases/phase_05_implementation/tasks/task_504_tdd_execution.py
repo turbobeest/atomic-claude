@@ -2009,7 +2009,7 @@ def _run_dag_parallel(
                         task_status[tid] = "failed"
                         stats["tasks_failed"] += 1
                         completed_ids.add(tid)
-                        scheduler.complete(tid)
+                        scheduler.fail(tid)
                         continue
                     results[tid] = result
 
@@ -2170,6 +2170,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             # Create minimal TDD record
             tdd_record = {
                 "task_id": task_id,
+                "status": "complete",
                 "classification": "feature",
                 "red": {"status": "complete"},
                 "green": {"status": "complete"},

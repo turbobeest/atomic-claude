@@ -942,6 +942,7 @@ def _run_wizard(
             effort_options = [
                 ("1", "high",   "Maximum reasoning depth (recommended)"),
                 ("2", "medium", "Balanced cost/quality"),
+                ("3", "low",    "Minimal compute (fastest, cheapest)"),
             ]
         for num, level, desc_text in effort_options:
             print(f"    {num}. {level:<10} {print_dim(desc_text)}")
@@ -950,7 +951,7 @@ def _run_wizard(
         raw = prompt_user("  Choice [1]: ").strip()
         if raw.lower() in ('q', 'quit'):
             return None
-        effort_map = {"1": "high", "2": "medium"}
+        effort_map = {"1": "high", "2": "medium", "3": "low"}
         effort_level = effort_map.get(raw, effort_level or "high")
         print()
 

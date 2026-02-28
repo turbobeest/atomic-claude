@@ -160,7 +160,18 @@ class OllamaProvider(BaseLLMProvider):
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 response_data = json.loads(response.read().decode('utf-8'))
 
+        except socket.timeout as e:
+            raise LLMTimeoutError(
+                f"Ollama request timed out after {timeout}s",
+                provider="ollama"
+            ) from e
+
         except urllib.error.URLError as e:
+            if isinstance(e.reason, socket.timeout):
+                raise LLMTimeoutError(
+                    f"Ollama request timed out after {timeout}s",
+                    provider="ollama"
+                ) from e
             if "Connection refused" in str(e) or "Connection reset" in str(e):
                 raise ProviderUnavailableException(
                     f"Ollama service not running at {self.host}. "
@@ -168,14 +179,6 @@ class OllamaProvider(BaseLLMProvider):
                     provider="ollama"
                 )
             raise APIError(f"Ollama API error: {e}", provider="ollama")
-
-        except (socket.timeout, urllib.error.URLError) as e:
-            if isinstance(e, urllib.error.URLError) and not isinstance(e.reason, socket.timeout):
-                raise APIError(f"Ollama API error: {e}", provider="ollama")
-            raise LLMTimeoutError(
-                f"Ollama request timed out after {timeout}s",
-                provider="ollama"
-            ) from e
         except Exception as e:
             raise APIError(f"Ollama request failed: {e}", provider="ollama")
 

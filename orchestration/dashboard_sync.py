@@ -475,7 +475,7 @@ def validate_state_files(atomic_root: Optional[Path] = None) -> bool:
 
     # Load and validate structure
     try:
-        with open(task_state_file) as f:
+        with open(task_state_file, encoding="utf-8") as f:
             state = json.load(f)
 
         # Check required keys
@@ -514,7 +514,7 @@ def fix_state_inconsistencies(atomic_root: Optional[Path] = None):
     current_task_file = state_dir / "current-task.json"
     if current_task_file.exists():
         try:
-            with open(current_task_file) as f:
+            with open(current_task_file, encoding="utf-8") as f:
                 current = json.load(f)
 
             # Check if it's stale (older than 5 minutes)

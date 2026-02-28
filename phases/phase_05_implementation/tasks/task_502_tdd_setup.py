@@ -312,7 +312,7 @@ def _check_tool_availability(stack: str) -> Dict[str, bool]:
     """Check if build/test tools for the detected stack are installed."""
     checks: Dict[str, List[str]] = {
         "rust": ["cargo", "--version"],
-        "python": ["python3", "--version"],
+        "python": [sys.executable, "--version"],
         "node": ["node", "--version"],
         "go": ["go", "version"],
     }

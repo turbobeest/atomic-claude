@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 # Global validation state
+# NOTE: Not thread-safe. Only intended for single-threaded execute() calls.
 CHECKS_PASS = 0
 CHECKS_FAIL = 0
 CHECKS_WARN = 0
@@ -564,7 +565,11 @@ def _validate_git_remote(report_file: Path, uat_mode: bool = False) -> None:
 # ---------------------------------------------------------------------------
 
 def _detect_os() -> str:
-    """Detect operating system."""
+    """Detect operating system.
+
+    NOTE: Duplicated from task_001_environment_bootstrap._detect_os() (simplified version).
+    Not consolidated because these tasks run independently and the duplication is minor.
+    """
     system = platform.system()
     if system == "Darwin":
         return "macos"
@@ -935,7 +940,11 @@ def _save_configuration(
     }
 
     # Read system capabilities from the report
-    report = json.loads(read_file(report_file))
+    try:
+        report = json.loads(read_file(report_file))
+    except (json.JSONDecodeError, FileNotFoundError, OSError) as e:
+        logger.warning("Failed to load report file, starting fresh: %s", e)
+        report = {"checks": [], "capabilities": {}}
     system_capabilities = report.get('capabilities', {})
 
     # Write summary to report

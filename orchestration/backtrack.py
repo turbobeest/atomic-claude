@@ -409,7 +409,7 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
         print("❌ No state file found")
         return
 
-    with open(state_file) as f:
+    with open(state_file, encoding="utf-8") as f:
         state = json.load(f)
 
     # Determine what to clear

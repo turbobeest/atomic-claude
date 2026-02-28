@@ -65,7 +65,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     print("  Scanning for RST files...")
 
-    rst_files = _find_rst_files(atomic_root)
+    rst_files = _find_rst_files(project_root)
+    if not rst_files:
+        # Fallback: search within atomic_root itself
+        rst_files = _find_rst_files(atomic_root)
 
     if not rst_files:
         print("  No RST files found.")
