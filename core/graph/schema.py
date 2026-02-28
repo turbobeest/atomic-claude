@@ -165,7 +165,7 @@ VALID_VALUES: Dict[str, Dict[str, Set[str]]] = {
 PROPERTY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     NodeLabel.SOURCE: {"phase": "1-discovery"},
     NodeLabel.FINDING: {"confidence": 0.8, "phase": "1-discovery"},
-    NodeLabel.DECISION: {"status": "proposed"},
+    NodeLabel.DECISION: {"status": "proposed", "confidence": 0.7, "alternatives_json": ""},
     NodeLabel.REQUIREMENT: {"priority": "medium", "status": "draft"},
     NodeLabel.FEATURE: {},
     NodeLabel.TASK: {
@@ -186,6 +186,7 @@ PROPERTY_DEFAULTS: Dict[str, Dict[str, Any]] = {
     NodeLabel.REVIEW_FINDING: {
         "status": "open",
         "phase": "6-code-review",
+        "shadow_finding": False,
     },
     NodeLabel.SKILL: {
         "installed": False,
@@ -258,7 +259,7 @@ VALID_RELATIONSHIPS: Dict[str, tuple] = {
     ),
     RelType.INFORMED_BY: (
         {NodeLabel.TASK},
-        {NodeLabel.FINDING},
+        {NodeLabel.FINDING, NodeLabel.DECISION},
     ),
     RelType.SUPERSEDES: (
         # Any node type can supersede any other of same type
@@ -440,6 +441,12 @@ def validate_node_properties(label: str, properties: Dict[str, Any]) -> Optional
         confidence = properties.get("confidence")
         if confidence is not None and not (0.0 <= confidence <= 1.0):
             return f"Finding.confidence must be 0.0-1.0, got {confidence}"
+
+    # Check confidence range for Decision
+    if label_str == NodeLabel.DECISION:
+        confidence = properties.get("confidence")
+        if confidence is not None and not (0.0 <= confidence <= 1.0):
+            return f"Decision.confidence must be 0.0-1.0, got {confidence}"
 
     return None
 

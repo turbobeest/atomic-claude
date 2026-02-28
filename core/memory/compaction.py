@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Set, Tuple
 from collections import defaultdict
 
+from .content_signals import detect_signals
 from .types import MemoryEntry, MemoryEntryType
 from .store import MemoryStore
 
@@ -296,12 +297,21 @@ class MemoryCompactor:
         else:
             length_score = 0.3
 
-        # Combine scores
+        # Content signal score (semantic importance markers)
+        raw_signal = detect_signals(entry.content).score()
+        content_signal_score = max(0.0, min(1.0, (raw_signal + 0.10) / 0.50))
+
+        # Critical entry types get a signal floor to prevent content drag-down
+        if entry.entry_type in (MemoryEntryType.CHECKPOINT, MemoryEntryType.PHASE_CLOSEOUT):
+            content_signal_score = max(content_signal_score, 0.6)
+
+        # Combine scores (rebalanced with content signal weight)
         importance = (
-            0.4 * type_score +
-            0.3 * recency_score +
-            0.2 * length_score +
-            0.1 * entry.relevance_score
+            0.30 * type_score +
+            0.25 * recency_score +
+            0.15 * length_score +
+            0.10 * entry.relevance_score +
+            0.20 * content_signal_score
         )
 
         return min(1.0, importance)

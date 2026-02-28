@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
+from .content_signals import detect_signals
 from .types import MemoryEntry, MemoryContext, MemoryEntryType
 from .store import MemoryStore
 
@@ -234,14 +235,18 @@ class MemoryRecall:
         # Phase relevance score
         phase_score = self._phase_relevance_score(entry.phase, current_phase)
 
+        # Content signal boost
+        signal_boost = 0.1 * detect_signals(entry.content).score()
+
         # Weighted combination
         total_score = (
             0.5 * keyword_score +
             0.3 * recency_score +
-            0.2 * phase_score
+            0.2 * phase_score +
+            signal_boost
         )
 
-        return min(1.0, total_score)
+        return min(1.0, max(0.0, total_score))
 
     def _extract_keywords(self, text: str) -> Set[str]:
         """Extract meaningful keywords from text."""

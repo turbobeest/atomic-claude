@@ -154,6 +154,10 @@ def run_phase_tasks(
             flush_fn=make_flush_fn(phase_id, task_id),
         )
 
+        # Attach graph for decision trail persistence
+        if graph is not None:
+            mem.set_graph(graph)
+
         # Pre-task: gravity assessment and skill selection
         gravity_assessment = None
         skill_selection = None
@@ -232,110 +236,204 @@ def run_phase_tasks(
             except Exception as e:
                 logger.debug("Graph context assembly skipped: %s", e)
 
+        # Resolve retry policy and pattern selection from gravity
+        gravity_key = (
+            gravity_assessment.gravity.value if gravity_assessment else "standard"
+        )
         try:
-            # Call task — pass graph only if the function accepts it (Finding #26)
-            if graph is not None:
-                try:
-                    sig = inspect.signature(task_func)
-                    accepts_graph = "graph" in sig.parameters
-                except (ValueError, TypeError):
-                    accepts_graph = False
-                if accepts_graph:
-                    success = task_func(mem, graph=graph)
-                else:
-                    success = task_func(mem)
-            else:
-                success = task_func(mem)
+            from orchestration.retry_policy import get_policy, ConsecutiveFailureTracker
+            retry_policy = get_policy(gravity_key)
+        except Exception:
+            retry_policy = None
 
-            # Clear context vars after task execution
-            try:
-                from core.skills.context_formatter import set_active_skill_context
-                set_active_skill_context(None)
-            except Exception:
-                pass
-            try:
-                from core.graph.context_injector import set_active_graph_context
-                set_active_graph_context(None)
-            except Exception:
-                pass
-
-            # Treat None as success; only explicit False is failure (Finding #28)
-            if success is False:
-                state.mark_task_failed(phase_id, task_id, task_name)
-                print(f"\n❌ Task {task_id} failed")
-                clear_current_task()
-                get_resolver().clear_task_overrides()
-                return False
-
-            # Collect artifacts
-            artifacts = [
-                str(output_dir / f)
-                for f in task_artifacts.get(task_id, [])
-                if (output_dir / f).exists()
-            ]
-            state.mark_task_complete(phase_id, task_id, task_name, artifacts=artifacts)
-            get_resolver().clear_task_overrides()
-
-            # Save task completion to memory
-            try:
-                if mem.has_entries():
-                    memory_content = mem.build_content()
-                    memory_metadata = mem.build_metadata()
-                else:
-                    memory_content = enrich_memory_with_llm(
-                        artifacts, task_id, task_name, output_dir=output_dir,
-                    )
-                    if not memory_content:
-                        memory_content = summarize_task_artifacts(
-                            artifacts, task_id, task_name, output_dir=output_dir,
-                        )
-                    memory_metadata = {}
-                memory_save(
-                    phase=phase_id,
-                    task_id=task_id,
-                    content=memory_content,
-                    tags=["task-complete", phase_id, f"task-{task_id}"],
-                    entry_type=MemoryEntryType.TASK_END,
-                    metadata=memory_metadata,
-                )
-            except Exception as e:
-                logger.warning("Memory save failed for task %s: %s", task_id, e)
-
-            # Post-task: log skill usage and gravity accuracy
-            if gravity_assessment and skill_selection and skill_selection.skills:
-                try:
-                    from core.skills import SkillLearning
-                    from core.skills.scoring import compute_task_score
-                    learning = SkillLearning()
-                    task_score = compute_task_score(
-                        success=(success is not False),
-                        task_id=task_id,
-                        expected_artifacts=task_artifacts.get(task_id, []),
-                        actual_artifacts=artifacts,
-                        mem_entry_count=len(mem._entries),
-                        gravity=gravity_assessment.gravity.value,
-                    )
-                    learning.log_usage(
-                        task_id=task_id,
-                        skill_ids=[s.id for s in skill_selection.skills],
-                        success_score=task_score,
-                        gravity=gravity_assessment.gravity.value,
-                    )
-                    learning.log_gravity_accuracy(
-                        task_id=task_id,
-                        assessed_gravity=gravity_assessment.gravity,
-                        success_score=task_score,
-                    )
-                except Exception as e:
-                    logger.debug("Post-task skill learning skipped: %s", e)
-
+        try:
+            from orchestration.coordination.selector import select_pattern
+            from orchestration.coordination.executors import (
+                execute_with_pattern, ExecutionContext,
+            )
+            pattern_selection = select_pattern(
+                gravity=gravity_key,
+                roster=roster if not is_infrastructure_task(task_name) else None,
+                task_id=task_id,
+                task_name=task_name,
+                phase_id=phase_id,
+            )
+            logger.info(
+                "Task %s pattern: %s (score=%.2f)",
+                task_id, pattern_selection.pattern.value, pattern_selection.score,
+            )
         except Exception as e:
-            state.mark_task_failed(phase_id, task_id, task_name, str(e))
-            log_error(phase_id, task_id, str(e), traceback.format_exc())
-            print(f"\n❌ Task {task_id} error: {e}")
+            logger.debug("Pattern selection skipped: %s", e)
+            pattern_selection = None
+
+        # --- Task execution with retry wrapper ---
+        success = None
+        last_error = None
+        max_attempts = (retry_policy.max_retries + 1) if retry_policy else 1
+
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                # Cooldown between retries
+                if retry_policy:
+                    import time as _time
+                    cooldown = retry_policy.cooldown_for_attempt(attempt)
+                    if cooldown > 0:
+                        logger.info(
+                            "Task %s retry %d/%d — cooldown %.1fs",
+                            task_id, attempt, retry_policy.max_retries, cooldown,
+                        )
+                        _time.sleep(cooldown)
+                    mem.retry_attempt(attempt, gravity_key, last_error)
+
+            try:
+                # Execute via coordination pattern or direct call
+                if pattern_selection is not None:
+                    exec_ctx = ExecutionContext(
+                        task_id=task_id,
+                        task_name=task_name,
+                        task_func=task_func,
+                        mem=mem,
+                        roster=roster if not is_infrastructure_task(task_name) else None,
+                        gravity=gravity_key,
+                        graph=graph,
+                        phase_id=phase_id,
+                    )
+                    exec_result = execute_with_pattern(pattern_selection.pattern, exec_ctx)
+                    success = exec_result.success
+                    if not success:
+                        last_error = exec_result.error
+                else:
+                    # Direct call (legacy path)
+                    if graph is not None:
+                        try:
+                            sig = inspect.signature(task_func)
+                            accepts_graph = "graph" in sig.parameters
+                        except (ValueError, TypeError):
+                            accepts_graph = False
+                        if accepts_graph:
+                            result = task_func(mem, graph=graph)
+                        else:
+                            result = task_func(mem)
+                    else:
+                        result = task_func(mem)
+                    # Treat None as success; only explicit False is failure
+                    success = result is not False
+
+                if success:
+                    break
+                last_error = last_error or "returned False"
+
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(
+                    "Task %s attempt %d failed: %s", task_id, attempt, e,
+                )
+                if attempt == max_attempts - 1:
+                    # Final attempt — propagate as failure
+                    success = False
+
+        # Clear context vars after task execution
+        try:
+            from core.skills.context_formatter import set_active_skill_context
+            set_active_skill_context(None)
+        except Exception:
+            pass
+        try:
+            from core.graph.context_injector import set_active_graph_context
+            set_active_graph_context(None)
+        except Exception:
+            pass
+
+        if success is False:
+            state.mark_task_failed(phase_id, task_id, task_name, last_error)
+            if last_error:
+                log_error(phase_id, task_id, last_error, "")
+            print(f"\n❌ Task {task_id} failed")
             clear_current_task()
             get_resolver().clear_task_overrides()
             return False
+
+        # Collect artifacts
+        artifacts = [
+            str(output_dir / f)
+            for f in task_artifacts.get(task_id, [])
+            if (output_dir / f).exists()
+        ]
+        state.mark_task_complete(phase_id, task_id, task_name, artifacts=artifacts)
+        get_resolver().clear_task_overrides()
+
+        # Shadow audit (non-blocking, STANDARD/INTENSIVE only)
+        if graph is not None and gravity_assessment:
+            try:
+                from core.shadow_agent import ShadowAgent, ShadowContext
+                if ShadowAgent.should_activate(gravity_key):
+                    shadow = ShadowAgent(graph=graph)
+                    shadow_content = mem.build_content() if mem.has_entries() else ""
+                    if shadow_content:
+                        shadow_ctx = ShadowContext(
+                            task_id=task_id,
+                            task_name=task_name,
+                            phase_id=phase_id,
+                            content=shadow_content,
+                            artifacts=artifacts,
+                        )
+                        shadow.evaluate_async(shadow_ctx)
+                        logger.info("Shadow audit submitted for task %s", task_id)
+            except Exception as e:
+                logger.debug("Shadow audit skipped: %s", e)
+
+        # Save task completion to memory
+        try:
+            if mem.has_entries():
+                memory_content = mem.build_content()
+                memory_metadata = mem.build_metadata()
+            else:
+                memory_content = enrich_memory_with_llm(
+                    artifacts, task_id, task_name, output_dir=output_dir,
+                )
+                if not memory_content:
+                    memory_content = summarize_task_artifacts(
+                        artifacts, task_id, task_name, output_dir=output_dir,
+                    )
+                memory_metadata = {}
+            memory_save(
+                phase=phase_id,
+                task_id=task_id,
+                content=memory_content,
+                tags=["task-complete", phase_id, f"task-{task_id}"],
+                entry_type=MemoryEntryType.TASK_END,
+                metadata=memory_metadata,
+            )
+        except Exception as e:
+            logger.warning("Memory save failed for task %s: %s", task_id, e)
+
+        # Post-task: log skill usage and gravity accuracy
+        if gravity_assessment and skill_selection and skill_selection.skills:
+            try:
+                from core.skills import SkillLearning
+                from core.skills.scoring import compute_task_score
+                learning = SkillLearning()
+                task_score = compute_task_score(
+                    success=(success is not False),
+                    task_id=task_id,
+                    expected_artifacts=task_artifacts.get(task_id, []),
+                    actual_artifacts=artifacts,
+                    mem_entry_count=len(mem._entries),
+                    gravity=gravity_assessment.gravity.value,
+                )
+                learning.log_usage(
+                    task_id=task_id,
+                    skill_ids=[s.id for s in skill_selection.skills],
+                    success_score=task_score,
+                    gravity=gravity_assessment.gravity.value,
+                )
+                learning.log_gravity_accuracy(
+                    task_id=task_id,
+                    assessed_gravity=gravity_assessment.gravity,
+                    success_score=task_score,
+                )
+            except Exception as e:
+                logger.debug("Post-task skill learning skipped: %s", e)
 
     # Phase complete
     clear_current_task()

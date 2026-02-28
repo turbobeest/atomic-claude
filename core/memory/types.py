@@ -21,6 +21,15 @@ class MemoryEntryType(str, Enum):
     SYSTEM_EVENT = "system_event"
 
 
+class MemoryPriority(str, Enum):
+    """Priority level for memory entries under token pressure."""
+    P0 = "P0"   # Critical: breaking changes, security
+    P1 = "P1"   # High: key decisions, blockers
+    P2 = "P2"   # Standard: task outcomes (default)
+    P3 = "P3"   # Low: progress notes
+    P4 = "P4"   # Ephemeral: ACK, routine
+
+
 class MemoryEntry(BaseModel):
     """Single memory entry with content and metadata."""
 
@@ -33,6 +42,7 @@ class MemoryEntry(BaseModel):
     tags: List[str] = Field(default_factory=list, description="Searchable tags")
     metadata: Dict[str, Any] = Field(default_factory=dict)
     relevance_score: float = Field(0.0, ge=0.0, le=1.0)
+    priority: str = Field("P2", description="Memory priority (P0-P4)")
 
     @field_serializer('timestamp')
     def serialize_timestamp(self, v: datetime) -> str:

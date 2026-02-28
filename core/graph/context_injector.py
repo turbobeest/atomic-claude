@@ -182,7 +182,7 @@ def _format_traceability_context(
             return compiler.compile(traversals, max_tokens=budget_tokens)
 
         elif budget_tokens <= 500:
-            # STANDARD: decisions + requirements
+            # STANDARD: decisions (with confidence) + requirements
             traversals = [
                 Traversal(
                     label="Decision",
@@ -190,7 +190,8 @@ def _format_traceability_context(
                     filters={"status": "accepted"},
                     limit=5,
                     format_fn=lambda d: (
-                        f"{d.get('title', '')}: {d.get('rationale', '')}"
+                        f"{d.get('title', '')}: {d.get('rationale', '')} "
+                        f"(confidence: {d.get('confidence', 'N/A')})"
                     ),
                     token_budget=budget_tokens // 2,
                 ),
@@ -241,15 +242,42 @@ def _format_memory_context(
         if not entries:
             return ""
 
+        # Priority-based budget reservation: reserve a portion for P0/P1 entries
+        # LIGHT: 25%, STANDARD: 20%, INTENSIVE: 15%
+        if budget_tokens <= 100:
+            reserved_pct = 0.25
+        elif budget_tokens <= 300:
+            reserved_pct = 0.20
+        else:
+            reserved_pct = 0.15
+        reserved_chars = int(budget_tokens * 4 * reserved_pct)
+
+        # Separate high-priority and normal entries
+        high_priority = [e for e in entries if e.get("priority", "P2") in ("P0", "P1")]
+        normal = [e for e in entries if e.get("priority", "P2") not in ("P0", "P1")]
+
         lines = ["[Prior Context]"]
         budget_chars = budget_tokens * 4
         chars_used = len(lines[0]) + 1
 
-        for entry in entries:
+        # Fill reserved budget with high-priority entries first
+        for entry in high_priority:
             content = entry.get("content", "")
             if not content:
                 continue
-            # Truncate long entries
+            if len(content) > 200:
+                content = content[:197] + "..."
+            line = f"- {content}"
+            if chars_used + len(line) + 1 > budget_chars:
+                break
+            lines.append(line)
+            chars_used += len(line) + 1
+
+        # Fill remaining with normal entries
+        for entry in normal:
+            content = entry.get("content", "")
+            if not content:
+                continue
             if len(content) > 200:
                 content = content[:197] + "..."
             line = f"- {content}"

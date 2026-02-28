@@ -48,6 +48,9 @@ class TaskMemory:
         self._skill_context: Optional[str] = None
         self._skill_selection = None
         self._gravity: Optional[str] = None
+        # Decision trail and graph (set by phase_runner)
+        self._trail = None
+        self._graph = None
 
     @staticmethod
     def _format_entries(entries: List[Tuple[str, str]], labels_map: Dict[str, str],
@@ -108,6 +111,45 @@ class TaskMemory:
         self._skill_context = context
         self._skill_selection = skill_selection
         self._gravity = gravity
+
+    def set_graph(self, graph) -> None:
+        """Attach graph manager for decision trail persistence.
+
+        Args:
+            graph: GraphManager instance.
+        """
+        self._graph = graph
+
+    @property
+    def trail(self):
+        """Lazy DecisionTrail for recording decisions with confidence.
+
+        Returns:
+            DecisionTrail instance (created on first access).
+        """
+        if self._trail is None:
+            from core.graph.decision_trail import DecisionTrail
+            self._trail = DecisionTrail(self.phase_id, self.task_id, self._graph)
+        return self._trail
+
+    def retry_attempt(self, attempt: int, model_tier: str, error: Optional[str] = None) -> None:
+        """Record a retry attempt in task memory.
+
+        Args:
+            attempt: Attempt number (0-indexed).
+            model_tier: Model tier used for this attempt.
+            error: Error from previous attempt, if any.
+        """
+        if error:
+            self._entries.append((
+                "warning",
+                f"Retry attempt {attempt} (model: {model_tier}): previous error: {error}",
+            ))
+        else:
+            self._entries.append((
+                "finding",
+                f"Retry attempt {attempt} (model: {model_tier})",
+            ))
 
     @property
     def skill_context(self) -> Optional[str]:
