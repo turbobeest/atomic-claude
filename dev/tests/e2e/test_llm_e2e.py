@@ -10,7 +10,7 @@ import json
 import pytest
 from pathlib import Path
 
-from tests.mocks.mock_llm import MockProvider
+from dev.tests.mocks.mock_llm import MockProvider
 
 
 # ============================================================================

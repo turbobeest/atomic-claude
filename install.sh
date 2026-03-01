@@ -137,18 +137,15 @@ else
     git sparse-checkout init --cone
 
     # Runtime-essential directories
-    # Cone mode: listing agents/expert-agents also includes all root files in agents/
-    # (gets agent-manifest.json for free). Same for audits/ root files.
+    # With dev/ split, all top-level dirs are runtime — just exclude dev/
     CONES=(
         core
         phases
         orchestration
         config
         initialization
-        agents/expert-agents
-        agents/pipeline-agents
-        audits/categories
-        audits/data
+        agents
+        audits
     )
 
     if $INCLUDE_DASHBOARD; then

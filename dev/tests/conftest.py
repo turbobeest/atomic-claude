@@ -20,7 +20,7 @@ import pytest
 @pytest.fixture(scope="session")
 def atomic_root() -> Path:
     """Get the atomic-claude root directory."""
-    return Path(__file__).parent.parent.resolve()
+    return Path(__file__).parent.parent.parent.resolve()
 
 
 @pytest.fixture(scope="session")

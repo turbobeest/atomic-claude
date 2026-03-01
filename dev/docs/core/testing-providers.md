@@ -58,7 +58,7 @@ pytest --cov=core/llm --cov-report=html
 Use `MockProvider` for testing without real APIs:
 
 ```python
-from tests.mocks.mock_llm import MockProvider
+from dev.tests.mocks.mock_llm import MockProvider
 
 # Basic usage
 provider = MockProvider()

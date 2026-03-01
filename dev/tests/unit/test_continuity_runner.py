@@ -13,7 +13,7 @@ from unittest.mock import Mock, patch, MagicMock
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tests.runners.continuity_runner import (
+from dev.tests.runners.continuity_runner import (
     ContinuityTestRunner,
     TaskResult,
     ContinuityTestReport,

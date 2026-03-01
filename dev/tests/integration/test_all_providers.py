@@ -15,7 +15,7 @@ from typing import List, Dict
 
 from core.llm.base import BaseLLMProvider, LLMResponse, HealthStatus
 from core.llm.ollama import OllamaProvider
-from tests.mocks.mock_llm import MockProvider
+from dev.tests.mocks.mock_llm import MockProvider
 
 
 # ============================================================================

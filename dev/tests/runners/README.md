@@ -26,7 +26,7 @@ This directory contains specialized test runners for validating different aspect
 
 **Usage:**
 ```python
-from tests.runners.uat_runner import UATRunner
+from dev.tests.runners.uat_runner import UATRunner
 
 runner = UATRunner()
 report = runner.run_phase_uat(phase_num=0, scenario="guided")

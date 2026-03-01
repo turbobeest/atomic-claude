@@ -283,7 +283,7 @@ cd atomic-claude
 pip install -r requirements.txt
 
 # Optional: Install dev dependencies
-pip install -r requirements-dev.txt
+pip install -e ".[dev]"
 ```
 
 ### Step 3: Copy Configuration

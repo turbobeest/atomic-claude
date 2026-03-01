@@ -247,7 +247,7 @@ def classify_violation(file_path: Path, acp_root: Path) -> Dict[str, Any]:
         }
 
     if suffix == ".py" and ("test" in name or "spec" in name):
-        if not str(rel_path).startswith("tests/"):  # Allow tests/ directory for tool tests
+        if not str(rel_path).startswith("dev/tests/"):  # Allow dev/tests/ directory for tool tests
             return {
                 "path": str(rel_path),
                 "correct_location": "../tests/",
@@ -256,7 +256,7 @@ def classify_violation(file_path: Path, acp_root: Path) -> Dict[str, Any]:
 
     if suffix == ".md" and not any(allowed in str(rel_path) for allowed in [
         "README.md", "CLAUDE.md", "OPERATIONAL.md", "PROJECT-STRUCTURE.md",
-        "docs/", "reports/"
+        "dev/docs/", "dev/reports/"
     ]) and not file_path.name.startswith("PLAN-") and not file_path.name.startswith("REFACTORING-"):
         return {
             "path": str(rel_path),

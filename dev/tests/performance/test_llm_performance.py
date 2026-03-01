@@ -13,7 +13,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from statistics import mean, median
 
-from tests.mocks.mock_llm import MockProvider
+from dev.tests.mocks.mock_llm import MockProvider
 from core.llm.ollama import OllamaProvider
 
 

@@ -178,11 +178,8 @@ ATOMIC_NETWORK_MODE=cui                # cui, internet, restricted
 # Core dependencies
 pip install -r requirements.txt
 
-# Development dependencies
-pip install -r requirements-dev.txt
-
-# LLM dependencies (optional)
-pip install -r requirements-llm.txt
+# Development dependencies (testing, linting, type checking)
+pip install -e ".[dev]"
 ```
 
 ### 3. Verify Setup

@@ -4,8 +4,8 @@ Python SDLC pipeline with phased orchestration, LLM routing, memory, and agent-d
 
 ## Installation Modes
 
-- **Runtime** (`curl | bash`): Sparse checkout ~23MB. Core pipeline, agents, audits, config. No tests/docs/scripts.
-- **Full** (`--full` flag or `git clone`): Everything ~160MB. Includes tests, docs, scripts, dev tooling.
+- **Runtime** (`curl | bash`): Sparse checkout ~23MB. Core pipeline, agents, audits, config. Excludes `dev/`.
+- **Full** (`--full` flag or `git clone`): Everything ~160MB. Includes `dev/` (tests, docs, scripts, examples).
 
 See `install.sh` at repo root for the installer. Runtime manifest: `config/runtime-manifest.json`.
 
@@ -56,14 +56,16 @@ agents/                # 221 agent definitions (186 expert + 35 pipeline)
 audits/                # 43-category audit framework
   categories/          # Audit category definitions
   data/                # Pre-built audit catalog (JSON)
-tests/                 # pytest suite (unit, integration, e2e, uat, performance)
 dashboard/             # Real-time web dashboard (Node.js/Express, port 5174)
 config/                # Configuration files
   models.json          # LLM provider and model configuration
-scripts/               # Utility scripts and audit runners
-docs/                  # User-facing documentation
-examples/              # Example usage
 initialization/        # Setup procedures
+dev/                   # Development-only (NOT deployed via sparse-checkout)
+  tests/               # pytest suite (unit, integration, e2e, uat, performance)
+  scripts/             # Utility scripts and audit runners
+  docs/                # User-facing documentation
+  examples/            # Example usage
+  reports/             # Generated reports (gitignored)
 ```
 
 ### Runtime Directories (gitignored)
@@ -112,7 +114,7 @@ Configured via `.env` (`ATOMIC_LLM_PROVIDER`, `ATOMIC_NETWORK_MODE`). See `.env.
 ## Testing
 
 - Config: `pytest.ini` at project root
-- Fixtures: `tests/conftest.py` and `tests/fixtures/`
+- Fixtures: `dev/tests/conftest.py` and `dev/tests/fixtures/`
 - Coverage targets: `core/`, `phases/`, `orchestration/` (95%+ with branch coverage)
 - Markers: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.e2e`, `@pytest.mark.uat`, `@pytest.mark.llm`, `@pytest.mark.slow`, `@pytest.mark.fileio`
 
