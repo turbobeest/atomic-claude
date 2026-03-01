@@ -1,146 +1,173 @@
 // Core Systems — Architecture Overview
-// StateManager, Memory, LLM Router, Audit, Dashboard, Knowledge Graph
 // Generated: 2026-03-01 from codebase analysis
 
 digraph core_systems {
     rankdir=TB
     fontname="Helvetica"
-    fontsize=14
-    label="Core Systems — Architecture & Data Flow"
+    fontsize=16
+    label="Core Systems \u2014 Architecture & Data Flow"
     labelloc=t
-    pad=0.5
-    nodesep=0.6
-    ranksep=0.8
+    labeljust=c
+    pad=0.3
+    nodesep=0.4
+    ranksep=0.5
+    splines=true
+    bgcolor=white
     compound=true
 
-    node [fontname="Helvetica", fontsize=10, style=filled, shape=box]
-    edge [fontname="Helvetica", fontsize=9]
+    node [fontname="Helvetica", fontsize=10, style="filled,rounded", shape=box, margin="0.12,0.06"]
+    edge [fontname="Helvetica", fontsize=8, arrowsize=0.7]
 
-    // Pipeline orchestrator
+    // ── Pipeline (top) ──
     subgraph cluster_pipeline {
-        label="PhasePipeline (orchestration/pipeline.py)"
-        style=filled
-        fillcolor="#E8F4FD"
+        label="Pipeline Orchestrator"
+        labeljust=c
+        fontsize=11
+        style="filled,rounded"
         color="#4169E1"
+        fillcolor="#E8F4FD"
+        margin=10
 
-        registry [label="Phase Registry\n─────────────\n0: Setup\n1: Discovery\n2: PRD\n3: Tasking\n4: Specification\n5: Implementation\n6: Code Review\n7: Integration\n8: Deployment Prep\n9: Release", shape=box, fillcolor="#C6E2FF"]
-        lifecycle [label="Phase Lifecycle\n─────────────\nNOT_STARTED →\nINITIALIZING → READY →\nRUNNING → COMPLETED\n(or PAUSED / FAILED)", shape=box, fillcolor="#C6E2FF"]
-        transition [label="Phase Transition\nAUTO | PROMPT | MANUAL", shape=box, fillcolor="#C6E2FF"]
+        node [fillcolor="#C6E2FF"]
+        registry [label="Phase Registry\n0-9: Setup \u2192 Release"]
+        lifecycle [label="Lifecycle: NOT_STARTED \u2192\nINITIALIZING \u2192 READY \u2192\nRUNNING \u2192 COMPLETED"]
+        transition [label="Transition Mode\nAUTO | PROMPT | MANUAL"]
+
+        registry -> lifecycle -> transition [style=invis]
     }
 
-    // State Manager
+    // ── State Manager ──
     subgraph cluster_state {
-        label="StateManager (core/state.py)"
-        style=filled
-        fillcolor="#FFF0F5"
+        label="StateManager  core/state.py"
+        labeljust=c
+        fontsize=10
+        style="filled,rounded"
         color="#CC0066"
+        fillcolor="#FFF0F5"
+        margin=10
 
-        state_ops [label="State Operations\n─────────────\nmark_task_started()\nmark_task_complete()\nmark_task_failed()\nget_completed_tasks()", shape=box, fillcolor="#FFB6C1"]
-        state_lock [label="StateLock\n─────────────\nFile-based locking\nfcntl (Unix)\nmsvcrt (Windows)", shape=box, fillcolor="#FFB6C1"]
-        state_snap [label="Snapshot / Restore\n─────────────\nPoint-in-time capture\nAtomic JSON writes\n(temp + rename)", shape=box, fillcolor="#FFB6C1"]
-        state_data [label=".state/task-state.json\n─────────────\nversion, current_phase\ncurrent_task, metadata\nphases → tasks → status", shape=note, fillcolor="#FFFACD"]
+        node [fillcolor="#FFB6C1"]
+        state_ops [label="mark_task_started / complete / failed\nget_completed_tasks, is_task_complete"]
+        state_lock [label="StateLock\nfcntl (Unix) | msvcrt (Windows)"]
+        state_snap [label="Snapshot / Restore\natomic JSON writes (temp + rename)"]
 
-        state_ops -> state_lock [style=dashed]
-        state_ops -> state_data
-        state_snap -> state_data
+        state_ops -> state_lock [style=invis]
+        state_lock -> state_snap [style=invis]
     }
 
-    // Memory System
+    // ── Memory System ──
     subgraph cluster_memory {
-        label="Memory System (core/memory/)"
-        style=filled
-        fillcolor="#F0FFF0"
+        label="Memory System  core/memory/"
+        labeljust=c
+        fontsize=10
+        style="filled,rounded"
         color="#228B22"
+        fillcolor="#F0FFF0"
+        margin=10
 
-        mem_store [label="MemoryStore\n─────────────\nAppend-only JSON log\nAtomic writes\nDual-write to graph", shape=box, fillcolor="#90EE90"]
-        mem_checkpoint [label="CheckpointManager\n─────────────\nPer-phase checkpoints\nmemory-head.json\nPrunes to last 10\nInvalidates on backtrack", shape=box, fillcolor="#90EE90"]
-        mem_compact [label="MemoryCompactor\n─────────────\n1. Age pruning (90d)\n2. Redundancy (Jaccard>0.85)\n3. Importance scoring", shape=box, fillcolor="#90EE90"]
-        mem_recall [label="MemoryRecall\n─────────────\nGraph fulltext (preferred)\nFile-based fallback\nRelevance scoring:\n50% keyword + 30% recency\n+ 20% phase relevance", shape=box, fillcolor="#90EE90"]
-        mem_data [label=".state/memory/\nmemory-log.json\nmemory-head.json\ncheckpoints/*.json", shape=note, fillcolor="#FFFACD"]
+        node [fillcolor="#90EE90"]
+        mem_store [label="MemoryStore\nappend-only JSON, dual-write to graph"]
+        mem_checkpoint [label="CheckpointManager\nper-phase, prunes to last 10"]
+        mem_compact [label="Compactor\nage prune \u2192 dedup (Jaccard) \u2192 score"]
+        mem_recall [label="Recall\ngraph fulltext \u2192 file-based fallback\n50% keyword + 30% recency + 20% phase"]
 
-        mem_store -> mem_data
-        mem_checkpoint -> mem_data
-        mem_recall -> mem_store [style=dashed]
+        mem_store -> mem_checkpoint [style=invis]
+        mem_checkpoint -> mem_compact [style=invis]
+        mem_compact -> mem_recall [style=invis]
     }
 
-    // LLM Router
+    // ── LLM Router ──
     subgraph cluster_llm {
-        label="LLM Router (core/llm/)"
-        style=filled
-        fillcolor="#FFFFF0"
+        label="LLM Router  core/llm/"
+        labeljust=c
+        fontsize=10
+        style="filled,rounded"
         color="#CC6600"
+        fillcolor="#FFFFF0"
+        margin=10
 
-        resolver [label="ModelResolver\n─────────────\n5-level hierarchy:\n1. Explicit override\n2. User override\n3. Agent preference\n4. Phase role\n5. Global default", shape=box, fillcolor="#FFE4B5"]
-        router [label="LLMRouter\n─────────────\nRole-based selection\nFallback chains\nCircuit breaker\n(3 failures → 5min cooldown)\nResponse cache (15min TTL)", shape=box, fillcolor="#FFE4B5"]
+        node [fillcolor="#FFE4B5"]
+        resolver [label="ModelResolver (5-level)\nexplicit \u2192 user \u2192 agent \u2192 phase \u2192 default"]
+        router_node [label="Router\nfallback chains, circuit breaker\n(3 fails \u2192 5min cooldown), cache (15min)"]
+        provider_chain [label="Claude Code CLI \u2192 Anthropic API\n\u2192 AWS Bedrock \u2192 Ollama"]
 
-        providers [label="Provider Chain\n─────────────\nClaude Code CLI\n  ↓ fallback\nAnthropic API\n  ↓ fallback\nAWS Bedrock\n  ↓ fallback\nOllama (local)", shape=box, fillcolor="#FFE4B5"]
-
-        resolver -> router -> providers
+        resolver -> router_node -> provider_chain
     }
 
-    // Knowledge Graph
-    subgraph cluster_graph {
-        label="Knowledge Graph (core/graph/)"
-        style=filled
-        fillcolor="#F5F0FF"
+    // ── Knowledge Graph ──
+    subgraph cluster_kg {
+        label="Knowledge Graph  core/graph/"
+        labeljust=c
+        fontsize=10
+        style="filled,rounded"
         color="#8B008B"
+        fillcolor="#F5F0FF"
+        margin=10
 
-        graph_conn [label="GraphConnection\n─────────────\nFalkorDB (Redis-based)\nSingleton + reconnect\nGraceful degradation", shape=box, fillcolor="#DDA0DD"]
-        graph_mgr [label="GraphManager\n─────────────\nNodes: Source, Finding,\nDecision, Requirement,\nFeature, Task, Spec,\nAgent, Memory, Checkpoint\n─────────────\nEdges: DERIVED_FROM,\nCONTAINS, IMPLEMENTS,\nTASK_DEPENDS_ON, HAS_SPEC", shape=box, fillcolor="#DDA0DD"]
+        node [fillcolor="#E8D5F5"]
+        graph_conn [label="FalkorDB (Redis-based)\nsingleton, auto-reconnect, graceful degradation"]
+        graph_mgr [label="10 node types: Source, Task, Spec, Feature...\n7 edge types: DERIVED_FROM, IMPLEMENTS..."]
 
         graph_conn -> graph_mgr
     }
 
-    // Audit System
+    // ── Audit ──
     subgraph cluster_audit {
-        label="Audit System (core/audit.py)"
-        style=filled
-        fillcolor="#FFF8F0"
+        label="Audit  core/audit.py"
+        labeljust=c
+        fontsize=10
+        style="filled,rounded"
         color="#996600"
+        fillcolor="#FFF8F0"
+        margin=10
 
-        audit_flow [label="Audit Flow\n─────────────\n1. Load criteria (CSV)\n2. Interactive plan (TUI)\n3. Parallel eval (5 max)\n4. Remediation (3 rounds)\n5. Report (JSON)", shape=box, fillcolor="#FFE4B5"]
-        audit_note [label="Non-blocking\n─────────────\nAlways returns True\nIssues recorded but\ndon't block phase", shape=box, fillcolor="#FFE4B5"]
+        node [fillcolor="#FFE4B5"]
+        audit_flow [label="43 categories, parallel eval (5 max)\nremediation loop (3 rounds)\nnon-blocking: always returns True"]
     }
 
-    // Dashboard Sync
-    subgraph cluster_dashboard {
-        label="Dashboard Sync (orchestration/dashboard_sync.py)"
-        style=filled
-        fillcolor="#F0F0FF"
+    // ── Dashboard ──
+    subgraph cluster_dash {
+        label="Dashboard Sync"
+        labeljust=c
+        fontsize=10
+        style="filled,rounded"
         color="#4169E1"
+        fillcolor="#F0F0FF"
+        margin=10
 
-        dash_files [label="Sync Files\n─────────────\ncurrent-task.json\nsession-tokens.json\nerrors.json\ntask-state.json", shape=box, fillcolor="#C6E2FF"]
-        dash_ops [label="Operations\n─────────────\nwrite_current_task()\nupdate_provider()\nclear_current_task()\nsync_dashboard()\nensure_dashboard()", shape=box, fillcolor="#C6E2FF"]
-        dash_port [label="Dashboard UI\nport 5174\n(Node.js/Express)", shape=box, fillcolor="#C6E2FF"]
+        node [fillcolor="#C6E2FF"]
+        dash_sync [label="current-task.json | session-tokens.json\nerrors.json | task-state.json"]
+        dash_ui [label="Dashboard UI  port 5174\nNode.js/Express"]
 
-        dash_ops -> dash_files -> dash_port
+        dash_sync -> dash_ui
     }
 
-    // Cross-system connections
-    registry -> state_ops [label="phase transitions", color="#4169E1", lhead=cluster_state]
-    registry -> mem_checkpoint [label="phase checkpoints", color="#228B22", lhead=cluster_memory]
-    registry -> audit_flow [label="phase audits", color="#996600", lhead=cluster_audit]
-    registry -> dash_ops [label="task updates", color="#4169E1", lhead=cluster_dashboard]
+    // ── Pipeline \u2192 systems ──
+    registry -> state_ops [label="state transitions", lhead=cluster_state]
+    registry -> mem_checkpoint [label="checkpoints", lhead=cluster_memory]
+    registry -> router_node [label="model resolution", lhead=cluster_llm, style=dashed]
+    registry -> audit_flow [label="phase audits", lhead=cluster_audit]
+    registry -> dash_sync [label="task updates", lhead=cluster_dash]
 
-    // Memory ↔ Graph dual-write
-    mem_store -> graph_mgr [label="dual-write\n(non-blocking)", color="#8B008B", style=dashed]
-    mem_checkpoint -> graph_mgr [label="checkpoint\nnodes", color="#8B008B", style=dashed]
-    mem_recall -> graph_conn [label="fulltext\nsearch", color="#8B008B", style=dashed]
+    // ── Memory \u2194 Graph (dual-write) ──
+    mem_store -> graph_mgr [label="dual-write", color="#8B008B", style=dashed]
+    mem_recall -> graph_conn [label="fulltext search", color="#8B008B", style=dashed]
 
-    // State ↔ Memory
-    state_snap -> mem_checkpoint [label="state snapshot\nin checkpoint", color="#CC0066", style=dashed]
+    // ── State \u2194 Memory ──
+    state_snap -> mem_checkpoint [label="snapshot in checkpoint", color="#CC0066", style=dashed]
 
-    // LLM ↔ Pipeline
-    router -> registry [label="model resolution\nper task", color="#CC6600", style=dashed, dir=back]
+    // ── Backtrack ──
+    node [shape=octagon, fillcolor="#FF6347", fontsize=9]
+    backtrack_node [label="Backtrack\ninvalidate checkpoints\nclear memory, reset state\nrestore snapshot"]
+    backtrack_node -> state_snap [style=dashed, color="#FF0000", arrowsize=0.5]
+    backtrack_node -> mem_checkpoint [style=dashed, color="#FF0000", arrowsize=0.5]
+    backtrack_node -> graph_mgr [style=dashed, color="#FF0000", arrowsize=0.5]
 
-    // Backtrack flow
-    node [shape=octagon, fillcolor="#FF6347"]
-    backtrack [label="Backtrack\n─────────────\n1. Invalidate checkpoints\n2. Clear phase memory\n3. Reset phase state\n4. Restore snapshot"]
-    backtrack -> state_snap [style=dashed, color="#FF0000"]
-    backtrack -> mem_checkpoint [style=dashed, color="#FF0000"]
-    backtrack -> graph_mgr [style=dashed, color="#FF0000", label="invalidate"]
+    // ── Data files ──
+    node [shape=note, fillcolor="#FFFACD", fontsize=8, margin="0.08,0.04"]
+    state_file [label=".state/task-state.json"]
+    mem_files [label=".state/memory/\nmemory-log.json\ncheckpoints/*.json"]
 
-    // Concurrency note
-    node [shape=component, fillcolor="#E0FFE0"]
-    safety [label="Concurrency & Safety\n─────────────\nFile locking (fcntl/msvcrt)\nAtomic writes (temp+rename)\nCircuit breakers\nThread-safe singletons\nNon-blocking graph writes"]
+    state_ops -> state_file [style=dashed, color="#4169E1", arrowsize=0.5]
+    mem_store -> mem_files [style=dashed, color="#4169E1", arrowsize=0.5]
 }
