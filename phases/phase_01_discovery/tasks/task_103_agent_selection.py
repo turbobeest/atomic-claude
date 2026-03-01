@@ -471,6 +471,14 @@ backend-architect
                 # All suggestions were hallucinated — fall through to defaults
                 return default_experts
 
+            if not valid_names and parsed:
+                # Agent catalog query failed; cannot validate LLM suggestions
+                logger.warning(
+                    "Agent name validation skipped — valid_names is empty "
+                    "(graph/manifest query failed). LLM-suggested names are "
+                    "unvalidated: %s", parsed
+                )
+
             return parsed if parsed else default_experts
     except Exception as e:
         logger.debug("LLM agent suggestion failed, using defaults: %s", e)

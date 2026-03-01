@@ -217,7 +217,7 @@ def _locked_tokens_file(filepath: Path):
                 fcntl.flock(fh, fcntl.LOCK_EX)
             elif sys.platform == 'win32':
                 import msvcrt
-                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1024)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 2**20)
         except OSError as e:
             raise OSError(f"Failed to acquire lock on {filepath}: {e}") from e
         fh.seek(0)
@@ -229,7 +229,7 @@ def _locked_tokens_file(filepath: Path):
             import msvcrt
             try:
                 fh.seek(0)
-                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1024)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 2**20)
             except OSError:
                 pass
         fh.close()

@@ -25,6 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 logger = logging.getLogger(__name__)
 
 from orchestration.phase_runner import run_phase_tasks
+try:
+    from core.graph import get_graph
+except ImportError:
+    get_graph = None
 
 # Import Python task modules
 from phases.phase_05_implementation.tasks import (
@@ -89,6 +93,17 @@ def run_phase(resume_at: str = None) -> bool:
     Returns:
         bool: True if phase completed successfully
     """
+    # Initialize knowledge graph (optional — graceful degradation if unavailable)
+    graph = None
+    try:
+        from core.graph import get_graph
+        graph = get_graph(phase_id="5-implementation")
+        if graph:
+            graph.ensure_schema()
+    except Exception as e:
+        logger.warning("Knowledge graph unavailable for Phase 5: %s", e)
+        graph = None
+
     # Task list in execution order
     tasks = [
         ("501", "Entry initialization", task_501_wrapper),
@@ -120,6 +135,7 @@ def run_phase(resume_at: str = None) -> bool:
         atomic_root=ATOMIC_ROOT,
         output_dir=OUTPUT_DIR,
         resume_at=resume_at,
+        graph=graph,
     )
 
 

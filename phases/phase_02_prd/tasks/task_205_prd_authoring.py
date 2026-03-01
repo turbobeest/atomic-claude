@@ -423,8 +423,11 @@ Generate the following section(s):
 
 """
 
-    # Add prior sections context (full content for LLM coherence)
+    # Add prior sections context (capped to prevent unbounded growth across 12 generations)
     if prior_content:
+        _PRIOR_CONTENT_CAP = 12000
+        if len(prior_content) > _PRIOR_CONTENT_CAP:
+            prior_content = "[Earlier sections truncated]\n" + prior_content[-_PRIOR_CONTENT_CAP:]
         prompt += f"""### Prior Sections
 
 {prior_content}

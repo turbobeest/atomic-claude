@@ -408,7 +408,12 @@ class PhaseTransition:
         print()
 
         while True:
-            choice = input("Choice (C/p/q): ").strip().lower()
+            try:
+                choice = input("Choice (C/p/q): ").strip().lower()
+            except EOFError:
+                print("\n⏸️  Pipeline paused (stdin closed).")
+                print(f"To resume: python main.py run {next_phase}")
+                return None
 
             if choice in ('c', 'continue', ''):
                 return next_phase

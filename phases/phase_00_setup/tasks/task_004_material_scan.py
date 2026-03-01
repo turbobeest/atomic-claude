@@ -922,6 +922,7 @@ def _offer_organization(
 
         # Wipe collected/ for idempotent re-runs (no _1 duplicates)
         if collected_dir.exists():
+            print(print_yellow("  Warning: Clearing existing collected materials directory"))
             shutil.rmtree(collected_dir)
         ensure_dir(collected_dir)
 

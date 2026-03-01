@@ -414,12 +414,18 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     print(print_bold("PRE-INJECTION BACKUP"))
     print()
 
+    # Validate JSON before making backup (avoid backing up corrupt data)
+    try:
+        tasks_data = json.loads(read_file(tasks_file))
+    except (json.JSONDecodeError, OSError) as e:
+        logger.error("Cannot parse %s: %s — aborting TDD injection", tasks_file, e)
+        print(print_red(f"✗ tasks.json is corrupt or unreadable: {e}"))
+        return False
     shutil.copy(tasks_file, backup_file)
     print(print_green("  ✓ Backed up tasks.json → tasks.json.pre-tdd-backup"))
     print()
 
-    # Load tasks
-    tasks_data = json.loads(read_file(tasks_file))
+    # Load tasks (already parsed above)
     tasks = tasks_data.get("tasks", [])
     total_tasks = len(tasks)
 

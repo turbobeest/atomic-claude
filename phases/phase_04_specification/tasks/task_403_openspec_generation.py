@@ -114,9 +114,11 @@ def _load_project_context(atomic_root: Path) -> str:
     analysis_file = project_root / ".outputs" / "1-discovery" / "corpus-analysis.md"
     if analysis_file.exists():
         try:
-            analysis = read_file(analysis_file).strip()
-            if analysis:
-                context_parts.append(f"\n**Corpus Analysis:**\n{analysis}")
+            corpus_content = read_file(analysis_file).strip()
+            if corpus_content:
+                if len(corpus_content) > 20_000:
+                    corpus_content = corpus_content[:20_000] + "\n[... truncated at 20,000 chars]"
+                context_parts.append(f"\n**Corpus Analysis:**\n{corpus_content}")
         except Exception as e:
             logger.debug("Could not load corpus analysis: %s", e)
 
@@ -126,6 +128,8 @@ def _load_project_context(atomic_root: Path) -> str:
         try:
             prd_content = read_file(prd_file).strip()
             if prd_content:
+                if len(prd_content) > 20_000:
+                    prd_content = prd_content[:20_000] + "\n[... truncated at 20,000 chars]"
                 context_parts.append(f"\n**PRD (Product Requirements Document):**\n{prd_content}")
         except Exception as e:
             logger.debug("Could not load PRD content: %s", e)
@@ -437,8 +441,8 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
         # spawning parallel workers (prevents TOCTOU race on singleton init).
         try:
             invoke_llm(prompt="Reply with OK", model="haiku", timeout=30)
-        except Exception:
-            pass  # Warmup failure is non-fatal; workers will retry
+        except Exception as e:
+            logger.warning("LLM warmup failed: %s — parallel workers will initialize independently", e)
 
         generated, failed = _run_parallel_specs(
             tasks, project_context, openspec_dir, invoke_llm, canonical_layout

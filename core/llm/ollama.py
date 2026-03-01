@@ -144,6 +144,18 @@ class OllamaProvider(BaseLLMProvider):
             raise ValueError(
                 f"Ollama host '{hostname}' is blocked (private/reserved IP range)"
             )
+        # DNS rebinding protection: resolve hostname to IP and validate the result.
+        # Skip resolution for localhost (primary use case) and raw IP literals
+        # (already validated above).
+        if hostname != "localhost" and not OllamaProvider._PRIVATE_IP_RE.match(hostname):
+            try:
+                resolved_ip = socket.gethostbyname(hostname)
+            except socket.gaierror:
+                raise ValueError(f"Cannot resolve hostname: {hostname}")
+            if OllamaProvider._PRIVATE_IP_RE.match(resolved_ip):
+                raise ValueError(
+                    f"Ollama host '{hostname}' resolves to private IP '{resolved_ip}' (DNS rebinding protection)"
+                )
 
     def invoke(
         self,

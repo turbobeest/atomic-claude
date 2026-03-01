@@ -382,7 +382,11 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
     print("   - Memory will be cleared")
 
     if not force:
-        confirm = input("\nType 'yes' to confirm: ")
+        try:
+            confirm = input("\nType 'yes' to confirm: ")
+        except EOFError:
+            print("❌ Backtrack cancelled (stdin closed)")
+            return False
 
         if confirm.lower() != "yes":
             print("❌ Backtrack cancelled")

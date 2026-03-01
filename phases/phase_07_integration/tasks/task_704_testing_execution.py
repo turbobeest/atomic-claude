@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_green,
-    print_red, print_dim
+    print_red, print_dim, print_yellow
 )
 from core.utils.file_ops import read_json, write_json
 
@@ -132,6 +132,10 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
 
     test_results = run_integration_tests(atomic_root, setup_data)
 
+    if test_results.get("simulated", False):
+        print(print_yellow("  ⚠ Integration tests are SIMULATED — no real tests were executed"))
+        print()
+
     tests_run = test_results["tests_run"]
     tests_passed = test_results["tests_passed"]
     tests_failed = test_results["tests_failed"]
@@ -188,6 +192,10 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
 
     if tests_failed > 0:
         print(print_red("  Integration test execution complete with failures"))
+        return False
+
+    if is_simulated:
+        print(print_yellow("  Integration tests are SIMULATED — phase cannot pass without real test execution"))
         return False
 
     print(print_green("  Integration test execution complete"))

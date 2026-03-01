@@ -329,8 +329,12 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     # Cache spec file list to avoid repeated glob calls
     spec_files = list(specs_dir.glob("spec-*.json")) if specs_dir.exists() else []
 
-    # Load tasks data once for reuse
-    tasks_data = json.loads(read_file(tasks_file))
+    # Load tasks data once for reuse (safe default on parse failure)
+    try:
+        tasks_data = json.loads(read_file(tasks_file))
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Cannot parse %s: %s — continuing closeout with empty task data", tasks_file, e)
+        tasks_data = {"tasks": []}
 
     print()
     print(print_dim("  Final review before moving to Phase 5 (TDD Implementation)."))

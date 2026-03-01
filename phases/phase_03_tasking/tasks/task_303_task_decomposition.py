@@ -68,7 +68,11 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     agent_repo = _find_agent_repo(atomic_root)
 
     if agents_file.exists():
-        agents_data = json.loads(read_file(agents_file))
+        try:
+            agents_data = json.loads(read_file(agents_file))
+        except (json.JSONDecodeError, Exception) as e:
+            logger.warning("Could not parse agents file %s: %s — skipping agent selection", agents_file, e)
+            agents_data = {}
         decomposition_agents = agents_data.get("decomposition_agents", [])
 
         for agent in decomposition_agents:

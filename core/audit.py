@@ -565,6 +565,14 @@ def _build_single_audit_prompt(
     A separate haiku summarization pass extracts structured verdicts.
     """
     a = audit_config.audit
+    if len(deliverables) > 12000:
+        logger.warning(
+            "Audit deliverables truncated from %d to 12,000 chars for %s",
+            len(deliverables), phase_id
+        )
+        deliverables_text = deliverables[:12000] + "\n[... truncated]"
+    else:
+        deliverables_text = deliverables
     return f"""You are a {audit_config.agent} evaluating Phase {phase_num} ({phase_id}) deliverables.
 
 # Audit: {a.get('audit_name', 'Unnamed')}
@@ -588,7 +596,7 @@ End your report with a single verdict line in exactly this format:
 
 ## Phase Deliverables
 
-{deliverables[:12000]}"""
+{deliverables_text}"""
 
 
 def _extract_verdict(response: str) -> str:

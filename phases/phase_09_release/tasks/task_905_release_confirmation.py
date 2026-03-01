@@ -98,7 +98,7 @@ def _display_approval_criteria(version: str, announcement_status: str, project_r
 
     all_criteria_met = True
 
-    if announcement_status == "success":
+    if announcement_status in ("success", "fallback"):
         print(f"  {GREEN}[CRIT]{NC} {GREEN}✓{NC} Internal release notes created")
     else:
         print(f"  {RED}[CRIT]{NC} {RED}✗{NC} Internal release notes failed")

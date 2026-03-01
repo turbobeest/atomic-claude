@@ -302,15 +302,14 @@ class GraphWriter:
         Returns:
             Number of nodes deleted
         """
-        # Delete nodes with phase property matching
-        cypher = (
-            "MATCH (n) WHERE n.phase = $phase "
-            "WITH n, count(n) AS c "
-            "DETACH DELETE n "
-            "RETURN sum(c) AS deleted"
-        )
-        result = self.conn.query(cypher, {"phase": phase})
-        deleted = result.result_set[0][0] if result.result_set else 0
+        # Count first, then delete (avoids accessing deleted variable in RETURN)
+        count_query = "MATCH (n) WHERE n.phase = $phase RETURN count(n) AS total"
+        count_result = self.conn.query(count_query, {"phase": phase})
+        deleted = count_result.result_set[0][0] if count_result.result_set else 0
+
+        delete_query = "MATCH (n) WHERE n.phase = $phase DETACH DELETE n"
+        self.conn.query(delete_query, {"phase": phase})
+
         logger.info("Deleted %d nodes for phase '%s'", deleted, phase)
         return deleted
 

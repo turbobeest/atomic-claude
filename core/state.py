@@ -680,39 +680,43 @@ class StateManager:
         Args:
             snapshot_file: Path to snapshot JSON
         """
-        with open(snapshot_file, 'r') as f:
-            data = json.load(f)
+        try:
+            with open(snapshot_file, 'r') as f:
+                data = json.load(f)
 
-        # Recreate snapshot object
-        phases = {}
-        for phase_id, phase_data in data.get('phases', {}).items():
-            # Build PhaseState manually to avoid duplicate task_id
-            tasks = {}
-            for task_id, task_data in phase_data.get('tasks', {}).items():
-                # Don't pass task_id again since it's already in the dict key
-                task_copy = dict(task_data)
-                task_copy['task_id'] = task_id
-                tasks[task_id] = TaskState(**task_copy)
+            # Recreate snapshot object
+            phases = {}
+            for phase_id, phase_data in data.get('phases', {}).items():
+                # Build PhaseState manually to avoid duplicate task_id
+                tasks = {}
+                for task_id, task_data in phase_data.get('tasks', {}).items():
+                    # Don't pass task_id again since it's already in the dict key
+                    task_copy = dict(task_data)
+                    task_copy['task_id'] = task_id
+                    tasks[task_id] = TaskState(**task_copy)
 
-            phases[phase_id] = PhaseState(
-                phase_id=phase_id,
-                status=phase_data.get('status', 'not_started'),
-                started_at=phase_data.get('started_at'),
-                completed_at=phase_data.get('completed_at'),
-                tasks=tasks
+                phases[phase_id] = PhaseState(
+                    phase_id=phase_id,
+                    status=phase_data.get('status', 'not_started'),
+                    started_at=phase_data.get('started_at'),
+                    completed_at=phase_data.get('completed_at'),
+                    tasks=tasks
+                )
+
+            snapshot = StateSnapshot(
+                timestamp=data.get('timestamp'),
+                version=data.get('version', self.STATE_VERSION),
+                phases=phases,
+                current_phase=data.get('current_phase'),
+                current_task=data.get('current_task'),
+                metadata=data.get('metadata', {})
             )
 
-        snapshot = StateSnapshot(
-            timestamp=data['timestamp'],
-            version=data['version'],
-            phases=phases,
-            current_phase=data.get('current_phase'),
-            current_task=data.get('current_task'),
-            metadata=data.get('metadata', {})
-        )
-
-        # Restore
-        self.restore(snapshot)
+            # Restore
+            self.restore(snapshot)
+        except (json.JSONDecodeError, KeyError, OSError) as e:
+            logger.error("Failed to load snapshot from '%s': %s", snapshot_file, e)
+            return False
 
     # ========================================================================
     # DISPLAY & UTILITIES

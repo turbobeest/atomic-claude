@@ -9,8 +9,10 @@ Usage in orchestrators:
 """
 
 import inspect
+import json
 import logging
 import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -485,5 +487,12 @@ def create_phase_closeout(phase_id: str, tasks: List[TaskEntry],
     }
 
     closeout_file = output_dir / "closeout.json"
-    write_json(closeout_file, closeout_data)
+    fd, tmp_path = tempfile.mkstemp(dir=str(closeout_file.parent), suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(closeout_data, f, indent=2, default=str)
+        os.replace(tmp_path, str(closeout_file))
+    except Exception:
+        os.unlink(tmp_path)
+        raise
     print(f"\n✅ Phase {phase_num} closeout: {closeout_file}")

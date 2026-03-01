@@ -159,7 +159,7 @@ def _verify_phase_5(closeout_file: Path) -> bool:
     coverage = closeout_data.get("coverage", {})
     unit_coverage = coverage.get("unit", 0)
 
-    if phase5_status != "complete" and "tasks_completed" not in closeout_data:
+    if phase5_status != "complete" or "tasks_completed" not in closeout_data:
         print(print_red(f"✗ Phase 5 status: {phase5_status}"))
         print()
         print(print_red("Phase 5 must be complete before starting Phase 6"))

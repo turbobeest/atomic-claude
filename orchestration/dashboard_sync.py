@@ -65,7 +65,7 @@ def _locked_file(filepath: Path, mode: str = "r+"):
                 fcntl.flock(fh, fcntl.LOCK_EX)
             elif sys.platform == 'win32':
                 import msvcrt
-                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1024)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 2**20)
         except OSError as e:
             raise OSError(f"Failed to acquire lock on {filepath}: {e}") from e
         fh.seek(0)
@@ -77,7 +77,7 @@ def _locked_file(filepath: Path, mode: str = "r+"):
             import msvcrt
             try:
                 fh.seek(0)
-                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1024)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 2**20)
             except OSError:
                 pass  # Unlock failure on Windows is non-fatal; file handle close releases it
         fh.close()

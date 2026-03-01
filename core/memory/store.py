@@ -110,12 +110,16 @@ class MemoryStore:
         if not self.memory_file.exists():
             return
 
-        with open(self.memory_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        try:
+            with open(self.memory_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
 
-        self._entries = [
-            MemoryEntry(**entry) for entry in data.get("entries", [])
-        ]
+            self._entries = [
+                MemoryEntry(**entry) for entry in data.get("entries", [])
+            ]
+        except (json.JSONDecodeError, TypeError, KeyError, OSError) as e:
+            logger.warning("Failed to load memory from '%s': %s — starting with empty memory", self.memory_file, e)
+            self._entries = []
 
         # Rebuild index
         self._index = {
@@ -244,9 +248,15 @@ class MemoryStore:
                 existing = file_path.read_text(encoding='utf-8')
             combined = existing + md_content
 
-            tmp_path = file_path.with_suffix('.tmp')
-            tmp_path.write_text(combined, encoding='utf-8')
-            shutil.move(str(tmp_path), str(file_path))
+            fd, tmp_path = tempfile.mkstemp(dir=str(file_path.parent), suffix='.tmp')
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    f.write(combined)
+                shutil.move(tmp_path, str(file_path))
+            except Exception:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                raise
 
         except Exception as e:
             # Never block the main memory operation

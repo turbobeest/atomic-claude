@@ -478,8 +478,12 @@ def _create_secrets_file(
     secrets["memory_enabled"] = True
     secrets["network_mode"] = env_vars.get('ATOMIC_NETWORK_MODE', 'cui')
 
-    ensure_dir(output_dir)
-    write_file(secrets_file, json.dumps(secrets, indent=2))
+    try:
+        ensure_dir(output_dir)
+        write_file(secrets_file, json.dumps(secrets, indent=2))
+    except OSError as e:
+        logger.error("Failed to write secrets file %s: %s", secrets_file, e)
+        return False
 
     if os.name != 'nt':
         try:

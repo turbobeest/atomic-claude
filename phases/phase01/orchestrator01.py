@@ -59,9 +59,15 @@ def run_phase(resume_at: str = None) -> bool:
     """
     phase_id = "1-discovery"
 
-    # Initialize knowledge graph (raises GraphUnavailableError on failure)
-    graph = get_graph(phase_id=phase_id)
-    graph.ensure_schema()
+    # Initialize knowledge graph (optional — graceful degradation if unavailable)
+    graph = None
+    try:
+        graph = get_graph(phase_id=phase_id)
+        if graph:
+            graph.ensure_schema()
+    except Exception as e:
+        logger.warning("Knowledge graph unavailable for Phase 1: %s", e)
+        graph = None
 
     # Task list in execution order
     tasks = [

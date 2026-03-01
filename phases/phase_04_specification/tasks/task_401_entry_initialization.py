@@ -68,6 +68,7 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     print()
 
     verification_passed = True
+    tasks_data = None
 
     # Check Phase 3 closeout
     phase3_closeout = project_root / ".claude" / "closeout" / "phase-03-closeout.json"
@@ -87,7 +88,7 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     # Check tasks.json
     if tasks_file.exists():
         try:
-            tasks_data = json.loads(read_file(tasks_file))
+            tasks_data = json.loads(read_file(tasks_file))  # noqa: F841 — hoisted for reuse below
             task_count = len(tasks_data.get("tasks", []))
             if task_count > 0:
                 print(print_green(f"  ✓ tasks.json found ({task_count} tasks)"))
@@ -128,7 +129,7 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     print(print_bold("TASK SUMMARY"))
     print()
 
-    tasks_data = json.loads(read_file(tasks_file))
+    # Reuse already-parsed tasks_data from the verification block above
     tasks = tasks_data.get("tasks", [])
 
     high_priority = len([t for t in tasks if t.get("priority") == "high"])

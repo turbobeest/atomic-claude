@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.ui import success, warning, step
-from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, RED, YELLOW, NC
+from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, RED, YELLOW, NC, print_yellow
 from core.utils.file_ops import read_json, write_json
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     # SIMULATED counts -- replace with CHANGELOG.md parsing
     features_count = 5
     fixes_count = 0
-    print(f"    {YELLOW}Note: Feature/fix counts are simulated{NC}")
+    print(print_yellow("  ⚠ Feature/fix counts are simulated (CHANGELOG.md parsing not implemented)"))
 
     print(f"    Changelog:   {GREEN}{features_count} features{NC}, {DIM}{fixes_count} fixes{NC}")
     print(f"  {'─' * 110}")

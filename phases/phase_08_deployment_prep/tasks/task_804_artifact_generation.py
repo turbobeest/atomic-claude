@@ -89,9 +89,9 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     docs_result = _generate_documentation(prompts_dir, version, project_context)
     install_result = _generate_installation_guide(prompts_dir, version, project_context)
 
-    # Determine overall success: all artifact generators must report success
+    # Determine overall success: "success" or "cached" are both non-failure
     all_succeeded = all(
-        r.get("status") == "success"
+        r.get("status") in ("success", "cached")
         for r in [package_result, changelog_result, docs_result, install_result]
     )
 
@@ -101,7 +101,12 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     print()
 
     def _status_label(result: Dict[str, Any]) -> str:
-        return "ok" if result.get("status") == "success" else "FAILED"
+        status = result.get("status")
+        if status == "success":
+            return "ok"
+        if status == "cached":
+            return "cached"
+        return "FAILED"
 
     print("  " + "─" * 110)
     print(print_bold("  ARTIFACTS PREPARED"))
@@ -225,6 +230,9 @@ Output raw JSON:
         print(print_red("  ✗ Package generation failed: LLM returned no content"))
         return {"package_name": package_name, "status": "failed", "reason": "LLM returned no content for packaging"}
 
+    if not llm_result and result_file.exists():
+        print(print_yellow("  ⚠ LLM unavailable — using cached result from prior run (package-result.md)"))
+
     print("  " + "─" * 110)
     print(print_bold("  PACKAGE BUILD"))
     print()
@@ -240,7 +248,8 @@ Output raw JSON:
     print("  " + "─" * 110)
     print()
 
-    return {"package_name": package_name, "status": "success"}
+    artifact_status = "success" if llm_result else "cached"
+    return {"package_name": package_name, "status": artifact_status}
 
 
 def _generate_changelog(prompts_dir: Path, version: str, release_type: str, context: str) -> Dict[str, Any]:
@@ -289,6 +298,9 @@ Generate a Keep a Changelog format entry. Include Added, Changed, Fixed sections
         print(print_red("  ✗ Changelog generation failed: LLM returned no content"))
         return {"status": "failed", "reason": "LLM returned no content for changelog"}
 
+    if not changelog_content and result_file.exists():
+        print(print_yellow("  ⚠ LLM unavailable — using cached result from prior run (changelog-result.md)"))
+
     print("  " + "─" * 110)
     print(print_bold("  CHANGELOG"))
     print()
@@ -305,7 +317,7 @@ Generate a Keep a Changelog format entry. Include Added, Changed, Fixed sections
     print("  " + "─" * 110)
     print()
 
-    return {"status": "success"}
+    return {"status": "success" if changelog_content else "cached"}
 
 
 def _generate_documentation(prompts_dir: Path, version: str, context: str) -> Dict[str, Any]:
@@ -353,6 +365,9 @@ Generate a documentation overview covering: project overview, usage guide, API r
         print(print_red("  ✗ Documentation generation failed: LLM returned no content"))
         return {"status": "failed", "reason": "LLM returned no content for documentation"}
 
+    if not docs_content and result_file.exists():
+        print(print_yellow("  ⚠ LLM unavailable — using cached result from prior run (documentation-result.md)"))
+
     print("  " + "─" * 110)
     print(print_bold("  DOCUMENTATION"))
     print()
@@ -367,7 +382,7 @@ Generate a documentation overview covering: project overview, usage guide, API r
     print("  " + "─" * 110)
     print()
 
-    return {"status": "success"}
+    return {"status": "success" if docs_content else "cached"}
 
 
 def _generate_installation_guide(prompts_dir: Path, version: str, context: str) -> Dict[str, Any]:
@@ -415,6 +430,9 @@ Generate a comprehensive installation guide with: prerequisites, quick start, ma
         print(print_red("  ✗ Installation guide generation failed: LLM returned no content"))
         return {"status": "failed", "reason": "LLM returned no content for installation guide"}
 
+    if not install_content and result_file.exists():
+        print(print_yellow("  ⚠ LLM unavailable — using cached result from prior run (installation-guide-result.md)"))
+
     print("  " + "─" * 110)
     print(print_bold("  INSTALLATION GUIDE"))
     print()
@@ -430,7 +448,7 @@ Generate a comprehensive installation guide with: prerequisites, quick start, ma
     print("  " + "─" * 110)
     print()
 
-    return {"status": "success"}
+    return {"status": "success" if install_content else "cached"}
 
 
 if __name__ == "__main__":

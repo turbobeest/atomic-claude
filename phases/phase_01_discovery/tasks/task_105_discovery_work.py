@@ -649,8 +649,21 @@ Return ONLY valid JSON:
         invoke(str(prompt_file), str(approaches_file), "Generate approaches", model="sonnet")
 
         if approaches_file.exists():
-            with open(approaches_file) as f:
-                data = json.load(f)
+            raw = approaches_file.read_text().strip()
+            # Strip markdown code fences (```json ... ```) that LLMs sometimes add
+            if '```' in raw:
+                fence_lines = raw.split('\n')
+                json_lines = []
+                in_fence = False
+                for fl in fence_lines:
+                    if fl.strip().startswith('```'):
+                        in_fence = not in_fence
+                        continue
+                    if in_fence:
+                        json_lines.append(fl)
+                if json_lines:
+                    raw = '\n'.join(json_lines)
+            data = json.loads(raw)
 
             print("  ✓ Approaches generated")
             print()

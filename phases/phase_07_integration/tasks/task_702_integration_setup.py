@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_green,
-    print_dim, prompt_user
+    print_dim, print_yellow, prompt_user
 )
 from core.utils.file_ops import read_json, write_json, ensure_dir
 
@@ -96,6 +96,7 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     print()
 
     # SIMULATED: Replace with actual PRD parsing when available
+    print(print_yellow("  ⚠ Using simulated acceptance criteria (hardcoded). Real PRD parsing not yet implemented."))
     criteria_count = 17
 
     print(print_dim("─" * 118))
@@ -152,7 +153,8 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
         },
         "acceptance_criteria": {
             "total": criteria_count,
-            "source": "PRD + specs"
+            "source": "PRD + specs",
+            "simulated": True
         },
         "setup_at": datetime.now(timezone.utc).isoformat()
     }
