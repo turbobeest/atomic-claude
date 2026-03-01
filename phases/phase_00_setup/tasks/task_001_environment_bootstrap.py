@@ -21,7 +21,7 @@ import json
 import subprocess
 import shutil
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -44,14 +44,13 @@ RECOMMENDED_TOTAL = 0
 RECOMMENDED_INSTALLED = 0
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 001: Environment Bootstrap.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -104,37 +103,33 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if missing > 0:
         print(print_red(f"  Cannot proceed with {missing} missing required tool(s)."))
         print()
-        if uat_mode:
-            print(print_yellow("  UAT Mode: Continuing despite missing tools"))
-        else:
-            print(print_yellow("  Open another terminal to install missing tools."))
-            print(print_yellow("  When ready, return here and press Enter to re-check."))
+        print(print_yellow("  Open another terminal to install missing tools."))
+        print(print_yellow("  When ready, return here and press Enter to re-check."))
+        print()
+
+        # Loop until all required tools are installed
+        while missing > 0:
+            clear_input_buffer()
+            prompt_user("Press Enter to re-check environment... ")
             print()
 
-            # Loop until all required tools are installed
-            while missing > 0:
-                clear_input_buffer()
-                prompt_user("Press Enter to re-check environment... ")
+            # Re-check required tools
+            REQUIRED_TOTAL = 0
+            REQUIRED_INSTALLED = 0
+            _recheck_required(os_type)
+
+            missing = REQUIRED_TOTAL - REQUIRED_INSTALLED
+            if missing > 0:
+                print(print_red(f"  Still missing {missing} required tool(s)."))
                 print()
 
-                # Re-check required tools
-                REQUIRED_TOTAL = 0
-                REQUIRED_INSTALLED = 0
-                _recheck_required(os_type)
-
-                missing = REQUIRED_TOTAL - REQUIRED_INSTALLED
-                if missing > 0:
-                    print(print_red(f"  Still missing {missing} required tool(s)."))
-                    print()
-
-            print(print_green("  All required tools now installed."))
-            print()
+        print(print_green("  All required tools now installed."))
+        print()
     else:
         print(print_green("  All required tools installed."))
         print()
-        if not uat_mode:
-            clear_input_buffer()
-            prompt_user("Press Enter to continue... ")
+        clear_input_buffer()
+        prompt_user("Press Enter to continue... ")
 
     # Install dashboard sub-app dependencies (requires node)
     _install_dashboard_deps(atomic_root)
@@ -143,7 +138,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     _launch_dashboard(atomic_root)
 
     # Start FalkorDB knowledge graph
-    _start_falkordb(atomic_root, uat_mode)
+    _start_falkordb(atomic_root)
 
     # Record environment to config
     try:
@@ -260,8 +255,6 @@ def _check_tool(tool: str) -> Optional[str]:
             result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout.strip().split()[-1] if result.stdout.strip() else "installed"
-        elif tool == "task-master":
-            return "installed"  # Legacy — no longer required
         elif tool == "dot":
             result = subprocess.run([tool_path, "-V"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
@@ -319,7 +312,6 @@ def _get_install_cmd(tool: str, os_type: str) -> str:
             "windows": "winget install OpenJS.NodeJS.LTS",
         },
         "claude": {"*": "npm install -g @anthropic-ai/claude-code"},
-        "task-master": {"*": "npm install -g task-master-ai"},
         "dot": {
             "macos": "brew install graphviz",
             "debian": "sudo apt install graphviz",
@@ -376,12 +368,17 @@ def _show_required_tools(os_type: str) -> None:
         if version:
             # Check version if minimum specified
             if min_version and tool == "node":
-                major = int(version.split('.')[0])
-                if major >= min_version:
-                    print(print_green(f"    ✓ {tool} (v{version})"))
-                    REQUIRED_INSTALLED += 1
-                else:
-                    print(print_yellow(f"    ! {tool} (v{version}) - v{min_version}+ required"))
+                try:
+                    major = int(version.split('.')[0])
+                    if major >= min_version:
+                        print(print_green(f"    ✓ {tool} (v{version})"))
+                        REQUIRED_INSTALLED += 1
+                    else:
+                        print(print_yellow(f"    ! {tool} (v{version}) - v{min_version}+ required"))
+                        print(print_dim(f"      {_get_install_cmd(tool, os_type)}"))
+                except ValueError:
+                    logger.debug("Failed to parse node version: %s", version)
+                    print(print_yellow(f"    ! {tool} (v{version}) - version could not be verified"))
                     print(print_dim(f"      {_get_install_cmd(tool, os_type)}"))
             else:
                 if tool == "cargo":
@@ -588,6 +585,18 @@ def _launch_dashboard(atomic_root: Path) -> None:
 
     port = os.environ.get("ATOMIC_TASKS_PORT", "5174")
 
+    # Check if port is already in use (dashboard already running) — skip spawn if so
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _sock:
+            _sock.settimeout(1)
+            _sock.connect(("127.0.0.1", int(port)))
+        # Connection succeeded — dashboard already running
+        logger.debug("Dashboard port %s already in use, skipping spawn", port)
+        return
+    except (OSError, ConnectionRefusedError, ValueError):
+        pass  # Port not in use — proceed to spawn
+
     try:
         env = os.environ.copy()
         env["ATOMIC_ROOT"] = str(atomic_root)
@@ -658,7 +667,7 @@ def _get_hostname() -> str:
 # FalkorDB knowledge graph
 # ---------------------------------------------------------------------------
 
-def _start_falkordb(atomic_root: Path, uat_mode: bool = False) -> None:
+def _start_falkordb(atomic_root: Path) -> None:
     """Start FalkorDB via docker compose and verify it's healthy."""
     import time
 
@@ -683,9 +692,6 @@ def _start_falkordb(atomic_root: Path, uat_mode: bool = False) -> None:
 
         if result.returncode != 0:
             print(print_red(f"  ✗ docker compose up failed: {result.stderr.strip()}"))
-            if uat_mode:
-                print(print_yellow("  UAT Mode: Continuing without FalkorDB"))
-                return
             print(print_yellow("  Ensure Docker is running and try again."))
             return
 
@@ -774,10 +780,8 @@ if __name__ == "__main__":
                         help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                         help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                        help='Run in UAT mode (skip interactive prompts)')
 
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

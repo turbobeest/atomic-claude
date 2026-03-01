@@ -1,7 +1,7 @@
 """
 Task 802: Deployment Setup
 
-Configure release type, version, and distribution channels.
+Configure release type and version.
 """
 
 import re
@@ -13,20 +13,18 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
-    print_bold, print_cyan, print_yellow, print_green,
-    print_red, print_dim, prompt_user
+    print_bold, print_green, print_red, print_dim, prompt_user
 )
 from core.utils.file_ops import write_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 802: Deployment Setup.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -41,21 +39,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     deployment_dir.mkdir(parents=True, exist_ok=True)
 
-    # UAT Mode Bypass
-    if uat_mode:
-        print(print_dim("  UAT Mode: Creating minimal valid output"))
-        setup_data = {
-            "release_type": "internal",
-            "version": "0.1.0",
-            "channels": ["internal"],
-            "config_confirmed": True
-        }
-        write_json(setup_file, setup_data)
-        print(print_green("✓ UAT bypass complete"))
-        return True
-
     print()
-    print(print_dim("  Configuring release type and distribution channels."))
+    print(print_dim("  Configuring release type and version."))
     print()
 
     while True:
@@ -96,23 +81,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
         print()
 
-        # DISTRIBUTION CHANNELS
-        print()
-        print(print_bold("  - DISTRIBUTION CHANNELS"))
-        print()
-
-        print(print_dim("  Select distribution channel:"))
-        print()
-        print("    [1] Internal only")
-        print()
-
-        channel_choice = prompt_user("  Select channel (default: 1): ") or "1"
-
-        channels = []
-        if channel_choice.strip() == "1":
-            channels.append("internal")
-
-        print()
+        channels = ["internal"]
 
         # RELEASE CONFIGURATION SUMMARY
         print()
@@ -169,10 +138,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

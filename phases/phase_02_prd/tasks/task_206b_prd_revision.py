@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from core.llm import invoke
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
-    print_red, print_dim, print_magenta, prompt_user, clear_input_buffer
+    print_red, print_dim, prompt_user
 )
 from core.utils.file_ops import read_file, write_file
 
@@ -111,8 +111,8 @@ def extract_section_references(text: str) -> List[str]:
     for m in re.finditer(r'[Ss]ection\s+(\d+)(?:\.\d+)*', text):
         refs.add(m.group(1))
 
-    # "in 2.15" or "current 2.1-2.5"
-    for m in re.finditer(r'\b(\d{1,2})\.\d+', text):
+    # "Section 2.15" or "section 2.1-2.5" (require "section" context)
+    for m in re.finditer(r'[Ss]ections?\s+(\d{1,2})\.\d+', text):
         refs.add(m.group(1))
 
     # Appendix references -> section "appendix"

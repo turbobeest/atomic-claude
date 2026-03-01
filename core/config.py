@@ -41,34 +41,6 @@ except ImportError:
 
 
 # ============================================================================
-# ENUMS
-# ============================================================================
-
-class NetworkMode(str, Enum):
-    """Network access modes."""
-    CUI = "cui"  # Completely Unclassified Information
-    INTERNET = "internet"  # Full internet access
-    RESTRICTED = "restricted"  # Limited network access
-
-
-class Provider(str, Enum):
-    """LLM providers."""
-    MAX = "max"  # Claude Desktop
-    API = "api"  # Anthropic API
-    BEDROCK = "bedrock"  # AWS Bedrock
-    OLLAMA = "ollama"  # Ollama local
-    CLAUDE_CODE = "claude-code"  # Claude Code CLI
-
-
-class ModelRole(str, Enum):
-    """Model roles for task routing."""
-    PRIMARY = "primary"  # Main workhorse
-    FAST = "fast"  # Quick validation
-    HEAVYWEIGHT = "heavyweight"  # Complex reasoning
-    GARDENER = "gardener"  # Context maintenance
-
-
-# ============================================================================
 # PYDANTIC SCHEMAS (if available)
 # ============================================================================
 
@@ -92,10 +64,10 @@ if HAS_PYDANTIC:
 
     class LLMConfig(BaseModel):
         """LLM configuration schema."""
-        primary_provider: Provider = Field(default=Provider.MAX, description="Primary LLM provider")
-        fast_provider: Optional[Provider] = Field(default=None, description="Fast operations provider")
-        gardener_provider: Optional[Provider] = Field(default=None, description="Context maintenance provider")
-        heavyweight_provider: Optional[Provider] = Field(default=None, description="Complex reasoning provider")
+        primary_provider: str = Field(default="max", description="Primary LLM provider")
+        fast_provider: Optional[str] = Field(default=None, description="Fast operations provider")
+        gardener_provider: Optional[str] = Field(default=None, description="Context maintenance provider")
+        heavyweight_provider: Optional[str] = Field(default=None, description="Complex reasoning provider")
 
         primary_model: str = Field(default="sonnet", description="Primary model")
         fast_model: str = Field(default="haiku", description="Fast model")
@@ -420,8 +392,11 @@ class Config:
                 # Update config with validated values
                 self._config = self._schema.model_dump()
             except Exception as e:
-                # Validation failed, continue with unvalidated config
-                print(f"Warning: Config validation failed: {e}")
+                # Validation failed, log details and continue with unvalidated config
+                logger.warning(
+                    "Config validation failed (falling back to unvalidated config): %s",
+                    e,
+                )
                 self._schema = None
 
         self._load_timestamp = datetime.now(timezone.utc)

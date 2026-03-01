@@ -6,10 +6,13 @@ Persistent context storage and recall across phases and sessions.
 Pure Python implementation replacing the bash memory.sh (47KB, 1,500 lines).
 """
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from .types import (
     MemoryEntry,
@@ -31,6 +34,7 @@ _checkpoint_manager: Optional[CheckpointManager] = None
 _recall_engine: Optional[MemoryRecall] = None
 _compactor: Optional[MemoryCompactor] = None
 _initialized = False
+_initialized_state_dir: Optional[Path] = None
 
 
 def memory_init(state_dir: Optional[Path] = None, graph=None) -> None:
@@ -41,13 +45,24 @@ def memory_init(state_dir: Optional[Path] = None, graph=None) -> None:
         state_dir: State directory (defaults to .state/)
         graph: Optional GraphManager for dual-write to FalkorDB
     """
-    global _store, _checkpoint_manager, _recall_engine, _compactor, _initialized
+    global _store, _checkpoint_manager, _recall_engine, _compactor, _initialized, _initialized_state_dir
 
     if _initialized:
+        if state_dir is not None and _initialized_state_dir is not None:
+            resolved_new = Path(state_dir).resolve()
+            resolved_old = Path(_initialized_state_dir).resolve()
+            if resolved_new != resolved_old:
+                logger.warning(
+                    "memory_init() called with state_dir=%s but already initialized with %s. "
+                    "Using previously initialized path.",
+                    resolved_new, resolved_old,
+                )
         return
 
     if state_dir is None:
         state_dir = Path.cwd() / ".state"
+
+    _initialized_state_dir = Path(state_dir).resolve()
 
     # Initialize store (with optional graph for dual-write)
     _store = MemoryStore(state_dir, graph=graph)
@@ -66,9 +81,12 @@ def memory_init(state_dir: Optional[Path] = None, graph=None) -> None:
 
 
 def _ensure_initialized():
-    """Ensure memory system is initialized."""
+    """Ensure memory system is initialized. Raises if not."""
     if not _initialized:
-        memory_init()
+        raise RuntimeError(
+            "Memory system not initialized. Call memory_init(state_dir) first. "
+            "Auto-initialization from CWD is disabled to prevent wrong project dir."
+        )
 
 
 def memory_save(

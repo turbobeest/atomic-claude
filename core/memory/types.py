@@ -21,15 +21,6 @@ class MemoryEntryType(str, Enum):
     SYSTEM_EVENT = "system_event"
 
 
-class MemoryPriority(str, Enum):
-    """Priority level for memory entries under token pressure."""
-    P0 = "P0"   # Critical: breaking changes, security
-    P1 = "P1"   # High: key decisions, blockers
-    P2 = "P2"   # Standard: task outcomes (default)
-    P3 = "P3"   # Low: progress notes
-    P4 = "P4"   # Ephemeral: ACK, routine
-
-
 class MemoryEntry(BaseModel):
     """Single memory entry with content and metadata."""
 
@@ -97,7 +88,6 @@ class MemoryStats(BaseModel):
     """Memory system statistics."""
 
     total_entries: int = 0
-    total_checkpoints: int = 0
     size_bytes: int = 0
     size_mb: float = 0.0
     oldest_entry: Optional[datetime] = None

@@ -23,14 +23,14 @@ import logging
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.llm import invoke_llm as invoke
-from core.ui import success, warning, info, step, wrap_text
+from core.ui import success, warning, step, wrap_text
 
 try:
     from core.discovery.canvas import (
@@ -42,14 +42,13 @@ except ImportError:
     HAS_CANVAS = False
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 104: Opening Dialogue.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, skip interactive conversation
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -63,26 +62,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     step("Opening Dialogue")
 
     prompts_dir.mkdir(parents=True, exist_ok=True)
-
-    # UAT Mode: Skip interactive conversation
-    if uat_mode:
-        print()
-        print("  ⚡ UAT Mode: Skipping interactive dialogue")
-        print()
-
-        _create_uat_dialogue(dialogue_output, conversation_log)
-        if HAS_CANVAS:
-            try:
-                canvas = CanvasState()
-                canvas.scores["vision"] = 0.8
-                canvas.scores["features"] = 0.4
-                canvas.scores["risks"] = 0.3
-                canvas_file = output_dir / "canvas.json"
-                canvas_file.write_text(json.dumps(canvas.to_dict(), indent=2))
-            except Exception as e:
-                logger.debug("Failed to save UAT canvas: %s", e)
-        success("Opening dialogue complete (UAT mode)")
-        return True
 
     print()
     print("  ┌─────────────────────────────────────────────────────────┐")
@@ -601,12 +580,12 @@ Return ONLY valid JSON with no additional text:
             if '```' in content:
                 lines = content.split('\n')
                 json_lines = []
-                in_json = False
+                in_fence = False
                 for line in lines:
                     if '```' in line:
-                        in_json = not in_json
+                        in_fence = not in_fence
                         continue
-                    if in_json or line.strip().startswith('{'):
+                    if in_fence:
                         json_lines.append(line)
                 content = '\n'.join(json_lines)
 
@@ -625,55 +604,11 @@ Return ONLY valid JSON with no additional text:
     }
 
 
-def _create_uat_dialogue(dialogue_output: Path, conversation_log: Path) -> None:
-    """Create minimal dialogue for UAT mode."""
-    with open(dialogue_output, 'w') as f:
-        json.dump({
-            "conversation": [
-                {"role": "agent", "content": "UAT mode: Opening dialogue skipped"},
-                {"role": "human", "content": "This is a UAT test of Phase 00 and Phase 01."}
-            ],
-            "synthesis": {
-                "vision": {
-                    "core_problem": "Validate Phase 00 and Phase 01 functionality",
-                    "solution_concept": "User acceptance testing framework",
-                    "why_now": "Refactoring to atomic-claude"
-                },
-                "impact": {
-                    "primary_impact": "Ensure phase transitions work correctly",
-                    "success_metrics": ["All tasks complete", "Closeout files created"],
-                    "timeline_to_value": "Immediate"
-                },
-                "audience": {
-                    "primary": "Development team",
-                    "secondary": ["QA engineers"],
-                    "pain_points": ["Manual testing"]
-                },
-                "constraints": {
-                    "tech_stack": "Python 3.11+, Bash",
-                    "timeline": "Ongoing refactoring",
-                    "team_size": "1-2 developers",
-                    "compliance": []
-                },
-                "non_negotiables": ["Phase 00 completion before Phase 01"],
-                "open_questions": []
-            }
-        }, f, indent=2)
-
-    conversation_log.write_text("""## UAT Mode
-
-Opening dialogue skipped in UAT mode.
-
-Vision: Validate Phase 00 and Phase 01 functionality through user acceptance testing.
-""")
-
-
 
 
 if __name__ == "__main__":
     # CLI execution support
     atomic_root = Path.cwd()
     output_dir = atomic_root.parent / ".outputs" / "1-discovery"
-    uat_mode = "--uat" in sys.argv
 
-    sys.exit(0 if execute(atomic_root, output_dir, uat_mode) else 1)
+    sys.exit(0 if execute(atomic_root, output_dir) else 1)

@@ -68,14 +68,13 @@ SKIP_DIRS = {
 }
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 004: Material Scan & Reference Organization.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, skip interactive prompts
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -115,7 +114,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     _scan_tests(manifest, project_root, exclude_dirs)
     _calculate_totals(manifest)
     _display_summary(manifest)
-    _prompt_exclusions(manifest, project_root, uat_mode)
+    _prompt_exclusions(manifest, project_root)
 
     # ── Part 2: Collect reference materials ────────────────────────────────
 
@@ -123,9 +122,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     found_files = _scan_for_reference_materials(project_root, atomic_root)
 
     # Ask for external reference material
-    if not uat_mode:
-        external_files = _prompt_additional_paths(manifest, project_root, config_file)
-        found_files.extend(external_files)
+    external_files = _prompt_additional_paths(manifest, project_root, config_file)
+    found_files.extend(external_files)
 
     # ── Part 3: Suggestions ────────────────────────────────────────────────
 
@@ -140,14 +138,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             print(print_dim(f"    {rel}"))
         print()
 
-        if not uat_mode:
-            _offer_organization(found_files, reference_dir, project_root)
+        _offer_organization(found_files, reference_dir, project_root)
     else:
         print(print_dim("  No reference materials found."))
         print()
 
     # Ensure reference dir exists for later phases
-    if not reference_dir.exists() and not uat_mode:
+    if not reference_dir.exists():
         print()
         clear_input_buffer()
         choice = prompt_user("  Create ./docs/reference/ for later? [Y/n]: ").strip().lower()
@@ -158,7 +155,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # ── Part 4b: Curate reference materials for corpus ─────────────────────
 
-    _select_reference_materials(manifest, reference_dir, project_root, uat_mode)
+    _select_reference_materials(manifest, reference_dir, project_root)
 
     # ── Part 5: Record everything ──────────────────────────────────────────
 
@@ -409,8 +406,9 @@ def _scan_source_code(manifest: Dict[str, Any], project_root: Path, exclude_dirs
     ], max_depth=5, max_files=100, exclude_dirs=exclude_dirs)
 
     # Filter out minified files and build artifacts
-    code = [f for f in code if not any(
-        pattern in str(f) for pattern in [".min.", "node_modules", "dist", "build", "__pycache__"]
+    code = [f for f in code if not (
+        ".min." in f.name
+        or any(part in ("node_modules", "dist", "build", "__pycache__") for part in f.parts)
     )]
 
     count = len(code)
@@ -490,22 +488,18 @@ def _display_summary(manifest: Dict[str, Any]) -> None:
     print()
 
 
-def _prompt_exclusions(manifest: Dict[str, Any], project_root: Path, uat_mode: bool = False) -> None:
+def _prompt_exclusions(manifest: Dict[str, Any], project_root: Path) -> None:
     """
     Prompt the user to exclude files via curses multi-select, with text fallback.
 
     Uses a cursor-navigable, space-to-toggle UI when the terminal supports it.
     Falls back to the text-based command interface (_prompt_exclusions_text)
-    when curses is unavailable, stdin is not a TTY, or in UAT mode.
+    when curses is unavailable or stdin is not a TTY.
 
     Args:
         manifest: The material manifest dict (modified in-place)
         project_root: Project root for display
-        uat_mode: If True, skip entirely
     """
-    if uat_mode:
-        return
-
     if not sys.stdin.isatty():
         return
 
@@ -579,10 +573,10 @@ def _prompt_exclusions(manifest: Dict[str, Any], project_root: Path, uat_mode: b
     except Exception as e:
         # Fall back to text-based UI on any failure
         logger.warning("Interactive exclusion prompt failed, using text fallback: %s", e)
-        _prompt_exclusions_text(manifest, project_root, uat_mode=False)
+        _prompt_exclusions_text(manifest, project_root)
 
 
-def _prompt_exclusions_text(manifest: Dict[str, Any], project_root: Path, uat_mode: bool = False) -> None:
+def _prompt_exclusions_text(manifest: Dict[str, Any], project_root: Path) -> None:
     """
     Text-based fallback for file exclusion prompts.
 
@@ -599,10 +593,7 @@ def _prompt_exclusions_text(manifest: Dict[str, Any], project_root: Path, uat_mo
     Args:
         manifest: The material manifest dict (modified in-place)
         project_root: Project root for display
-        uat_mode: If True, skip entirely
     """
-    if uat_mode:
-        return
 
     print(print_dim("  Exclude files from context? [Enter to skip]"))
     print(print_dim("  Commands: dir:<path>  file:<path>  cat:<name>  done"))
@@ -984,7 +975,6 @@ def _select_reference_materials(
     manifest: Dict[str, Any],
     reference_dir: Path,
     project_root: Path,
-    uat_mode: bool,
 ) -> None:
     """
     Scan docs/reference/ for corpus-worthy files and let the user curate
@@ -1048,7 +1038,7 @@ def _select_reference_materials(
     # ── 3. Show curses multi-select ───────────────────────────────────────
 
     try:
-        if uat_mode or not sys.stdin.isatty():
+        if not sys.stdin.isatty():
             raise RuntimeError("non-interactive")
 
         from core.utils.multi_select import (
@@ -1238,16 +1228,23 @@ def _find_files(
         List of matching file paths
     """
     files = []
-    exclude_patterns = ["node_modules", ".git", ".outputs", "__pycache__", "dist", "build"]
-    # Add explicit directory exclusions (e.g. the atomic-claude tool dir)
+    exclude_components = {"node_modules", ".git", ".outputs", "__pycache__", "dist", "build"}
+    # Absolute directory exclusions (e.g. the atomic-claude tool dir)
+    exclude_abs = set()
     if exclude_dirs:
-        exclude_patterns.extend(exclude_dirs)
+        for d in exclude_dirs:
+            exclude_abs.add(Path(d).resolve())
 
     for pattern in patterns:
         for f in root.glob(pattern):
-            # Check if any exclude pattern is in the path
-            if any(excl in str(f) for excl in exclude_patterns):
+            # Check short name exclusions against path components
+            if any(comp in exclude_components for comp in f.parts):
                 continue
+            # Check absolute directory exclusions
+            if exclude_abs:
+                resolved = f.resolve()
+                if any(resolved.is_relative_to(excl) for excl in exclude_abs):
+                    continue
 
             # Check depth
             try:

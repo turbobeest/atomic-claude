@@ -233,7 +233,10 @@ def _generate_closeout_json(
     closeout_data = {
         "phase": 7,
         "name": "Integration",
-        "status": "complete",
+        "status": "complete" if all(
+            item.endswith(":PASS") or item.endswith(":WARN")
+            for item in checklist
+        ) else "incomplete",
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "results": {
             "e2e_tests": {"passed": metrics["e2e_passed"], "total": metrics["e2e_total"]},
@@ -254,14 +257,13 @@ def _generate_closeout_json(
     write_json(closeout_json, closeout_data)
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 707: Phase Closeout.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -310,10 +312,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_yellow("Some critical items need attention before closeout."))
         print()
 
-    if uat_mode:
-        print(print_yellow("UAT Mode: Auto-approving closeout"))
-        closeout_choice = "approve"
-    else:
+    closeout_choice = None
+    while closeout_choice != "approve":
         print(print_cyan("Closeout options:"))
         print()
         print(print_green("  [approve] ") + "Approve closeout and proceed")
@@ -327,12 +327,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         if closeout_choice == "review":
             print()
             print(print_dim("Key artifacts:"))
-            print("  .claude/integration/e2e-results.json         - E2E test results")
-            print("  .claude/integration/acceptance-results.json  - Acceptance validation")
-            print("  .claude/integration/performance-results.json - Performance benchmarks")
-            print("  .claude/integration/integration-report.json  - Integration report")
-            print("  .claude/integration/approval.json            - Approval record")
-            print("  .outputs/audits/phase-7-report.json          - Audit results")
+            print("  .outputs/7-integration/integration-test-results.json - Integration test results")
+            print("  .claude/integration/approval.json                    - Approval record")
+            print("  .outputs/audits/phase-7-report.json                  - Audit results")
             print()
             if integration_dir.exists():
                 for f in sorted(integration_dir.iterdir()):
@@ -344,6 +341,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             print()
             print(print_yellow("Closeout held - phase not complete"))
             return False
+
+        elif closeout_choice != "approve":
+            print()
+            print(print_yellow(f"Unrecognized choice: '{closeout_choice}'. Please choose approve, review, or hold."))
+            print()
+            closeout_choice = None
+            continue
 
     # ─────────────────────────────────────────────────────────────────────────
     # GENERATING CLOSEOUT
@@ -394,10 +398,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

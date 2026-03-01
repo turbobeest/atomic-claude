@@ -170,8 +170,10 @@ class AnthropicProvider(BaseLLMProvider):
         elif system_prompt:
             request_kwargs["system"] = system_prompt
 
-        # Merge additional kwargs
-        request_kwargs.update(kwargs)
+        # Merge additional kwargs, but never allow override of critical keys
+        _PROTECTED_KEYS = {"model", "messages", "max_tokens", "temperature", "system"}
+        safe_kwargs = {k: v for k, v in kwargs.items() if k not in _PROTECTED_KEYS}
+        request_kwargs.update(safe_kwargs)
 
         # Retry logic with exponential backoff
         last_exception = None
@@ -327,8 +329,10 @@ class AnthropicProvider(BaseLLMProvider):
         if system_prompt:
             request_kwargs["system"] = system_prompt
 
-        # Merge additional kwargs
-        request_kwargs.update(kwargs)
+        # Merge additional kwargs, but never allow override of critical keys
+        _PROTECTED_KEYS = {"model", "messages", "max_tokens", "temperature", "system"}
+        safe_kwargs = {k: v for k, v in kwargs.items() if k not in _PROTECTED_KEYS}
+        request_kwargs.update(safe_kwargs)
 
         try:
             with self.client.messages.stream(**request_kwargs) as stream:

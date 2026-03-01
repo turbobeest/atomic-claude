@@ -14,11 +14,6 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# Model tier constants
-TIER_OPUS = "opus"
-TIER_SONNET = "sonnet"
-TIER_HAIKU = "haiku"
-
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
@@ -30,14 +25,13 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 602: Agent Selection.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -48,26 +42,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
     print(print_dim("Selecting specialized agents for code review."))
     print()
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(print_yellow("UAT Mode: Creating minimal valid output"))
-        # NOTE: Agent names here are display labels, not manifest IDs
-        # TODO: validate against agent-manifest.json
-        write_file(agents_file, json.dumps({
-            "agents": ["code-reviewer"],
-            "count": 1,
-            "review_agents": {
-                "deep_code": {"name": "code-reviewer", "model": TIER_SONNET, "dimension": "code_quality"},
-                "architecture": {"name": "code-reviewer", "model": TIER_SONNET, "dimension": "architecture"},
-                "performance": {"name": "code-reviewer", "model": TIER_SONNET, "dimension": "performance"},
-                "documentation": {"name": "code-reviewer", "model": TIER_SONNET, "dimension": "documentation"},
-                "refiner": {"name": "code-reviewer", "model": TIER_SONNET, "dimension": "refinement"}
-            },
-            "selected_at": datetime.now(timezone.utc).isoformat()
-        }, indent=2))
-        print(print_green("✓ UAT bypass complete"))
-        return True
 
     # Display agent roles
     _display_agent_roles()
@@ -87,14 +61,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Save agent selection
     # NOTE: Agent names here are display labels, not manifest IDs
-    # TODO: validate against agent-manifest.json
     agent_data = {
         "review_agents": {
-            "deep_code": {"name": agents["deep"], "model": TIER_OPUS, "dimension": "code_quality"},
-            "architecture": {"name": agents["arch"], "model": TIER_SONNET, "dimension": "architecture"},
-            "performance": {"name": agents["perf"], "model": TIER_SONNET, "dimension": "performance"},
-            "documentation": {"name": agents["doc"], "model": TIER_HAIKU, "dimension": "documentation"},
-            "refiner": {"name": agents["refiner"], "model": TIER_OPUS, "dimension": "refinement"}
+            "deep_code": {"name": agents["deep"], "model": "opus", "dimension": "code_quality"},
+            "architecture": {"name": agents["arch"], "model": "sonnet", "dimension": "architecture"},
+            "performance": {"name": agents["perf"], "model": "sonnet", "dimension": "performance"},
+            "documentation": {"name": agents["doc"], "model": "haiku", "dimension": "documentation"},
+            "refiner": {"name": agents["refiner"], "model": "opus", "dimension": "refinement"}
         },
         "selected_at": datetime.now(timezone.utc).isoformat()
     }
@@ -281,10 +254,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

@@ -28,9 +28,8 @@ CORE INTEGRATION TESTS:
    - Failure tracking and error reporting
 
 USAGE:
-    python3 test/integration_audit_runner.py [--uat] [--verbose]
+    python3 test/integration_audit_runner.py [--verbose]
 
-    --uat       Run in UAT mode (no LLM token consumption)
     --verbose   Enable verbose output
 
 OUTPUT:
@@ -68,7 +67,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 
 # ============================================================================
@@ -145,23 +144,18 @@ class IntegrationAuditRunner:
     Validates integration points between Python orchestrators and bash scripts.
     """
 
-    def __init__(self, uat_mode: bool = False):
+    def __init__(self):
         self.atomic_root = Path(__file__).parent.parent.resolve()
         self.test_dir = self.atomic_root / "test"
         self.fixtures_dir = self.test_dir / "fixtures"
         self.reports_dir = self.test_dir / "reports"
         self.lib_dir = self.atomic_root / "lib"
-        self.uat_mode = uat_mode
 
         # Ensure directories exist
         self.fixtures_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
 
         self.results: List[TestResult] = []
-
-        # Set UAT environment variable if enabled
-        if self.uat_mode:
-            os.environ["ATOMIC_UAT_MODE"] = "true"
 
     def run_all_tests(self) -> AuditReport:
         """
@@ -171,8 +165,6 @@ class IntegrationAuditRunner:
 
         print(f"\n{BOLD}{CYAN}{'='*70}{NC}")
         print(f"{BOLD}  Integration Audit Runner{NC}")
-        if self.uat_mode:
-            print(f"{CYAN}  [UAT Mode - No LLM Token Consumption]{NC}")
         print(f"{CYAN}{'='*70}{NC}\n")
 
         # Create test fixtures
@@ -1240,11 +1232,6 @@ def main():
         description="Integration Audit Runner - validates Python/Bash integration points"
     )
     parser.add_argument(
-        "--uat",
-        action="store_true",
-        help="Run in UAT mode (no LLM token consumption)"
-    )
-    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -1253,11 +1240,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Print mode info
-    if args.uat:
-        print(f"{CYAN}Running in UAT mode (no LLM token consumption){NC}")
-
-    runner = IntegrationAuditRunner(uat_mode=args.uat)
+    runner = IntegrationAuditRunner()
     report = runner.run_all_tests()
 
     # Exit with appropriate code based on critical failures only

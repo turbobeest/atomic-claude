@@ -40,7 +40,6 @@ export PYTHONPATH="$(pwd):$PYTHONPATH"
 export ATOMIC_ROOT="$(pwd)"
 export ATOMIC_STATE_DIR="$(pwd)/.state"
 # Don't set ATOMIC_OUTPUT_DIR - let orchestrators set phase-specific directories
-export ATOMIC_UAT_MODE="true"
 export ATOMIC_TOOL_DEVELOPMENT="true"  # Disable forcing function for tool development
 
 echo "✓ Test environment ready"

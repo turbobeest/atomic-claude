@@ -12,9 +12,11 @@ Uses ThreadPoolExecutor for concurrent generation with Rich live progress
 import copy
 import json
 import logging
+import os
 import re
 import sys
 import shutil
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -377,14 +379,13 @@ def _run_parallel_tdd(
     return [r for r in results if r is not None]
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 404: TDD Subtask Injection.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, generate generic subtasks without LLM
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -395,37 +396,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     backup_file = project_root / ".taskmaster" / "tasks" / "tasks.json.pre-tdd-backup"
     openspec_dir = project_root / ".openspec"
     injection_report = output_dir / "tdd-injection.json"
-
-    # UAT Mode: generic subtasks, no LLM
-    if uat_mode:
-        print()
-        print(print_yellow("⚡ UAT Mode: Injecting generic TDD subtasks (no LLM)"))
-        print()
-        ensure_dir(output_dir)
-
-        if not tasks_file.exists():
-            write_file(injection_report, json.dumps({
-                "injection_mode": "uat",
-                "tasks_injected": 0,
-            }, indent=2))
-            print(print_green("✓ TDD subtask injection complete (UAT mode, no tasks)"))
-            return True
-
-        tasks_data = json.loads(read_file(tasks_file))
-        tasks = tasks_data.get("tasks", [])
-
-        for task in tasks:
-            task["subtasks"] = create_generic_subtasks(task.get("id", 0))
-
-        write_file(tasks_file, json.dumps(tasks_data, indent=2))
-        write_file(injection_report, json.dumps({
-            "injection_mode": "uat",
-            "tasks_injected": len(tasks),
-            "total_subtasks_created": len(tasks) * 4,
-            "completed_at": datetime.now(timezone.utc).isoformat()
-        }, indent=2))
-        print(print_green(f"✓ TDD subtask injection complete (UAT mode, {len(tasks)} tasks)"))
-        return True
 
     ensure_dir(output_dir)
 
@@ -574,8 +544,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         if tid in result_map:
             task["subtasks"] = result_map[tid][2]
 
-    # Write updated tasks
-    write_file(tasks_file, json.dumps(tasks_data, indent=2))
+    # Write updated tasks (atomic: temp file + os.replace to avoid corruption on crash)
+    tasks_dir = tasks_file.parent
+    fd, tmp_path = tempfile.mkstemp(dir=tasks_dir, suffix=".tmp", prefix="tasks_")
+    try:
+        with os.fdopen(fd, 'w') as tmp_f:
+            tmp_f.write(json.dumps(tasks_data, indent=2))
+        os.replace(tmp_path, tasks_file)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
 
     # Compute stats
     ok_count = sum(1 for r in results if r[1] in ("ok", "parsed"))
@@ -694,10 +673,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (generic subtasks, no LLM)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

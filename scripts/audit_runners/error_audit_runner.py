@@ -20,7 +20,7 @@ import shutil
 import signal
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from datetime import datetime
 
 # Repo root
@@ -154,7 +154,7 @@ type: also-wrong
                 capture_output=True,
                 text=True,
                 timeout=30,
-                env={**os.environ, "ATOMIC_ROOT": str(REPO_ROOT), "ATOMIC_UAT_MODE": "true", "ATOMIC_TOOL_DEVELOPMENT": "true"}
+                env={**os.environ, "ATOMIC_ROOT": str(REPO_ROOT), "ATOMIC_TOOL_DEVELOPMENT": "true"}
             )
 
             # Check if error was handled gracefully
@@ -216,7 +216,6 @@ type: also-wrong
         env.pop('AWS_SECRET_ACCESS_KEY', None)
         env.pop('AWS_PROFILE', None)
         env['ATOMIC_ROOT'] = str(REPO_ROOT)
-        env['ATOMIC_UAT_MODE'] = 'true'
 
         try:
             # Try to invoke Python LLM module directly (tests core/llm.py validation)
@@ -341,6 +340,7 @@ sys.exit(0 if success else 1)
 
             # If we get here without exception, recovery succeeded
             recovered = STATE_FILE.exists()
+            failed_gracefully = False
             no_crash = True
             passed = recovered and no_crash
 
@@ -448,7 +448,7 @@ sys.exit(0 if success else 1)
                 capture_output=True,
                 text=True,
                 timeout=30,
-                env={**os.environ, "ATOMIC_ROOT": str(REPO_ROOT), "ATOMIC_UAT_MODE": "true", "ATOMIC_TOOL_DEVELOPMENT": "true"}
+                env={**os.environ, "ATOMIC_ROOT": str(REPO_ROOT), "ATOMIC_TOOL_DEVELOPMENT": "true"}
             )
 
             # Check if resume worked
@@ -489,7 +489,7 @@ sys.exit(0 if success else 1)
                 cwd=REPO_ROOT,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env={**os.environ, "ATOMIC_ROOT": str(REPO_ROOT), "ATOMIC_UAT_MODE": "true", "ATOMIC_TOOL_DEVELOPMENT": "true"}
+                env={**os.environ, "ATOMIC_ROOT": str(REPO_ROOT), "ATOMIC_TOOL_DEVELOPMENT": "true"}
             )
 
             # Wait a bit for it to start
@@ -572,7 +572,7 @@ sys.exit(0 if success else 1)
                 capture_output=True,
                 text=True,
                 timeout=30,
-                env={**os.environ, "ATOMIC_ROOT": str(REPO_ROOT), "ATOMIC_UAT_MODE": "true", "ATOMIC_TOOL_DEVELOPMENT": "true"}
+                env={**os.environ, "ATOMIC_ROOT": str(REPO_ROOT), "ATOMIC_TOOL_DEVELOPMENT": "true"}
             )
 
             # Check if partial completion handled

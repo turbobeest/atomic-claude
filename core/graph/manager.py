@@ -3,6 +3,7 @@
 High-level graph operations for pipeline tasks.
 This is the primary interface used by phase orchestrators."""
 
+import hashlib
 import json
 import logging
 from collections import defaultdict
@@ -203,11 +204,23 @@ class GraphManager:
         if not agents:
             return 0
 
-        # Check if already loaded
+        # Idempotency check: use a content hash instead of just counting agents
+        # so that manifest updates (same count, different content) are detected.
+        manifest_hash = hashlib.sha256(
+            json.dumps(agents, sort_keys=True).encode()
+        ).hexdigest()
+        hash_file = manifest_path.parent / ".agent-manifest.hash"
         existing = self.reader.count_nodes("Agent")
         if existing >= len(agents):
-            logger.debug(f"Agent catalog already loaded ({existing} agents)")
-            return 0
+            # Count matches — also verify content hasn't changed
+            try:
+                stored_hash = hash_file.read_text().strip()
+            except (OSError, FileNotFoundError):
+                stored_hash = ""
+            if stored_hash == manifest_hash:
+                logger.debug(f"Agent catalog already loaded ({existing} agents, hash matches)")
+                return 0
+            logger.info("Agent manifest content changed (hash mismatch) — reloading")
 
         # Bulk load all agents
         ops = []
@@ -227,6 +240,11 @@ class GraphManager:
             ops.append({"op": "add_node", "label": "Agent", "properties": props})
 
         loaded = self.writer.bulk_write(ops)
+        # Persist manifest content hash for idempotency on next call
+        try:
+            hash_file.write_text(manifest_hash)
+        except OSError as exc:
+            logger.warning(f"Could not write manifest hash file: {exc}")
         logger.info(f"Loaded {loaded} agents from manifest into graph")
         return loaded
 

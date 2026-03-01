@@ -28,14 +28,13 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 202: PRD Setup.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -58,12 +57,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     # Confirm scope
-    scope_type, scope_description = confirm_scope(uat_mode)
+    scope_type, scope_description = confirm_scope()
 
     print()
 
     # Identify focus areas
-    focus_areas = identify_focus_areas(uat_mode)
+    focus_areas = identify_focus_areas()
 
     print()
 
@@ -125,12 +124,9 @@ def recap_selected_approach(phase1_dir: Path) -> tuple:
     return approach_name, approach_summary, approach_rationale
 
 
-def confirm_scope(uat_mode: bool) -> tuple:
+def confirm_scope() -> tuple:
     """
     Confirm PRD scope with user.
-
-    Args:
-        uat_mode: If True, use defaults without prompting
 
     Returns:
         Tuple of (scope_type, scope_description)
@@ -148,12 +144,7 @@ def confirm_scope(uat_mode: bool) -> tuple:
     print("    " + print_magenta("[custom]") + "    Define custom scope")
     print()
 
-    # UAT mode bypass
-    if uat_mode:
-        scope_choice = "mvp"
-        print(print_dim(f"  UAT mode: Using default scope '{scope_choice}'"))
-    else:
-        scope_choice = prompt_user("  Scope (default: mvp): ").strip().lower() or "mvp"
+    scope_choice = prompt_user("  Scope (default: mvp): ").strip().lower() or "mvp"
 
     scope_type = scope_choice
     scope_description = ""
@@ -163,20 +154,12 @@ def confirm_scope(uat_mode: bool) -> tuple:
     elif scope_choice == "mvp":
         scope_description = "Minimal viable product - core features only"
     elif scope_choice == "component":
-        if uat_mode:
-            component_name = "core-component"
-            print(print_dim(f"  UAT mode: Using default component '{component_name}'"))
-        else:
-            print()
-            component_name = prompt_user("  Component name: ").strip()
+        print()
+        component_name = prompt_user("  Component name: ").strip()
         scope_description = f"Single component: {component_name}"
     elif scope_choice == "custom":
-        if uat_mode:
-            custom_scope = "Custom scope for testing"
-            print(print_dim(f"  UAT mode: Using default custom scope"))
-        else:
-            print()
-            custom_scope = prompt_user("  Describe scope: ").strip()
+        print()
+        custom_scope = prompt_user("  Describe scope: ").strip()
         scope_description = custom_scope
     else:
         # Default to MVP
@@ -189,12 +172,9 @@ def confirm_scope(uat_mode: bool) -> tuple:
     return scope_type, scope_description
 
 
-def identify_focus_areas(uat_mode: bool) -> List[str]:
+def identify_focus_areas() -> List[str]:
     """
     Identify PRD focus areas with user.
-
-    Args:
-        uat_mode: If True, use defaults without prompting
 
     Returns:
         List of focus area identifiers
@@ -217,12 +197,7 @@ def identify_focus_areas(uat_mode: bool) -> List[str]:
     print("    " + print_dim("8.") + " Deployment/operations")
     print()
 
-    # UAT mode bypass
-    if uat_mode:
-        focus_input = "1 2 7"
-        print(print_dim(f"  UAT mode: Using default focus areas '{focus_input}'"))
-    else:
-        focus_input = prompt_user("  Focus areas (default: 1 2 7): ").strip() or "1 2 7"
+    focus_input = prompt_user("  Focus areas (default: 1 2 7): ").strip() or "1 2 7"
 
     # Map numbers to focus area identifiers
     focus_map = {
@@ -292,10 +267,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

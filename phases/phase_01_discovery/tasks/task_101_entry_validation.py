@@ -29,21 +29,20 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.llm import invoke_llm as invoke
-from core.ui import success, error, warning, info, step
+from core.ui import success, error, warning, step
 from core.utils.file_ops import write_json, write_file
 
 # Supported file extensions for corpus analysis
 SUPPORTED_EXTS = {'.md', '.txt', '.rst', '.pdf', '.json', '.yaml', '.yml', '.dot', '.svg'}
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 101: Entry Validation & Corpus Analysis.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -214,10 +213,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     prompts_dir = output_dir / "prompts"
     prompts_dir.mkdir(parents=True, exist_ok=True)
 
-    _analyze_corpus(materials, analysis_file, prompts_dir, setup_dir, uat_mode)
+    _analyze_corpus(materials, analysis_file, prompts_dir, setup_dir)
 
     # Conversational reflection
-    if not uat_mode and analysis_file.exists():
+    if analysis_file.exists():
         _corpus_reflection(analysis_file, corpus_data)
 
     # Save corpus data
@@ -376,7 +375,6 @@ def _analyze_corpus(
     analysis_file: Path,
     prompts_dir: Path,
     setup_dir: Path,
-    uat_mode: bool = False,
 ) -> None:
     """Analyze reference materials using LLM."""
     print("╔═══════════════════════════════════════════════════════════╗")
@@ -673,10 +671,8 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (bypass some checks)')
 
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

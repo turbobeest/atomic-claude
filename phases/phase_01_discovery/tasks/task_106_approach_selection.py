@@ -35,35 +35,23 @@ except ImportError:
     HAS_CANVAS = False
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 106: Approach Selection.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, auto-approve first approach
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
         True if selection completed successfully, False otherwise
     """
     consensus_file = output_dir / "consensus.json"
-    approaches_file = output_dir / "approaches.json"
     selected_json = output_dir / "selected-approach.json"
     selected_md = output_dir / "selected-approach.md"
 
     step("Direction Confirmation")
-
-    # UAT Mode: Auto-approve first approach
-    if uat_mode:
-        print()
-        print("  ⚡ UAT Mode: Auto-approving first approach")
-        print()
-
-        _create_uat_approach(selected_json, selected_md)
-        success("Direction confirmed (UAT mode)")
-        return True
 
     print()
     print("╔═══════════════════════════════════════════════════════════╗")
@@ -484,42 +472,11 @@ def _create_markdown_doc(output_file: Path, direction: str, rationale: str,
     output_file.write_text(content)
 
 
-def _create_uat_approach(selected_json: Path, selected_md: Path) -> None:
-    """Create minimal approach files for UAT mode."""
-    with open(selected_json, 'w') as f:
-        json.dump({
-            "name": "UAT Test Approach",
-            "description": "Auto-selected approach for UAT testing",
-            "architecture": "monolithic",
-            "tech_stack": ["Python", "Bash", "JSON"],
-            "rationale": "UAT mode auto-approval",
-            "mode": "uat"
-        }, f, indent=2)
-
-    selected_md.write_text("""# Selected Approach: UAT Test Approach
-
-## Overview
-Auto-selected approach for UAT testing.
-
-## Architecture
-Monolithic
-
-## Tech Stack
-- Python
-- Bash
-- JSON
-
-## Rationale
-UAT mode auto-approval
-""")
-
-
 
 
 if __name__ == "__main__":
     # CLI execution support
     atomic_root = Path.cwd()
     output_dir = atomic_root.parent / ".outputs" / "1-discovery"
-    uat_mode = "--uat" in sys.argv
 
-    sys.exit(0 if execute(atomic_root, output_dir, uat_mode) else 1)
+    sys.exit(0 if execute(atomic_root, output_dir) else 1)

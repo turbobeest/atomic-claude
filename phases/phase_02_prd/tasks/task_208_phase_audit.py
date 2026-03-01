@@ -18,14 +18,13 @@ from core.audit import run_phase_audit
 from core.utils.cli_ui import print_green, print_yellow
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 208: Phase Audit.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, skip audit for testing
         mem: Optional TaskMemory instance for recording substantive memory
         graph: Optional GraphManager instance for knowledge graph operations
 
@@ -57,7 +56,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         logger.debug("Audit graph unavailable: %s", e)
 
     # Run audit (non-blocking - returns True even if audit fails)
-    result = run_phase_audit(phase_num, phase_id, output_dir, uat_mode,
+    result = run_phase_audit(phase_num, phase_id, output_dir,
                              audit_context=audit_context)
 
     if result:
@@ -94,10 +93,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

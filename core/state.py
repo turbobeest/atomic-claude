@@ -234,80 +234,18 @@ class StateLock:
             finally:
                 self.lock_fd = None
 
-        # Clean up lock file
-        try:
-            self.lock_file.unlink()
-        except FileNotFoundError:
-            pass
+        # Lock file intentionally NOT deleted — the flock itself provides
+        # mutual exclusion.  Deleting the file creates a TOCTOU race where
+        # a concurrent process can open a new inode and both believe they
+        # hold the lock.
 
     def __enter__(self):
         if not self.acquire():
-            logger.warning("StateLock.acquire() returned False (timeout); proceeding without lock")
+            raise TimeoutError("StateLock.acquire() timed out; refusing to proceed without lock")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
-
-
-# ============================================================================
-# STATE TRANSACTION
-# ============================================================================
-
-class StateTransaction:
-    """
-    Transaction context manager for atomic state changes.
-
-    Usage:
-        with state_manager.begin_transaction() as txn:
-            txn.mark_task_complete("0-setup", "001", "Task name")
-            # If exception occurs, changes are rolled back
-            # If successful, changes are committed
-    """
-
-    def __init__(self, state_manager: 'StateManager'):
-        self.state_manager = state_manager
-        self.snapshot: Optional[StateSnapshot] = None
-        self.committed = False
-        self.changes_buffer: List[tuple] = []  # Buffer changes to apply on commit
-
-    def __enter__(self) -> 'StateTransaction':
-        """Begin transaction by capturing snapshot BEFORE any changes."""
-        self.snapshot = self.state_manager.snapshot()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Commit or rollback on exit."""
-        if exc_type is not None:
-            # Exception occurred, rollback
-            self.rollback()
-            return False  # Re-raise exception
-        else:
-            # Success, commit
-            self.commit()
-            return False  # Do not suppress exceptions
-
-    def mark_task_complete(self, phase_id: str, task_id: str, task_name: str) -> None:
-        """Mark task as complete within transaction (defers save until commit)."""
-        self.state_manager.mark_task_complete(phase_id, task_id, task_name, auto_save=False)
-
-    def mark_task_failed(self, phase_id: str, task_id: str, task_name: str, error: str) -> None:
-        """Mark task as failed within transaction (defers save until commit)."""
-        self.state_manager.mark_task_failed(phase_id, task_id, task_name, error, auto_save=False)
-
-    def set_current_phase(self, phase_id: str) -> None:
-        """Set current phase within transaction (applied immediately but can rollback)."""
-        self.state_manager.set_current_phase(phase_id)
-
-    def commit(self) -> None:
-        """Commit transaction."""
-        self.committed = True
-        # State changes were already applied, just ensure saved
-        self.state_manager.save_state()
-
-    def rollback(self) -> None:
-        """Rollback transaction to snapshot."""
-        if self.snapshot:
-            self.state_manager.restore(self.snapshot)
 
 
 # ============================================================================
@@ -390,34 +328,56 @@ class StateManager:
             print(f"Warning: Failed to load state file: {e}")
             return self._create_empty_state()
 
+    def reload(self) -> None:
+        """Reload state from disk into memory, replacing the in-memory cache."""
+        self._state = self.load_state()
+
+    def get_raw_state(self) -> Dict[str, Any]:
+        """Return a reference to the in-memory state dict.
+
+        Prefer specific accessor methods when available. This is provided for
+        callers that need to inspect phase-level metadata not yet exposed by a
+        dedicated method.
+        """
+        return self._state
+
     def save_state(self) -> None:
         """
         Atomically save state to disk.
 
         Uses atomic write (write to temp, then rename) to prevent corruption.
+        Acquires StateLock so all callers get concurrency safety automatically.
+
+        If the state lock cannot be acquired within the timeout, the error is
+        logged and the save is skipped (degraded but non-crashing).
         """
-        # Create temp file
-        temp_fd, temp_path = tempfile.mkstemp(
-            dir=self.state_dir,
-            prefix='.state-',
-            suffix='.tmp'
-        )
-
+        lock = StateLock(self.lock_file)
         try:
-            # Write to temp file
-            with os.fdopen(temp_fd, 'w') as f:
-                json.dump(self._state, f, indent=2)
+            with lock:
+                # Create temp file
+                temp_fd, temp_path = tempfile.mkstemp(
+                    dir=self.state_dir,
+                    prefix='.state-',
+                    suffix='.tmp'
+                )
 
-            # Atomic rename
-            shutil.move(temp_path, self.state_file)
+                try:
+                    # Write to temp file
+                    with os.fdopen(temp_fd, 'w') as f:
+                        json.dump(self._state, f, indent=2)
 
-        except Exception as e:
-            # Clean up temp file on error
-            try:
-                os.unlink(temp_path)
-            except Exception as io_err:
-                logger.debug("Failed to clean up temp state file %s: %s", temp_path, io_err)
-            raise IOError(f"Failed to save state: {e}")
+                    # Atomic rename (os.replace is atomic on POSIX same-filesystem)
+                    os.replace(temp_path, self.state_file)
+
+                except Exception as e:
+                    # Clean up temp file on error
+                    try:
+                        os.unlink(temp_path)
+                    except Exception as io_err:
+                        logger.debug("Failed to clean up temp state file %s: %s", temp_path, io_err)
+                    raise IOError(f"Failed to save state: {e}")
+        except TimeoutError:
+            logger.error("StateLock timeout -- skipping save_state (state may be stale)")
 
     def _create_empty_state(self) -> Dict[str, Any]:
         """Create empty state structure."""
@@ -617,7 +577,7 @@ class StateManager:
         self._state['metadata']['last_updated'] = datetime.now(timezone.utc).isoformat()
         self.save_state()
 
-    def mark_phase_complete(self, phase_id: str) -> None:
+    def mark_phase_complete(self, phase_id: str, auto_save: bool = True) -> None:
         """Mark entire phase as complete."""
         # Ensure phase exists
         if phase_id not in self._state['phases']:
@@ -629,25 +589,8 @@ class StateManager:
         self._state['phases'][phase_id]['completed_at'] = datetime.now(timezone.utc).isoformat()
         self._state['phases'][phase_id]['status'] = 'completed'
         self._state['metadata']['last_updated'] = datetime.now(timezone.utc).isoformat()
-        self.save_state()
-
-    # ========================================================================
-    # TRANSACTIONS
-    # ========================================================================
-
-    def begin_transaction(self):
-        """
-        Begin a state transaction.
-
-        Usage:
-            with state.begin_transaction() as txn:
-                txn.mark_task_complete("0-setup", "001", "Task")
-                # Auto-commit on success, rollback on exception
-
-        Returns:
-            StateTransaction context manager
-        """
-        return StateTransaction(self)
+        if auto_save:
+            self.save_state()
 
     # ========================================================================
     # SNAPSHOTS
@@ -670,7 +613,7 @@ class StateManager:
 
             phases[phase_id] = PhaseState(
                 phase_id=phase_id,
-                status=PhaseStatus.IN_PROGRESS,  # Default
+                status=PhaseStatus(phase_data.get('status', 'in_progress')),
                 started_at=phase_data.get('started_at'),
                 completed_at=phase_data.get('completed_at'),
                 tasks={
@@ -855,43 +798,6 @@ class StateManager:
                     task_data['status'] = 'completed'
 
         return state
-
-
-# ============================================================================
-# CONTEXT MANAGER FOR TASK EXECUTION
-# ============================================================================
-
-@contextmanager
-def task_running(phase_id: str, task_id: str, task_name: str, state_dir: Path = None):
-    """
-    Context manager for task execution tracking.
-
-    Usage:
-        with task_running("2-prd", "205", "PRD Authoring"):
-            # Task logic here
-            pass
-    """
-    from core.utils.file_ops import write_json
-
-    state_dir = state_dir or Path(".state")
-    current_task_file = state_dir / "current-task.json"
-
-    current_task = {
-        "phase": phase_id,
-        "task": task_id,
-        "name": task_name,
-        "status": "running",
-        "started_at": datetime.now(timezone.utc).isoformat()
-    }
-
-    write_json(current_task_file, current_task)
-
-    try:
-        yield
-    finally:
-        # Clear current task
-        if current_task_file.exists():
-            current_task_file.unlink()
 
 
 # ============================================================================

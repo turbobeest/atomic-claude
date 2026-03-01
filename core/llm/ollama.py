@@ -8,8 +8,10 @@ Supports streaming, model pulling, and GPU acceleration.
 
 import json
 import logging
+import re
 import socket
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 from typing import Dict, Generator, Optional, Any, List
@@ -80,6 +82,68 @@ class OllamaProvider(BaseLLMProvider):
 
         # Ensure host doesn't have trailing slash
         self.host = self.host.rstrip('/')
+
+        # SSRF protection: validate host URL scheme and reject known internal/metadata addresses
+        self._validate_host(self.host)
+
+    # Blocked host patterns: cloud metadata endpoints and link-local addresses
+    _BLOCKED_HOST_RE = re.compile(
+        r'^(169\.254\.\d+\.\d+|fd[0-9a-f]{2}:)',  # link-local IPv4 / IPv6
+        re.IGNORECASE,
+    )
+    _BLOCKED_HOSTS = frozenset({
+        "169.254.169.254",          # AWS/GCP/Azure metadata
+        "metadata.google.internal", # GCP metadata
+        "[fd00::1]",                # common link-local
+    })
+
+    # Private/reserved IPv4 ranges (RFC 1918 + loopback + link-local + CGNAT)
+    _PRIVATE_IP_RE = re.compile(
+        r'^('
+        r'10\.\d{1,3}\.\d{1,3}\.\d{1,3}'    # 10.0.0.0/8
+        r'|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}'  # 172.16.0.0/12
+        r'|192\.168\.\d{1,3}\.\d{1,3}'       # 192.168.0.0/16
+        r'|127\.\d{1,3}\.\d{1,3}\.\d{1,3}'   # 127.0.0.0/8
+        r'|169\.254\.\d{1,3}\.\d{1,3}'       # link-local
+        r'|100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\.\d{1,3}\.\d{1,3}'  # CGNAT 100.64/10
+        r'|0\.0\.0\.0'                        # unspecified
+        r')$'
+    )
+
+    @staticmethod
+    def _validate_host(host: str) -> None:
+        """Validate that the Ollama host URL is safe (not an SSRF target).
+
+        Raises ValueError if the URL uses a non-http(s) scheme or points at
+        a known cloud-metadata / link-local address.
+
+        NOTE: This is defense-in-depth.  Hostname-based checks alone cannot
+        fully prevent DNS-rebinding attacks (an attacker's DNS can return a
+        private IP *after* this check passes).  For robust protection the
+        caller should ideally resolve the hostname and verify the resulting IP
+        is not in a private/reserved range before opening a connection.  The
+        _PRIVATE_IP_RE check below catches the easy case of IP-literal URLs
+        pointing at private ranges (e.g. http://192.168.1.1/...).
+        """
+        parsed = urllib.parse.urlparse(host)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"Ollama host must use http or https scheme, got '{parsed.scheme}' in '{host}'"
+            )
+        hostname = (parsed.hostname or "").lower()
+        if hostname in OllamaProvider._BLOCKED_HOSTS:
+            raise ValueError(
+                f"Ollama host '{hostname}' is blocked (cloud metadata / link-local address)"
+            )
+        if OllamaProvider._BLOCKED_HOST_RE.match(hostname):
+            raise ValueError(
+                f"Ollama host '{hostname}' is blocked (link-local address range)"
+            )
+        # Block IP-literal URLs that resolve to private/reserved ranges
+        if OllamaProvider._PRIVATE_IP_RE.match(hostname):
+            raise ValueError(
+                f"Ollama host '{hostname}' is blocked (private/reserved IP range)"
+            )
 
     def invoke(
         self,

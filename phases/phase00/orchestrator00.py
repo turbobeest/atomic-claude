@@ -35,9 +35,7 @@ from phases.phase_00_setup.tasks import (
 
 # Get paths from environment
 ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
-PROJECT_ROOT = ATOMIC_ROOT.parent
-OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', PROJECT_ROOT / '.outputs' / '0-setup'))
-UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
+OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '0-setup'))
 
 
 def _print_setup_description():
@@ -90,7 +88,6 @@ def run_phase(resume_at: str = None) -> bool:
         task_artifacts=task_artifacts,
         atomic_root=ATOMIC_ROOT,
         output_dir=OUTPUT_DIR,
-        uat_mode=UAT_MODE,
         resume_at=resume_at,
         pre_header_fn=_print_setup_description,
     )
@@ -100,27 +97,27 @@ def run_phase(resume_at: str = None) -> bool:
 
 def task_001_environment_bootstrap(mem=None) -> bool:
     """Execute task 001: Environment bootstrap."""
-    return task_001(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_001(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def task_002_provider_detection(mem=None) -> bool:
     """Execute task 002: Provider detection."""
-    return task_002(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_002(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def task_003_setup_wizard(mem=None) -> bool:
     """Execute task 003: Setup wizard."""
-    return task_003(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_003(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def task_004_material_scan(mem=None) -> bool:
     """Execute task 004: Material scan & reference organization."""
-    return task_004(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_004(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def task_005_repository_setup(mem=None) -> bool:
     """Execute task 005: Repository & system setup."""
-    return task_005(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_005(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 if __name__ == "__main__":

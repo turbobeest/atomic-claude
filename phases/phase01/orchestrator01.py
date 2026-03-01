@@ -44,9 +44,7 @@ from phases.phase_01_discovery.tasks import (
 
 # Get paths from environment
 ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
-PROJECT_ROOT = ATOMIC_ROOT.parent
-OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', PROJECT_ROOT / '.outputs' / '1-discovery'))
-UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
+OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '1-discovery'))
 
 
 def run_phase(resume_at: str = None) -> bool:
@@ -99,7 +97,6 @@ def run_phase(resume_at: str = None) -> bool:
         task_artifacts=task_artifacts,
         atomic_root=ATOMIC_ROOT,
         output_dir=OUTPUT_DIR,
-        uat_mode=UAT_MODE,
         resume_at=resume_at,
         graph=graph,
     )
@@ -109,47 +106,47 @@ def run_phase(resume_at: str = None) -> bool:
 
 def task_101_entry_validation(mem=None, graph=None) -> bool:
     """Task 101: Entry validation & corpus analysis"""
-    return task_101(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_101(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_102_import_requirements(mem=None, graph=None) -> bool:
     """Task 102: Import requirements"""
-    return task_102(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_102(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_103_agent_selection(mem=None, graph=None) -> bool:
     """Task 103: Agent selection"""
-    return task_103(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_103(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_104_opening_dialogue(mem=None, graph=None) -> bool:
     """Task 104: Opening dialogue"""
-    return task_104(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_104(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_105_discovery_work(mem=None, graph=None) -> bool:
     """Task 105: Discovery work"""
-    return task_105(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_105(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_106_approach_selection(mem=None, graph=None) -> bool:
     """Task 106: Approach selection"""
-    return task_106(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_106(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_107_discovery_diagrams(mem=None, graph=None) -> bool:
     """Task 107: Discovery diagrams"""
-    return task_107(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_107(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_108_phase_audit(mem=None, graph=None) -> bool:
     """Task 108: Phase audit"""
-    return task_108(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_108(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_109_closeout(mem=None, graph=None) -> bool:
     """Task 109: Closeout"""
-    return task_109(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_109(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 if __name__ == "__main__":

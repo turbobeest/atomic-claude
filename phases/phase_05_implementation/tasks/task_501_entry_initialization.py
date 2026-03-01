@@ -8,7 +8,6 @@ import logging
 import sys
 import json
 from pathlib import Path
-from typing import Dict, Any
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -23,14 +22,13 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, write_file, read_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 501: Entry & Initialization.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -64,27 +62,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
     print(print_dim("  Executing RED/GREEN/REFACTOR/VERIFY cycles for all tasks."))
     print()
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print()
-        print(print_yellow("⚡ UAT Mode: Skipping Phase 4 verification, creating minimal initialization"))
-        print()
-
-        ensure_dir(init_file.parent)
-
-        init_data = {
-            "phase4_verified": True,
-            "tasks_with_tdd": 3,
-            "total_subtasks": 12,
-            "spec_count": 3,
-            "mode": "uat",
-            "initialized_at": datetime.now(timezone.utc).isoformat()
-        }
-        write_file(init_file, json.dumps(init_data, indent=2))
-
-        print(print_green("✓ Entry & Initialization complete (UAT mode)"))
-        return True
 
     # Phase 4 Verification
     print(print_dim("─" * 120))
@@ -233,10 +210,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

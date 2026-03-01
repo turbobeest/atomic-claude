@@ -25,18 +25,17 @@ logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.ui import success, error, warning, info, step
+from core.ui import success, info, step
 from core.utils.file_ops import write_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 102: Import Requirements.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, skip interactive import
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -170,7 +169,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     seen_ids = set()
 
     for rst_file in files_with_needs:
-        file_relpath = str(rst_file.relative_to(atomic_root))
+        try:
+            file_relpath = str(rst_file.relative_to(atomic_root))
+        except ValueError:
+            # RST file found under project_root, not under atomic_root
+            try:
+                file_relpath = str(rst_file.relative_to(project_root))
+            except ValueError:
+                # File is outside both atomic_root and project_root (e.g. manual path)
+                file_relpath = str(rst_file)
         needs_data["source_files"].append(file_relpath)
 
         print(f"  Parsing: {rst_file.name}")
@@ -412,6 +419,5 @@ if __name__ == "__main__":
     # CLI execution support
     atomic_root = Path.cwd()
     output_dir = atomic_root.parent / ".outputs" / "1-discovery"
-    uat_mode = "--uat" in sys.argv
 
-    sys.exit(0 if execute(atomic_root, output_dir, uat_mode) else 1)
+    sys.exit(0 if execute(atomic_root, output_dir) else 1)

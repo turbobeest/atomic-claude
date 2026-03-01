@@ -30,18 +30,17 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.llm import invoke_llm as invoke
-from core.ui import success, warning, info, step, wrap_text
+from core.ui import success, warning, step, wrap_text
 from core.utils.file_ops import write_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 103: Agent Selection.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, skip interactive agent selection
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -55,16 +54,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     step("Agent Selection")
 
     prompts_dir.mkdir(parents=True, exist_ok=True)
-
-    # UAT Mode: Skip interactive agent selection
-    if uat_mode:
-        print()
-        print("  ⚡ UAT Mode: Using default agent selection")
-        print()
-
-        _create_uat_agents(agents_output, roster_output, conversation_log)
-        success("Agent selection complete (UAT mode)")
-        return True
 
     print()
     print("  ┌─────────────────────────────────────────────────────────┐")
@@ -294,7 +283,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
     print(f"  Core agents:      2")
     print(f"  Expert agents:    {len(selected_experts)}")
-    print(f"  Phases mapped:    10")
+    print(f"  Phases mapped:    {len(roster.get('phases', {}))}")
     print()
 
     # Record substantive memory
@@ -480,6 +469,7 @@ backend-architect
                 if validated:
                     return validated
                 # All suggestions were hallucinated — fall through to defaults
+                return default_experts
 
             return parsed if parsed else default_experts
     except Exception as e:
@@ -602,42 +592,11 @@ def _use_builtin_agents(agents_output: Path, roster_output: Path) -> None:
     print("  ✓ Created default phase roster")
 
 
-def _create_uat_agents(agents_output: Path, roster_output: Path, conversation_log: Path) -> None:
-    """Create minimal agent files for UAT mode."""
-    write_json(agents_output, {
-        "selected_experts": ["python-pro", "test-strategist", "backend-architect"],
-        "selection_method": "uat_defaults"
-    })
-
-    write_json(roster_output, {
-        "pipeline": {
-            "1-discovery": ["discovery-agent"],
-            "2-prd": ["prd-validator"],
-            "3-tasking": ["task-decomposer"],
-            "4-specification": ["specification-agent"],
-            "5-implementation": ["tdd-implementation-agent"],
-            "6-code-review": ["code-review-gate"],
-            "7-integration": ["integration-testing-gate"],
-            "8-validation": ["plan-guardian"],
-            "9-deployment": ["deployment-gate"]
-        },
-        "experts": ["python-pro", "test-strategist", "backend-architect"]
-    })
-
-    conversation_log.write_text("""## UAT Mode
-
-Agent selection skipped in UAT mode.
-
-Selected: python-pro, test-strategist, backend-architect (defaults)
-""")
-
-
 
 
 if __name__ == "__main__":
     # CLI execution support
     atomic_root = Path.cwd()
     output_dir = atomic_root.parent / ".outputs" / "1-discovery"
-    uat_mode = "--uat" in sys.argv
 
-    sys.exit(0 if execute(atomic_root, output_dir, uat_mode) else 1)
+    sys.exit(0 if execute(atomic_root, output_dir) else 1)

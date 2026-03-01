@@ -46,7 +46,7 @@ def load_tasks(project_root: Path) -> List[Dict]:
 
 
 def generate_stub_spec(task: Dict) -> Dict:
-    """Generate a stub OpenSpec for UAT/testing mode."""
+    """Generate a stub OpenSpec as a fallback when LLM is unavailable."""
     task_id = task.get("id", 0)
     task_title = task.get("title", f"Task {task_id}")
 
@@ -219,7 +219,7 @@ Generate a JSON specification with the following structure:
 {{
     "spec_id": "SPEC-T{task_id}",
     "task_id": {task_id},
-    "task_title": "{task_title}",
+    "task_title": {json.dumps(task_title)},
     "test_strategy": {{
         "unit_tests": [...],
         "integration_tests": [...],
@@ -279,6 +279,7 @@ def _spec_worker(
                 logger.warning(
                     "Spec file spec-t%s.json is not valid JSON: %s", task_id, je
                 )
+                spec_file.unlink(missing_ok=True)
                 return (task_id, "invalid", time.monotonic() - start, str(je))
 
         return (task_id, "ok", time.monotonic() - start, None)
@@ -370,19 +371,18 @@ def _run_parallel_specs(
                 results[idx] = future.result()
                 live.update(_build_display())
 
-    generated = sum(1 for r in results if r is not None)
-    failed = sum(1 for r in results if r and r[1] == "stub")
+    generated = sum(1 for r in results if r is not None and r[1] not in ("stub", "invalid"))
+    failed = sum(1 for r in results if r and r[1] in ("stub", "invalid"))
     return generated, failed
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 403: OpenSpec Generation.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, generate stub specs without LLM calls
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -409,46 +409,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         report = {
             "status": "complete",
             "specs_generated": 0,
-            "mode": "uat" if uat_mode else "normal",
+            "mode": "normal",
             "generated_at": datetime.now(timezone.utc).isoformat()
         }
         write_file(output_dir / "openspec-generation.json", json.dumps(report, indent=2))
         return True
 
-    # UAT Mode: Generate stub specs
-    if uat_mode:
-        print(print_yellow("  UAT Mode: Generating stub OpenSpecs"))
-        print()
-
-        for task in tasks:
-            task_id = task.get("id", 0)
-            spec = generate_stub_spec(task)
-            spec_file = openspec_dir / f"spec-t{task_id}.json"
-            write_file(spec_file, json.dumps(spec, indent=2))
-            print(print_green(f"    Stub spec created: spec-t{task_id}.json"))
-
-            # Write stub spec to knowledge graph
-            if graph:
-                try:
-                    graph.add_spec(task_id=task_id, spec_data=spec)
-                except Exception as e:
-                    logger.warning("Graph spec write failed for T%s: %s", task_id, e)
-
-        # Write generation report
-        report = {
-            "status": "complete",
-            "specs_generated": len(tasks),
-            "mode": "uat",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "specs": [f"spec-t{t.get('id', 0)}.json" for t in tasks]
-        }
-        write_file(output_dir / "openspec-generation.json", json.dumps(report, indent=2))
-
-        print()
-        print(print_green(f"  OpenSpec generation complete: {len(tasks)} specs created (UAT mode)"))
-        return True
-
-    # Normal Mode: Use LLM to generate specs in parallel
+    # Use LLM to generate specs in parallel
     print(print_bold("  OPENSPEC GENERATION"))
     print()
     print(print_dim(f"  Generating specifications for {len(tasks)} tasks "
@@ -465,6 +432,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     try:
         from core.llm.invoke import invoke_llm
+
+        # Warmup: force router initialization on the main thread before
+        # spawning parallel workers (prevents TOCTOU race on singleton init).
+        try:
+            invoke_llm(prompt="Reply with OK", model="haiku", timeout=30)
+        except Exception:
+            pass  # Warmup failure is non-fatal; workers will retry
 
         generated, failed = _run_parallel_specs(
             tasks, project_context, openspec_dir, invoke_llm, canonical_layout
@@ -539,10 +513,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (generate stub specs)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

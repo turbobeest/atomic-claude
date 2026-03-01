@@ -267,7 +267,13 @@ def _track_tokens(response):
 
         with _locked_tokens_file(tokens_file) as fh:
             raw = fh.read()
-            data = json.loads(raw) if raw.strip() else dict(_empty_data)
+            try:
+                data = json.loads(raw) if raw.strip() else dict(_empty_data)
+            except (json.JSONDecodeError, ValueError) as exc:
+                logger.warning(
+                    "Corrupted session-tokens.json — resetting to empty state: %s", exc
+                )
+                data = dict(_empty_data)
 
             # Ensure expected keys exist (defensive against truncated files)
             for key, default in _empty_data.items():
@@ -576,6 +582,17 @@ def invoke_llm(
     Returns:
         Response string from LLM
     """
+    # --- Warn on likely positional arg misuse ---
+    _MODEL_LIKE_NAMES = {"sonnet", "opus", "haiku", "claude", "gpt", "gemini"}
+    if isinstance(output_or_provider, str) and output_or_provider.lower() in _MODEL_LIKE_NAMES:
+        import warnings
+        warnings.warn(
+            f"invoke_llm() 2nd positional arg looks like a model name "
+            f"('{output_or_provider}'). Did you mean model='{output_or_provider}'? "
+            f"The 2nd positional arg is output_file/provider, not model.",
+            stacklevel=2,
+        )
+
     # --- Resolve prompt text ---
     actual_prompt = prompt  # keyword takes priority
     if actual_prompt is None and prompt_file is not None:

@@ -66,19 +66,6 @@ class MemoryAuditRunner:
             import shutil
             shutil.rmtree(OUTPUT_DIR)
 
-        # Create initialization directory with UAT setup
-        init_dir = REPO_ROOT.parent / "initialization"
-        init_dir.mkdir(exist_ok=True)
-
-        # Copy UAT setup
-        uat_setup = REPO_ROOT / "test" / "fixtures" / "uat_setup.md"
-        setup_dst = init_dir / "setup.md"
-
-        if uat_setup.exists():
-            import shutil
-            shutil.copy(uat_setup, setup_dst)
-            self.log(f"\n  ✓ Copied UAT setup.md", Colors.GREEN)
-
         self.log(f"  ✓ Test environment ready", Colors.GREEN)
         return True
 
@@ -108,7 +95,6 @@ class MemoryAuditRunner:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(REPO_ROOT)
         env["ATOMIC_ROOT"] = str(REPO_ROOT)
-        env["ATOMIC_UAT_MODE"] = "true"  # Use UAT mode for fast execution
         env["ATOMIC_MEMORY_ENABLED"] = "true"  # Enable memory system
         env["ATOMIC_MEMORY_TRACE"] = "true"  # Enable memory tracing
         env["ATOMIC_TOOL_DEVELOPMENT"] = "true"  # Disable forcing function

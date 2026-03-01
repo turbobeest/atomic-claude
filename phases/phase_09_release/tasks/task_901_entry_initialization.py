@@ -12,21 +12,20 @@ from pathlib import Path
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.ui import success, error, warning, info, step
+from core.ui import success, warning, step
 from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, RED, YELLOW, NC
 from core.utils.file_ops import read_json, write_json
 
 logger = logging.getLogger(__name__)
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 901: Entry & Initialization.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -41,12 +40,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     step("Entry & Initialization")
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(f"  {DIM}UAT Mode: Skipping interactive validation{NC}")
-        success("UAT bypass complete")
-        return True
 
     print()
     print(f"  {DIM}Validating prerequisites for Release phase.{NC}")
@@ -64,6 +57,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Find Phase 8 closeout
     closeout_patterns = [
+        atomic_root / ".outputs" / "8-deployment-prep" / "closeout.json",
         atomic_root.parent / ".outputs" / "8-deployment-prep" / "closeout.json",
         project_root / ".claude" / "closeout" / "phase-08-closeout.json"
     ]
@@ -99,8 +93,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     else:
         print(f"  {YELLOW}[BLCK]{NC} {YELLOW}!{NC} CHANGELOG.md not found")
 
-    # Check dist directory
-    dist_dir = atomic_root / "dist"
+    # Check dist directory (in project root, not atomic-claude tool dir)
+    dist_dir = project_root / "dist"
     if dist_dir.exists() and dist_dir.is_dir():
         print(f"  {GREEN}[BLCK]{NC} {GREEN}✓{NC} Distribution artifacts present")
     else:
@@ -178,10 +172,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    result = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    result = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if result else 1)

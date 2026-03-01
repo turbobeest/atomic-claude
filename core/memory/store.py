@@ -406,51 +406,6 @@ class MemoryStore:
             entries_by_type=dict(entries_by_type)
         )
 
-    def export(self, path: Path) -> None:
-        """
-        Export memory to file.
-
-        Args:
-            path: Export file path
-        """
-        self._ensure_fresh()
-
-        data = {
-            "exported_at": datetime.now(timezone.utc).isoformat(),
-            "entries": [entry.model_dump() for entry in self._entries]
-        }
-
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, default=str)
-
-    def import_data(self, path: Path) -> int:
-        """
-        Import memory from file.
-
-        Args:
-            path: Import file path
-
-        Returns:
-            Number of entries imported
-        """
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        entries = [MemoryEntry(**entry) for entry in data.get("entries", [])]
-
-        self._ensure_fresh()
-
-        # Add entries (skip duplicates)
-        existing_ids = set(self._index.keys())
-        imported = 0
-
-        for entry in entries:
-            if entry.id not in existing_ids:
-                self.append(entry)
-                imported += 1
-
-        return imported
-
     def clear_phase(self, phase_num: int) -> int:
         """
         Clear all entries for a phase and later phases.
@@ -465,10 +420,18 @@ class MemoryStore:
 
         initial_count = len(self._entries)
 
-        # Keep entries before target phase
+        # Keep entries before target phase.
+        # Entries with non-numeric phase prefixes are treated as phase 0
+        # (kept unless phase_num is 0) to avoid crashing the backtrack.
+        def _parse_phase_num(entry):
+            try:
+                return int(entry.phase.split('-')[0])
+            except (ValueError, AttributeError):
+                return 0
+
         self._entries = [
             entry for entry in self._entries
-            if int(entry.phase.split('-')[0]) < phase_num
+            if _parse_phase_num(entry) < phase_num
         ]
 
         removed_count = initial_count - len(self._entries)

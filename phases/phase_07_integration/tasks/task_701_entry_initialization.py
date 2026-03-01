@@ -26,14 +26,13 @@ from core.utils.file_ops import read_json
 logger = logging.getLogger(__name__)
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 701: Entry & Initialization.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -71,15 +70,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             closeout_data = read_json(closeout_file)
         except (ValueError, OSError) as e:
             logger.debug("Failed to read Phase 6 closeout %s: %s", closeout_file, e)
-            print(print_red("  [CRIT] ✗ Phase 6 closeout unreadable"))
+            print(print_red("  [CRIT] ✗ Phase 6 closeout corrupt or unreadable"))
             all_valid = False
-            closeout_data = {}
-        phase_6_status = closeout_data.get("status", "unknown")
-        if phase_6_status == "complete" or "tasks_completed" in closeout_data:
-            print(print_green("  [CRIT] ✓ Phase 6 (Code Review) complete"))
+            closeout_data = None
+        if closeout_data is None:
+            pass  # already reported above
         else:
-            print(print_red(f"  [CRIT] ✗ Phase 6 not complete (status: {phase_6_status})"))
-            all_valid = False
+            phase_6_status = closeout_data.get("status", "unknown")
+            if phase_6_status == "complete" or "tasks_completed" in closeout_data:
+                print(print_green("  [CRIT] ✓ Phase 6 (Code Review) complete"))
+            else:
+                print(print_red(f"  [CRIT] ✗ Phase 6 not complete (status: {phase_6_status})"))
+                all_valid = False
     else:
         print(print_red("  [CRIT] ✗ Phase 6 closeout not found"))
         all_valid = False
@@ -141,8 +143,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_dim("       (flows)       (criteria)    (benchmarks)     (gate)"))
     print()
 
-    if not uat_mode:
-        prompt_user("  Press Enter to continue...")
+    prompt_user("  Press Enter to continue...")
     print()
 
     print(print_green("✓ Entry & Initialization complete"))
@@ -157,10 +158,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

@@ -26,14 +26,13 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 209: Phase Closeout.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, auto-approve closeout for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -59,23 +58,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     checklist, all_passed = run_closeout_checklist(atomic_root, output_dir, prd_file)
 
     print()
-
-    # UAT mode bypass
-    if uat_mode:
-        print(print_yellow("  UAT mode: Auto-approving closeout..."))
-        generate_closeout_documents(closeout_file, closeout_json, prd_file, checklist)
-
-        # Export PRD from graph if available
-        if graph:
-            try:
-                graph_prd_export = project_root / "docs" / "prd" / "PRD-graph.md"
-                graph.export_prd_md(graph_prd_export)
-                logger.info(f"Graph PRD export: {graph_prd_export}")
-            except Exception as e:
-                logger.warning(f"Graph export failed, using file-based export: {e}")
-
-        print(print_green("✓ UAT mode: Closeout auto-approved"))
-        return True
 
     # Closeout approval
     print(print_dim("━" * 60))
@@ -208,12 +190,11 @@ def run_closeout_checklist(
         all_passed = False
 
     # Check audit (project deliverable in project_root, fallback in atomic_root)
-    project_root = atomic_root.parent
     audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-2" / "report.json"
     if not audit_file.exists():
         audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-2-report.json"
     if not audit_file.exists():
-        audit_file = project_root / ".claude" / "audit" / "phase-02-audit.json"
+        audit_file = atomic_root.parent / ".claude" / "audit" / "phase-02-audit.json"
 
     if audit_file.exists():
         try:
@@ -285,8 +266,8 @@ def generate_closeout_documents(
 
     if prd_file.exists():
         content = read_file(prd_file)
-        prd_lines = len(content.split('\n'))
         lines = content.split('\n')
+        prd_lines = len(lines)
         top = [l for l in lines if re.match(r'^# \d+\.\s', l)]
         if not top:
             top = [l for l in lines if re.match(r'^## \d+\.\s', l)]
@@ -376,10 +357,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (auto-approve closeout)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

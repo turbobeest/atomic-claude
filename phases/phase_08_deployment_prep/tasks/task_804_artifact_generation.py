@@ -4,6 +4,7 @@ Task 804: Artifact Generation
 Generate release package, changelog, documentation, and installation guide.
 """
 
+import json
 import re
 import sys
 import logging
@@ -29,14 +30,13 @@ def _sanitize_input(value: str) -> str:
     return re.sub(r'[^a-zA-Z0-9.\-]', '', value)
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 804: Artifact Generation.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -54,27 +54,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     deployment_dir.mkdir(parents=True, exist_ok=True)
     prompts_dir.mkdir(parents=True, exist_ok=True)
 
-    # UAT Mode Bypass
-    if uat_mode:
-        print(print_dim("  UAT Mode: Creating minimal valid output"))
-        artifacts_data = {
-            "release": {
-                "version": "0.1.0",
-                "type": "minor"
-            },
-            "artifacts": {
-                "package": {"name": "project-0.1.0", "status": "success"},
-                "changelog": {"file": "CHANGELOG.md", "status": "success"},
-                "documentation": {"files": ["docs/README.md"], "status": "success"},
-                "installation_guide": {"file": "docs/INSTALL.md", "status": "success"}
-            },
-            "generated_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-            "uat_mode": True
-        }
-        write_json(artifacts_file, artifacts_data)
-        print(print_green("✓ UAT bypass complete"))
-        return True
-
     print()
     print(print_dim("  Generating deployment artifacts."))
     print()
@@ -83,7 +62,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     version = "0.1.0"
     release_type = "minor"
     if setup_file.exists():
-        setup_data = read_json(setup_file)
+        try:
+            setup_data = read_json(setup_file)
+        except (json.JSONDecodeError, OSError):
+            setup_data = {}
         version = setup_data.get("release", {}).get("version", "0.1.0")
         release_type = setup_data.get("release", {}).get("type", "minor")
 
@@ -459,10 +441,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

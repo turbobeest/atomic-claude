@@ -21,7 +21,7 @@ import sys
 import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -44,14 +44,13 @@ DIAGRAM_TYPES = {
 }
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 107: Discovery Diagrams.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, skip diagram generation
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -65,16 +64,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     diagrams_dir.mkdir(parents=True, exist_ok=True)
     prompts_dir.mkdir(parents=True, exist_ok=True)
-
-    # UAT Mode: Skip diagram generation
-    if uat_mode:
-        print()
-        print("  ⚡ UAT Mode: Skipping diagram generation")
-        print()
-
-        _create_uat_manifest(diagrams_dir)
-        success("Diagram generation skipped (UAT mode)")
-        return True
 
     print()
     print("  ┌─────────────────────────────────────────────────────────┐")
@@ -429,7 +418,7 @@ digraph {diagram_type.replace('-', '_')} {{
         # Clean output (remove markdown fences if present)
         if output_file.exists():
             content = output_file.read_text()
-            # Extract DOT content
+            # Extract DOT content — only capture lines within code fences
             if '```' in content:
                 lines = content.split('\n')
                 dot_lines = []
@@ -438,7 +427,7 @@ digraph {diagram_type.replace('-', '_')} {{
                     if line.startswith('```'):
                         in_code = not in_code
                         continue
-                    if in_code or line.startswith('digraph') or line.startswith('graph'):
+                    if in_code:
                         dot_lines.append(line)
                 content = '\n'.join(dot_lines)
             output_file.write_text(content)
@@ -510,25 +499,10 @@ def _create_manifest(diagrams_dir: Path, selected_diagrams: List[str],
         json.dump(manifest, f, indent=2)
 
 
-def _create_uat_manifest(diagrams_dir: Path) -> None:
-    """Create minimal manifest for UAT mode."""
-    manifest = {
-        "summary": {
-            "generated": 0,
-            "successful": 0,
-            "mode": "uat"
-        },
-        "diagrams": []
-    }
-
-    with open(diagrams_dir / "manifest.json", 'w') as f:
-        json.dump(manifest, f, indent=2)
-
 
 if __name__ == "__main__":
     # CLI execution support
     atomic_root = Path.cwd()
     output_dir = atomic_root.parent / ".outputs" / "1-discovery"
-    uat_mode = "--uat" in sys.argv
 
-    sys.exit(0 if execute(atomic_root, output_dir, uat_mode) else 1)
+    sys.exit(0 if execute(atomic_root, output_dir) else 1)

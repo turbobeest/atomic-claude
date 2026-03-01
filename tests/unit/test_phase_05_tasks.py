@@ -15,9 +15,8 @@ Requirements: 6+ tests per task × 7 tasks = 42+ unit tests
 
 import pytest
 import json
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 # Import all Phase 05 task modules
 from phases.phase_05_implementation.tasks.task_501_entry_initialization import execute as task_501
@@ -27,7 +26,6 @@ from phases.phase_05_implementation.tasks.task_504_tdd_execution import execute 
 from phases.phase_05_implementation.tasks.task_505_validation import execute as task_505
 from phases.phase_05_implementation.tasks.task_506_phase_audit import execute as task_506
 from phases.phase_05_implementation.tasks.task_507_closeout import execute as task_507
-
 
 # ============================================================================
 # FIXTURES
@@ -111,24 +109,6 @@ def temp_project_structure(tmp_path):
 
     return atomic_root, project_root
 
-
-@pytest.fixture
-def sample_tdd_config():
-    """Sample TDD configuration."""
-    return {
-        "framework": "pytest",
-        "coverage_tool": "coverage.py",
-        "coverage_targets": {
-            "unit": 80,
-            "integration": 70,
-            "branch": 75
-        },
-        "test_dirs": ["tests/", "test/"],
-        "parallel_execution": True,
-        "max_workers": 4
-    }
-
-
 # ============================================================================
 # TASK 501: ENTRY INITIALIZATION
 # ============================================================================
@@ -136,25 +116,13 @@ def sample_tdd_config():
 class TestTask501EntryInitialization:
     """Test Task 501: Entry Initialization."""
 
-    def test_uat_mode_bypass(self, temp_project_structure):
-        """Test UAT mode auto-passes validation."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "5-implementation"
-
-        result = task_501(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "initialization.json").exists()
-        init = json.loads((output_dir / "initialization.json").read_text())
-        assert init["mode"] == "uat"
-
     def test_phase4_closeout_validation(self, temp_project_structure):
         """Test Phase 4 closeout is validated."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
         with patch('core.utils.cli_ui.prompt_user', return_value=''):
-            result = task_501(atomic_root, output_dir, uat_mode=False)
+            result = task_501(atomic_root, output_dir)
 
         assert result is True
         init = json.loads((output_dir / "initialization.json").read_text())
@@ -166,7 +134,7 @@ class TestTask501EntryInitialization:
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
         with patch('core.utils.cli_ui.prompt_user', return_value=''):
-            result = task_501(atomic_root, output_dir, uat_mode=False)
+            result = task_501(atomic_root, output_dir)
 
         assert result is True
 
@@ -175,7 +143,7 @@ class TestTask501EntryInitialization:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_501(atomic_root, output_dir, uat_mode=True)
+        result = task_501(atomic_root, output_dir)
 
         assert result is True
 
@@ -188,7 +156,7 @@ class TestTask501EntryInitialization:
         import shutil
         shutil.rmtree(project_root / ".claude")
 
-        result = task_501(atomic_root, output_dir, uat_mode=True)
+        result = task_501(atomic_root, output_dir)
 
         assert result is True
         assert (project_root / ".claude" / "testing").exists()
@@ -198,7 +166,7 @@ class TestTask501EntryInitialization:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_501(atomic_root, output_dir, uat_mode=True)
+        result = task_501(atomic_root, output_dir)
 
         assert result is True
         init = json.loads((output_dir / "initialization.json").read_text())
@@ -212,10 +180,9 @@ class TestTask501EntryInitialization:
 
         mock_prompt.return_value = 'continue'
 
-        result = task_501(atomic_root, output_dir, uat_mode=False)
+        result = task_501(atomic_root, output_dir)
 
         assert result is True
-
 
 # ============================================================================
 # TASK 502: TDD SETUP
@@ -224,22 +191,12 @@ class TestTask501EntryInitialization:
 class TestTask502TddSetup:
     """Test Task 502: TDD Setup."""
 
-    def test_uat_mode_default_config(self, temp_project_structure):
-        """Test UAT mode creates default config."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "5-implementation"
-
-        result = task_502(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "tdd-setup.json").exists()
-
     def test_framework_detection(self, temp_project_structure):
         """Test test framework is detected."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_502(atomic_root, output_dir, uat_mode=True)
+        result = task_502(atomic_root, output_dir)
 
         assert result is True
         config = json.loads((output_dir / "tdd-setup.json").read_text())
@@ -250,7 +207,7 @@ class TestTask502TddSetup:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_502(atomic_root, output_dir, uat_mode=True)
+        result = task_502(atomic_root, output_dir)
 
         assert result is True
         config = json.loads((output_dir / "tdd-setup.json").read_text())
@@ -261,7 +218,7 @@ class TestTask502TddSetup:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_502(atomic_root, output_dir, uat_mode=True)
+        result = task_502(atomic_root, output_dir)
 
         assert result is True
         config = json.loads((output_dir / "tdd-setup.json").read_text())
@@ -272,7 +229,7 @@ class TestTask502TddSetup:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_502(atomic_root, output_dir, uat_mode=True)
+        result = task_502(atomic_root, output_dir)
 
         assert result is True
 
@@ -281,7 +238,7 @@ class TestTask502TddSetup:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_502(atomic_root, output_dir, uat_mode=True)
+        result = task_502(atomic_root, output_dir)
 
         assert result is True
 
@@ -293,10 +250,9 @@ class TestTask502TddSetup:
 
         mock_prompt.return_value = 'pytest'
 
-        result = task_502(atomic_root, output_dir, uat_mode=False)
+        result = task_502(atomic_root, output_dir)
 
         assert result is True
-
 
 # ============================================================================
 # TASK 503: AGENT SELECTION
@@ -305,22 +261,12 @@ class TestTask502TddSetup:
 class TestTask503AgentSelection:
     """Test Task 503: Agent Selection."""
 
-    def test_uat_mode_bypass(self, temp_project_structure):
-        """Test UAT mode selects default agents."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "5-implementation"
-
-        result = task_503(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "selected-agents.json").exists()
-
     def test_implementation_agents_selected(self, temp_project_structure):
         """Test implementation agents are selected."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_503(atomic_root, output_dir, uat_mode=True)
+        result = task_503(atomic_root, output_dir)
 
         assert result is True
         agents = json.loads((output_dir / "selected-agents.json").read_text())
@@ -331,7 +277,7 @@ class TestTask503AgentSelection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_503(atomic_root, output_dir, uat_mode=True)
+        result = task_503(atomic_root, output_dir)
 
         assert result is True
 
@@ -346,7 +292,7 @@ class TestTask503AgentSelection:
         inventory = "agent_id,name,category\ncode-impl-01,Code Implementer,implementation\n"
         (agent_dir / "agent-inventory.csv").write_text(inventory)
 
-        result = task_503(atomic_root, output_dir, uat_mode=True)
+        result = task_503(atomic_root, output_dir)
 
         assert result is True
 
@@ -355,7 +301,7 @@ class TestTask503AgentSelection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_503(atomic_root, output_dir, uat_mode=True)
+        result = task_503(atomic_root, output_dir)
 
         assert result is True
 
@@ -364,7 +310,7 @@ class TestTask503AgentSelection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_503(atomic_root, output_dir, uat_mode=True)
+        result = task_503(atomic_root, output_dir)
 
         assert result is True
         agents = json.loads((output_dir / "selected-agents.json").read_text())
@@ -378,10 +324,9 @@ class TestTask503AgentSelection:
 
         mock_prompt.return_value = '1'
 
-        result = task_503(atomic_root, output_dir, uat_mode=False)
+        result = task_503(atomic_root, output_dir)
 
         assert result is True
-
 
 # ============================================================================
 # TASK 504: TDD EXECUTION
@@ -390,22 +335,12 @@ class TestTask503AgentSelection:
 class TestTask504TddExecution:
     """Test Task 504: TDD Execution."""
 
-    def test_uat_mode_stub_files(self, temp_project_structure):
-        """Test UAT mode creates stub implementation files."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "5-implementation"
-
-        result = task_504(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "tdd-progress.json").exists()
-
     def test_red_phase_execution(self, temp_project_structure):
         """Test RED phase is executed."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_504(atomic_root, output_dir, uat_mode=True)
+        result = task_504(atomic_root, output_dir)
 
         assert result is True
         progress = json.loads((output_dir / "tdd-progress.json").read_text())
@@ -416,7 +351,7 @@ class TestTask504TddExecution:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_504(atomic_root, output_dir, uat_mode=True)
+        result = task_504(atomic_root, output_dir)
 
         assert result is True
         progress = json.loads((output_dir / "tdd-progress.json").read_text())
@@ -427,7 +362,7 @@ class TestTask504TddExecution:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_504(atomic_root, output_dir, uat_mode=True)
+        result = task_504(atomic_root, output_dir)
 
         assert result is True
         progress = json.loads((output_dir / "tdd-progress.json").read_text())
@@ -438,7 +373,7 @@ class TestTask504TddExecution:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_504(atomic_root, output_dir, uat_mode=True)
+        result = task_504(atomic_root, output_dir)
 
         assert result is True
         progress = json.loads((output_dir / "tdd-progress.json").read_text())
@@ -449,7 +384,7 @@ class TestTask504TddExecution:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_504(atomic_root, output_dir, uat_mode=True)
+        result = task_504(atomic_root, output_dir)
 
         assert result is True
         progress = json.loads((output_dir / "tdd-progress.json").read_text())
@@ -461,13 +396,12 @@ class TestTask504TddExecution:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_504(atomic_root, output_dir, uat_mode=True)
+        result = task_504(atomic_root, output_dir)
 
         assert result is True
         # Check for stub files in src/
         src_files = list((project_root / "src").rglob("*.py"))
         assert len(src_files) > 0
-
 
 # ============================================================================
 # TASK 505: VALIDATION
@@ -476,22 +410,12 @@ class TestTask504TddExecution:
 class TestTask505Validation:
     """Test Task 505: Final Validation."""
 
-    def test_uat_mode_validation(self, temp_project_structure):
-        """Test UAT mode performs validation."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "5-implementation"
-
-        result = task_505(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (project_root / ".claude" / "testing" / "validation-report.json").exists()
-
     def test_coverage_analysis(self, temp_project_structure):
         """Test coverage analysis is performed."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_505(atomic_root, output_dir, uat_mode=True)
+        result = task_505(atomic_root, output_dir)
 
         assert result is True
         report = json.loads((project_root / ".claude" / "testing" / "validation-report.json").read_text())
@@ -502,7 +426,7 @@ class TestTask505Validation:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_505(atomic_root, output_dir, uat_mode=True)
+        result = task_505(atomic_root, output_dir)
 
         assert result is True
         report = json.loads((project_root / ".claude" / "testing" / "validation-report.json").read_text())
@@ -513,7 +437,7 @@ class TestTask505Validation:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_505(atomic_root, output_dir, uat_mode=True)
+        result = task_505(atomic_root, output_dir)
 
         assert result is True
         report = json.loads((project_root / ".claude" / "testing" / "validation-report.json").read_text())
@@ -524,7 +448,7 @@ class TestTask505Validation:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_505(atomic_root, output_dir, uat_mode=True)
+        result = task_505(atomic_root, output_dir)
 
         assert result is True
         report = json.loads((project_root / ".claude" / "testing" / "validation-report.json").read_text())
@@ -544,7 +468,7 @@ class TestTask505Validation:
         }
         (output_dir / "tdd-setup.json").write_text(json.dumps(setup))
 
-        result = task_505(atomic_root, output_dir, uat_mode=True)
+        result = task_505(atomic_root, output_dir)
 
         assert result is True
 
@@ -553,7 +477,7 @@ class TestTask505Validation:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_505(atomic_root, output_dir, uat_mode=True)
+        result = task_505(atomic_root, output_dir)
 
         assert result is True
         report = json.loads((project_root / ".claude" / "testing" / "validation-report.json").read_text())
@@ -562,7 +486,6 @@ class TestTask505Validation:
         assert "security" in report
         assert "tdd_completion" in report
 
-
 # ============================================================================
 # TASK 506: PHASE AUDIT
 # ============================================================================
@@ -570,22 +493,12 @@ class TestTask505Validation:
 class TestTask506PhaseAudit:
     """Test Task 506: Phase Audit."""
 
-    def test_uat_mode_bypass(self, temp_project_structure):
-        """Test UAT mode skips audit."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "5-implementation"
-
-        result = task_506(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "phase-audit.json").exists()
-
     def test_audit_selection(self, temp_project_structure):
         """Test audit selection for implementation phase."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_506(atomic_root, output_dir, uat_mode=True)
+        result = task_506(atomic_root, output_dir)
 
         assert result is True
 
@@ -594,7 +507,7 @@ class TestTask506PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_506(atomic_root, output_dir, uat_mode=True)
+        result = task_506(atomic_root, output_dir)
 
         assert result is True
         audit = json.loads((output_dir / "phase-audit.json").read_text())
@@ -605,7 +518,7 @@ class TestTask506PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_506(atomic_root, output_dir, uat_mode=True)
+        result = task_506(atomic_root, output_dir)
 
         assert result is True
 
@@ -614,7 +527,7 @@ class TestTask506PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_506(atomic_root, output_dir, uat_mode=True)
+        result = task_506(atomic_root, output_dir)
 
         assert result is True
 
@@ -623,7 +536,7 @@ class TestTask506PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_506(atomic_root, output_dir, uat_mode=True)
+        result = task_506(atomic_root, output_dir)
 
         assert result is True
         audit = json.loads((output_dir / "phase-audit.json").read_text())
@@ -637,10 +550,9 @@ class TestTask506PhaseAudit:
 
         mock_prompt.return_value = '1'
 
-        result = task_506(atomic_root, output_dir, uat_mode=False)
+        result = task_506(atomic_root, output_dir)
 
         assert result is True
-
 
 # ============================================================================
 # TASK 507: CLOSEOUT
@@ -649,22 +561,12 @@ class TestTask506PhaseAudit:
 class TestTask507Closeout:
     """Test Task 507: Phase Closeout."""
 
-    def test_uat_mode(self, temp_project_structure):
-        """Test closeout in UAT mode."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "5-implementation"
-
-        result = task_507(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "closeout.json").exists()
-
     def test_closeout_file_structure(self, temp_project_structure):
         """Test closeout file structure."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_507(atomic_root, output_dir, uat_mode=True)
+        result = task_507(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -676,7 +578,7 @@ class TestTask507Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_507(atomic_root, output_dir, uat_mode=True)
+        result = task_507(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -687,7 +589,7 @@ class TestTask507Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_507(atomic_root, output_dir, uat_mode=True)
+        result = task_507(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -698,7 +600,7 @@ class TestTask507Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result = task_507(atomic_root, output_dir, uat_mode=True)
+        result = task_507(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -714,7 +616,7 @@ class TestTask507Closeout:
         if output_dir.exists():
             shutil.rmtree(output_dir)
 
-        result = task_507(atomic_root, output_dir, uat_mode=True)
+        result = task_507(atomic_root, output_dir)
 
         assert result is True
         assert output_dir.exists()
@@ -724,12 +626,11 @@ class TestTask507Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "5-implementation"
 
-        result1 = task_507(atomic_root, output_dir, uat_mode=True)
-        result2 = task_507(atomic_root, output_dir, uat_mode=True)
+        result1 = task_507(atomic_root, output_dir)
+        result2 = task_507(atomic_root, output_dir)
 
         assert result1 is True
         assert result2 is True
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -39,46 +39,44 @@ from phases.phase_05_implementation.tasks import (
 
 # Environment variables
 ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
-PROJECT_ROOT = ATOMIC_ROOT.parent
-OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', PROJECT_ROOT / '.outputs' / '5-implementation'))
-UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
+OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '5-implementation'))
 
 
 # Task wrapper functions (call Python task modules)
 
 def task_501_wrapper(mem=None) -> bool:
     """Task 501: Entry initialization"""
-    return task_501_entry_initialization.execute(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_501_entry_initialization.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def task_502_wrapper(mem=None) -> bool:
     """Task 502: TDD setup"""
-    return task_502_tdd_setup.execute(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_502_tdd_setup.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def task_503_wrapper(mem=None) -> bool:
     """Task 503: Agent selection"""
-    return task_503_agent_selection.execute(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_503_agent_selection.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def task_504_wrapper(mem=None) -> bool:
     """Task 504: TDD execution"""
-    return task_504_tdd_execution.execute(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_504_tdd_execution.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def task_505_wrapper(mem=None) -> bool:
     """Task 505: Validation"""
-    return task_505_validation.execute(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_505_validation.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_506_wrapper(mem=None, **kwargs) -> bool:
+def task_506_wrapper(mem=None, graph=None) -> bool:
     """Task 506: Phase audit"""
-    return task_506_phase_audit.execute(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=kwargs.get("graph"))
+    return task_506_phase_audit.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_507_wrapper(mem=None) -> bool:
     """Task 507: Closeout"""
-    return task_507_closeout.execute(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_507_closeout.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def run_phase(resume_at: str = None) -> bool:
@@ -121,7 +119,6 @@ def run_phase(resume_at: str = None) -> bool:
         task_artifacts=task_artifacts,
         atomic_root=ATOMIC_ROOT,
         output_dir=OUTPUT_DIR,
-        uat_mode=UAT_MODE,
         resume_at=resume_at,
     )
 

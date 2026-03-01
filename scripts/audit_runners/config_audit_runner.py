@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 
 # ============================================================================
@@ -444,29 +444,6 @@ class ConfigAuditRunner:
 
         print(f"\n{BOLD}{BLUE}Testing Environment Variables...{NC}")
 
-        # Check ATOMIC_UAT_MODE
-        print(f"  Checking ATOMIC_UAT_MODE...", end=" ")
-        uat_mode = os.getenv("ATOMIC_UAT_MODE", "false")
-
-        if uat_mode.lower() in ["true", "false"]:
-            print(f"{GREEN}✓{NC} ({uat_mode})")
-            results.append(ConfigTestResult(
-                category="env_vars",
-                test="ATOMIC_UAT_MODE is valid",
-                passed=True,
-                message=f"Value: {uat_mode}",
-                severity="info"
-            ))
-        else:
-            print(f"{YELLOW}⚠{NC} ({uat_mode})")
-            results.append(ConfigTestResult(
-                category="env_vars",
-                test="ATOMIC_UAT_MODE is valid",
-                passed=False,
-                message=f"Invalid value '{uat_mode}' (should be 'true' or 'false')",
-                severity="warning"
-            ))
-
         # Check ATOMIC_AUTO_APPROVE
         print(f"  Checking ATOMIC_AUTO_APPROVE...", end=" ")
         auto_approve = os.getenv("ATOMIC_AUTO_APPROVE", "false")
@@ -580,10 +557,6 @@ class ConfigAuditRunner:
         # Check for conflicting settings
         print(f"  Checking for conflicting env vars...", end=" ")
         conflicts = []
-
-        # Conflict: UAT_MODE=true + AUTO_APPROVE=true (both shouldn't be active)
-        if uat_mode.lower() == "true" and auto_approve.lower() == "true":
-            conflicts.append("ATOMIC_UAT_MODE and ATOMIC_AUTO_APPROVE both enabled")
 
         # Conflict: OFFLINE_MODE=true + NETWORK_MODE=internet
         if offline_mode.lower() == "true" and network_mode.lower() == "internet":

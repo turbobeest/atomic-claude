@@ -15,11 +15,9 @@ Tests all 10 Phase 2 tasks with comprehensive coverage:
 """
 
 import json
-import os
 import pytest
-import subprocess
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, mock_open, call
+from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
 
 # Import task modules
@@ -37,33 +35,12 @@ from phases.phase_02_prd.tasks import task_207_prd_approval
 from phases.phase_02_prd.tasks import task_208_phase_audit
 from phases.phase_02_prd.tasks import task_209_closeout
 
-
 # ============================================================================
 # Task 201: Entry Validation Tests
 # ============================================================================
 
 class TestTask201EntryValidation:
     """Unit tests for task_201_entry_validation."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        # Create minimal Phase 1 artifacts
-        phase1_dir = temp_dir / ".outputs" / "1-discovery"
-        phase1_dir.mkdir(parents=True)
-        (phase1_dir / "selected-approach.json").write_text(
-            json.dumps({"name": "test-approach"})
-        )
-
-        result = task_201_entry_validation.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     def test_validate_phase1_artifacts_all_present(self, temp_dir):
         """Test artifact validation with all files present."""
@@ -160,26 +137,12 @@ class TestTask201EntryValidation:
 
         assert context["corpus_materials"] == 3
 
-
 # ============================================================================
 # Task 202: PRD Setup Tests
 # ============================================================================
 
 class TestTask202PrdSetup:
     """Unit tests for task_202_prd_setup."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        result = task_202_prd_setup.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     def test_execute_creates_prd_template(self, temp_dir):
         """Test execute creates PRD template."""
@@ -189,7 +152,6 @@ class TestTask202PrdSetup:
         task_202_prd_setup.execute(
             atomic_root=temp_dir,
             output_dir=output_dir,
-            uat_mode=True
         )
 
         prd_file = output_dir / "PRD.md"
@@ -237,40 +199,12 @@ class TestTask202PrdSetup:
         data = json.loads(output_file.read_text())
         assert data["version"] == "1.0"
 
-
 # ============================================================================
 # Task 203: PRD Interview Tests
 # ============================================================================
 
 class TestTask203PrdInterview:
     """Unit tests for task_203_prd_interview."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        result = task_203_prd_interview.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
-
-    def test_execute_uat_mode_creates_interview_file(self, temp_dir):
-        """Test UAT mode creates interview transcript."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        task_203_prd_interview.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        interview_file = output_dir / "prd-interview.json"
-        assert interview_file.exists()
 
     @patch('core.llm.invoke_llm')
     def test_generate_interview_questions(self, mock_llm):
@@ -319,43 +253,12 @@ class TestTask203PrdInterview:
         data = json.loads(output_file.read_text())
         assert len(data["questions"]) == 2
 
-
 # ============================================================================
 # Task 204: Agent Selection Tests
 # ============================================================================
 
 class TestTask204AgentSelection:
     """Unit tests for task_204_agent_selection."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        result = task_204_agent_selection.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
-
-    def test_execute_uat_mode_selects_prd_agent(self, temp_dir):
-        """Test UAT mode selects PRD-specific agent."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        task_204_agent_selection.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        agent_file = output_dir / "selected-agent.json"
-        assert agent_file.exists()
-
-        agent = json.loads(agent_file.read_text())
-        assert "name" in agent
 
     @patch('core.llm.invoke_llm')
     def test_recommend_prd_agent(self, mock_llm):
@@ -390,26 +293,12 @@ architect,4,Design""")
         assert len(phase2_agents) == 1
         assert phase2_agents[0]["name"] == "prd-author"
 
-
 # ============================================================================
 # Task 205: PRD Authoring Tests
 # ============================================================================
 
 class TestTask205PrdAuthoring:
     """Unit tests for task_205_prd_authoring."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        result = task_205_prd_authoring.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     def test_execute_creates_prd_document(self, temp_dir):
         """Test execute creates PRD document."""
@@ -424,7 +313,6 @@ class TestTask205PrdAuthoring:
         task_205_prd_authoring.execute(
             atomic_root=temp_dir,
             output_dir=output_dir,
-            uat_mode=True
         )
 
         prd_file = output_dir / "PRD.md"
@@ -486,44 +374,12 @@ Project overview here.
 
         assert valid is False
 
-
 # ============================================================================
 # Task 206: PRD Validation Tests
 # ============================================================================
 
 class TestTask206PrdValidation:
     """Unit tests for task_206_prd_validation."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        # Create PRD
-        (output_dir / "PRD.md").write_text("# PRD Content")
-
-        result = task_206_prd_validation.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
-
-    def test_execute_uat_mode_creates_validation_report(self, temp_dir):
-        """Test UAT mode creates validation report."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-        (output_dir / "PRD.md").write_text("# PRD")
-
-        task_206_prd_validation.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        validation_file = output_dir / "prd-validation.json"
-        assert validation_file.exists()
 
     @patch('core.llm.invoke_llm')
     def test_validate_prd_with_llm(self, mock_llm, temp_dir):
@@ -579,32 +435,12 @@ Defined metrics
         data = json.loads(output_file.read_text())
         assert data["valid"] is True
 
-
 # ============================================================================
 # Task 206b: PRD Revision Tests
 # ============================================================================
 
 class TestTask206bPrdRevision:
     """Unit tests for task_206b_prd_revision."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        # Create PRD and validation
-        (output_dir / "PRD.md").write_text("# PRD")
-        (output_dir / "prd-validation.json").write_text(
-            json.dumps({"valid": False, "issues": ["Missing section"]})
-        )
-
-        result = task_206b_prd_revision.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     @patch('core.llm.invoke_llm')
     def test_revise_prd_section(self, mock_llm, temp_dir):
@@ -656,44 +492,12 @@ More content.
         data = json.loads(history_file.read_text())
         assert data["version"] == 2
 
-
 # ============================================================================
 # Task 207: PRD Approval Tests
 # ============================================================================
 
 class TestTask207PrdApproval:
     """Unit tests for task_207_prd_approval."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        # Create PRD
-        (output_dir / "PRD.md").write_text("# PRD Content")
-
-        result = task_207_prd_approval.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
-
-    def test_execute_uat_mode_creates_approval_record(self, temp_dir):
-        """Test UAT mode creates approval record."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-        (output_dir / "PRD.md").write_text("# PRD")
-
-        task_207_prd_approval.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        approval_file = output_dir / "prd-approval.json"
-        assert approval_file.exists()
 
     def test_display_prd_for_approval(self, temp_dir, capsys):
         """Test displaying PRD for approval."""
@@ -726,28 +530,12 @@ Test project overview.
         data = json.loads(output_file.read_text())
         assert data["approved"] is True
 
-
 # ============================================================================
 # Task 208: Phase Audit Tests
 # ============================================================================
 
 class TestTask208PhaseAudit:
     """Unit tests for task_208_phase_audit."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True (delegates to core.audit)."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        with patch('phases.phase_02_prd.tasks.task_208_phase_audit.run_phase_audit',
-                    return_value=True):
-            result = task_208_phase_audit.execute(
-                atomic_root=temp_dir,
-                output_dir=output_dir,
-                uat_mode=True,
-            )
-
-        assert result is True
 
     @patch('phases.phase_02_prd.tasks.task_208_phase_audit.run_phase_audit',
            return_value=True)
@@ -759,7 +547,6 @@ class TestTask208PhaseAudit:
         task_208_phase_audit.execute(
             atomic_root=temp_dir,
             output_dir=output_dir,
-            uat_mode=False,
         )
 
         mock_rpa.assert_called_once_with(2, "2-prd", output_dir, False)
@@ -774,7 +561,6 @@ class TestTask208PhaseAudit:
         result = task_208_phase_audit.execute(
             atomic_root=temp_dir,
             output_dir=output_dir,
-            uat_mode=False,
             mem=None,
         )
 
@@ -792,26 +578,12 @@ class TestTask208PhaseAudit:
 
         assert result is True
 
-
 # ============================================================================
 # Task 209: Closeout Tests
 # ============================================================================
 
 class TestTask209Closeout:
     """Unit tests for task_209_closeout."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        result = task_209_closeout.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     def test_execute_creates_closeout_file(self, temp_dir):
         """Test execute creates closeout file."""
@@ -821,7 +593,6 @@ class TestTask209Closeout:
         task_209_closeout.execute(
             atomic_root=temp_dir,
             output_dir=output_dir,
-            uat_mode=True
         )
 
         closeout_file = output_dir / "phase-02-closeout.json"

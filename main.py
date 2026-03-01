@@ -31,18 +31,7 @@ from orchestration.pipeline import PhasePipeline, TransitionMode, PHASE_REGISTRY
 from orchestration.backtrack import backtrack_to
 
 # Phase names for display
-PHASE_NAMES = {
-    0: "Setup",
-    1: "Discovery",
-    2: "PRD",
-    3: "Tasking",
-    4: "Specification",
-    5: "Implementation",
-    6: "Code Review",
-    7: "Integration",
-    8: "Deployment Prep",
-    9: "Release"
-}
+PHASE_NAMES = {num: meta.phase_name for num, meta in PHASE_REGISTRY.items()}
 
 
 def run_phase(phase_num: int, resume_at: str = None):

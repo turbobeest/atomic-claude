@@ -46,9 +46,12 @@ from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, prompt_user, clear_input_buffer
 )
-from core.utils.file_ops import ensure_dir, read_file, write_file
+from core.utils.file_ops import ensure_dir, read_file, read_json, write_file
 
 logger = logging.getLogger(__name__)
+
+# Sentinel object for wizard restart (avoids returning a string as sentinel)
+_RESTART = object()
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -250,7 +253,7 @@ def _get_default_phase_roles(atomic_root: Path) -> Dict[str, str]:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 003: Setup Wizard.
 
@@ -261,7 +264,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, generate stub config without interactive prompts
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -294,10 +296,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     env_vars = provider_inventory.get("env_vars", dict(os.environ))
     ai_defaults = _infer_project_defaults(env_vars, project_root, env_info)
 
-    # --- Run the 10-step wizard (loop on RESTART sentinel) ---
-    config = "RESTART"
-    while config == "RESTART":
-        config = _run_wizard(ai_defaults, env_info, provider_inventory, config_file, mem=mem)
+    # --- Run the 10-step wizard (loop on _RESTART sentinel) ---
+    config = _RESTART
+    while config is _RESTART:
+        config = _run_wizard(ai_defaults, env_info, provider_inventory, config_file, mem=mem, atomic_root=atomic_root)
     if config is None:
         print(print_red("Setup aborted"))
         return False
@@ -647,8 +649,9 @@ def _run_wizard(
     provider_inventory: Dict[str, Any],
     config_file: Path = None,
     mem=None,
+    atomic_root: Path = None,
 ) -> Optional[Dict[str, Any]]:
-    """Run the 10-step interactive wizard. Returns config dict or None.
+    """Run the 10-step interactive wizard. Returns config dict, None, or _RESTART sentinel.
 
     Args:
         ai: AI-inferred project defaults from reference materials.
@@ -658,7 +661,10 @@ def _run_wizard(
                            ollama_hosts, ollama_models, env_vars, and health info.
         config_file: Path for preliminary config writes (dashboard integration).
         mem: Optional TaskMemory instance for mid-wizard checkpoints.
+        atomic_root: Path to atomic-claude root directory.
     """
+    if atomic_root is None:
+        atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
     # Extract provider info from inventory
     credentials = provider_inventory.get("credentials", {})
     has_aws = credentials.get("has_aws", False)
@@ -870,7 +876,6 @@ def _run_wizard(
     # Provider-aware defaults from config/models.json (with inline fallback)
     chain_priority = chain_providers[:]
     primary_provider = chain_providers[0] if chain_providers else "anthropic"
-    atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
     profile = _get_provider_profile(primary_provider, atomic_root)
     models = dict(profile["models"])
     effort_level = profile["effort"]
@@ -1269,10 +1274,10 @@ def _run_wizard(
     if choice in ('n', 'no'):
         print(print_yellow("  Restarting wizard..."))
         print()
-        return "RESTART"
+        return _RESTART
 
     # Fill in auto-defaults that are not prompted
-    _apply_auto_defaults(cfg)
+    _apply_auto_defaults(cfg, atomic_root=atomic_root)
 
     return cfg
 
@@ -1590,8 +1595,10 @@ def _show_summary(cfg: Dict[str, Any]) -> None:
 # Auto-defaults (not prompted)
 # ---------------------------------------------------------------------------
 
-def _apply_auto_defaults(cfg: Dict[str, Any]) -> None:
+def _apply_auto_defaults(cfg: Dict[str, Any], atomic_root: Path = None) -> None:
     """Fill in fields that always get sensible defaults (only for sections not already set)."""
+    if atomic_root is None:
+        atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
     cfg.setdefault("mcp", {"enabled": False, "servers": [], "tool_permissions": "none"})
 
     # Agents -- only set flat fallback if structured agents section wasn't set by wizard
@@ -1606,7 +1613,6 @@ def _apply_auto_defaults(cfg: Dict[str, Any]) -> None:
     if "providers" not in cfg:
         has_ollama = cfg.get("llm", {}).get("local_fallback", False)
         provider = cfg.get("llm", {}).get("primary_provider", "anthropic")
-        atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
         fallback_profile = _get_provider_profile(provider, atomic_root)
         phase_roles_default = _get_default_phase_roles(atomic_root)
         cfg["providers"] = {
@@ -1624,7 +1630,6 @@ def _apply_auto_defaults(cfg: Dict[str, Any]) -> None:
         cfg["providers"].setdefault("effort_level", None)
         cfg["providers"].setdefault("thinking_budget", None)
         if "phase_roles" not in cfg["providers"]:
-            atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
             cfg["providers"]["phase_roles"] = _get_default_phase_roles(atomic_root)
 
     # Audits -- only set if wizard didn't produce one
@@ -1870,13 +1875,21 @@ def _save_config(
 
     # project-config.json: flatten extracted config into top-level keys
     # and mark as approved (replaces the former Task 002 config review step)
-    project_config = {
+    # Read existing config to preserve keys written by earlier tasks (e.g. environment)
+    try:
+        project_config = read_json(config_file)
+        if not isinstance(project_config, dict):
+            project_config = {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        project_config = {}
+
+    project_config.update({
         "setup_mode": "wizard",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "config_approved": True,
         "approved_at": datetime.now(timezone.utc).isoformat(),
         "extracted": config,
-    }
+    })
     # Flatten extracted sections into top-level for downstream consumers
     for key in ('project', 'repository', 'sandbox', 'mcp', 'pipeline',
                 'agents', 'llm', 'constraints', 'providers', 'gardener', 'audits'):

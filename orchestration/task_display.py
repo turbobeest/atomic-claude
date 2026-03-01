@@ -219,12 +219,10 @@ def display_task_roster(
     task_id: str,
     task_name: str,
     roster: List[Tuple[AgentEntry, ResolvedModel]],
-    uat_mode: bool = False,
 ) -> List[Tuple[AgentEntry, ResolvedModel]]:
     """Display agent model table and offer override prompt.
 
     Returns the (possibly modified) roster.
-    In UAT mode, skips the interactive prompt.
     """
     print()
 
@@ -241,9 +239,6 @@ def display_task_roster(
         _print_roster_table(task_id, task_name, roster)
 
     print()
-
-    if uat_mode:
-        return roster
 
     # Interactive prompt — always offer model override
     clear_input_buffer()

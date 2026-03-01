@@ -28,14 +28,13 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 201: Entry Validation.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -64,23 +63,19 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             print(f"    • {item}")
         print()
 
-        # UAT mode bypass
-        if uat_mode:
-            print(print_yellow("  UAT mode: Continuing with missing artifacts"))
+        print(print_yellow("  Options:"))
+        print("    " + print_dim("[b]") + " Go back to Phase 1")
+        print("    " + print_dim("[c]") + " Continue anyway (not recommended)")
+        print()
+
+        clear_input_buffer()
+        choice = prompt_user("  Choice (default: b): ").strip().lower() or "b"
+
+        if choice in ["c"]:
+            print(print_yellow("  ⚠ Continuing with missing artifacts"))
         else:
-            print(print_yellow("  Options:"))
-            print("    " + print_dim("[b]") + " Go back to Phase 1")
-            print("    " + print_dim("[c]") + " Continue anyway (not recommended)")
-            print()
-
-            clear_input_buffer()
-            choice = prompt_user("  Choice (default: b): ").strip().lower() or "b"
-
-            if choice in ["c"]:
-                print(print_yellow("  ⚠ Continuing with missing artifacts"))
-            else:
-                print(print_cyan("  → Returning to complete Phase 1 first"))
-                return False
+            print(print_cyan("  → Returning to complete Phase 1 first"))
+            return False
 
     # Load context from Phase 1
     context = load_phase1_context(phase1_dir)
@@ -322,10 +317,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

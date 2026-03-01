@@ -9,7 +9,7 @@ import sys
 import json
 import csv
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Optional
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -91,14 +91,13 @@ def analyze_project_patterns(specs_dir: Path) -> Dict[str, bool]:
     return patterns
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 503: Agent Selection.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -110,31 +109,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     specs_dir = project_root / ".openspec"
     if not specs_dir.exists() or not list(specs_dir.glob("spec-*.json")):
         specs_dir = project_root / ".claude" / "specs"
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print()
-        print(print_yellow("⚡ UAT Mode: Auto-selecting default implementation agents"))
-        print()
-
-        ensure_dir(agents_file.parent)
-
-        agents_data = {
-            "tdd_agents": {
-                "red": {"name": "test-first-developer", "model": "haiku", "phase": "RED"},
-                "green": {"name": "implementation-engineer", "model": "sonnet", "phase": "GREEN"},
-                "refactor": {"name": "code-optimization-specialist", "model": "haiku", "phase": "REFACTOR"},
-                "verify": {"name": "security-scanner", "model": "haiku", "phase": "VERIFY"}
-            },
-            "specialists": ["backend-engineer", "api-developer"],
-            "source": "uat-defaults",
-            "mode": "uat",
-            "selected_at": datetime.now(timezone.utc).isoformat()
-        }
-        write_file(agents_file, json.dumps(agents_data, indent=2))
-
-        print(print_green("✓ Agent Selection complete (UAT mode)"))
-        return True
 
     ensure_dir(agents_file.parent)
 
@@ -379,10 +353,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

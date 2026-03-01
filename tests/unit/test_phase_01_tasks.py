@@ -14,11 +14,9 @@ Tests all 9 Phase 1 tasks with comprehensive coverage:
 """
 
 import json
-import os
 import pytest
-import subprocess
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, mock_open, call
+from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
 
 # Import task modules
@@ -35,40 +33,12 @@ from phases.phase_01_discovery.tasks import task_107_discovery_diagrams
 from phases.phase_01_discovery.tasks import task_108_phase_audit
 from phases.phase_01_discovery.tasks import task_109_closeout
 
-
 # ============================================================================
 # Task 101: Entry Validation Tests
 # ============================================================================
 
 class TestTask101EntryValidation:
     """Unit tests for task_101_entry_validation."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        # Create minimal Phase 0 artifacts
-        setup_dir = temp_dir / ".outputs" / "0-setup"
-        setup_dir.mkdir(parents=True)
-        (setup_dir / "project-config.json").write_text(
-            json.dumps({"project": {"name": "test"}})
-        )
-
-        # Create closeout file
-        closeout_dir = temp_dir / ".claude" / "closeout"
-        closeout_dir.mkdir(parents=True)
-        (closeout_dir / "phase-0-setup-closeout.json").write_text(
-            json.dumps({"status": "complete"})
-        )
-
-        result = task_101_entry_validation.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     def test_find_closeout_multiple_patterns(self, temp_dir):
         """Test closeout file finding with multiple patterns."""
@@ -119,12 +89,10 @@ class TestTask101EntryValidation:
         result = task_101_entry_validation.execute(
             atomic_root=temp_dir,
             output_dir=output_dir,
-            uat_mode=True
         )
 
-        # Should handle missing gracefully in UAT mode
+        # Should handle missing gracefully
         assert isinstance(result, bool)
-
 
 # ============================================================================
 # Task 102: Import Requirements Tests
@@ -132,19 +100,6 @@ class TestTask101EntryValidation:
 
 class TestTask102ImportRequirements:
     """Unit tests for task_102_import_requirements."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        result = task_102_import_requirements.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     def test_find_requirements_files(self, temp_dir):
         """Test finding requirements files."""
@@ -202,43 +157,12 @@ class TestTask102ImportRequirements:
         assert "python" in data
         assert "javascript" in data
 
-
 # ============================================================================
 # Task 103: Agent Selection Tests
 # ============================================================================
 
 class TestTask103AgentSelection:
     """Unit tests for task_103_agent_selection."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        result = task_103_agent_selection.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
-
-    def test_execute_uat_mode_selects_default_agent(self, temp_dir):
-        """Test UAT mode selects default agent."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        task_103_agent_selection.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        agent_file = output_dir / "selected-agent.json"
-        assert agent_file.exists()
-
-        agent = json.loads(agent_file.read_text())
-        assert "name" in agent
 
     @patch('core.llm.invoke_llm')
     def test_recommend_agent_with_llm(self, mock_llm, temp_dir):
@@ -270,40 +194,12 @@ prd-author,PRD Writing,2""")
         assert len(agents) >= 2
         assert any(a["name"] == "discovery-specialist" for a in agents)
 
-
 # ============================================================================
 # Task 104: Opening Dialogue Tests
 # ============================================================================
 
 class TestTask104OpeningDialogue:
     """Unit tests for task_104_opening_dialogue."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        result = task_104_opening_dialogue.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
-
-    def test_execute_uat_mode_creates_dialogue_file(self, temp_dir):
-        """Test UAT mode creates dialogue.json."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        task_104_opening_dialogue.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        dialogue_file = output_dir / "dialogue.json"
-        assert dialogue_file.exists()
 
     @patch('builtins.input', return_value="We need a web application for task management")
     def test_collect_user_input_interactive(self, mock_input):
@@ -344,26 +240,12 @@ class TestTask104OpeningDialogue:
         data = json.loads(output_file.read_text())
         assert len(data["exchanges"]) == 2
 
-
 # ============================================================================
 # Task 105: Discovery Work Tests
 # ============================================================================
 
 class TestTask105DiscoveryWork:
     """Unit tests for task_105_discovery_work."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        result = task_105_discovery_work.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     @patch('core.llm.invoke_llm')
     def test_analyze_project_vision(self, mock_llm, temp_dir):
@@ -411,40 +293,12 @@ class TestTask105DiscoveryWork:
         data = json.loads(output_file.read_text())
         assert "vision" in data
 
-
 # ============================================================================
 # Task 106: Approach Selection Tests
 # ============================================================================
 
 class TestTask106ApproachSelection:
     """Unit tests for task_106_approach_selection."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        result = task_106_approach_selection.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
-
-    def test_execute_uat_mode_creates_approach_file(self, temp_dir):
-        """Test UAT mode creates selected-approach.json."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        task_106_approach_selection.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        approach_file = output_dir / "selected-approach.json"
-        assert approach_file.exists()
 
     @patch('core.llm.invoke_llm')
     def test_generate_approach_options(self, mock_llm):
@@ -493,26 +347,12 @@ class TestTask106ApproachSelection:
         data = json.loads(output_file.read_text())
         assert data["name"] == "Microservices Architecture"
 
-
 # ============================================================================
 # Task 107: Discovery Diagrams Tests
 # ============================================================================
 
 class TestTask107DiscoveryDiagrams:
     """Unit tests for task_107_discovery_diagrams."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        result = task_107_discovery_diagrams.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     @patch('core.llm.invoke_llm')
     def test_generate_architecture_diagram(self, mock_llm, temp_dir):
@@ -560,26 +400,12 @@ digraph {
         assert diagrams_dir.exists()
         assert (diagrams_dir / "architecture.dot").exists()
 
-
 # ============================================================================
 # Task 108: Phase Audit Tests
 # ============================================================================
 
 class TestTask108PhaseAudit:
     """Unit tests for task_108_phase_audit."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        result = task_108_phase_audit.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     def test_audit_checks_required_artifacts(self, temp_dir):
         """Test audit checks for required artifacts."""
@@ -636,26 +462,12 @@ class TestTask108PhaseAudit:
         data = json.loads(output_file.read_text())
         assert data["status"] == "complete"
 
-
 # ============================================================================
 # Task 109: Closeout Tests
 # ============================================================================
 
 class TestTask109Closeout:
     """Unit tests for task_109_closeout."""
-
-    def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "1-discovery"
-        output_dir.mkdir(parents=True)
-
-        result = task_109_closeout.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     def test_execute_creates_closeout_file(self, temp_dir):
         """Test execute creates closeout file."""
@@ -665,7 +477,6 @@ class TestTask109Closeout:
         task_109_closeout.execute(
             atomic_root=temp_dir,
             output_dir=output_dir,
-            uat_mode=True
         )
 
         # Check for closeout file

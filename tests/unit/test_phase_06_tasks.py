@@ -15,10 +15,8 @@ Requirements: Mock LLM calls, file operations, and test all code paths
 
 import pytest
 import json
-import tempfile
-import shutil
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open, call
+from unittest.mock import patch, MagicMock
 from datetime import datetime
 
 # Import task modules
@@ -30,7 +28,6 @@ from phases.phase_06_code_review.tasks import (
     task_605_phase_audit,
     task_606_closeout,
 )
-
 
 # ============================================================================
 # FIXTURES
@@ -54,7 +51,6 @@ def temp_dirs(tmp_path):
         "outputs_dir": outputs_dir
     }
 
-
 @pytest.fixture
 def phase5_closeout(temp_dirs):
     """Create Phase 5 closeout file."""
@@ -74,7 +70,6 @@ def phase5_closeout(temp_dirs):
     closeout_file.write_text(json.dumps(closeout_data, indent=2))
     return closeout_file
 
-
 # ============================================================================
 # TASK 601: ENTRY INITIALIZATION TESTS
 # ============================================================================
@@ -82,29 +77,12 @@ def phase5_closeout(temp_dirs):
 class TestTask601EntryInitialization:
     """Test Task 601: Entry & Initialization."""
 
-    def test_601_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses interactive prompts."""
-        result = task_601_entry_initialization.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        entry_context = temp_dirs["output_dir"] / "entry-context.json"
-        assert entry_context.exists()
-
-        context_data = json.loads(entry_context.read_text())
-        assert context_data["status"] == "initialized"
-        assert context_data["phase"] == "6-code-review"
-
     def test_601_phase5_missing_closeout(self, temp_dirs):
         """Test failure when Phase 5 closeout is missing."""
         with patch('builtins.input', return_value=''):
             result = task_601_entry_initialization.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
         assert result is False
@@ -120,7 +98,6 @@ class TestTask601EntryInitialization:
             result = task_601_entry_initialization.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
         assert result is False
@@ -131,7 +108,6 @@ class TestTask601EntryInitialization:
             result = task_601_entry_initialization.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
         assert result is True
@@ -157,7 +133,6 @@ class TestTask601EntryInitialization:
             result = task_601_entry_initialization.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
         assert result is True
@@ -173,11 +148,9 @@ class TestTask601EntryInitialization:
             result = task_601_entry_initialization.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
         assert result is False
-
 
 # ============================================================================
 # TASK 602: AGENT SELECTION TESTS
@@ -186,22 +159,6 @@ class TestTask601EntryInitialization:
 class TestTask602AgentSelection:
     """Test Task 602: Agent Selection."""
 
-    def test_602_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses interactive agent selection."""
-        result = task_602_agent_selection.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        agents_file = temp_dirs["output_dir"] / "review-agents.json"
-        assert agents_file.exists()
-
-        agent_data = json.loads(agents_file.read_text())
-        assert "review_agents" in agent_data
-        assert "deep_code" in agent_data["review_agents"]
-
     def test_602_output_directory_creation(self, temp_dirs):
         """Test output directory is created if it doesn't exist."""
         output_dir = temp_dirs["atomic_root"] / "new_output"
@@ -209,7 +166,6 @@ class TestTask602AgentSelection:
         result = task_602_agent_selection.execute(
             temp_dirs["atomic_root"],
             output_dir,
-            uat_mode=True
         )
 
         assert result is True
@@ -220,7 +176,6 @@ class TestTask602AgentSelection:
         result = task_602_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "review-agents.json"
@@ -239,7 +194,6 @@ class TestTask602AgentSelection:
         result = task_602_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "review-agents.json"
@@ -263,7 +217,6 @@ class TestTask602AgentSelection:
             result = task_602_agent_selection.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is True
@@ -278,9 +231,7 @@ class TestTask602AgentSelection:
                 task_602_agent_selection.execute(
                     temp_dirs["atomic_root"],
                     temp_dirs["output_dir"],
-                    uat_mode=True
                 )
-
 
 # ============================================================================
 # TASK 603: COMPREHENSIVE REVIEW TESTS
@@ -288,18 +239,6 @@ class TestTask602AgentSelection:
 
 class TestTask603ComprehensiveReview:
     """Test Task 603: Comprehensive Review."""
-
-    def test_603_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses LLM review calls."""
-        result = task_603_comprehensive_review.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        review_file = temp_dirs["output_dir"] / "review-report.json"
-        assert review_file.exists()
 
     def test_603_missing_agent_selection(self, temp_dirs):
         """Test handling when agent selection is missing."""
@@ -310,7 +249,6 @@ class TestTask603ComprehensiveReview:
             result = task_603_comprehensive_review.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is False
@@ -320,7 +258,6 @@ class TestTask603ComprehensiveReview:
         result = task_603_comprehensive_review.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         review_file = temp_dirs["output_dir"] / "review-report.json"
@@ -347,7 +284,6 @@ class TestTask603ComprehensiveReview:
             result = task_603_comprehensive_review.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert mock_llm.called
@@ -357,7 +293,6 @@ class TestTask603ComprehensiveReview:
         result = task_603_comprehensive_review.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         review_file = temp_dirs["output_dir"] / "review-report.json"
@@ -371,7 +306,6 @@ class TestTask603ComprehensiveReview:
         result = task_603_comprehensive_review.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         review_file = temp_dirs["output_dir"] / "review-report.json"
@@ -380,25 +314,12 @@ class TestTask603ComprehensiveReview:
         assert "reviewed_at" in review_data
         datetime.fromisoformat(review_data["reviewed_at"])
 
-
 # ============================================================================
 # TASK 604: REFINEMENT TESTS
 # ============================================================================
 
 class TestTask604Refinement:
     """Test Task 604: Refinement."""
-
-    def test_604_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses refinement process."""
-        result = task_604_refinement.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        refinement_file = temp_dirs["output_dir"] / "refinement-log.json"
-        assert refinement_file.exists()
 
     def test_604_missing_review_report(self, temp_dirs):
         """Test handling when review report is missing."""
@@ -408,7 +329,6 @@ class TestTask604Refinement:
             result = task_604_refinement.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is False
@@ -425,7 +345,6 @@ class TestTask604Refinement:
         result = task_604_refinement.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is True
@@ -435,7 +354,6 @@ class TestTask604Refinement:
         result = task_604_refinement.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         refinement_file = temp_dirs["output_dir"] / "refinement-log.json"
@@ -460,7 +378,6 @@ class TestTask604Refinement:
             result = task_604_refinement.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert mock_llm.called
@@ -470,7 +387,6 @@ class TestTask604Refinement:
         result = task_604_refinement.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         refinement_file = temp_dirs["output_dir"] / "refinement-log.json"
@@ -479,7 +395,6 @@ class TestTask604Refinement:
         assert isinstance(refinement_data["findings_addressed"], int)
         assert refinement_data["findings_addressed"] >= 0
 
-
 # ============================================================================
 # TASK 605: PHASE AUDIT TESTS
 # ============================================================================
@@ -487,24 +402,11 @@ class TestTask604Refinement:
 class TestTask605PhaseAudit:
     """Test Task 605: Phase Audit."""
 
-    def test_605_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses audit process."""
-        result = task_605_phase_audit.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        audit_file = temp_dirs["output_dir"] / "phase-audit.json"
-        assert audit_file.exists()
-
     def test_605_audit_checklist_validation(self, temp_dirs):
         """Test audit validates all required items."""
         result = task_605_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
@@ -520,7 +422,6 @@ class TestTask605PhaseAudit:
         result = task_605_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         # Should fail if artifacts are missing
@@ -531,7 +432,6 @@ class TestTask605PhaseAudit:
         result = task_605_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
@@ -545,7 +445,6 @@ class TestTask605PhaseAudit:
         result = task_605_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
@@ -559,7 +458,6 @@ class TestTask605PhaseAudit:
         result = task_605_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
@@ -568,7 +466,6 @@ class TestTask605PhaseAudit:
         assert "recommendations" in audit_data
         assert isinstance(audit_data["recommendations"], list)
 
-
 # ============================================================================
 # TASK 606: CLOSEOUT TESTS
 # ============================================================================
@@ -576,24 +473,11 @@ class TestTask605PhaseAudit:
 class TestTask606Closeout:
     """Test Task 606: Closeout."""
 
-    def test_606_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode creates valid closeout."""
-        result = task_606_closeout.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        closeout_file = temp_dirs["output_dir"] / "closeout.json"
-        assert closeout_file.exists()
-
     def test_606_closeout_structure(self, temp_dirs):
         """Test closeout has required structure."""
         result = task_606_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -608,7 +492,6 @@ class TestTask606Closeout:
         result = task_606_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -621,7 +504,6 @@ class TestTask606Closeout:
         result = task_606_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -635,7 +517,6 @@ class TestTask606Closeout:
         result = task_606_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -649,7 +530,6 @@ class TestTask606Closeout:
         result = task_606_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -670,13 +550,11 @@ class TestTask606Closeout:
         result = task_606_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         # Should fail or warn on incomplete work
         # Implementation may vary - test for proper handling
         assert result in [True, False]  # Either fail or succeed with warning
-
 
 # ============================================================================
 # INTEGRATION TESTS
@@ -685,73 +563,17 @@ class TestTask606Closeout:
 class TestPhase06Integration:
     """Integration tests for Phase 6 task flow."""
 
-    def test_phase06_complete_flow_uat(self, temp_dirs, phase5_closeout):
-        """Test complete Phase 6 flow in UAT mode."""
-        # Task 601
-        result = task_601_entry_initialization.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 602
-        result = task_602_agent_selection.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 603
-        result = task_603_comprehensive_review.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 604
-        result = task_604_refinement.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 605
-        result = task_605_phase_audit.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 606
-        result = task_606_closeout.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Verify closeout exists
-        closeout_file = temp_dirs["output_dir"] / "closeout.json"
-        assert closeout_file.exists()
-
     def test_phase06_artifact_chain(self, temp_dirs, phase5_closeout):
         """Test artifacts are properly chained between tasks."""
         # Execute tasks in sequence
         task_601_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         task_602_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         # Verify agent selection output exists for next task
@@ -761,7 +583,6 @@ class TestPhase06Integration:
         task_603_comprehensive_review.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         # Verify review output exists for next task

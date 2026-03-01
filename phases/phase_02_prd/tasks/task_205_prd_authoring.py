@@ -48,14 +48,13 @@ PRD_SECTIONS = [
 ]
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 205: PRD Authoring.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, create minimal PRD for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -73,13 +72,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_cyan("║ " + print_bold("PRD AUTHORING") + "                                             ║"))
     print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
-
-    # UAT mode bypass - create minimal PRD
-    if uat_mode:
-        print(print_yellow("  UAT mode: Creating minimal PRD..."))
-        create_minimal_prd(prd_file, atomic_root, output_dir)
-        print(print_green("✓ Minimal PRD created for UAT"))
-        return True
 
     # Load context from previous tasks
     context = load_prd_context(atomic_root, output_dir)
@@ -203,6 +195,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
         if section_content:
             prd_content += section_content + "\n\n"
+            completed_gens.add(gen_num)
             print(print_green(f"    ✓ {section_name} complete"))
 
             # Write Feature node to graph for this section
@@ -217,120 +210,25 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 except Exception as e:
                     logger.warning(f"Graph write failed for section '{section_name}': {e}")
         else:
-            print(print_red(f"    ✗ Failed to generate {section_name}"))
-            return False
+            print(print_red(f"    ✗ Failed to generate {section_name} — skipping"))
+            logger.warning("Section generation returned empty for '%s' (gen %d)", section_name, gen_num)
 
         # Save incremental progress
         write_file(prd_file, prd_content)
 
+    # Check if any sections were actually generated
+    failed_sections = [s["name"] for s in PRD_SECTIONS if s["gen"] not in completed_gens]
+    if not prd_content.strip():
+        print()
+        print(print_red("✗ PRD authoring failed: no sections were generated"))
+        return False
+
     print()
-    print(print_green(f"✓ PRD authoring complete: {prd_file}"))
+    if failed_sections:
+        print(print_yellow(f"⚠ PRD authoring partially complete ({len(failed_sections)} section(s) failed): {prd_file}"))
+    else:
+        print(print_green(f"✓ PRD authoring complete: {prd_file}"))
     return True
-
-
-def create_minimal_prd(prd_file: Path, atomic_root: Path, output_dir: Path) -> None:
-    """
-    Create minimal PRD for UAT testing.
-
-    Args:
-        prd_file: Path to PRD file
-        atomic_root: Path to atomic-claude root
-        output_dir: Path to phase output directory
-    """
-    minimal_prd = """# Product Requirements Document (PRD)
-
-**Project**: UAT Test Project
-**Version**: 1.0
-**Date**: """ + datetime.now(timezone.utc).strftime("%Y-%m-%d") + """
-**Status**: Draft (UAT Mode)
-
-## 0. Vision & Problem Statement
-
-This is a minimal PRD created for UAT testing purposes.
-
-### Problem
-Testing the PRD authoring workflow in automated mode.
-
-### Vision
-Validate that the PRD phase can complete successfully in UAT mode.
-
-## 1. Executive Summary
-
-This PRD documents the requirements for UAT testing of the atomic-claude pipeline.
-
-## 2. Technical Architecture
-
-### 2.1 Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| Language  | Python 3.x |
-| Testing   | pytest     |
-
-## 3. Feature Requirements (FRs)
-
-#### FR-001: UAT Support
-**WHEN** running in UAT mode
-**THEN** the system SHALL complete without interactive prompts
-
-## 4. Non-Functional Requirements (NFRs)
-
-| ID | Category | Requirement | Priority |
-|----|----------|-------------|----------|
-| NFR-001 | Performance | Tests SHALL complete in under 5 minutes | P0 |
-
-## 5. Logical Dependency Chain
-
-### Layer 0: Foundation
-- Test framework setup
-
-## 6. Development Phases
-
-### Phase 1: Core Development
-- Implement UAT mode support
-
-## 7. Code Structure & Organization
-
-```
-tests/
-  uat/
-```
-
-## 8. TDD Requirements & Test Strategy
-
-- Unit tests for all core functions
-- Integration tests for phase workflows
-
-## 9. Integration Testing Strategy
-
-- End-to-end UAT tests
-
-## 10. Documentation Requirements
-
-- README with UAT instructions
-
-## 11. Operational Requirements
-
-- CI/CD pipeline integration
-
-## 12. Risks & Mitigation
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Test failures | High | Comprehensive error handling |
-
-## 13. Success Metrics
-
-- All UAT tests pass
-- Pipeline completes end-to-end
-
-## 14. Approval & Sign-off
-
-**Status**: Auto-approved (UAT mode)
-**Date**: """ + datetime.now(timezone.utc).strftime("%Y-%m-%d") + """
-"""
-
-    write_file(prd_file, minimal_prd)
 
 
 def load_prd_context(atomic_root: Path, output_dir: Path) -> Dict[str, Any]:
@@ -586,21 +484,26 @@ def _strip_llm_preamble(content: str) -> str:
     """Strip LLM preamble/reflection text before the actual section header.
 
     LLM outputs sometimes start with "I have sufficient context..." or similar
-    thinking-out-loud text before the actual markdown section header (# N. Title).
+    thinking-out-loud text before the actual markdown section header.
+    Matches both # and ## headings, numbered (# 1. Title) or unnumbered (## Title).
     """
-    match = re.search(r'^(# \d+\.)', content, re.MULTILINE)
+    match = re.search(r'^(#{1,2}\s+(?:\d+\.)?\s*\w)', content, re.MULTILINE)
     if match and match.start() > 0:
         return content[match.start():]
     return content
 
 
 def _is_valid_section_output(content: str) -> bool:
-    """Check if content is real PRD content (not an LLM summary/reflection)."""
-    if len(content) < 500:
-        return False
-    if not re.search(r'^#{2,3}\s+', content, re.MULTILINE):
-        return False
-    return True
+    """Check if content is real PRD content (not an LLM summary/reflection).
+
+    A section is valid if it meets EITHER criterion:
+      - At least 200 characters long, OR
+      - Contains ## or ### subheadings.
+    This avoids rejecting short but valid sections (e.g., Vision for small projects).
+    """
+    has_sufficient_length = len(content) >= 200
+    has_subheadings = bool(re.search(r'^#{2,3}\s+', content, re.MULTILINE))
+    return has_sufficient_length or has_subheadings
 
 
 def _detect_completed_sections(prompts_dir: Path) -> set:
@@ -642,10 +545,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (create minimal PRD)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

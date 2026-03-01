@@ -36,14 +36,13 @@ from phases.phase_02_prd.tasks.task_206b_prd_revision import prd_revision_flow, 
 from phases.phase_02_prd.tasks.task_206_prd_validation import validate_content
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 207: PRD Approval.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, auto-approve for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -65,23 +64,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_red(f"  ✗ PRD file not found: {prd_file}"))
         return False
 
-    # UAT mode bypass
-    if uat_mode:
-        print(print_yellow("  UAT mode: Auto-approving PRD..."))
-        approve_prd(approval_file, prd_file, "uat-mode")
-        print(print_green("✓ PRD auto-approved (UAT mode)"))
-        return True
-
     # Show validation scores
     show_validation_scores(validation_file)
 
     # Review-refine-approve loop
-    max_iterations = 3
-    iteration = 0
+    max_refinements = 3
+    refinement_count = 0
+    max_total_iterations = 50
+    total_iterations = 0
 
-    while iteration < max_iterations:
-        iteration += 1
-
+    while refinement_count < max_refinements and total_iterations < max_total_iterations:
         print(print_dim("─" * 60))
         print()
 
@@ -120,7 +112,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             return True
 
         elif choice in ["view", "v"]:
-            # View PRD
+            # View PRD — does NOT count as a refinement iteration
             print()
             print(print_dim("─" * 60))
             print()
@@ -136,7 +128,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             print()
 
         elif choice in ["custom", "c"]:
-            # Custom request
+            # Custom request — counts as a refinement iteration
+            total_iterations += 1
             print()
             print(print_dim("  Enter custom improvement request:"))
             custom_request = prompt_user("  > ").strip()
@@ -147,21 +140,24 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                     if validation_result:
                         write_file(validation_file, json.dumps(validation_result, indent=2))
                         show_validation_scores(validation_file)
+            refinement_count += 1
             print()
 
         elif choice in ["refine", "r"]:
-            # Guided refinement via 206b Q&A flow
+            # Guided refinement via 206b Q&A flow — counts as a refinement iteration
+            total_iterations += 1
             revised = prd_revision_flow(validation_file, prd_file, prompts_dir)
             if revised:
                 validation_result = validate_content(prd_file, prompts_dir, atomic_root, output_dir)
                 if validation_result:
                     write_file(validation_file, json.dumps(validation_result, indent=2))
                     show_validation_scores(validation_file)
+            refinement_count += 1
 
         else:
             print(print_red("  Invalid choice"))
 
-    print(print_yellow("  Maximum iterations reached - proceeding with approval"))
+    print(print_yellow("  Maximum refinement iterations reached - proceeding with approval"))
     approve_prd(approval_file, prd_file, "auto-approved")
     return True
 
@@ -238,10 +234,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (auto-approve)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

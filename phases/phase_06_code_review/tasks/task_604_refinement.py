@@ -9,7 +9,7 @@ import sys
 import json
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Optional
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -48,14 +48,13 @@ def _graph_findings_to_dict(findings: list) -> dict:
     return {"totals": totals, "dimensions": dimensions}
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 604: Refinement.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -70,33 +69,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
     print(print_dim("Addressing review findings and applying code improvements."))
     print()
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(print_yellow("UAT Mode: Creating minimal valid output"))
-        ensure_dir(review_dir)
-        ensure_dir(fixes_dir)
-
-        refinement_report = output_dir / "refinement-report.md"
-        write_file(refinement_report, "# Refinement Report (UAT Mode)\n\nAll issues addressed (UAT stub)")
-
-        write_file(refinement_file, json.dumps({
-            "refinements": {
-                "critical": {"total": 0, "fixed": 0},
-                "major": {"total": 0, "fixed": 0},
-                "minor": {"total": 0, "fixed": 0}
-            },
-            "test_verification": {
-                "total": 0,
-                "passing": 0,
-                "all_passing": True
-            },
-            "all_resolved": True,
-            "refined_at": datetime.now(timezone.utc).isoformat()
-        }, indent=2))
-
-        print(print_green("✓ UAT bypass complete"))
-        return True
 
     ensure_dir(fixes_dir)
 
@@ -131,7 +103,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     _display_findings_summary(total_critical, total_major, total_minor)
 
     # Get refinement scope
-    refinement_scope = _get_refinement_scope(total_critical, total_major, uat_mode)
+    refinement_scope = _get_refinement_scope(total_critical, total_major)
 
     if refinement_scope == "skip":
         print(print_yellow("! Skipping refinement - no changes will be made"))
@@ -256,11 +228,8 @@ def _display_findings_summary(critical: int, major: int, minor: int) -> None:
     print()
 
 
-def _get_refinement_scope(critical: int, major: int, uat_mode: bool) -> str:
+def _get_refinement_scope(critical: int, major: int) -> str:
     """Get refinement scope from user."""
-    if uat_mode:
-        return "major"
-
     print()
     print(print_bold("- REFINEMENT STRATEGY"))
     print()
@@ -333,10 +302,13 @@ def _address_issues(findings_data: Dict, severity: str, fixes_dir: Path, atomic_
     return fixed_count
 
 
-def _resolve_source_path(finding_file: str, project_root: Path) -> Path:
-    """Resolve the source file path for a finding, trying multiple locations."""
+def _resolve_source_path(finding_file: str, project_root: Path) -> Optional[Path]:
+    """Resolve the source file path for a finding, trying multiple locations.
+
+    Returns None if the file is unknown or not found.
+    """
     if not finding_file or finding_file == 'unknown':
-        return Path(finding_file)
+        return None
 
     candidates = [
         project_root / finding_file,
@@ -345,9 +317,12 @@ def _resolve_source_path(finding_file: str, project_root: Path) -> Path:
         Path(finding_file),
     ]
     for candidate in candidates:
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(project_root.resolve()):
+            continue
         if candidate.exists():
             return candidate
-    return Path(finding_file)
+    return None
 
 
 def _build_fix_prompt(finding: Dict, source_context: str, finding_file: str,
@@ -442,7 +417,7 @@ def _apply_fix(finding: Dict, output_prefix: Path, atomic_root: Path) -> bool:
     source_context = ""
     source_path = _resolve_source_path(finding_file, project_root)
 
-    if source_path.exists() and finding_file != 'unknown':
+    if source_path is not None and source_path.exists():
         try:
             source_lines = source_path.read_text().splitlines()
             context_radius = 25
@@ -511,7 +486,7 @@ def _run_test_verification(atomic_root: Path) -> tuple:
     print()
 
     # Detect and run tests in the HOST project
-    tests_passing = True
+    tests_passing = False
     tests_total = 0
     tests_passed = 0
     result = None
@@ -575,7 +550,10 @@ def _run_test_verification(atomic_root: Path) -> tuple:
     print(print_bold("TEST RESULTS"))
     print()
 
-    if tests_passing:
+    if result is None:
+        print(print_yellow("  ⚠ No test runner detected"))
+        print(print_yellow("  ! Could not verify tests — no supported test runner found"))
+    elif tests_passing:
         print(print_green(f"  Passing:  {tests_passed if tests_passed > 0 else 'unknown (not parsed)'}"))
         print(print_green("  Failing:  0"))
         print()
@@ -629,10 +607,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

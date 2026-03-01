@@ -214,13 +214,79 @@ Categories A-L are per-file checks. Categories M-R are cross-cutting concerns ev
 
 ## Severity Classification
 
-| Severity | Description | Action |
-|----------|-------------|--------|
-| **CRITICAL** | Will cause runtime failure, data loss, or security vulnerability | Fix immediately |
-| **HIGH** | Likely to cause incorrect behavior in production | Fix before next operational test |
-| **MEDIUM** | Code quality issue that impairs maintainability or debugging | Fix in current sprint |
-| **LOW** | Style/consistency issue with no functional impact | Fix opportunistically |
-| **INFO** | Observation or suggestion, not a defect | Document for future reference |
+**Reporting threshold**: Only report CRITICAL, HIGH, and MEDIUM findings. Do NOT report LOW or INFO.
+
+A finding MUST meet the concrete criteria below to qualify for its severity level. When in doubt, downgrade. The goal is zero false positives at CRITICAL/HIGH — every finding at those levels must be a confirmed, reproducible defect with a specific code path that demonstrates the problem.
+
+### CRITICAL — Confirmed runtime failure, data loss, or exploitable security vulnerability
+
+A finding is CRITICAL **only if** ALL of these are true:
+- You can describe a **specific, reproducible scenario** (not hypothetical) where the code fails
+- The failure causes **runtime crash, data loss, data corruption, or security exploit**
+- The failure occurs on a **normal code path** (not an obscure edge case requiring adversarial input from a trusted internal caller)
+
+**CRITICAL examples:**
+- `json.loads(response)` with no try/except where `response` is raw LLM output (will crash on malformed JSON — reproducible every time the LLM returns non-JSON)
+- `state["key"]` where `key` is provably never set on a reachable code path (confirmed KeyError)
+- Path traversal guard using `startswith()` that is demonstrably bypassable with a concrete exploit string
+
+**NOT CRITICAL (downgrade or omit):**
+- "No tests for this module" — lack of tests is not a runtime failure
+- "God function is 400 lines" — code quality, not a defect
+- "Bare `except`" — bad practice, but the code runs
+- "Could theoretically crash if..." without a concrete trigger scenario
+- Missing `KeyboardInterrupt` handling — expected developer behavior, not a bug
+
+### HIGH — Confirmed incorrect behavior in production
+
+A finding is HIGH **only if** ALL of these are true:
+- You can describe a **specific scenario** where the code produces **wrong results, wrong state, or wrong output**
+- The scenario occurs on a **reachable code path** during normal or UAT operation
+- The impact is **functional** (wrong data, skipped logic, broken pipeline flow) not cosmetic
+
+**HIGH examples:**
+- UAT mode writes `{"version": "0.1.0"}` but downstream task reads `setup_data["release"]["version"]` — confirmed schema mismatch that breaks UAT runs
+- Task writes output to `review-report.md` but tests assert `review-report.json` — tests are provably broken
+- `run_integration_tests()` returns hardcoded passing results — phase is functionally hollow, masking real failures
+- User-controlled input interpolated into `bash -c` or Cypher query without sanitization — exploitable injection with a concrete payload
+
+**NOT HIGH (downgrade or omit):**
+- "Function too long" — code quality, not incorrect behavior
+- "Unused parameter `mem`" — dead code, not wrong behavior
+- "Broad `except Exception`" — may mask bugs but is not itself a bug
+- "No `isatty()` check on `input()`" — environment assumption, not wrong results
+- "Duplicate code across files" — maintainability concern, not a defect
+
+### MEDIUM — Confirmed code defect that degrades reliability or correctness under specific conditions
+
+A finding is MEDIUM **only if** ALL of these are true:
+- There is a **concrete code defect** (not a style preference or missing feature)
+- The defect **could cause incorrect behavior** under conditions that are plausible but not guaranteed on every run
+- You can identify the **specific lines** and **triggering condition**
+
+**MEDIUM examples:**
+- `except Exception: pass` silently swallows a failure in a code path where the caller checks the return value for success — downstream logic proceeds on bad data
+- File written non-atomically (write then rename) where a crash between steps leaves corrupt state that the resume logic cannot recover from
+- LLM prompt truncation at character boundary that can break mid-JSON-instruction — triggers when prompt exceeds 50k chars
+- Race condition between two functions accessing the same file where one uses locking and the other doesn't
+
+**NOT MEDIUM (omit entirely):**
+- Style issues (import ordering, naming conventions, missing docstrings)
+- "Should use `dict.get()` instead of `dict[]`" without proving the key can be absent
+- "Magic number 5174" — hardcoded but correct and stable
+- "Function could be decomposed" — opinion, not a defect
+- Theoretical concerns without a concrete triggering condition
+- Duplicate code that is correct in all copies
+- Missing features or missing tests (unless tests exist and are provably wrong)
+
+### Omit entirely (do not report):
+
+- LOW: Style, consistency, naming, formatting, import order, missing docstrings, unused imports, dead parameters, code length opinions
+- INFO: Observations, suggestions, "this is clean", N/A confirmations
+- Hypothetical risks without concrete trigger scenarios
+- Code quality opinions (function length, nesting depth, complexity metrics)
+- Missing tests (unless existing tests are provably broken — that's MEDIUM+)
+- Accepted patterns (broad exception handling in pipeline code that must not crash)
 
 ---
 
@@ -354,19 +420,21 @@ Categories A-L are per-file checks. Categories M-R are cross-cutting concerns ev
 
 ## Finding Template
 
+Only include findings that meet CRITICAL, HIGH, or MEDIUM criteria above. Every finding must include a concrete trigger scenario.
+
 ```markdown
 ### [FILE_PATH] — Audit #N
 
 **Date**: YYYY-MM-DD
 **Auditor**: Claude Opus 4.6
 
-| Check | Severity | Finding | Line(s) | Recommendation |
-|-------|----------|---------|---------|----------------|
-| B1    | CRITICAL | Bare except swallows all exceptions | 142-145 | Catch specific OSError |
-| C1    | LOW      | Unused import: json | 3 | Remove |
-| ...   | ...      | ...     | ...     | ...            |
+| Check | Severity | Finding | Line(s) | Trigger Scenario | Recommendation |
+|-------|----------|---------|---------|------------------|----------------|
+| G1    | CRITICAL | Path traversal guard uses startswith() | 1311 | Input `/foo/bar2/../secret` bypasses `/foo/bar` base check | Use Path.is_relative_to() |
+| F2    | HIGH     | UAT writes flat JSON, consumer reads nested | 61-74, 73 | Run full pipeline in UAT mode; task_303 gets empty agent list | Align UAT schema to production schema |
+| ...   | ...      | ...     | ...     | ...              | ...            |
 
-**Summary**: X critical, Y high, Z medium, W low findings
+**Summary**: X critical, Y high, Z medium findings (only actionable defects)
 **Action Items**:
 1. ...
 2. ...
@@ -376,18 +444,20 @@ Categories A-L are per-file checks. Categories M-R are cross-cutting concerns ev
 
 ## Aggregate Tracking
 
-| Phase | Files | Critical | High | Medium | Low | Status |
-|-------|-------|----------|------|--------|-----|--------|
-| 00    | 6     |          |      |        |     | Pending |
-| 01    | 10    |          |      |        |     | Pending |
-| 02    | 11    |          |      |        |     | Pending |
-| 03    | 7     |          |      |        |     | Pending |
-| 04    | 7     |          |      |        |     | Pending |
-| 05    | 8     |          |      |        |     | Pending |
-| 06    | 7     |          |      |        |     | Pending |
-| 07    | 8     |          |      |        |     | Pending |
-| 08    | 8     |          |      |        |     | Pending |
-| 09    | 7     |          |      |        |     | Pending |
-| Orch  | 7     |          |      |        |     | Pending |
-| Core  | 14    |          |      |        |     | Pending |
-| **Total** | **100** |    |      |        |     |         |
+Only CRITICAL, HIGH, and MEDIUM counts. Every entry must meet the concrete criteria above.
+
+| Phase | Files | Critical | High | Medium | Status |
+|-------|-------|----------|------|--------|--------|
+| 00    | 6     |          |      |        | Pending |
+| 01    | 10    |          |      |        | Pending |
+| 02    | 11    |          |      |        | Pending |
+| 03    | 7     |          |      |        | Pending |
+| 04    | 7     |          |      |        | Pending |
+| 05    | 8     |          |      |        | Pending |
+| 06    | 7     |          |      |        | Pending |
+| 07    | 8     |          |      |        | Pending |
+| 08    | 8     |          |      |        | Pending |
+| 09    | 7     |          |      |        | Pending |
+| Orch  | 7     |          |      |        | Pending |
+| Core  | 14    |          |      |        | Pending |
+| **Total** | **100** |    |      |        |         |

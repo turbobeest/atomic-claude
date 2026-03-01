@@ -14,9 +14,8 @@ Requirements: 6+ tests per task × 6 tasks = 36+ unit tests
 
 import pytest
 import json
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 # Import all Phase 04 task modules
 from phases.phase_04_specification.tasks.task_401_entry_initialization import execute as task_401
@@ -25,7 +24,6 @@ from phases.phase_04_specification.tasks.task_403_openspec_generation import exe
 from phases.phase_04_specification.tasks.task_404_tdd_subtask_injection import execute as task_404
 from phases.phase_04_specification.tasks.task_405_phase_audit import execute as task_405
 from phases.phase_04_specification.tasks.task_406_closeout import execute as task_406
-
 
 # ============================================================================
 # FIXTURES
@@ -89,7 +87,6 @@ def temp_project_structure(tmp_path):
 
     return atomic_root, project_root
 
-
 @pytest.fixture
 def sample_openspec():
     """Sample OpenSpec structure."""
@@ -123,7 +120,6 @@ def sample_openspec():
         ]
     }
 
-
 # ============================================================================
 # TASK 401: ENTRY INITIALIZATION
 # ============================================================================
@@ -131,25 +127,13 @@ def sample_openspec():
 class TestTask401EntryInitialization:
     """Test Task 401: Entry Initialization."""
 
-    def test_uat_mode_bypass(self, temp_project_structure):
-        """Test UAT mode auto-passes validation."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "4-specification"
-
-        result = task_401(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "initialization.json").exists()
-        validation = json.loads((output_dir / "initialization.json").read_text())
-        assert validation["mode"] == "uat"
-
     def test_phase3_closeout_validation(self, temp_project_structure):
         """Test Phase 3 closeout is validated."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
         with patch('core.utils.cli_ui.prompt_user', return_value=''):
-            result = task_401(atomic_root, output_dir, uat_mode=False)
+            result = task_401(atomic_root, output_dir)
 
         assert result is True
         init = json.loads((output_dir / "initialization.json").read_text())
@@ -164,7 +148,7 @@ class TestTask401EntryInitialization:
         (project_root / ".taskmaster" / "tasks" / "tasks.json").unlink()
 
         with patch('core.utils.cli_ui.prompt_user', return_value='abort'):
-            result = task_401(atomic_root, output_dir, uat_mode=False)
+            result = task_401(atomic_root, output_dir)
 
         # Should fail or warn
         assert result is False or (output_dir / "entry-validation.json").exists()
@@ -178,7 +162,7 @@ class TestTask401EntryInitialization:
         import shutil
         shutil.rmtree(project_root / ".openspec")
 
-        result = task_401(atomic_root, output_dir, uat_mode=True)
+        result = task_401(atomic_root, output_dir)
 
         assert result is True
         assert (project_root / ".openspec").exists()
@@ -188,7 +172,7 @@ class TestTask401EntryInitialization:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_401(atomic_root, output_dir, uat_mode=True)
+        result = task_401(atomic_root, output_dir)
 
         assert result is True
         init = json.loads((output_dir / "initialization.json").read_text())
@@ -199,7 +183,7 @@ class TestTask401EntryInitialization:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_401(atomic_root, output_dir, uat_mode=True)
+        result = task_401(atomic_root, output_dir)
 
         assert result is True
 
@@ -211,10 +195,9 @@ class TestTask401EntryInitialization:
 
         mock_prompt.return_value = 'continue'
 
-        result = task_401(atomic_root, output_dir, uat_mode=False)
+        result = task_401(atomic_root, output_dir)
 
         assert result is True
-
 
 # ============================================================================
 # TASK 402: AGENT SELECTION
@@ -223,22 +206,12 @@ class TestTask401EntryInitialization:
 class TestTask402AgentSelection:
     """Test Task 402: Agent Selection."""
 
-    def test_uat_mode_bypass(self, temp_project_structure):
-        """Test UAT mode skips interactive selection."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "4-specification"
-
-        result = task_402(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "selected-agents.json").exists()
-
     def test_specification_agents_selected(self, temp_project_structure):
         """Test correct agent categories for specification."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_402(atomic_root, output_dir, uat_mode=True)
+        result = task_402(atomic_root, output_dir)
 
         assert result is True
         agents = json.loads((output_dir / "selected-agents.json").read_text())
@@ -255,7 +228,7 @@ class TestTask402AgentSelection:
         inventory = "agent_id,name,category\nspec-writer-01,Spec Writer,specification\n"
         (agent_dir / "agent-inventory.csv").write_text(inventory)
 
-        result = task_402(atomic_root, output_dir, uat_mode=True)
+        result = task_402(atomic_root, output_dir)
 
         assert result is True
 
@@ -264,7 +237,7 @@ class TestTask402AgentSelection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_402(atomic_root, output_dir, uat_mode=True)
+        result = task_402(atomic_root, output_dir)
 
         assert result is True
 
@@ -273,7 +246,7 @@ class TestTask402AgentSelection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_402(atomic_root, output_dir, uat_mode=True)
+        result = task_402(atomic_root, output_dir)
 
         assert result is True
         agents = json.loads((output_dir / "selected-agents.json").read_text())
@@ -284,7 +257,7 @@ class TestTask402AgentSelection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_402(atomic_root, output_dir, uat_mode=True)
+        result = task_402(atomic_root, output_dir)
 
         assert result is True
 
@@ -296,10 +269,9 @@ class TestTask402AgentSelection:
 
         mock_prompt.return_value = '1'
 
-        result = task_402(atomic_root, output_dir, uat_mode=False)
+        result = task_402(atomic_root, output_dir)
 
         assert result is True
-
 
 # ============================================================================
 # TASK 403: OPENSPEC GENERATION
@@ -307,19 +279,6 @@ class TestTask402AgentSelection:
 
 class TestTask403OpenspecGeneration:
     """Test Task 403: OpenSpec Generation."""
-
-    def test_uat_mode_stub_generation(self, temp_project_structure):
-        """Test UAT mode generates stub specs."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "4-specification"
-
-        result = task_403(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        # Should create some spec files
-        openspec_dir = project_root / ".openspec"
-        spec_files = list(openspec_dir.glob("spec-t*.json"))
-        assert len(spec_files) > 0
 
     @patch('core.llm.invoke')
     def test_llm_invocation_per_task(self, mock_llm, temp_project_structure, sample_openspec):
@@ -335,7 +294,7 @@ class TestTask403OpenspecGeneration:
 
         mock_llm.side_effect = write_spec
 
-        result = task_403(atomic_root, output_dir, uat_mode=False)
+        result = task_403(atomic_root, output_dir)
 
         # LLM should be called for each task
         assert mock_llm.call_count >= 2  # We have 2 tasks
@@ -354,7 +313,7 @@ class TestTask403OpenspecGeneration:
 
             mock_llm.side_effect = write_spec
 
-            result = task_403(atomic_root, output_dir, uat_mode=False)
+            result = task_403(atomic_root, output_dir)
 
         # Check a spec file
         spec_files = list((project_root / ".openspec").glob("spec-t*.json"))
@@ -367,7 +326,7 @@ class TestTask403OpenspecGeneration:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_403(atomic_root, output_dir, uat_mode=True)
+        result = task_403(atomic_root, output_dir)
 
         assert result is True
 
@@ -380,7 +339,7 @@ class TestTask403OpenspecGeneration:
         tasks = {"meta": {}, "tasks": []}
         (project_root / ".taskmaster" / "tasks" / "tasks.json").write_text(json.dumps(tasks))
 
-        result = task_403(atomic_root, output_dir, uat_mode=True)
+        result = task_403(atomic_root, output_dir)
 
         # Should handle gracefully
         assert result is True or result is False
@@ -390,7 +349,7 @@ class TestTask403OpenspecGeneration:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_403(atomic_root, output_dir, uat_mode=True)
+        result = task_403(atomic_root, output_dir)
 
         assert result is True
 
@@ -400,11 +359,10 @@ class TestTask403OpenspecGeneration:
         output_dir = atomic_root / ".outputs" / "4-specification"
 
         with patch('builtins.print') as mock_print:
-            result = task_403(atomic_root, output_dir, uat_mode=True)
+            result = task_403(atomic_root, output_dir)
 
         # Should print progress
         assert result is True
-
 
 # ============================================================================
 # TASK 404: TDD SUBTASK INJECTION
@@ -413,22 +371,12 @@ class TestTask403OpenspecGeneration:
 class TestTask404TddSubtaskInjection:
     """Test Task 404: TDD Subtask Injection."""
 
-    def test_uat_mode_skip(self, temp_project_structure):
-        """Test UAT mode skips TDD injection."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "4-specification"
-
-        result = task_404(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "tdd-injection.json").exists()
-
     def test_backup_creation(self, temp_project_structure):
         """Test tasks backup is created before injection."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_404(atomic_root, output_dir, uat_mode=False)
+        result = task_404(atomic_root, output_dir)
 
         # Backup should be created
         backup_file = project_root / ".taskmaster" / "tasks" / "tasks.json.pre-tdd-backup"
@@ -440,7 +388,7 @@ class TestTask404TddSubtaskInjection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_404(atomic_root, output_dir, uat_mode=False)
+        result = task_404(atomic_root, output_dir)
 
         if result:
             tasks = json.loads((project_root / ".taskmaster" / "tasks" / "tasks.json").read_text())
@@ -454,7 +402,7 @@ class TestTask404TddSubtaskInjection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_404(atomic_root, output_dir, uat_mode=False)
+        result = task_404(atomic_root, output_dir)
 
         if result:
             tasks = json.loads((project_root / ".taskmaster" / "tasks" / "tasks.json").read_text())
@@ -471,7 +419,7 @@ class TestTask404TddSubtaskInjection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_404(atomic_root, output_dir, uat_mode=True)
+        result = task_404(atomic_root, output_dir)
 
         assert result is True
         report = json.loads((output_dir / "tdd-injection.json").read_text())
@@ -482,8 +430,8 @@ class TestTask404TddSubtaskInjection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result1 = task_404(atomic_root, output_dir, uat_mode=False)
-        result2 = task_404(atomic_root, output_dir, uat_mode=False)
+        result1 = task_404(atomic_root, output_dir)
+        result2 = task_404(atomic_root, output_dir)
 
         # Should not double-inject
         if result1 and result2:
@@ -498,7 +446,7 @@ class TestTask404TddSubtaskInjection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_404(atomic_root, output_dir, uat_mode=False)
+        result = task_404(atomic_root, output_dir)
 
         if result:
             tasks = json.loads((project_root / ".taskmaster" / "tasks" / "tasks.json").read_text())
@@ -509,7 +457,6 @@ class TestTask404TddSubtaskInjection:
                 if phases:
                     assert all(p in expected_phases for p in phases)
 
-
 # ============================================================================
 # TASK 405: PHASE AUDIT
 # ============================================================================
@@ -517,22 +464,12 @@ class TestTask404TddSubtaskInjection:
 class TestTask405PhaseAudit:
     """Test Task 405: Phase Audit."""
 
-    def test_uat_mode_bypass(self, temp_project_structure):
-        """Test UAT mode skips audit."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "4-specification"
-
-        result = task_405(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "phase-audit.json").exists()
-
     def test_audit_selection(self, temp_project_structure):
         """Test audit selection for specification phase."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_405(atomic_root, output_dir, uat_mode=True)
+        result = task_405(atomic_root, output_dir)
 
         assert result is True
 
@@ -541,7 +478,7 @@ class TestTask405PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_405(atomic_root, output_dir, uat_mode=True)
+        result = task_405(atomic_root, output_dir)
 
         assert result is True
         audit = json.loads((output_dir / "phase-audit.json").read_text())
@@ -552,7 +489,7 @@ class TestTask405PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_405(atomic_root, output_dir, uat_mode=True)
+        result = task_405(atomic_root, output_dir)
 
         assert result is True
 
@@ -561,7 +498,7 @@ class TestTask405PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_405(atomic_root, output_dir, uat_mode=True)
+        result = task_405(atomic_root, output_dir)
 
         assert result is True
 
@@ -570,7 +507,7 @@ class TestTask405PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_405(atomic_root, output_dir, uat_mode=True)
+        result = task_405(atomic_root, output_dir)
 
         assert result is True
         audit = json.loads((output_dir / "phase-audit.json").read_text())
@@ -584,10 +521,9 @@ class TestTask405PhaseAudit:
 
         mock_prompt.return_value = '1'
 
-        result = task_405(atomic_root, output_dir, uat_mode=False)
+        result = task_405(atomic_root, output_dir)
 
         assert result is True
-
 
 # ============================================================================
 # TASK 406: CLOSEOUT
@@ -596,22 +532,12 @@ class TestTask405PhaseAudit:
 class TestTask406Closeout:
     """Test Task 406: Phase Closeout."""
 
-    def test_uat_mode(self, temp_project_structure):
-        """Test closeout in UAT mode."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "4-specification"
-
-        result = task_406(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "closeout.json").exists()
-
     def test_closeout_file_structure(self, temp_project_structure):
         """Test closeout file structure."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_406(atomic_root, output_dir, uat_mode=True)
+        result = task_406(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -623,7 +549,7 @@ class TestTask406Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_406(atomic_root, output_dir, uat_mode=True)
+        result = task_406(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -634,7 +560,7 @@ class TestTask406Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_406(atomic_root, output_dir, uat_mode=True)
+        result = task_406(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -645,7 +571,7 @@ class TestTask406Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result = task_406(atomic_root, output_dir, uat_mode=True)
+        result = task_406(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -661,7 +587,7 @@ class TestTask406Closeout:
         if output_dir.exists():
             shutil.rmtree(output_dir)
 
-        result = task_406(atomic_root, output_dir, uat_mode=True)
+        result = task_406(atomic_root, output_dir)
 
         assert result is True
         assert output_dir.exists()
@@ -671,12 +597,11 @@ class TestTask406Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "4-specification"
 
-        result1 = task_406(atomic_root, output_dir, uat_mode=True)
-        result2 = task_406(atomic_root, output_dir, uat_mode=True)
+        result1 = task_406(atomic_root, output_dir)
+        result2 = task_406(atomic_root, output_dir)
 
         assert result1 is True
         assert result2 is True
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

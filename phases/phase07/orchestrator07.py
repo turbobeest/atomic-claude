@@ -25,7 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 logger = logging.getLogger(__name__)
 
 from orchestration.phase_runner import run_phase_tasks
-from core.graph import get_graph
+try:
+    from core.graph import get_graph
+except ImportError:
+    get_graph = None
 
 # Import Python task modules
 from phases.phase_07_integration.tasks import (
@@ -40,46 +43,44 @@ from phases.phase_07_integration.tasks import (
 
 # Environment variables
 ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
-PROJECT_ROOT = ATOMIC_ROOT.parent
-OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', PROJECT_ROOT / '.outputs' / '7-integration'))
-UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
+OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '7-integration'))
 
 
 # Task wrapper functions (call Python task modules)
 
-def task_701_wrapper(mem=None, **kwargs) -> bool:
+def task_701_wrapper(mem=None) -> bool:
     """Task 701: Entry initialization"""
-    return task_701(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_701(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_702_wrapper(mem=None, **kwargs) -> bool:
+def task_702_wrapper(mem=None) -> bool:
     """Task 702: Integration setup"""
-    return task_702(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_702(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_703_wrapper(mem=None, **kwargs) -> bool:
+def task_703_wrapper(mem=None) -> bool:
     """Task 703: Agent selection"""
-    return task_703(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_703(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_704_wrapper(mem=None, **kwargs) -> bool:
+def task_704_wrapper(mem=None) -> bool:
     """Task 704: Testing execution"""
-    return task_704(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_704(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_705_wrapper(mem=None, **kwargs) -> bool:
+def task_705_wrapper(mem=None) -> bool:
     """Task 705: Integration approval"""
-    return task_705(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_705(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_706_wrapper(mem=None, **kwargs) -> bool:
+def task_706_wrapper(mem=None, graph=None) -> bool:
     """Task 706: Phase audit"""
-    return task_706(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=kwargs.get("graph"))
+    return task_706(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
-def task_707_wrapper(mem=None, **kwargs) -> bool:
+def task_707_wrapper(mem=None) -> bool:
     """Task 707: Closeout"""
-    return task_707(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_707(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def run_phase(resume_at: str = None) -> bool:
@@ -94,9 +95,15 @@ def run_phase(resume_at: str = None) -> bool:
     """
     phase_id = "7-integration"
 
-    # Initialize knowledge graph (raises GraphUnavailableError on failure)
-    graph = get_graph(phase_id=phase_id)
-    graph.ensure_schema()
+    # Initialize knowledge graph (guarded)
+    graph = None
+    if get_graph is not None:
+        try:
+            graph = get_graph(phase_id=phase_id)
+            graph.ensure_schema()
+        except Exception as e:
+            logger.warning("Graph unavailable for phase 7: %s", e)
+            graph = None
 
     # Task list in execution order
     tasks = [
@@ -128,15 +135,12 @@ def run_phase(resume_at: str = None) -> bool:
         task_artifacts=task_artifacts,
         atomic_root=ATOMIC_ROOT,
         output_dir=OUTPUT_DIR,
-        uat_mode=UAT_MODE,
         resume_at=resume_at,
         graph=graph,
     )
 
 
 if __name__ == "__main__":
-    import sys
-
     resume_at = None
     if len(sys.argv) > 1:
         resume_at = sys.argv[1]

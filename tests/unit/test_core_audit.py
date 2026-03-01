@@ -273,11 +273,6 @@ class TestCurateAuditSelection:
             for i in range(1, count + 1)
         ]
 
-    def test_uat_mode_returns_all(self):
-        audits = self._make_audits(10)
-        result = _curate_audit_selection(audits, "deliverables", 1, "1-discovery", uat_mode=True)
-        assert result == audits
-
     def test_empty_audits_returns_empty(self):
         result = _curate_audit_selection([], "deliverables", 1, "1-discovery")
         assert result == []
@@ -1149,11 +1144,6 @@ class TestRemediationLoop:
 class TestRunPhaseAudit:
     """Test run_phase_audit end-to-end (with mocked pipeline stages)."""
 
-    def test_uat_mode_skips(self, temp_dir, capsys):
-        result = run_phase_audit(1, "1-discovery", temp_dir, uat_mode=True)
-        assert result is True
-        assert "UAT Mode" in capsys.readouterr().out
-
     @patch("core.audit._load_audit_inventory", return_value=[])
     def test_empty_inventory(self, _mock, temp_dir, capsys):
         result = run_phase_audit(1, "1-discovery", temp_dir)
@@ -1184,7 +1174,7 @@ class TestRunPhaseAudit:
     @patch("core.audit._display_audit_plan",
            side_effect=lambda configs, phase_num: configs)
     @patch("core.audit._curate_audit_selection",
-           side_effect=lambda a, d, pn, pid, uat_mode=False: a)
+           side_effect=lambda a, d, pn, pid: a)
     @patch("core.audit._load_audit_inventory")
     def test_successful_audit(self, mock_load, _curation, _plan, mock_parallel,
                               _display, _remediation, _existing, temp_dir, capsys):
@@ -1237,7 +1227,7 @@ class TestRunPhaseAudit:
     @patch("core.audit._display_audit_plan",
            side_effect=lambda configs, phase_num: configs)
     @patch("core.audit._curate_audit_selection",
-           side_effect=lambda a, d, pn, pid, uat_mode=False: a)
+           side_effect=lambda a, d, pn, pid: a)
     @patch("core.audit._load_audit_inventory")
     def test_all_pass(self, mock_load, _curation, _plan, mock_parallel,
                       _display, _remediation, _existing, temp_dir):
@@ -1268,7 +1258,7 @@ class TestRunPhaseAudit:
     @patch("core.audit._display_audit_plan",
            side_effect=lambda configs, phase_num: configs)
     @patch("core.audit._curate_audit_selection",
-           side_effect=lambda a, d, pn, pid, uat_mode=False: a)
+           side_effect=lambda a, d, pn, pid: a)
     @patch("core.audit._load_audit_inventory")
     def test_has_failure(self, mock_load, _curation, _plan, mock_parallel,
                          _display, _remediation, _existing, temp_dir):
@@ -1294,7 +1284,7 @@ class TestRunPhaseAudit:
     @patch("core.audit._display_audit_plan",
            side_effect=lambda configs, phase_num: configs)
     @patch("core.audit._curate_audit_selection",
-           side_effect=lambda a, d, pn, pid, uat_mode=False: a)
+           side_effect=lambda a, d, pn, pid: a)
     @patch("core.audit._load_audit_inventory")
     def test_llm_exception_non_blocking(self, mock_load, _curation, _plan,
                                         temp_dir, capsys):
@@ -1311,7 +1301,7 @@ class TestRunPhaseAudit:
         assert "LLM audit failed" in capsys.readouterr().out
 
     @patch("core.audit._curate_audit_selection",
-           side_effect=lambda a, d, pn, pid, uat_mode=False: a)
+           side_effect=lambda a, d, pn, pid: a)
     @patch("core.audit._load_audit_inventory")
     def test_user_skips_plan(self, mock_load, _curation, temp_dir, capsys):
         """User skips in audit plan TUI → returns True."""
@@ -1334,15 +1324,10 @@ class TestRunPhaseAudit:
 class TestRunAudit:
     """Test run_audit backward-compat wrapper."""
 
-    def test_uat_mode(self, temp_dir, capsys):
-        result = run_audit("test-audit", "1-discovery", temp_dir, uat_mode=True)
-        assert result is True
-        assert "Skipping" in capsys.readouterr().out
-
     @patch("core.audit.run_phase_audit", return_value=True)
     def test_delegates_to_run_phase_audit(self, mock_rpa, temp_dir):
         run_audit("whatever", "3-task_decomposition", temp_dir)
-        mock_rpa.assert_called_once_with(3, "3-task_decomposition", temp_dir, False)
+        mock_rpa.assert_called_once_with(3, "3-task_decomposition", temp_dir)
 
     def test_bad_phase_id(self, temp_dir, capsys):
         result = run_audit("test", "invalid", temp_dir)
@@ -1353,9 +1338,6 @@ class TestRunAudit:
 @pytest.mark.unit
 class TestSelectAudit:
     """Test select_audit backward-compat wrapper."""
-
-    def test_uat_mode_returns_name(self, temp_dir):
-        assert select_audit(1, temp_dir, uat_mode=True) == "phase-1-audit"
 
     def test_phase_0_returns_none(self, temp_dir):
         assert select_audit(0, temp_dir) is None
@@ -1377,17 +1359,11 @@ class TestAuditManager:
         assert manager.atomic_root == temp_dir
         assert manager.output_dir == temp_dir / ".outputs"
 
-    def test_uat_mode(self, temp_dir, capsys):
-        manager = AuditManager(atomic_root=temp_dir, output_dir=temp_dir / ".outputs")
-        result = manager.run_phase_audit(1, "1-discovery", uat_mode=True)
-        assert result is True
-        assert "UAT Mode" in capsys.readouterr().out
-
     @patch("core.audit.run_phase_audit", return_value=True)
     def test_delegates(self, mock_rpa, temp_dir):
         manager = AuditManager(atomic_root=temp_dir, output_dir=temp_dir / "out")
         manager.run_phase_audit(2, "2-prd")
-        mock_rpa.assert_called_once_with(2, "2-prd", temp_dir / "out", False)
+        mock_rpa.assert_called_once_with(2, "2-prd", temp_dir / "out")
 
 
 # ---------------------------------------------------------------------------
@@ -1397,9 +1373,6 @@ class TestAuditManager:
 @pytest.mark.unit
 class TestNonBlocking:
     """Every code path must return True."""
-
-    def test_uat_mode(self, temp_dir):
-        assert run_phase_audit(1, "1-discovery", temp_dir, uat_mode=True) is True
 
     @patch("core.audit._load_audit_inventory", return_value=[])
     def test_missing_csv(self, _m, temp_dir):
@@ -1412,7 +1385,7 @@ class TestNonBlocking:
     @patch("core.audit._display_audit_plan",
            side_effect=lambda configs, phase_num: configs)
     @patch("core.audit._curate_audit_selection",
-           side_effect=lambda a, d, pn, pid, uat_mode=False: a)
+           side_effect=lambda a, d, pn, pid: a)
     @patch("core.audit._run_parallel_evaluations",
            side_effect=Exception("boom"))
     @patch("core.audit._load_audit_inventory")

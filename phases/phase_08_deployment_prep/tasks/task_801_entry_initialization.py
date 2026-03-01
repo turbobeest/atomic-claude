@@ -19,14 +19,13 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import read_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 801: Entry & Initialization.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -45,12 +44,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     print(print_bold("Entry & Initialization"))
     print()
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(print_dim("  UAT Mode: Skipping interactive validation"))
-        print(print_green("✓ UAT bypass complete"))
-        return True
 
     print(print_dim("  Validating prerequisites for Deployment Prep phase."))
     print()
@@ -123,9 +116,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_dim("      (build)      (version)       (guides)        (gate)"))
     print()
 
-    if not uat_mode:
-        prompt_user("  Press Enter to continue...")
-        print()
+    prompt_user("  Press Enter to continue...")
+    print()
 
     print(print_green("✓ Entry & Initialization complete"))
     return True
@@ -140,12 +132,19 @@ def _find_closeout(atomic_root: Path, phase_name: str) -> Optional[Path]:
     """
     project_root = atomic_root.parent
 
-    # Primary: .outputs/<phase_name>/closeout.json
-    closeout_dir = project_root / ".outputs" / phase_name
+    # Primary: atomic_root/.outputs/<phase_name>/closeout.json (phase_runner writes here)
+    closeout_dir = atomic_root / ".outputs" / phase_name
     if closeout_dir.exists():
         closeout_file = closeout_dir / "closeout.json"
         if closeout_file.exists():
             return closeout_file
+
+    # Fallback: project_root/.outputs/<phase_name>/closeout.json (legacy)
+    fallback_dir = project_root / ".outputs" / phase_name
+    if fallback_dir.exists():
+        fallback_file = fallback_dir / "closeout.json"
+        if fallback_file.exists():
+            return fallback_file
 
     # Fallback: .claude/closeout/phase-07-closeout.json (task_707 writes here)
     claude_closeout = project_root / ".claude" / "closeout" / "phase-07-closeout.json"
@@ -163,10 +162,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

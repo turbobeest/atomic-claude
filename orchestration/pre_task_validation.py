@@ -43,13 +43,13 @@ FORBIDDEN_TYPES = {
     ".spec.js": "../tests/",
 
     # Data files
-    ".csv": "parent directory or ../data/",
-    ".db": "parent directory or ../data/",
-    ".sqlite": "parent directory or ../data/",
-    ".sql": "parent directory or ../migrations/",
+    ".csv": "../data/",
+    ".db": "../data/",
+    ".sqlite": "../data/",
+    ".sql": "../migrations/",
 
     # Notebooks
-    ".ipynb": "../notebooks/ or parent directory",
+    ".ipynb": "../notebooks/",
 
     # Binaries
     ".exe": "should never exist",
@@ -292,15 +292,26 @@ def auto_cleanup() -> bool:
         src = acp_root / violation["path"]
 
         # Determine destination
-        if violation["correct_location"] == "parent directory or reports/ (if scratch work)":
+        if violation["correct_location"] == "should never exist":
+            # Files that should never exist (binaries, archives) — delete with warning
+            try:
+                src.unlink()
+                print(f"✓ Deleted {violation['path']} (should never exist in tool directory)")
+            except Exception as e:
+                print(f"✗ Failed to delete {violation['path']}: {e}")
+                return False
+            continue
+        elif violation["correct_location"] == "parent directory or reports/ (if scratch work)":
             # Move to reports as safe default
             dst_dir = acp_root / "reports"
         elif violation["correct_location"].startswith("../"):
-            # Move to parent directory
-            dst_dir = acp_root.parent / violation["correct_location"].replace("../", "")
+            # Move to parent directory — strip annotations like "(unless ...)"
+            raw_loc = violation["correct_location"].split("(")[0].strip().replace("../", "")
+            dst_dir = acp_root.parent / raw_loc
         else:
-            # Other location
-            dst_dir = acp_root.parent / violation["correct_location"]
+            # Other location — strip annotations
+            raw_loc = violation["correct_location"].split("(")[0].strip()
+            dst_dir = acp_root.parent / raw_loc
 
         # Create destination directory
         dst_dir.mkdir(parents=True, exist_ok=True)

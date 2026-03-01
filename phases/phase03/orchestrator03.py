@@ -38,9 +38,7 @@ from phases.phase_03_tasking.tasks import (
 
 # Get paths from environment
 ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
-PROJECT_ROOT = ATOMIC_ROOT.parent
-OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', PROJECT_ROOT / '.outputs' / '3-tasking'))
-UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
+OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '3-tasking'))
 
 
 def run_phase(resume_at: str = None) -> bool:
@@ -87,7 +85,6 @@ def run_phase(resume_at: str = None) -> bool:
         task_artifacts=task_artifacts,
         atomic_root=ATOMIC_ROOT,
         output_dir=OUTPUT_DIR,
-        uat_mode=UAT_MODE,
         resume_at=resume_at,
         graph=graph,
     )
@@ -97,32 +94,32 @@ def run_phase(resume_at: str = None) -> bool:
 
 def task_301_entry_initialization(mem=None, graph=None) -> bool:
     """Task 301: Entry initialization"""
-    return task_301(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_301(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_302_agent_selection(mem=None, graph=None) -> bool:
     """Task 302: Agent selection"""
-    return task_302(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_302(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_303_task_decomposition(mem=None, graph=None) -> bool:
     """Task 303: Task decomposition"""
-    return task_303(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_303(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_304_dependency_analysis(mem=None, graph=None) -> bool:
     """Task 304: Dependency analysis"""
-    return task_304(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_304(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_305_phase_audit(mem=None, graph=None) -> bool:
     """Task 305: Phase audit"""
-    return task_305(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_305(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_306_closeout(mem=None, graph=None) -> bool:
     """Task 306: Closeout"""
-    return task_306(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_306(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 if __name__ == "__main__":

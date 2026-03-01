@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
-    print_red, print_dim, print_magenta, print_blue, prompt_user, clear_input_buffer
+    print_dim, print_magenta, prompt_user, clear_input_buffer
 )
 from core.utils.file_ops import write_file
 
@@ -52,20 +52,18 @@ ADDITIONAL_AGENTS = {
 }
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 204: Agent Selection.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
     """
-    config_file = output_dir.parent / "0-setup" / "project-config.json"
     agents_file = output_dir / "selected-agents.json"
 
     print()
@@ -88,7 +86,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     # Agent selection
-    selected_agents, additional = select_agents(uat_mode)
+    selected_agents, additional = select_agents()
 
     print()
 
@@ -136,12 +134,9 @@ def display_additional_agents() -> None:
         print()
 
 
-def select_agents(uat_mode: bool) -> tuple:
+def select_agents() -> tuple:
     """
     Select agents for PRD phase.
-
-    Args:
-        uat_mode: If True, use defaults
 
     Returns:
         Tuple of (selected_agents_list, additional_agents_list)
@@ -156,58 +151,45 @@ def select_agents(uat_mode: bool) -> tuple:
     print("    " + print_magenta("[list]") + "      Browse available agents")
     print()
 
-    if uat_mode:
-        agent_choice = "approve"
-        print(print_dim(f"  UAT mode: Using '{agent_choice}'"))
-    else:
-        clear_input_buffer()
-        agent_choice = prompt_user("  Choice (default: approve): ").strip().lower() or "approve"
+    clear_input_buffer()
+    agent_choice = prompt_user("  Choice (default: approve): ").strip().lower() or "approve"
 
     selected_agents = list(CORE_AGENTS)
     additional_agents = []
 
     if agent_choice == "add":
-        if uat_mode:
-            # Don't add any in UAT mode
-            pass
-        else:
-            print()
-            print(print_dim("  Select additional agents (space-separated numbers):"))
-            print("    1. security-requirements-analyst")
-            print("    2. api-requirements-engineer")
-            print("    3. ux-requirements-analyst")
-            print()
-            add_selection = prompt_user("  > ").strip()
+        print()
+        print(print_dim("  Select additional agents (space-separated numbers):"))
+        print("    1. security-requirements-analyst")
+        print("    2. api-requirements-engineer")
+        print("    3. ux-requirements-analyst")
+        print()
+        add_selection = prompt_user("  > ").strip()
 
-            for num in add_selection.split():
-                if num in ADDITIONAL_AGENTS:
-                    agent_name = ADDITIONAL_AGENTS[num]["name"]
-                    additional_agents.append(agent_name)
-                    selected_agents.append(agent_name)
-
-    elif agent_choice == "custom":
-        if uat_mode:
-            # Use core agents in UAT mode
-            pass
-        else:
-            print()
-            print(print_dim("  Enter agent names (one per line, empty to finish):"))
-            selected_agents = []
-            while True:
-                agent_name = prompt_user("    > ").strip()
-                if not agent_name:
-                    break
+        for num in add_selection.split():
+            if num in ADDITIONAL_AGENTS:
+                agent_name = ADDITIONAL_AGENTS[num]["name"]
+                additional_agents.append(agent_name)
                 selected_agents.append(agent_name)
 
-            # Ensure at least core agents
-            if not selected_agents:
-                selected_agents = list(CORE_AGENTS)
+    elif agent_choice == "custom":
+        print()
+        print(print_dim("  Enter agent names (one per line, empty to finish):"))
+        selected_agents = []
+        while True:
+            agent_name = prompt_user("    > ").strip()
+            if not agent_name:
+                break
+            selected_agents.append(agent_name)
+
+        # Ensure at least core agents
+        if not selected_agents:
+            selected_agents = list(CORE_AGENTS)
 
     elif agent_choice == "list":
-        if not uat_mode:
-            list_available_agents()
-            print()
-            prompt_user("  Press Enter to continue with core agents...")
+        list_available_agents()
+        print()
+        prompt_user("  Press Enter to continue with core agents...")
 
     # Remove duplicates while preserving order
     seen = set()
@@ -305,10 +287,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

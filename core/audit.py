@@ -797,8 +797,15 @@ def _run_parallel_evaluations(
 
 def _audit_report_filename(ev: AuditEvaluation) -> str:
     """Consistent filename for an audit's markdown report."""
+    # Sanitize audit_id: strip path separators, null bytes, and collapse to safe chars
+    safe_id = re.sub(r"[^a-zA-Z0-9_-]+", "-", ev.audit_id.replace("\x00", "")).strip("-")
     safe_name = re.sub(r"[^a-z0-9]+", "-", ev.audit_name.lower()).strip("-")
-    return f"{ev.audit_id}-{safe_name}.md"
+    # Fallback when audit_id (and/or name) consists entirely of special characters
+    if not safe_id:
+        safe_id = "audit-unknown"
+    if not safe_name:
+        safe_name = "unnamed"
+    return f"{safe_id}-{safe_name}.md"
 
 
 def _save_audit_markdowns(
@@ -1314,7 +1321,8 @@ def _safe_write(target: Path, resolved_base: Path, content: str) -> int:
     Returns new file size in bytes, or -1 if path traversal was rejected.
     """
     resolved_target = target.resolve()
-    if not str(resolved_target).startswith(str(resolved_base)):
+    if not resolved_target.is_relative_to(resolved_base):
+        logger.warning("Path traversal rejected: %s is not within %s", resolved_target, resolved_base)
         return -1
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
@@ -1347,7 +1355,7 @@ def _apply_remediation(
     for rel_path, content in file_updates.items():
         # Always write to output_dir
         output_target = (output_dir / rel_path).resolve()
-        if not str(output_target).startswith(str(resolved_output)):
+        if not output_target.is_relative_to(resolved_output):
             continue
 
         old_size = output_target.stat().st_size if output_target.exists() else 0
@@ -1361,7 +1369,7 @@ def _apply_remediation(
 
         if classification == "atomic" and resolved_atomic:
             canonical = (atomic_root / rel_path).resolve()
-            if str(canonical).startswith(str(resolved_atomic)):
+            if canonical.is_relative_to(resolved_atomic):
                 canon_old = canonical.stat().st_size if canonical.exists() else 0
                 result = _safe_write(canonical, resolved_atomic, content)
                 if result >= 0:
@@ -1369,7 +1377,7 @@ def _apply_remediation(
                     old_size = canon_old  # report canonical file's old size
         elif classification == "project" and resolved_project:
             canonical = (project_root / rel_path).resolve()
-            if str(canonical).startswith(str(resolved_project)):
+            if canonical.is_relative_to(resolved_project):
                 canon_old = canonical.stat().st_size if canonical.exists() else 0
                 result = _safe_write(canonical, resolved_project, content)
                 if result >= 0:
@@ -1721,7 +1729,6 @@ def _curate_audit_selection(
     deliverables: str,
     phase_num: int,
     phase_id: str,
-    uat_mode: bool = False,
     audit_context: str = "",
 ) -> list[dict]:
     """
@@ -1731,9 +1738,6 @@ def _curate_audit_selection(
     handpicks individual audits for multi-domain coverage. User confirms
     or adjusts. Falls back to manual category pick on LLM failure.
     """
-    if uat_mode:
-        return audits
-
     if not audits:
         return audits
 
@@ -2077,7 +2081,6 @@ def run_phase_audit(
     phase_num: int,
     phase_id: str,
     output_dir: Path,
-    uat_mode: bool = False,
     audit_context: str = "",
 ) -> bool:
     """
@@ -2089,10 +2092,6 @@ def run_phase_audit(
 
     Always returns True (non-blocking).
     """
-    if uat_mode:
-        print(f"⚠️  UAT Mode: Skipping phase {phase_num} audit")
-        return True
-
     # 0. Check for existing audit results — offer to resume remediation
     existing_evals, existing_configs = _load_existing_evaluations(phase_num)
     if existing_evals:
@@ -2146,7 +2145,7 @@ def run_phase_audit(
     deliverables = _gather_deliverables(output_dir, extra_dirs=extra_dirs)
 
     # 3. LLM-curated audit selection
-    audits = _curate_audit_selection(audits, deliverables, phase_num, phase_id, uat_mode,
+    audits = _curate_audit_selection(audits, deliverables, phase_num, phase_id,
                                      audit_context=audit_context)
     if not audits:
         print("⚠️  Audit skipped by user")
@@ -2201,17 +2200,12 @@ def run_audit(
     audit_name: str,
     phase_id: str,
     output_dir: Path,
-    uat_mode: bool = False,
 ) -> bool:
     """
     Run an audit (backward-compatible entry point).
 
     Delegates to run_phase_audit by extracting phase_num from phase_id.
     """
-    if uat_mode:
-        print(f"⚠️  UAT Mode: Skipping audit {audit_name}")
-        return True
-
     # Extract phase number from phase_id (e.g., "1-discovery" → 1)
     try:
         phase_num = int(phase_id.split("-")[0])
@@ -2219,22 +2213,18 @@ def run_audit(
         print(f"⚠️  Could not parse phase number from '{phase_id}', skipping audit")
         return True
 
-    return run_phase_audit(phase_num, phase_id, output_dir, uat_mode)
+    return run_phase_audit(phase_num, phase_id, output_dir)
 
 
 def select_audit(
     phase_num: int,
     output_dir: Path,
-    uat_mode: bool = False,
 ) -> Optional[str]:
     """
     Select audit for phase (backward-compatible).
 
     Returns a phase audit name string, or None if no audits apply.
     """
-    if uat_mode:
-        return f"phase-{phase_num}-audit"
-
     col = PHASE_CSV_COLUMN.get(phase_num)
     if col is None:
         return None
@@ -2452,8 +2442,7 @@ class AuditManager:
         self,
         phase_num: int,
         phase_id: str,
-        uat_mode: bool = False,
         audit_context: str = "",
     ) -> bool:
-        return run_phase_audit(phase_num, phase_id, self.output_dir, uat_mode,
+        return run_phase_audit(phase_num, phase_id, self.output_dir,
                                audit_context=audit_context)

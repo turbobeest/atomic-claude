@@ -44,46 +44,44 @@ from phases.phase_08_deployment_prep.tasks import (
 
 # Environment variables
 ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
-PROJECT_ROOT = ATOMIC_ROOT.parent
-OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', PROJECT_ROOT / '.outputs' / '8-deployment-prep'))
-UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
+OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '8-deployment-prep'))
 
 
 # Task wrapper functions (call Python task modules)
 
-def task_801_wrapper(mem=None, **kwargs) -> bool:
+def task_801_wrapper(mem=None) -> bool:
     """Task 801: Entry initialization"""
-    return task_801(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_801(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_802_wrapper(mem=None, **kwargs) -> bool:
+def task_802_wrapper(mem=None) -> bool:
     """Task 802: Deployment setup"""
-    return task_802(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_802(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_803_wrapper(mem=None, **kwargs) -> bool:
+def task_803_wrapper(mem=None) -> bool:
     """Task 803: Agent selection"""
-    return task_803(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_803(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_804_wrapper(mem=None, **kwargs) -> bool:
+def task_804_wrapper(mem=None) -> bool:
     """Task 804: Artifact generation"""
-    return task_804(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_804(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_805_wrapper(mem=None, **kwargs) -> bool:
+def task_805_wrapper(mem=None, graph=None) -> bool:
     """Task 805: Phase audit"""
-    return task_805(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=kwargs.get("graph"))
+    return task_805(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
-def task_806_wrapper(mem=None, **kwargs) -> bool:
+def task_806_wrapper(mem=None) -> bool:
     """Task 806: Deployment approval"""
-    return task_806(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_806(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_807_wrapper(mem=None, **kwargs) -> bool:
+def task_807_wrapper(mem=None) -> bool:
     """Task 807: Closeout"""
-    return task_807(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_807(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def run_phase(resume_at: str = None) -> bool:
@@ -136,7 +134,6 @@ def run_phase(resume_at: str = None) -> bool:
         task_artifacts=task_artifacts,
         atomic_root=ATOMIC_ROOT,
         output_dir=OUTPUT_DIR,
-        uat_mode=UAT_MODE,
         resume_at=resume_at,
         graph=graph,
     )

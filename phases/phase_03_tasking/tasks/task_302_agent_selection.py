@@ -39,14 +39,13 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 302: Agent Selection.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -56,22 +55,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     project_root = atomic_root.parent
     prd_file = project_root / "docs" / "prd" / "PRD.md"
     analysis_file = output_dir / "prd-analysis.json"
-
-    # UAT Mode: Auto-select core agents
-    if uat_mode:
-        print()
-        print(print_yellow("⚡ UAT Mode: Using core agents only"))
-        print()
-
-        agents_data = {
-            "selected": ["task-decomposer", "dependency-mapper", "work-packager",
-                        "task-validator", "coverage-checker"],
-            "additional": [],
-            "selection_method": "uat_defaults"
-        }
-        write_file(agents_file, json.dumps(agents_data, indent=2))
-        print(print_green("✓ Agent selection complete (UAT mode)"))
-        return True
 
     print()
     print(print_dim("Analyzing your PRD to recommend the best agent composition."))
@@ -225,9 +208,13 @@ def _analyze_prd(prd_file: Path) -> Dict[str, Any]:
 
     content = read_file(prd_file).lower()
 
-    # Count features and NFRs
-    analysis["feature_count"] = len(re.findall(r'^## feature f\d+', content, re.MULTILINE | re.IGNORECASE))
-    analysis["nfr_count"] = len(re.findall(r'^## nfr-\d+', content, re.MULTILINE | re.IGNORECASE))
+    # Count features — match heading-anchored F1/F2 (### F1:, #### FR-001:) or inline FR-\d+
+    heading_features = re.findall(r'#{2,4}\s+F\d+[:\s]', content, re.MULTILINE | re.IGNORECASE)
+    inline_features = re.findall(r'FR-\d+', content, re.IGNORECASE)
+    analysis["feature_count"] = max(len(heading_features), len(set(inline_features)))
+
+    # Count NFRs — body text search (NFRs typically appear in table rows, not headings)
+    analysis["nfr_count"] = len(set(re.findall(r'NFR-\d+', content, re.IGNORECASE)))
 
     # Detect patterns
     patterns = analysis["patterns"]
@@ -419,10 +406,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

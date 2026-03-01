@@ -15,20 +15,19 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
-    print_bold, print_cyan, print_yellow, print_green,
+    print_bold, print_cyan, print_green,
     print_dim, prompt_user
 )
 from core.utils.file_ops import read_json, write_json, ensure_dir
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 702: Integration Setup.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -74,18 +73,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_dim("─" * 118))
     print()
 
-    env_confirm = "y"
     env_notes = ""
 
-    if not uat_mode:
-        print(print_dim("Is this the correct integration environment?"))
-        print()
-        env_confirm = prompt_user("Confirm (default: y/n): ").strip() or "y"
+    print(print_dim("Is this the correct integration environment?"))
+    print()
+    env_confirm = prompt_user("Confirm (default: y/n): ").strip() or "y"
 
-        if env_confirm.lower() not in ["y", "yes"]:
-            print()
-            env_notes = prompt_user("Enter environment notes: ").strip()
-            print()
+    if env_confirm.lower() not in ["y", "yes"]:
+        print()
+        env_notes = prompt_user("Enter environment notes: ").strip()
+        print()
 
     # ─────────────────────────────────────────────────────────────────────────
     # ACCEPTANCE CRITERIA REVIEW
@@ -141,8 +138,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_dim("─" * 118))
     print()
 
-    if not uat_mode:
-        prompt_user("Press Enter to proceed with agent selection...")
+    prompt_user("Press Enter to proceed with agent selection...")
     print()
 
     # Save setup configuration
@@ -181,10 +177,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

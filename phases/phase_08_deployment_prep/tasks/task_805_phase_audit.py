@@ -13,30 +13,23 @@ logger = logging.getLogger(__name__)
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.utils.cli_ui import print_bold, print_dim, print_green
+from core.utils.cli_ui import print_bold
 from core.audit import run_phase_audit
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 805: Phase Audit.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass audit for testing
 
     Returns:
         True if task completed successfully, False otherwise
     """
     print(print_bold("Phase Audit"))
     print()
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(print_dim("  UAT Mode: Skipping audit"))
-        print(print_green("✓ UAT bypass complete"))
-        return True
 
     # Query audit graph for relevant audits
     audit_context = ""
@@ -66,10 +59,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip audit)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

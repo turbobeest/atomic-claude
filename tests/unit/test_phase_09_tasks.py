@@ -15,10 +15,8 @@ Requirements: Mock LLM calls, file operations, and test all code paths
 
 import pytest
 import json
-import tempfile
-import shutil
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open, call
+from unittest.mock import patch, MagicMock
 from datetime import datetime
 
 # Import task modules
@@ -30,7 +28,6 @@ from phases.phase_09_release.tasks import (
     task_905_release_confirmation,
     task_906_closeout,
 )
-
 
 # ============================================================================
 # FIXTURES
@@ -57,7 +54,6 @@ def temp_dirs(tmp_path):
         "claude_dir": claude_dir
     }
 
-
 @pytest.fixture
 def phase8_closeout(temp_dirs):
     """Create Phase 8 closeout file."""
@@ -78,7 +74,6 @@ def phase8_closeout(temp_dirs):
     closeout_file.write_text(json.dumps(closeout_data, indent=2))
     return closeout_file
 
-
 @pytest.fixture
 def deployment_artifacts(temp_dirs):
     """Create deployment artifacts file."""
@@ -95,7 +90,6 @@ def deployment_artifacts(temp_dirs):
     artifacts_file.write_text(json.dumps(artifacts_data, indent=2))
     return artifacts_file
 
-
 # ============================================================================
 # TASK 901: ENTRY INITIALIZATION TESTS
 # ============================================================================
@@ -103,22 +97,11 @@ def deployment_artifacts(temp_dirs):
 class TestTask901EntryInitialization:
     """Test Task 901: Entry & Initialization."""
 
-    def test_901_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses prerequisite validation."""
-        result = task_901_entry_initialization.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-
     def test_901_missing_phase8_closeout(self, temp_dirs):
         """Test failure when Phase 8 closeout is missing."""
         result = task_901_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is False
@@ -132,7 +115,6 @@ class TestTask901EntryInitialization:
         result = task_901_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is False
@@ -142,7 +124,6 @@ class TestTask901EntryInitialization:
         result = task_901_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is True
@@ -157,7 +138,6 @@ class TestTask901EntryInitialization:
         result = task_901_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is False
@@ -179,7 +159,6 @@ class TestTask901EntryInitialization:
         result = task_901_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is True
@@ -190,12 +169,10 @@ class TestTask901EntryInitialization:
             result = task_901_entry_initialization.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             # Verify output was printed
             assert mock_print.called
-
 
 # ============================================================================
 # TASK 902: RELEASE SETUP TESTS
@@ -204,24 +181,11 @@ class TestTask901EntryInitialization:
 class TestTask902ReleaseSetup:
     """Test Task 902: Release Setup."""
 
-    def test_902_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode creates minimal valid output."""
-        result = task_902_release_setup.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        setup_file = temp_dirs["output_dir"] / "release-setup.json"
-        assert setup_file.exists()
-
     def test_902_setup_configuration(self, temp_dirs):
         """Test release setup creates proper configuration."""
         result = task_902_release_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "release-setup.json"
@@ -236,7 +200,6 @@ class TestTask902ReleaseSetup:
         result = task_902_release_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "release-setup.json"
@@ -251,7 +214,6 @@ class TestTask902ReleaseSetup:
         result = task_902_release_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "release-setup.json"
@@ -266,7 +228,6 @@ class TestTask902ReleaseSetup:
         result = task_902_release_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "release-setup.json"
@@ -279,7 +240,6 @@ class TestTask902ReleaseSetup:
         result = task_902_release_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "release-setup.json"
@@ -288,7 +248,6 @@ class TestTask902ReleaseSetup:
         assert "setup_at" in setup_data
         datetime.fromisoformat(setup_data["setup_at"])
 
-
 # ============================================================================
 # TASK 903: AGENT SELECTION TESTS
 # ============================================================================
@@ -296,24 +255,11 @@ class TestTask902ReleaseSetup:
 class TestTask903AgentSelection:
     """Test Task 903: Agent Selection."""
 
-    def test_903_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses agent selection."""
-        result = task_903_agent_selection.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        agents_file = temp_dirs["output_dir"] / "release-agents.json"
-        assert agents_file.exists()
-
     def test_903_agent_roles_structure(self, temp_dirs):
         """Test agent selection creates proper role structure."""
         result = task_903_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "release-agents.json"
@@ -326,7 +272,6 @@ class TestTask903AgentSelection:
         result = task_903_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "release-agents.json"
@@ -341,7 +286,6 @@ class TestTask903AgentSelection:
         result = task_903_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "release-agents.json"
@@ -356,7 +300,6 @@ class TestTask903AgentSelection:
         result = task_903_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "release-agents.json"
@@ -377,11 +320,9 @@ class TestTask903AgentSelection:
             result = task_903_agent_selection.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is True
-
 
 # ============================================================================
 # TASK 904: RELEASE EXECUTION TESTS
@@ -390,24 +331,11 @@ class TestTask903AgentSelection:
 class TestTask904ReleaseExecution:
     """Test Task 904: Release Execution."""
 
-    def test_904_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses release execution."""
-        result = task_904_release_execution.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        execution_file = temp_dirs["output_dir"] / "release-execution.json"
-        assert execution_file.exists()
-
     def test_904_release_steps_execution(self, temp_dirs):
         """Test release execution steps are tracked."""
         result = task_904_release_execution.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         execution_file = temp_dirs["output_dir"] / "release-execution.json"
@@ -422,7 +350,6 @@ class TestTask904ReleaseExecution:
         result = task_904_release_execution.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         execution_file = temp_dirs["output_dir"] / "release-execution.json"
@@ -439,7 +366,6 @@ class TestTask904ReleaseExecution:
             result = task_904_release_execution.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is False
@@ -455,7 +381,6 @@ class TestTask904ReleaseExecution:
             result = task_904_release_execution.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             # Should handle release failures
@@ -466,7 +391,6 @@ class TestTask904ReleaseExecution:
         result = task_904_release_execution.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         execution_file = temp_dirs["output_dir"] / "release-execution.json"
@@ -475,7 +399,6 @@ class TestTask904ReleaseExecution:
         assert "executed_at" in execution_data
         datetime.fromisoformat(execution_data["executed_at"])
 
-
 # ============================================================================
 # TASK 905: RELEASE CONFIRMATION TESTS
 # ============================================================================
@@ -483,24 +406,11 @@ class TestTask904ReleaseExecution:
 class TestTask905ReleaseConfirmation:
     """Test Task 905: Release Confirmation."""
 
-    def test_905_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses confirmation validation."""
-        result = task_905_release_confirmation.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        confirmation_file = temp_dirs["output_dir"] / "release-confirmation.json"
-        assert confirmation_file.exists()
-
     def test_905_confirmation_criteria_validation(self, temp_dirs):
         """Test confirmation validates all criteria."""
         result = task_905_release_confirmation.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         confirmation_file = temp_dirs["output_dir"] / "release-confirmation.json"
@@ -518,7 +428,6 @@ class TestTask905ReleaseConfirmation:
             result = task_905_release_confirmation.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is False
@@ -536,7 +445,6 @@ class TestTask905ReleaseConfirmation:
         result = task_905_release_confirmation.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         # Should fail confirmation
@@ -547,7 +455,6 @@ class TestTask905ReleaseConfirmation:
         result = task_905_release_confirmation.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         confirmation_file = temp_dirs["output_dir"] / "release-confirmation.json"
@@ -561,7 +468,6 @@ class TestTask905ReleaseConfirmation:
         result = task_905_release_confirmation.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         confirmation_file = temp_dirs["output_dir"] / "release-confirmation.json"
@@ -570,7 +476,6 @@ class TestTask905ReleaseConfirmation:
         assert "release_version" in confirmation_data
         assert "release_channels" in confirmation_data
 
-
 # ============================================================================
 # TASK 906: CLOSEOUT TESTS
 # ============================================================================
@@ -578,24 +483,11 @@ class TestTask905ReleaseConfirmation:
 class TestTask906Closeout:
     """Test Task 906: Closeout."""
 
-    def test_906_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode creates valid closeout."""
-        result = task_906_closeout.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        closeout_file = temp_dirs["output_dir"] / "closeout.json"
-        assert closeout_file.exists()
-
     def test_906_closeout_structure(self, temp_dirs):
         """Test closeout has required structure."""
         result = task_906_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -610,7 +502,6 @@ class TestTask906Closeout:
         result = task_906_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -624,7 +515,6 @@ class TestTask906Closeout:
         result = task_906_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -638,7 +528,6 @@ class TestTask906Closeout:
         result = task_906_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -651,7 +540,6 @@ class TestTask906Closeout:
         result = task_906_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -667,7 +555,6 @@ class TestTask906Closeout:
         result = task_906_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -677,7 +564,6 @@ class TestTask906Closeout:
         assert closeout_data["phase_num"] == 9
         assert "release" in closeout_data["summary"].lower()
 
-
 # ============================================================================
 # INTEGRATION TESTS
 # ============================================================================
@@ -685,67 +571,12 @@ class TestTask906Closeout:
 class TestPhase09Integration:
     """Integration tests for Phase 9 task flow."""
 
-    def test_phase09_complete_flow_uat(self, temp_dirs, phase8_closeout, deployment_artifacts):
-        """Test complete Phase 9 flow in UAT mode."""
-        # Task 901
-        result = task_901_entry_initialization.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 902
-        result = task_902_release_setup.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 903
-        result = task_903_agent_selection.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 904
-        result = task_904_release_execution.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 905
-        result = task_905_release_confirmation.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 906
-        result = task_906_closeout.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Verify closeout exists
-        closeout_file = temp_dirs["output_dir"] / "closeout.json"
-        assert closeout_file.exists()
-
     def test_phase09_release_pipeline(self, temp_dirs, phase8_closeout):
         """Test release pipeline from setup to confirmation."""
         # Setup
         task_902_release_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "release-setup.json"
@@ -755,7 +586,6 @@ class TestPhase09Integration:
         task_903_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "release-agents.json"
@@ -765,7 +595,6 @@ class TestPhase09Integration:
         task_904_release_execution.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         execution_file = temp_dirs["output_dir"] / "release-execution.json"
@@ -775,7 +604,6 @@ class TestPhase09Integration:
         task_905_release_confirmation.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         confirmation_file = temp_dirs["output_dir"] / "release-confirmation.json"
@@ -787,34 +615,28 @@ class TestPhase09Integration:
         task_901_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
         task_902_release_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
         task_903_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
         task_904_release_execution.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
         task_905_release_confirmation.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         # Final closeout
         result = task_906_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         assert result is True

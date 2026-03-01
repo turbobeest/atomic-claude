@@ -31,14 +31,13 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 301: Entry & Initialization.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -50,25 +49,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     closeout_file = project_root / ".claude" / "closeout" / "phase-02-closeout.json"
     validation_file = output_dir / "entry-validation.json"
     taskmaster_dir = project_root / ".taskmaster"
-
-    # UAT Mode: Auto-pass validation
-    if uat_mode:
-        print()
-        print(print_yellow("⚡ UAT Mode: Auto-passing entry validation"))
-        print()
-
-        ensure_dir(taskmaster_dir / "tasks")
-        ensure_dir(taskmaster_dir / "reports")
-
-        validation_data = {
-            "phase2_closeout": "pass",
-            "prd_exists": "pass",
-            "validation": "pass",
-            "mode": "uat"
-        }
-        write_file(validation_file, json.dumps(validation_data, indent=2))
-        print(print_green("✓ Entry validation complete (UAT mode)"))
-        return True
 
     # Phase 3 Welcome
     _show_phase_welcome()
@@ -317,8 +297,9 @@ def _configure_taskmaster_provider(
 
     # Write .env additions for the target project
     if env_additions:
-        _append_env_vars(env_file, env_additions)
+        # Ensure .gitignore protects .env BEFORE writing secrets to disk
         _ensure_env_gitignored(atomic_root.parent)
+        _append_env_vars(env_file, env_additions)
 
 
 def _taskmaster_bedrock_config(secrets: dict, project_name: str) -> dict:
@@ -515,10 +496,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

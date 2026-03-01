@@ -517,7 +517,7 @@ from core.state import StateManager
 def task_NNN(
     atomic_root: Path = None,
     output_dir: Path = None,
-    uat_mode: bool = False
+    mem=None
 ) -> bool:
     """
     Execute Task NNN: Task Name.
@@ -525,7 +525,7 @@ def task_NNN(
     Args:
         atomic_root: Atomic root directory (defaults to current)
         output_dir: Output directory (defaults to .outputs/N-phase)
-        uat_mode: UAT mode (auto-approve prompts)
+        mem: Memory context (optional)
 
     Returns:
         bool: True if successful

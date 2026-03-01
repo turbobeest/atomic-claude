@@ -51,7 +51,6 @@ rm -rf .state .outputs .logs
 
 # Set environment
 export ATOMIC_TOOL_DEVELOPMENT="true"  # Disable forcing function
-export ATOMIC_UAT_MODE="false"         # Interactive mode
 export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
 export ATOMIC_ROOT="$PROJECT_ROOT"
 

@@ -16,20 +16,19 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
-    print_bold, print_cyan, print_yellow, print_green,
-    print_red, print_dim, print_magenta, prompt_user, clear_input_buffer
+    print_bold, print_cyan, print_green,
+    print_red, print_dim, prompt_user, clear_input_buffer
 )
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 601: Entry & Initialization.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -41,19 +40,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Display phase header
     _display_phase_header()
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(print_yellow("UAT Mode: Creating minimal valid output"))
-        entry_context = output_dir / "entry-context.json"
-        ensure_dir(entry_context.parent)
-        write_file(entry_context, json.dumps({
-            "status": "initialized",
-            "phase": "6-code-review",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, indent=2))
-        print(print_green("✓ UAT bypass complete"))
-        return True
 
     # Phase 5 Verification
     if not _verify_phase_5(closeout_file):
@@ -83,9 +69,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if closeout_file.exists():
         try:
             phase5_data = json.loads(read_file(closeout_file))
+            raw_tasks_completed = phase5_data.get("tasks_completed", 0)
+            tasks_completed_count = len(raw_tasks_completed) if isinstance(raw_tasks_completed, list) else raw_tasks_completed
             phase5_summary = {
                 "status": phase5_data.get("status", "unknown"),
-                "tasks_completed": phase5_data.get("tasks_completed", 0),
+                "tasks_completed": tasks_completed_count,
                 "total_tasks": phase5_data.get("total_tasks", 0),
             }
         except (json.JSONDecodeError, OSError):
@@ -178,7 +166,8 @@ def _verify_phase_5(closeout_file: Path) -> bool:
         return False
 
     print(print_green("✓ Phase 5 complete"))
-    print(print_green(f"✓ TDD cycles completed: {tasks_completed} / {total_tasks}"))
+    tasks_count = len(tasks_completed) if isinstance(tasks_completed, list) else tasks_completed
+    print(print_green(f"✓ TDD cycles completed: {tasks_count} / {total_tasks}"))
     print(print_green(f"✓ Tests passing: {tests_passing} / {total_tests}"))
     print(print_green(f"✓ Unit coverage: {unit_coverage}%"))
     print()
@@ -263,10 +252,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

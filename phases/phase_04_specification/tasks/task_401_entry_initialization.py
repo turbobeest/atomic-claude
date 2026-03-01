@@ -9,7 +9,6 @@ import logging
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +39,13 @@ PHASE_BANNER = r"""━━━━━━━━━━━━━━━━━━━━�
 """
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 401: Entry & Initialization.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass verification for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -62,20 +60,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Display phase banner
     print(PHASE_BANNER)
-
-    # UAT Mode: Skip Phase 3 verification
-    if uat_mode:
-        print()
-        print(print_yellow("⚡ UAT Mode: Bypassing Phase 3 verification"))
-        print()
-        ensure_dir(output_dir)
-        write_file(init_file, json.dumps({
-            "phase3_verified": True,
-            "task_count": 3,
-            "mode": "uat"
-        }, indent=2))
-        print(print_green("✓ Entry initialization complete (UAT mode)"))
-        return True
 
     # Phase 3 Verification
     print(print_dim("─" * 109))
@@ -259,10 +243,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip verification)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

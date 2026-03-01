@@ -65,14 +65,13 @@ except ImportError:
     OllamaProvider = None
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 002: Provider Detection.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, generate stub config without interactive prompts
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -96,7 +95,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     _push_provider_to_dashboard(env_vars, has_aws, has_anthropic, has_ollama)
 
     # --- Step 3: Ollama host configuration (local + remote LAN) ---
-    ollama_hosts = _configure_ollama_hosts(secrets_file, uat_mode)
+    ollama_hosts = _configure_ollama_hosts(secrets_file)
 
     # --- Step 4: Health-check all providers ---
     provider_health = _health_check_providers(secrets_file, output_dir)
@@ -282,6 +281,17 @@ def _detect_credentials(
     return has_aws, has_anthropic, has_ollama
 
 
+def _ensure_env_gitignored(project_root: Path) -> None:
+    """Ensure .env is listed in .gitignore before writing secrets."""
+    gitignore = project_root / ".gitignore"
+    if gitignore.exists():
+        content = read_file(gitignore)
+        if not any(line.strip() == ".env" for line in content.splitlines()):
+            write_file(gitignore, content + "\n.env\n")
+    else:
+        write_file(gitignore, ".env\n")
+
+
 def _credential_wizard(
     env_file: Path, env_vars: Dict[str, str],
 ) -> Optional[Tuple[bool, bool, bool]]:
@@ -403,6 +413,9 @@ def _credential_wizard(
     lines.append("ATOMIC_NETWORK_MODE=open")
     lines.append("")
 
+    # Ensure .env is covered by .gitignore before writing secrets
+    _ensure_env_gitignored(env_file.parent)
+
     # Write .env
     write_file(env_file, '\n'.join(lines) + '\n')
     if os.name != 'nt':
@@ -523,7 +536,7 @@ def _push_provider_to_dashboard(
 # ---------------------------------------------------------------------------
 
 def _configure_ollama_hosts(
-    secrets_file: Path, uat_mode: bool
+    secrets_file: Path,
 ) -> List[str]:
     """
     Configure Ollama hosts — detect local and offer remote LAN hosts.
@@ -573,47 +586,46 @@ def _configure_ollama_hosts(
     print()
 
     # Offer to add remote hosts
-    if not uat_mode:
-        print(print_bold("  Add remote Ollama hosts?"))
-        print(print_dim("  Machines on your LAN running Ollama (e.g. GPU workstation)."))
-        print(print_dim("  Format: hostname:port or IP:port (default port: 11434)"))
+    print(print_bold("  Add remote Ollama hosts?"))
+    print(print_dim("  Machines on your LAN running Ollama (e.g. GPU workstation)."))
+    print(print_dim("  Format: hostname:port or IP:port (default port: 11434)"))
+    print()
+
+    clear_input_buffer()
+    choice = prompt_user("  Add remote hosts? [n]: ").strip().lower()
+
+    if choice in ('y', 'yes'):
+        print(print_dim("  One host per line, blank line to finish:"))
+        while True:
+            clear_input_buffer()
+            raw = prompt_user("    > ").strip()
+            if not raw:
+                break
+
+            # Normalize the URL
+            host = raw
+            if not host.startswith("http"):
+                host = f"http://{host}"
+            if ":" not in host.split("//", 1)[-1]:
+                host = f"{host}:11434"
+
+            # Test connectivity
+            available = _check_ollama_host(host)
+            if available:
+                print(print_green(f"    ✓ Connected to {host}"))
+                models = _list_ollama_models(host)
+                if models:
+                    print(print_dim(f"      Models: {', '.join(models[:8])}"))
+                    if len(models) > 8:
+                        print(print_dim(f"      ... and {len(models) - 8} more"))
+            else:
+                print(print_yellow(f"    ! Could not reach {host}"))
+                print(print_dim(f"      Adding anyway — it may come online later"))
+
+            if host not in existing_hosts:
+                existing_hosts.append(host)
+
         print()
-
-        clear_input_buffer()
-        choice = prompt_user("  Add remote hosts? [n]: ").strip().lower()
-
-        if choice in ('y', 'yes'):
-            print(print_dim("  One host per line, blank line to finish:"))
-            while True:
-                clear_input_buffer()
-                raw = prompt_user("    > ").strip()
-                if not raw:
-                    break
-
-                # Normalize the URL
-                host = raw
-                if not host.startswith("http"):
-                    host = f"http://{host}"
-                if ":" not in host.split("//", 1)[-1]:
-                    host = f"{host}:11434"
-
-                # Test connectivity
-                available = _check_ollama_host(host)
-                if available:
-                    print(print_green(f"    ✓ Connected to {host}"))
-                    models = _list_ollama_models(host)
-                    if models:
-                        print(print_dim(f"      Models: {', '.join(models[:8])}"))
-                        if len(models) > 8:
-                            print(print_dim(f"      ... and {len(models) - 8} more"))
-                else:
-                    print(print_yellow(f"    ! Could not reach {host}"))
-                    print(print_dim(f"      Adding anyway — it may come online later"))
-
-                if host not in existing_hosts:
-                    existing_hosts.append(host)
-
-            print()
 
     # Write updated hosts back to secrets
     if existing_hosts:
@@ -911,10 +923,8 @@ if __name__ == "__main__":
                         help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                         help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                        help='Run in UAT mode (skip interactive prompts)')
 
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

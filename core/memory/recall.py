@@ -141,45 +141,6 @@ class MemoryRecall:
             max_tokens=max_tokens
         )
 
-    def recall_task(
-        self,
-        phase_num: int,
-        task_id: str,
-        max_tokens: int = 4000
-    ) -> MemoryContext:
-        """
-        Get memory from specific task.
-
-        Args:
-            phase_num: Phase number
-            task_id: Task ID
-            max_tokens: Maximum tokens
-
-        Returns:
-            Memory context
-        """
-        # Build phase pattern
-        entries = self.store.query(task_id=task_id)
-        task_entries = [
-            e for e in entries
-            if e.phase.startswith(f"{phase_num}-")
-        ]
-
-        # Sort by timestamp
-        task_entries.sort(key=lambda e: e.timestamp)
-
-        # Select within token limit
-        selected = self._select_within_token_limit(task_entries, max_tokens)
-
-        total_tokens = sum(self._estimate_tokens(e.content) for e in selected)
-
-        return MemoryContext(
-            query=f"Phase {phase_num}, Task {task_id}",
-            entries=selected,
-            total_tokens=total_tokens,
-            max_tokens=max_tokens
-        )
-
     def recall_recent(self, count: int = 10) -> MemoryContext:
         """
         Get N most recent entries.

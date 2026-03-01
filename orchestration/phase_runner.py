@@ -11,7 +11,6 @@ Usage in orchestrators:
 import inspect
 import logging
 import os
-import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -60,7 +59,6 @@ def run_phase_tasks(
     task_artifacts: Dict[str, List[str]],
     atomic_root: Path,
     output_dir: Path,
-    uat_mode: bool = False,
     resume_at: Optional[str] = None,
     pre_header_fn: Optional[Callable] = None,
     graph=None,
@@ -85,7 +83,6 @@ def run_phase_tasks(
         task_artifacts: Dict mapping task_id to expected artifact filenames
         atomic_root: Path to atomic-claude root
         output_dir: Phase output directory
-        uat_mode: Whether running in UAT mode
         resume_at: Optional task ID to resume from
         pre_header_fn: Optional callable to run after header but before task loop
                        (e.g., phase 0's description print)
@@ -142,7 +139,7 @@ def run_phase_tasks(
             write_current_task(phase_id, task_id, task_name)
         else:
             roster = resolve_agent_roster(phase_id, task_id, output_dir)
-            roster = display_task_roster(task_id, task_name, roster, uat_mode=uat_mode)
+            roster = display_task_roster(task_id, task_name, roster)
             write_current_task(
                 phase_id, task_id, task_name,
                 resolved=roster[0][1], agent_roster=roster,

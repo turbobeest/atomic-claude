@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
-    print_red, print_dim, prompt_user, clear_input_buffer
+    print_dim, prompt_user, clear_input_buffer
 )
 from core.utils.file_ops import write_file
 
@@ -55,14 +55,13 @@ DEFAULT_MVP_SCOPE = [
 ]
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 203: PRD Interview (Optional).
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -81,7 +80,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     # Optional skip
-    skip_choice = handle_optional_skip(uat_mode)
+    skip_choice = handle_optional_skip()
 
     if skip_choice == "defaults":
         save_defaults(interview_file)
@@ -99,16 +98,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Conduct interview
     print()
 
-    stakeholders = collect_stakeholders(uat_mode)
+    stakeholders = collect_stakeholders()
     print()
 
-    success_criteria = collect_success_criteria(uat_mode)
+    success_criteria = collect_success_criteria()
     print()
 
-    non_goals = collect_non_goals(uat_mode)
+    non_goals = collect_non_goals()
     print()
 
-    mvp_scope = collect_mvp_scope(uat_mode)
+    mvp_scope = collect_mvp_scope()
     print()
 
     # Save interview results
@@ -124,12 +123,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     return True
 
 
-def handle_optional_skip(uat_mode: bool) -> str:
+def handle_optional_skip() -> str:
     """
     Handle optional skip decision.
-
-    Args:
-        uat_mode: If True, use defaults
 
     Returns:
         Choice: "continue", "defaults", or "skip"
@@ -141,23 +137,15 @@ def handle_optional_skip(uat_mode: bool) -> str:
     print("    " + print_dim("[skip]") + "      Skip entirely (no interview data)")
     print()
 
-    if uat_mode:
-        choice = "defaults"
-        print(print_dim(f"  UAT mode: Using '{choice}'"))
-        return choice
-
     clear_input_buffer()
     choice = prompt_user("  Choice (default: continue): ").strip().lower() or "continue"
 
     return choice
 
 
-def collect_stakeholders(uat_mode: bool) -> List[str]:
+def collect_stakeholders() -> List[str]:
     """
     Collect stakeholder information.
-
-    Args:
-        uat_mode: If True, use defaults
 
     Returns:
         List of stakeholder descriptions
@@ -176,11 +164,6 @@ def collect_stakeholders(uat_mode: bool) -> List[str]:
     print("    " + print_green("[confirm]") + "  Accept proposed stakeholders")
     print("    " + print_yellow("[adjust]") + "   Add or modify stakeholders")
     print()
-
-    if uat_mode:
-        choice = "confirm"
-        print(print_dim(f"  UAT mode: Using '{choice}'"))
-        return DEFAULT_STAKEHOLDERS
 
     clear_input_buffer()
     choice = prompt_user("  Choice (default: confirm): ").strip().lower() or "confirm"
@@ -204,12 +187,9 @@ def collect_stakeholders(uat_mode: bool) -> List[str]:
     return stakeholders
 
 
-def collect_success_criteria(uat_mode: bool) -> List[str]:
+def collect_success_criteria() -> List[str]:
     """
     Collect success criteria.
-
-    Args:
-        uat_mode: If True, use defaults
 
     Returns:
         List of success criteria
@@ -227,11 +207,6 @@ def collect_success_criteria(uat_mode: bool) -> List[str]:
     print("    " + print_green("[confirm]") + "  Accept proposed criteria")
     print("    " + print_yellow("[adjust]") + "   Define specific metrics")
     print()
-
-    if uat_mode:
-        choice = "confirm"
-        print(print_dim(f"  UAT mode: Using '{choice}'"))
-        return DEFAULT_SUCCESS_CRITERIA
 
     clear_input_buffer()
     choice = prompt_user("  Choice (default: confirm): ").strip().lower() or "confirm"
@@ -255,12 +230,9 @@ def collect_success_criteria(uat_mode: bool) -> List[str]:
     return criteria
 
 
-def collect_non_goals(uat_mode: bool) -> List[str]:
+def collect_non_goals() -> List[str]:
     """
     Collect non-goals (explicitly out of scope).
-
-    Args:
-        uat_mode: If True, use defaults
 
     Returns:
         List of non-goals
@@ -278,11 +250,6 @@ def collect_non_goals(uat_mode: bool) -> List[str]:
     print("    " + print_green("[confirm]") + "  Accept proposed non-goals")
     print("    " + print_yellow("[adjust]") + "   Define specific non-goals")
     print()
-
-    if uat_mode:
-        choice = "confirm"
-        print(print_dim(f"  UAT mode: Using '{choice}'"))
-        return DEFAULT_NON_GOALS
 
     clear_input_buffer()
     choice = prompt_user("  Choice (default: confirm): ").strip().lower() or "confirm"
@@ -306,12 +273,9 @@ def collect_non_goals(uat_mode: bool) -> List[str]:
     return non_goals
 
 
-def collect_mvp_scope(uat_mode: bool) -> List[str]:
+def collect_mvp_scope() -> List[str]:
     """
     Collect MVP scope definition.
-
-    Args:
-        uat_mode: If True, use defaults
 
     Returns:
         List of MVP features/components
@@ -320,10 +284,6 @@ def collect_mvp_scope(uat_mode: bool) -> List[str]:
     print(print_cyan("║ " + print_bold("4. MVP SCOPE") + "                                              ║"))
     print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
-
-    if uat_mode:
-        print(print_dim("  UAT mode: Using default MVP scope"))
-        return DEFAULT_MVP_SCOPE
 
     print(print_dim("  What's the minimum viable scope for Phase 1 delivery?"))
     print()
@@ -403,10 +363,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

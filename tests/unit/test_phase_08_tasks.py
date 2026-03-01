@@ -16,10 +16,8 @@ Requirements: Mock LLM calls, file operations, and test all code paths
 
 import pytest
 import json
-import tempfile
-import shutil
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open, call
+from unittest.mock import patch, MagicMock
 from datetime import datetime
 
 # Import task modules
@@ -32,7 +30,6 @@ from phases.phase_08_deployment_prep.tasks import (
     task_806_deployment_approval,
     task_807_closeout,
 )
-
 
 # ============================================================================
 # FIXTURES
@@ -59,7 +56,6 @@ def temp_dirs(tmp_path):
         "claude_dir": claude_dir
     }
 
-
 @pytest.fixture
 def phase7_closeout(temp_dirs):
     """Create Phase 7 closeout file."""
@@ -80,7 +76,6 @@ def phase7_closeout(temp_dirs):
     closeout_file.write_text(json.dumps(closeout_data, indent=2))
     return closeout_file
 
-
 @pytest.fixture
 def integration_report(temp_dirs):
     """Create integration report file."""
@@ -97,7 +92,6 @@ def integration_report(temp_dirs):
     report_file.write_text(json.dumps(report_data, indent=2))
     return report_file
 
-
 # ============================================================================
 # TASK 801: ENTRY INITIALIZATION TESTS
 # ============================================================================
@@ -105,22 +99,11 @@ def integration_report(temp_dirs):
 class TestTask801EntryInitialization:
     """Test Task 801: Entry & Initialization."""
 
-    def test_801_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses prerequisite validation."""
-        result = task_801_entry_initialization.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-
     def test_801_missing_phase7_closeout(self, temp_dirs):
         """Test failure when Phase 7 closeout is missing."""
         result = task_801_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is False
@@ -134,7 +117,6 @@ class TestTask801EntryInitialization:
         result = task_801_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is False
@@ -144,7 +126,6 @@ class TestTask801EntryInitialization:
         result = task_801_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is True
@@ -159,7 +140,6 @@ class TestTask801EntryInitialization:
         result = task_801_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is False
@@ -170,12 +150,10 @@ class TestTask801EntryInitialization:
             result = task_801_entry_initialization.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             # Verify output was printed
             assert mock_print.called
-
 
 # ============================================================================
 # TASK 802: DEPLOYMENT SETUP TESTS
@@ -184,24 +162,11 @@ class TestTask801EntryInitialization:
 class TestTask802DeploymentSetup:
     """Test Task 802: Deployment Setup."""
 
-    def test_802_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode creates minimal valid output."""
-        result = task_802_deployment_setup.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        setup_file = temp_dirs["output_dir"] / "deployment-setup.json"
-        assert setup_file.exists()
-
     def test_802_setup_configuration(self, temp_dirs):
         """Test deployment setup creates proper configuration."""
         result = task_802_deployment_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "deployment-setup.json"
@@ -215,7 +180,6 @@ class TestTask802DeploymentSetup:
         result = task_802_deployment_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "deployment-setup.json"
@@ -230,7 +194,6 @@ class TestTask802DeploymentSetup:
         result = task_802_deployment_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "deployment-setup.json"
@@ -245,7 +208,6 @@ class TestTask802DeploymentSetup:
         result = task_802_deployment_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "deployment-setup.json"
@@ -261,12 +223,10 @@ class TestTask802DeploymentSetup:
         result = task_802_deployment_setup.execute(
             temp_dirs["atomic_root"],
             output_dir,
-            uat_mode=True
         )
 
         assert result is True
         assert output_dir.exists()
-
 
 # ============================================================================
 # TASK 803: AGENT SELECTION TESTS
@@ -275,24 +235,11 @@ class TestTask802DeploymentSetup:
 class TestTask803AgentSelection:
     """Test Task 803: Agent Selection."""
 
-    def test_803_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses agent selection."""
-        result = task_803_agent_selection.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        agents_file = temp_dirs["output_dir"] / "deployment-agents.json"
-        assert agents_file.exists()
-
     def test_803_agent_roles_structure(self, temp_dirs):
         """Test agent selection creates proper role structure."""
         result = task_803_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "deployment-agents.json"
@@ -305,7 +252,6 @@ class TestTask803AgentSelection:
         result = task_803_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "deployment-agents.json"
@@ -320,7 +266,6 @@ class TestTask803AgentSelection:
         result = task_803_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "deployment-agents.json"
@@ -335,7 +280,6 @@ class TestTask803AgentSelection:
         result = task_803_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "deployment-agents.json"
@@ -356,11 +300,9 @@ class TestTask803AgentSelection:
             result = task_803_agent_selection.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is True
-
 
 # ============================================================================
 # TASK 804: ARTIFACT GENERATION TESTS
@@ -369,24 +311,11 @@ class TestTask803AgentSelection:
 class TestTask804ArtifactGeneration:
     """Test Task 804: Artifact Generation."""
 
-    def test_804_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses artifact generation."""
-        result = task_804_artifact_generation.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        artifacts_file = temp_dirs["output_dir"] / "deployment-artifacts.json"
-        assert artifacts_file.exists()
-
     def test_804_artifact_types_generated(self, temp_dirs):
         """Test various artifact types are generated."""
         result = task_804_artifact_generation.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         artifacts_file = temp_dirs["output_dir"] / "deployment-artifacts.json"
@@ -401,7 +330,6 @@ class TestTask804ArtifactGeneration:
         result = task_804_artifact_generation.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         artifacts_file = temp_dirs["output_dir"] / "deployment-artifacts.json"
@@ -418,7 +346,6 @@ class TestTask804ArtifactGeneration:
             result = task_804_artifact_generation.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is False
@@ -428,7 +355,6 @@ class TestTask804ArtifactGeneration:
         result = task_804_artifact_generation.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         artifacts_file = temp_dirs["output_dir"] / "deployment-artifacts.json"
@@ -442,7 +368,6 @@ class TestTask804ArtifactGeneration:
         result = task_804_artifact_generation.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         artifacts_file = temp_dirs["output_dir"] / "deployment-artifacts.json"
@@ -451,7 +376,6 @@ class TestTask804ArtifactGeneration:
         assert "generated_at" in artifacts_data
         datetime.fromisoformat(artifacts_data["generated_at"])
 
-
 # ============================================================================
 # TASK 805: PHASE AUDIT TESTS
 # ============================================================================
@@ -459,24 +383,11 @@ class TestTask804ArtifactGeneration:
 class TestTask805PhaseAudit:
     """Test Task 805: Phase Audit."""
 
-    def test_805_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses audit process."""
-        result = task_805_phase_audit.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        audit_file = temp_dirs["output_dir"] / "phase-audit.json"
-        assert audit_file.exists()
-
     def test_805_audit_checklist(self, temp_dirs):
         """Test audit validates all checklist items."""
         result = task_805_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
@@ -491,7 +402,6 @@ class TestTask805PhaseAudit:
         result = task_805_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         # Should fail with missing artifacts
@@ -502,7 +412,6 @@ class TestTask805PhaseAudit:
         result = task_805_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
@@ -516,7 +425,6 @@ class TestTask805PhaseAudit:
         result = task_805_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
@@ -530,14 +438,12 @@ class TestTask805PhaseAudit:
         result = task_805_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
         audit_data = json.loads(audit_file.read_text())
 
         assert "recommendations" in audit_data
-
 
 # ============================================================================
 # TASK 806: DEPLOYMENT APPROVAL TESTS
@@ -546,24 +452,11 @@ class TestTask805PhaseAudit:
 class TestTask806DeploymentApproval:
     """Test Task 806: Deployment Approval."""
 
-    def test_806_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses approval gate."""
-        result = task_806_deployment_approval.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        approval_file = temp_dirs["output_dir"] / "deployment-approval.json"
-        assert approval_file.exists()
-
     def test_806_approval_criteria_validation(self, temp_dirs):
         """Test approval validates all criteria."""
         result = task_806_deployment_approval.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         approval_file = temp_dirs["output_dir"] / "deployment-approval.json"
@@ -580,7 +473,6 @@ class TestTask806DeploymentApproval:
             result = task_806_deployment_approval.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is False
@@ -597,7 +489,6 @@ class TestTask806DeploymentApproval:
         result = task_806_deployment_approval.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         # Should fail if criteria not met
@@ -608,7 +499,6 @@ class TestTask806DeploymentApproval:
         result = task_806_deployment_approval.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         approval_file = temp_dirs["output_dir"] / "deployment-approval.json"
@@ -622,7 +512,6 @@ class TestTask806DeploymentApproval:
         result = task_806_deployment_approval.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         approval_file = temp_dirs["output_dir"] / "deployment-approval.json"
@@ -631,7 +520,6 @@ class TestTask806DeploymentApproval:
         assert "status" in approval_data
         assert approval_data["status"] in ["approved", "rejected", "conditional"]
 
-
 # ============================================================================
 # TASK 807: CLOSEOUT TESTS
 # ============================================================================
@@ -639,24 +527,11 @@ class TestTask806DeploymentApproval:
 class TestTask807Closeout:
     """Test Task 807: Closeout."""
 
-    def test_807_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode creates valid closeout."""
-        result = task_807_closeout.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        closeout_file = temp_dirs["output_dir"] / "closeout.json"
-        assert closeout_file.exists()
-
     def test_807_closeout_structure(self, temp_dirs):
         """Test closeout has required structure."""
         result = task_807_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -671,7 +546,6 @@ class TestTask807Closeout:
         result = task_807_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -684,7 +558,6 @@ class TestTask807Closeout:
         result = task_807_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -698,7 +571,6 @@ class TestTask807Closeout:
         result = task_807_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -711,7 +583,6 @@ class TestTask807Closeout:
         result = task_807_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -725,7 +596,6 @@ class TestTask807Closeout:
         result = task_807_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -734,7 +604,6 @@ class TestTask807Closeout:
         assert "outputs" in closeout_data
         assert "deployment_plan" in closeout_data["outputs"]
 
-
 # ============================================================================
 # INTEGRATION TESTS
 # ============================================================================
@@ -742,75 +611,12 @@ class TestTask807Closeout:
 class TestPhase08Integration:
     """Integration tests for Phase 8 task flow."""
 
-    def test_phase08_complete_flow_uat(self, temp_dirs, phase7_closeout, integration_report):
-        """Test complete Phase 8 flow in UAT mode."""
-        # Task 801
-        result = task_801_entry_initialization.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 802
-        result = task_802_deployment_setup.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 803
-        result = task_803_agent_selection.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 804
-        result = task_804_artifact_generation.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 805
-        result = task_805_phase_audit.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 806
-        result = task_806_deployment_approval.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 807
-        result = task_807_closeout.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Verify closeout exists
-        closeout_file = temp_dirs["output_dir"] / "closeout.json"
-        assert closeout_file.exists()
-
     def test_phase08_artifact_pipeline(self, temp_dirs, phase7_closeout):
         """Test artifact pipeline from setup to approval."""
         # Setup
         task_802_deployment_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "deployment-setup.json"
@@ -820,7 +626,6 @@ class TestPhase08Integration:
         task_804_artifact_generation.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         artifacts_file = temp_dirs["output_dir"] / "deployment-artifacts.json"
@@ -830,7 +635,6 @@ class TestPhase08Integration:
         task_806_deployment_approval.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         approval_file = temp_dirs["output_dir"] / "deployment-approval.json"

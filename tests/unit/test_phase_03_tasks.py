@@ -14,9 +14,8 @@ Requirements: 6+ tests per task × 6 tasks = 36+ unit tests
 
 import pytest
 import json
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 # Import all Phase 03 task modules
 from phases.phase_03_tasking.tasks.task_301_entry_initialization import execute as task_301
@@ -25,7 +24,6 @@ from phases.phase_03_tasking.tasks.task_303_task_decomposition import execute as
 from phases.phase_03_tasking.tasks.task_304_dependency_analysis import execute as task_304
 from phases.phase_03_tasking.tasks.task_305_phase_audit import execute as task_305
 from phases.phase_03_tasking.tasks.task_306_closeout import execute as task_306
-
 
 # ============================================================================
 # FIXTURES
@@ -90,7 +88,6 @@ Phase 1: Foundation
 
     return atomic_root, project_root
 
-
 @pytest.fixture
 def sample_tasks():
     """Sample tasks.json content."""
@@ -147,21 +144,6 @@ def sample_tasks():
         ]
     }
 
-
-@pytest.fixture
-def sample_agents():
-    """Sample agent selection data."""
-    return {
-        "decomposition_agents": [
-            "task-decomposer-01",
-            "dependency-mapper-02"
-        ],
-        "validation_agents": [
-            "task-validator-01"
-        ]
-    }
-
-
 # ============================================================================
 # TASK 301: ENTRY INITIALIZATION
 # ============================================================================
@@ -169,26 +151,13 @@ def sample_agents():
 class TestTask301EntryInitialization:
     """Test Task 301: Entry Initialization."""
 
-    def test_uat_mode_bypass(self, temp_project_structure):
-        """Test UAT mode auto-passes validation."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "3-tasking"
-
-        result = task_301(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "entry-validation.json").exists()
-        validation = json.loads((output_dir / "entry-validation.json").read_text())
-        assert validation["mode"] == "uat"
-        assert validation["validation"] == "pass"
-
     def test_phase2_closeout_exists(self, temp_project_structure):
         """Test successful validation when Phase 2 closeout exists."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
         with patch('core.utils.cli_ui.prompt_user', return_value=''):
-            result = task_301(atomic_root, output_dir, uat_mode=False)
+            result = task_301(atomic_root, output_dir)
 
         assert result is True
         validation = json.loads((output_dir / "entry-validation.json").read_text())
@@ -203,7 +172,7 @@ class TestTask301EntryInitialization:
         (project_root / "docs" / "prd" / "PRD.md").unlink()
 
         with patch('core.utils.cli_ui.prompt_user', return_value='abort'):
-            result = task_301(atomic_root, output_dir, uat_mode=False)
+            result = task_301(atomic_root, output_dir)
 
         assert result is False
 
@@ -216,7 +185,7 @@ class TestTask301EntryInitialization:
         import shutil
         shutil.rmtree(project_root / ".taskmaster")
 
-        result = task_301(atomic_root, output_dir, uat_mode=True)
+        result = task_301(atomic_root, output_dir)
 
         assert result is True
         assert (project_root / ".taskmaster").exists()
@@ -228,7 +197,7 @@ class TestTask301EntryInitialization:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_301(atomic_root, output_dir, uat_mode=True)
+        result = task_301(atomic_root, output_dir)
 
         assert result is True
         validation = json.loads((output_dir / "entry-validation.json").read_text())
@@ -245,7 +214,7 @@ class TestTask301EntryInitialization:
         (atomic_root / ".outputs" / "2-prd" / "prd-approved.json").unlink()
 
         with patch('core.utils.cli_ui.prompt_user', return_value='continue'):
-            result = task_301(atomic_root, output_dir, uat_mode=False)
+            result = task_301(atomic_root, output_dir)
 
         assert result is True
 
@@ -258,10 +227,9 @@ class TestTask301EntryInitialization:
         (atomic_root / ".outputs" / "2-prd" / "phase-02-closeout.json").unlink()
 
         with patch('core.utils.cli_ui.prompt_user', return_value='abort'):
-            result = task_301(atomic_root, output_dir, uat_mode=False)
+            result = task_301(atomic_root, output_dir)
 
         assert result is False
-
 
 # ============================================================================
 # TASK 302: AGENT SELECTION
@@ -269,16 +237,6 @@ class TestTask301EntryInitialization:
 
 class TestTask302AgentSelection:
     """Test Task 302: Agent Selection."""
-
-    def test_uat_mode_bypass(self, temp_project_structure):
-        """Test UAT mode skips interactive selection."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "3-tasking"
-
-        result = task_302(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "selected-agents.json").exists()
 
     def test_agent_inventory_loading(self, temp_project_structure):
         """Test loading agent inventory from repository."""
@@ -291,7 +249,7 @@ class TestTask302AgentSelection:
         inventory = "agent_id,name,category,grade\ntask-decomposer-01,Task Decomposer,decomposition,A\n"
         (agent_dir / "agent-inventory.csv").write_text(inventory)
 
-        result = task_302(atomic_root, output_dir, uat_mode=True)
+        result = task_302(atomic_root, output_dir)
 
         assert result is True
 
@@ -300,7 +258,7 @@ class TestTask302AgentSelection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_302(atomic_root, output_dir, uat_mode=True)
+        result = task_302(atomic_root, output_dir)
 
         assert result is True
         agents = json.loads((output_dir / "selected-agents.json").read_text())
@@ -311,7 +269,7 @@ class TestTask302AgentSelection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_302(atomic_root, output_dir, uat_mode=True)
+        result = task_302(atomic_root, output_dir)
 
         assert result is True
         agents = json.loads((output_dir / "selected-agents.json").read_text())
@@ -323,7 +281,7 @@ class TestTask302AgentSelection:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_302(atomic_root, output_dir, uat_mode=True)
+        result = task_302(atomic_root, output_dir)
 
         assert result is True
         agents = json.loads((output_dir / "selected-agents.json").read_text())
@@ -339,7 +297,7 @@ class TestTask302AgentSelection:
         agent_dir.mkdir(parents=True)
         (agent_dir / "task-decomposer-01.md").write_text("# Agent content")
 
-        result = task_302(atomic_root, output_dir, uat_mode=True)
+        result = task_302(atomic_root, output_dir)
 
         assert result is True
 
@@ -351,10 +309,9 @@ class TestTask302AgentSelection:
 
         mock_prompt.return_value = '1'
 
-        result = task_302(atomic_root, output_dir, uat_mode=False)
+        result = task_302(atomic_root, output_dir)
 
         assert result is True
-
 
 # ============================================================================
 # TASK 303: TASK DECOMPOSITION
@@ -363,23 +320,6 @@ class TestTask302AgentSelection:
 class TestTask303TaskDecomposition:
     """Test Task 303: Task Decomposition."""
 
-    def test_uat_mode_fast_path(self, temp_project_structure, sample_agents):
-        """Test UAT mode generates minimal tasks."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "3-tasking"
-
-        # Save agent selection
-        (output_dir / "selected-agents.json").write_text(json.dumps(sample_agents))
-
-        with patch('core.llm.invoke') as mock_llm:
-            # Mock LLM response with minimal tasks
-            mock_llm.return_value = True
-
-            result = task_303(atomic_root, output_dir, uat_mode=True)
-
-        # Should create template or succeed
-        assert result is True or (output_dir / "raw-tasks.json").exists()
-
     def test_prd_section_extraction(self, temp_project_structure):
         """Test PRD sections are correctly extracted."""
         atomic_root, project_root = temp_project_structure
@@ -387,7 +327,7 @@ class TestTask303TaskDecomposition:
 
         with patch('core.llm.invoke') as mock_llm:
             mock_llm.return_value = True
-            result = task_303(atomic_root, output_dir, uat_mode=True)
+            result = task_303(atomic_root, output_dir)
 
         # Verify prompt file contains sections
         if (output_dir / "prompts" / "task-decomposition.md").exists():
@@ -407,7 +347,7 @@ class TestTask303TaskDecomposition:
 
         mock_llm.side_effect = write_tasks
 
-        result = task_303(atomic_root, output_dir, uat_mode=False)
+        result = task_303(atomic_root, output_dir)
 
         assert mock_llm.called
         assert result is True
@@ -426,7 +366,7 @@ class TestTask303TaskDecomposition:
 
             mock_llm.side_effect = write_markdown_json
 
-            result = task_303(atomic_root, output_dir, uat_mode=False)
+            result = task_303(atomic_root, output_dir)
 
         assert result is True
         tasks = json.loads((output_dir / "raw-tasks.json").read_text())
@@ -440,7 +380,7 @@ class TestTask303TaskDecomposition:
         with patch('core.llm.invoke') as mock_llm:
             mock_llm.return_value = False
 
-            result = task_303(atomic_root, output_dir, uat_mode=False)
+            result = task_303(atomic_root, output_dir)
 
         assert result is True
         assert (output_dir / "raw-tasks.json").exists()
@@ -460,7 +400,7 @@ class TestTask303TaskDecomposition:
 
             mock_llm.side_effect = write_tasks
 
-            result = task_303(atomic_root, output_dir, uat_mode=False)
+            result = task_303(atomic_root, output_dir)
 
         assert result is True
         taskmaster_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
@@ -480,12 +420,11 @@ class TestTask303TaskDecomposition:
             mock_llm.side_effect = write_tasks
 
             with patch('builtins.print') as mock_print:
-                result = task_303(atomic_root, output_dir, uat_mode=False)
+                result = task_303(atomic_root, output_dir)
 
             # Verify statistics were printed
             print_calls = [str(call) for call in mock_print.call_args_list]
             assert any("tasks" in str(call).lower() for call in print_calls)
-
 
 # ============================================================================
 # TASK 304: DEPENDENCY ANALYSIS
@@ -493,18 +432,6 @@ class TestTask303TaskDecomposition:
 
 class TestTask304DependencyAnalysis:
     """Test Task 304: Dependency Analysis."""
-
-    def test_uat_mode_bypass(self, temp_project_structure):
-        """Test UAT mode auto-approves dependency analysis."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "3-tasking"
-
-        result = task_304(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        analysis = json.loads((output_dir / "dependency-analysis.json").read_text())
-        assert analysis["mode"] == "uat"
-        assert analysis["validation"] == "pass"
 
     def test_valid_dag(self, temp_project_structure, sample_tasks):
         """Test validation passes for valid DAG."""
@@ -516,7 +443,7 @@ class TestTask304DependencyAnalysis:
         tasks_file.write_text(json.dumps(sample_tasks))
 
         with patch('core.utils.cli_ui.prompt_user', return_value=''):
-            result = task_304(atomic_root, output_dir, uat_mode=False)
+            result = task_304(atomic_root, output_dir)
 
         assert result is True
 
@@ -533,7 +460,7 @@ class TestTask304DependencyAnalysis:
         tasks_file.write_text(json.dumps(sample_tasks))
 
         with patch('core.utils.cli_ui.prompt_user', return_value='abort'):
-            result = task_304(atomic_root, output_dir, uat_mode=False)
+            result = task_304(atomic_root, output_dir)
 
         # Should detect cycle
         analysis = json.loads((output_dir / "dependency-analysis.json").read_text())
@@ -551,7 +478,7 @@ class TestTask304DependencyAnalysis:
         tasks_file.write_text(json.dumps(sample_tasks))
 
         with patch('core.utils.cli_ui.prompt_user', return_value='abort'):
-            result = task_304(atomic_root, output_dir, uat_mode=False)
+            result = task_304(atomic_root, output_dir)
 
         # Should be recorded in analysis
         assert (output_dir / "dependency-analysis.json").exists()
@@ -565,7 +492,7 @@ class TestTask304DependencyAnalysis:
         tasks_file.write_text(json.dumps(sample_tasks))
 
         with patch('core.utils.cli_ui.prompt_user', return_value=''):
-            result = task_304(atomic_root, output_dir, uat_mode=False)
+            result = task_304(atomic_root, output_dir)
 
         # Should generate graph file
         graph_file = project_root / ".taskmaster" / "reports" / "dependency-graph.json"
@@ -582,7 +509,7 @@ class TestTask304DependencyAnalysis:
         tasks_file.write_text(json.dumps(sample_tasks))
 
         with patch('core.utils.cli_ui.prompt_user', return_value=''):
-            result = task_304(atomic_root, output_dir, uat_mode=False)
+            result = task_304(atomic_root, output_dir)
 
         # Work packages may be generated
         packages_file = project_root / ".taskmaster" / "reports" / "work-packages.json"
@@ -595,10 +522,9 @@ class TestTask304DependencyAnalysis:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_304(atomic_root, output_dir, uat_mode=False)
+        result = task_304(atomic_root, output_dir)
 
         assert result is False
-
 
 # ============================================================================
 # TASK 305: PHASE AUDIT
@@ -606,16 +532,6 @@ class TestTask304DependencyAnalysis:
 
 class TestTask305PhaseAudit:
     """Test Task 305: Phase Audit."""
-
-    def test_uat_mode_bypass(self, temp_project_structure):
-        """Test UAT mode skips audit."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "3-tasking"
-
-        result = task_305(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "phase-audit.json").exists()
 
     def test_audit_selection(self, temp_project_structure):
         """Test audit is selected and executed."""
@@ -627,7 +543,7 @@ class TestTask305PhaseAudit:
         audit_dir.mkdir(exist_ok=True)
         (audit_dir / "AUDIT-INVENTORY.csv").write_text("audit_id,name\nAUD-001,Test Audit\n")
 
-        result = task_305(atomic_root, output_dir, uat_mode=True)
+        result = task_305(atomic_root, output_dir)
 
         assert result is True
 
@@ -636,7 +552,7 @@ class TestTask305PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_305(atomic_root, output_dir, uat_mode=True)
+        result = task_305(atomic_root, output_dir)
 
         assert result is True
         audit = json.loads((output_dir / "phase-audit.json").read_text())
@@ -647,7 +563,7 @@ class TestTask305PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_305(atomic_root, output_dir, uat_mode=True)
+        result = task_305(atomic_root, output_dir)
 
         assert result is True
 
@@ -656,7 +572,7 @@ class TestTask305PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_305(atomic_root, output_dir, uat_mode=True)
+        result = task_305(atomic_root, output_dir)
 
         assert result is True
         audit = json.loads((output_dir / "phase-audit.json").read_text())
@@ -667,7 +583,7 @@ class TestTask305PhaseAudit:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_305(atomic_root, output_dir, uat_mode=True)
+        result = task_305(atomic_root, output_dir)
 
         assert result is True
 
@@ -679,10 +595,9 @@ class TestTask305PhaseAudit:
 
         mock_prompt.return_value = '1'
 
-        result = task_305(atomic_root, output_dir, uat_mode=False)
+        result = task_305(atomic_root, output_dir)
 
         assert result is True
-
 
 # ============================================================================
 # TASK 306: CLOSEOUT
@@ -691,22 +606,12 @@ class TestTask305PhaseAudit:
 class TestTask306Closeout:
     """Test Task 306: Phase Closeout."""
 
-    def test_uat_mode(self, temp_project_structure):
-        """Test closeout in UAT mode."""
-        atomic_root, project_root = temp_project_structure
-        output_dir = atomic_root / ".outputs" / "3-tasking"
-
-        result = task_306(atomic_root, output_dir, uat_mode=True)
-
-        assert result is True
-        assert (output_dir / "closeout.json").exists()
-
     def test_closeout_file_structure(self, temp_project_structure):
         """Test closeout file has correct structure."""
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_306(atomic_root, output_dir, uat_mode=True)
+        result = task_306(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -718,7 +623,7 @@ class TestTask306Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_306(atomic_root, output_dir, uat_mode=True)
+        result = task_306(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -729,7 +634,7 @@ class TestTask306Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_306(atomic_root, output_dir, uat_mode=True)
+        result = task_306(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -740,7 +645,7 @@ class TestTask306Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result = task_306(atomic_root, output_dir, uat_mode=True)
+        result = task_306(atomic_root, output_dir)
 
         assert result is True
         closeout = json.loads((output_dir / "closeout.json").read_text())
@@ -757,7 +662,7 @@ class TestTask306Closeout:
         if output_dir.exists():
             shutil.rmtree(output_dir)
 
-        result = task_306(atomic_root, output_dir, uat_mode=True)
+        result = task_306(atomic_root, output_dir)
 
         assert result is True
         assert output_dir.exists()
@@ -767,12 +672,11 @@ class TestTask306Closeout:
         atomic_root, project_root = temp_project_structure
         output_dir = atomic_root / ".outputs" / "3-tasking"
 
-        result1 = task_306(atomic_root, output_dir, uat_mode=True)
-        result2 = task_306(atomic_root, output_dir, uat_mode=True)
+        result1 = task_306(atomic_root, output_dir)
+        result2 = task_306(atomic_root, output_dir)
 
         assert result1 is True
         assert result2 is True
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

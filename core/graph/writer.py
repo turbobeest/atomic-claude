@@ -6,10 +6,12 @@ Handles node creation, edge creation, updates, and bulk operations.
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from .exceptions import SchemaValidationError
 from .schema import (
+    NodeLabel,
     PROPERTY_DEFAULTS,
     validate_node_properties, validate_relationship,
 )
@@ -26,6 +28,32 @@ _NODE_ID_PROPERTY = {
 def _id_prop(label: str) -> str:
     """Return the ID property name for a given node label."""
     return _NODE_ID_PROPERTY.get(label, "id")
+
+
+# Allowlist of valid node labels derived from the ontology schema.
+_VALID_LABELS: set = {label.value for label in NodeLabel}
+
+
+_SAFE_KEY_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+
+def _validate_property_key(key: str) -> None:
+    """Raise SchemaValidationError if key contains unsafe characters."""
+    if not _SAFE_KEY_RE.match(key):
+        raise SchemaValidationError(
+            f"Invalid property key '{key}'. "
+            "Keys must match [a-zA-Z_][a-zA-Z0-9_]*.",
+        )
+
+
+def _validate_label(label_str: str) -> None:
+    """Raise SchemaValidationError if label_str is not in the schema allowlist."""
+    if label_str not in _VALID_LABELS:
+        raise SchemaValidationError(
+            f"Unknown node label '{label_str}'. "
+            f"Valid labels: {sorted(_VALID_LABELS)}",
+            label=label_str,
+        )
 
 
 class GraphWriter:
@@ -58,6 +86,7 @@ class GraphWriter:
             QueryError: If Cypher execution fails
         """
         label_str = label if isinstance(label, str) else label.value
+        _validate_label(label_str)
 
         # Apply defaults
         defaults = PROPERTY_DEFAULTS.get(label_str, {})
@@ -72,6 +101,7 @@ class GraphWriter:
         param_pairs = []
         params = {}
         for i, (key, value) in enumerate(merged.items()):
+            _validate_property_key(key)
             param_name = f"p{i}"
             param_pairs.append(f"{key}: ${param_name}")
             params[param_name] = value
@@ -99,6 +129,7 @@ class GraphWriter:
             QueryError: If Cypher execution fails
         """
         label_str = label if isinstance(label, str) else label.value
+        _validate_label(label_str)
 
         if not updates:
             return False
@@ -106,6 +137,7 @@ class GraphWriter:
         set_clauses = []
         params = {"node_id": node_id}
         for i, (key, value) in enumerate(updates.items()):
+            _validate_property_key(key)
             param_name = f"u{i}"
             set_clauses.append(f"n.{key} = ${param_name}")
             params[param_name] = value
@@ -131,6 +163,7 @@ class GraphWriter:
             True if node was found and deleted
         """
         label_str = label if isinstance(label, str) else label.value
+        _validate_label(label_str)
         cypher = f"MATCH (n:{label_str} {{id: $node_id}}) DETACH DELETE n RETURN count(n) AS c"
         result = self.conn.query(cypher, {"node_id": node_id})
         deleted = result.result_set[0][0] > 0 if result.result_set else False
@@ -159,6 +192,8 @@ class GraphWriter:
         rel_str = rel_type if isinstance(rel_type, str) else rel_type.value
         from_str = from_label if isinstance(from_label, str) else from_label.value
         to_str = to_label if isinstance(to_label, str) else to_label.value
+        _validate_label(from_str)
+        _validate_label(to_str)
 
         # Validate relationship
         error = validate_relationship(rel_str, from_str, to_str)
@@ -170,6 +205,7 @@ class GraphWriter:
         if properties:
             prop_pairs = []
             for i, (key, value) in enumerate(properties.items()):
+                _validate_property_key(key)
                 param_name = f"rp{i}"
                 prop_pairs.append(f"{key}: ${param_name}")
                 params[param_name] = value
@@ -201,6 +237,8 @@ class GraphWriter:
         rel_str = rel_type if isinstance(rel_type, str) else rel_type.value
         from_str = from_label if isinstance(from_label, str) else from_label.value
         to_str = to_label if isinstance(to_label, str) else to_label.value
+        _validate_label(from_str)
+        _validate_label(to_str)
 
         from_id_prop = _id_prop(from_str)
         to_id_prop = _id_prop(to_str)

@@ -27,7 +27,7 @@ from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, prompt_user, clear_input_buffer
 )
-from core.utils.file_ops import ensure_dir, read_file, write_file
+from core.utils.file_ops import read_file, write_file
 
 try:
     from core.sandbox import generate_sandbox_config
@@ -45,7 +45,7 @@ CHECKS_FAIL = 0
 CHECKS_WARN = 0
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 005: Repository & System Setup.
 
@@ -55,7 +55,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -125,7 +124,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     # Git configuration
-    _validate_git(report_file, uat_mode)
+    _validate_git(report_file)
 
     # System capabilities
     _assess_cpu(report_file, os_type)
@@ -196,7 +195,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         mem.configuration(f"Routing: {'Ollama-enabled' if ollama_configured else 'API-only'}")
 
     # Handle failures
-    if CHECKS_FAIL > 0 and not uat_mode:
+    if CHECKS_FAIL > 0:
         return _handle_validation_failure()
 
     if CHECKS_WARN > 0:
@@ -412,7 +411,7 @@ def _configure_routing(ollama_configured: bool) -> Dict[str, str]:
 # Git validation (from task_005)
 # ---------------------------------------------------------------------------
 
-def _validate_git(report_file: Path, uat_mode: bool = False) -> None:
+def _validate_git(report_file: Path) -> None:
     """Validate Git configuration including remote repository."""
     global CHECKS_PASS, CHECKS_WARN
 
@@ -472,12 +471,12 @@ def _validate_git(report_file: Path, uat_mode: bool = False) -> None:
 
     # Check remote repository
     if is_git_repo:
-        _validate_git_remote(report_file, uat_mode)
+        _validate_git_remote(report_file)
 
     print()
 
 
-def _validate_git_remote(report_file: Path, uat_mode: bool = False) -> None:
+def _validate_git_remote(report_file: Path) -> None:
     """Check for git remote and offer to configure one if missing."""
     global CHECKS_PASS, CHECKS_WARN
 
@@ -508,12 +507,6 @@ def _validate_git_remote(report_file: Path, uat_mode: bool = False) -> None:
     else:
         print(print_yellow("    ! No remote repository configured"))
         print(print_dim("      Phase 9 (Release) needs a remote to push to."))
-
-        if uat_mode:
-            print(print_dim("      Skipping remote setup (UAT mode)"))
-            _add_check(report_file, "git_remote", "warn", "recommended", "")
-            CHECKS_WARN += 1
-            return
 
         print()
         print(print_dim("      Enter a remote URL to configure 'origin', or press Enter to skip."))
@@ -1021,7 +1014,10 @@ def _show_summary(
             print(print_yellow(f"    ! Warnings: {CHECKS_WARN}"))
 
     # System capability summary
-    report = json.loads(read_file(report_file))
+    try:
+        report = json.loads(read_file(report_file))
+    except (json.JSONDecodeError, FileNotFoundError, OSError):
+        report = {}
     caps = report.get('capabilities', {})
 
     cores = caps.get('cpu', {}).get('cores', 0)
@@ -1073,10 +1069,8 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
 
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

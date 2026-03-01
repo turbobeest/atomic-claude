@@ -12,21 +12,20 @@ from datetime import datetime, timezone
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.ui import success, error, warning, info, step
+from core.ui import success, warning, step
 from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, RED, YELLOW, NC
 from core.utils.file_ops import read_json, write_json
 
 logger = logging.getLogger(__name__)
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 902: Release Setup.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -41,20 +40,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     step("Release Setup")
 
     release_dir.mkdir(parents=True, exist_ok=True)
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(f"  {DIM}UAT Mode: Creating minimal valid output{NC}")
-
-        # Create minimal release setup
-        write_json(release_setup_file, {
-            "version": "0.1.0",
-            "release_type": "internal",
-            "confirmed": True
-        })
-
-        success("UAT bypass complete")
-        return True
 
     print()
     print(f"  {DIM}Final confirmation before release.{NC}")
@@ -228,10 +213,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    result = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    result = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if result else 1)

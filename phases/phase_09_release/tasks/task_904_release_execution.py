@@ -16,7 +16,7 @@ from typing import Optional
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.ui import success, error, warning, info, step
+from core.ui import success, step
 from core.llm import invoke_llm
 from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, YELLOW, NC
 from core.utils.file_ops import read_json, write_json, read_file, write_file
@@ -61,14 +61,13 @@ def find_agent_prompt(agent_name: str, agent_repo: Path) -> Optional[str]:
     return None
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 904: Release Execution.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass LLM calls for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -85,22 +84,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     release_dir.mkdir(parents=True, exist_ok=True)
     prompts_dir.mkdir(parents=True, exist_ok=True)
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(f"  {DIM}UAT Mode: Creating minimal valid output{NC}")
-
-        # Create minimal execution file
-        write_json(execution_file, {
-            "status": "executed",
-            "executed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "uat_mode": True
-        })
-
-        write_file(announcement_file, "# Release Announcement (UAT)\n\nRelease executed in UAT mode.\n")
-
-        success("UAT bypass complete")
-        return True
 
     print()
     print(f"  {DIM}Executing release to distribution channels.{NC}")
@@ -185,7 +168,9 @@ def _gather_context(project_root: Path, atomic_root: Path) -> str:
 
     if prd_file.exists():
         try:
-            prd_content = read_file(prd_file)
+            content = read_file(prd_file)
+            lines = content.splitlines(keepends=True)[:200]
+            prd_content = "".join(lines)
             project_context += f"## PRD\n{prd_content}\n\n"
         except Exception as e:
             logger.debug("Failed to read PRD file: %s", e)
@@ -220,6 +205,9 @@ def _gather_context(project_root: Path, atomic_root: Path) -> str:
     if phase_summaries:
         project_context += "## Phase Outcomes (Phases 5-8)\n\n"
         project_context += "\n\n".join(phase_summaries) + "\n\n"
+
+    # Limit project context size to avoid oversized LLM prompts
+    project_context = project_context[:8000]
 
     return project_context
 
@@ -387,10 +375,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip LLM calls)')
-
     args = parser.parse_args()
 
-    result = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    result = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if result else 1)

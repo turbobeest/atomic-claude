@@ -15,7 +15,7 @@ import logging
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Tuple
+from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +24,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from core.ui import success, warning, step
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 109: Phase Closeout.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, auto-approve closeout
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -45,16 +44,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     step("Phase Closeout")
 
     closeout_dir.mkdir(parents=True, exist_ok=True)
-
-    # UAT Mode: Auto-approve closeout
-    if uat_mode:
-        print()
-        print("  ⚡ UAT Mode: Auto-approving closeout")
-        print()
-
-        _create_uat_closeout(closeout_file, closeout_json)
-        success("Phase closeout complete (UAT mode)")
-        return True
 
     print()
     print("  ┌─────────────────────────────────────────────────────────┐")
@@ -229,7 +218,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print("║      Phase 1 Complete!                                        ║")
     print("║      Great work. See you in PRD.                              ║")
     print("║                                                               ║")
-    print("╔═══════════════════════════════════════════════════════════════╝")
+    print("╚═══════════════════════════════════════════════════════════════╝")
     print()
 
     # Record substantive memory
@@ -350,9 +339,9 @@ Phase 1 (Discovery) has been completed successfully.
 | CORPUS-INDEX.md | Organized corpus index |
 | dialogue.json | Opening dialogue capture |
 | approaches.json | Generated solution approaches |
-| first-principles.json | First principles analysis |
+| consensus.json | Agreed positions and next steps |
 | selected-approach.json | Human-selected approach (includes confirmed direction) |
-| deliberation-log.json | Multi-agent discussion log |
+| deliberation-log.md | Multi-agent discussion log |
 | docs/diagrams/*.dot | Architecture diagrams (DOT format) |
 | docs/diagrams/*.svg | Architecture diagrams (SVG visual) |
 
@@ -395,7 +384,7 @@ def _generate_json_closeout(closeout_json: Path, approach_name: str, corpus_coun
     timestamp = datetime.now(timezone.utc).isoformat()
 
     data = {
-        "phase": 1,
+        "phase": "1-discovery",
         "name": "Discovery",
         "status": "complete",
         "completed_at": timestamp,
@@ -410,32 +399,10 @@ def _generate_json_closeout(closeout_json: Path, approach_name: str, corpus_coun
         json.dump(data, f, indent=2)
 
 
-def _create_uat_closeout(closeout_file: Path, closeout_json: Path) -> None:
-    """Create minimal closeout files for UAT mode."""
-    closeout_file.write_text("""# Phase 1: Discovery - Closeout
-
-## UAT Mode
-
-Phase 1 closeout auto-approved in UAT mode.
-
-## Status
-- All tasks completed
-- Ready for Phase 2 (PRD)
-""")
-
-    with open(closeout_json, 'w') as f:
-        json.dump({
-            "phase": "1-discovery",
-            "status": "complete",
-            "approved": True,
-            "mode": "uat"
-        }, f, indent=2)
-
 
 if __name__ == "__main__":
     # CLI execution support
     atomic_root = Path.cwd()
     output_dir = atomic_root.parent / ".outputs" / "1-discovery"
-    uat_mode = "--uat" in sys.argv
 
-    sys.exit(0 if execute(atomic_root, output_dir, uat_mode) else 1)
+    sys.exit(0 if execute(atomic_root, output_dir) else 1)

@@ -22,14 +22,13 @@ from core.utils.file_ops import read_json, write_json, write_file
 logger = logging.getLogger(__name__)
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 807: Phase Closeout.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -48,24 +47,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     closeout_dir.mkdir(parents=True, exist_ok=True)
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(print_dim("  UAT Mode: Creating minimal valid output"))
-
-        # Create minimal closeout files
-        write_file(closeout_file, "# Phase 8: Deployment Prep - Closeout (UAT)\n\nDeployment artifacts prepared and approved in UAT mode.\n")
-
-        closeout_data = {
-            "phase": "8-deployment-prep",
-            "status": "complete",
-            "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-            "uat_mode": True
-        }
-        write_json(closeout_json, closeout_data)
-
-        print(print_green("✓ UAT bypass complete"))
-        return True
 
     print()
     print(print_dim("  Final review before moving to Phase 9 (Release)."))
@@ -330,12 +311,10 @@ def _format_checklist_markdown(checklist: List[str]) -> str:
         status = parts[1] if len(parts) > 1 else "UNKNOWN"
         if status == "PASS":
             lines.append(f"- [x] {name}")
-        elif status == "WARN":
-            lines.append(f"- [~] {name} (warning)")
         elif status == "FAIL":
             lines.append(f"- [ ] {name} (failed)")
-        elif status in ["SKIP", "DEFERRED"]:
-            lines.append(f"- [-] {name} (deferred)")
+        else:
+            lines.append(f"- [?] {name} (unknown)")
     return "\n".join(lines)
 
 
@@ -347,10 +326,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

@@ -103,14 +103,13 @@ def _display_agent_roles() -> None:
     print()
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 703: Agent Selection.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -155,50 +154,39 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     # PLACEHOLDER agent IDs -- validate against agent-manifest.json when available
-    if uat_mode:
-        # UAT mode: use defaults
-        selected_agents = [
-            "e2e-test-runner-phd:sonnet",
-            "acceptance-validator-phd:sonnet",
-            "performance-tester-phd:haiku",
-            "integration-reporter-phd:haiku"
-        ]
-        print(print_yellow("UAT Mode: Using default agents"))
-        print()
-    else:
-        print(print_dim("Select agents for each role:"))
-        print()
+    print(print_dim("Select agents for each role:"))
+    print()
 
-        clear_input_buffer()
-        selected_agents = []
+    clear_input_buffer()
+    selected_agents = []
 
-        selected_agents.append(_select_agent_for_role(
-            "E2E Test Runner", print_cyan,
-            ["e2e-test-runner-phd:sonnet", "e2e-test-runner:haiku"],
-            default_idx=0,
-        ))
-        print()
+    selected_agents.append(_select_agent_for_role(
+        "E2E Test Runner", print_cyan,
+        ["e2e-test-runner-phd:sonnet", "e2e-test-runner:haiku"],
+        default_idx=0,
+    ))
+    print()
 
-        selected_agents.append(_select_agent_for_role(
-            "Acceptance Validator", print_magenta,
-            ["acceptance-validator-phd:sonnet", "acceptance-validator:haiku"],
-            default_idx=0,
-        ))
-        print()
+    selected_agents.append(_select_agent_for_role(
+        "Acceptance Validator", print_magenta,
+        ["acceptance-validator-phd:sonnet", "acceptance-validator:haiku"],
+        default_idx=0,
+    ))
+    print()
 
-        selected_agents.append(_select_agent_for_role(
-            "Performance Tester", print_yellow,
-            ["performance-tester-phd:haiku", "performance-tester-deep:sonnet"],
-            default_idx=0,
-        ))
-        print()
+    selected_agents.append(_select_agent_for_role(
+        "Performance Tester", print_yellow,
+        ["performance-tester-phd:haiku", "performance-tester-deep:sonnet"],
+        default_idx=0,
+    ))
+    print()
 
-        selected_agents.append(_select_agent_for_role(
-            "Integration Reporter", print_blue,
-            ["integration-reporter-phd:haiku", "integration-reporter-detailed:sonnet"],
-            default_idx=0,
-        ))
-        print()
+    selected_agents.append(_select_agent_for_role(
+        "Integration Reporter", print_blue,
+        ["integration-reporter-phd:haiku", "integration-reporter-detailed:sonnet"],
+        default_idx=0,
+    ))
+    print()
 
     # ─────────────────────────────────────────────────────────────────────────
     # SELECTION SUMMARY
@@ -240,10 +228,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

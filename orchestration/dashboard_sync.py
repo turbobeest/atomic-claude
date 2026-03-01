@@ -150,8 +150,19 @@ def write_current_task(phase_id: str, task_id: str, task_name: str,
             if entry.name != "\u2014"  # Skip placeholder entries
         ]
 
-    from core.utils.file_ops import write_json
-    write_json(state_dir / "current-task.json", data)
+    # Atomic write: temp file + os.replace to prevent corrupt JSON on crash
+    target = state_dir / "current-task.json"
+    fd, tmp = tempfile.mkstemp(dir=state_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def update_current_task_provider(provider: str, model: str = None,
@@ -523,8 +534,14 @@ def fix_state_inconsistencies(atomic_root: Optional[Path] = None):
 
             file_age = time.time() - os.path.getmtime(current_task_file)
             if file_age > 300:  # 5 minutes
-                current_task_file.unlink()
-                print("✓ Cleared stale current-task.json")
+                # Only delete if task is not actively running (M9 fix).
+                # Long-running LLM tasks (10+ min) should not have their
+                # marker deleted while still active.
+                if not current.get("active", False):
+                    current_task_file.unlink()
+                    print("✓ Cleared stale current-task.json")
+                else:
+                    logger.debug("current-task.json is old but marked active — keeping")
 
         except (json.JSONDecodeError, OSError):
             current_task_file.unlink()

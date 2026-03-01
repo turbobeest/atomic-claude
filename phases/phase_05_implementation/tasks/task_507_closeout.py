@@ -9,7 +9,7 @@ import logging
 import sys
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -140,6 +140,7 @@ def get_closeout_metrics(
 def build_checklist(
     m: Dict[str, Any],
     audit_file: Path,
+    output_dir: Path = None,
 ) -> Tuple[List[str], bool]:
     """
     Build closeout checklist from real metrics.
@@ -149,11 +150,24 @@ def build_checklist(
     and their display are tightly coupled.  A future refactor could separate
     them, but the current approach keeps the checklist rendering self-contained.
 
+    Args:
+        m: Metrics dict from get_closeout_metrics()
+        audit_file: Path to audit report JSON
+        output_dir: Phase output directory (used to read tdd-setup.json for coverage target)
+
     Returns:
         Tuple of (checklist items, all_passed bool)
     """
     checklist = []
     all_passed = True
+
+    # Read configured coverage target from tdd-setup.json (default 80%)
+    coverage_target = 80
+    if output_dir:
+        setup_data = _load_json(output_dir / "tdd-setup.json")
+        configured = setup_data.get("coverage_targets", {}).get("unit")
+        if isinstance(configured, (int, float)) and configured > 0:
+            coverage_target = configured
 
     # TDD completion
     if m["tasks_completed"] >= m["tasks_total"] and m["tasks_total"] > 0:
@@ -182,15 +196,16 @@ def build_checklist(
         checklist.append("Test suite:SKIP")
 
     # Coverage
+    coverage_warn = max(coverage_target - 10, 0)
     if m["unit_coverage"] > 0:
-        if m["unit_coverage"] >= 80:
-            print(print_green(f"  [CRIT] + Coverage >= 80% ({m['unit_coverage']}%)"))
+        if m["unit_coverage"] >= coverage_target:
+            print(print_green(f"  [CRIT] + Coverage >= {coverage_target}% ({m['unit_coverage']}%)"))
             checklist.append("Coverage:PASS")
-        elif m["unit_coverage"] >= 70:
-            print(print_yellow(f"  [CRIT] ~ Coverage {m['unit_coverage']}% (target: 80%)"))
+        elif m["unit_coverage"] >= coverage_warn:
+            print(print_yellow(f"  [CRIT] ~ Coverage {m['unit_coverage']}% (target: {coverage_target}%)"))
             checklist.append("Coverage:WARN")
         else:
-            print(print_red(f"  [CRIT] X Coverage below 70% ({m['unit_coverage']}%)"))
+            print(print_red(f"  [CRIT] X Coverage below {coverage_warn}% ({m['unit_coverage']}%)"))
             checklist.append("Coverage:FAIL")
             all_passed = False
     else:
@@ -254,14 +269,13 @@ def build_checklist(
     return checklist, all_passed
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 507: Phase Closeout.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -283,53 +297,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     progress_file = output_dir / "tdd-progress.json"
     state_dir = atomic_root / ".state"
 
-    # UAT Mode Bypass
-    if uat_mode:
-        print()
-        print(print_yellow("  UAT Mode: Auto-approving closeout, creating minimal artifacts"))
-        print()
-
-        ensure_dir(closeout_dir)
-
-        closeout_md = """# Phase 5: Implementation - Closeout (UAT Mode)
-
-## Summary
-Phase 5 completed in UAT mode with stub implementation files.
-
-## Metrics
-- Tasks: 3/3 complete
-- Test Coverage: N/A (UAT mode)
-- Security Issues: 0 critical
-
-## Status
-COMPLETE (UAT Mode)
-
-## Next Phase
-Phase 6: Code Review
-"""
-        write_file(closeout_file, closeout_md)
-
-        closeout_data = {
-            "phase": 5,
-            "status": "complete",
-            "mode": "uat",
-            "completion": {
-                "tasks_completed": 3,
-                "tasks_total": 3,
-                "completion_rate": 100
-            },
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "next_phase": 6
-        }
-        write_file(closeout_json, json.dumps(closeout_data, indent=2))
-
-        print(print_green("  Generated phase-05-closeout.md (UAT mode)"))
-        print(print_green("  Generated phase-05-closeout.json (UAT mode)"))
-        print()
-
-        print(print_green("  Phase 5 closeout complete (UAT mode)"))
-        return True
-
     ensure_dir(closeout_dir)
 
     print()
@@ -347,7 +314,7 @@ Phase 6: Code Review
     print(print_bold("CLOSEOUT CHECKLIST"))
     print()
 
-    checklist, all_passed = build_checklist(m, audit_file)
+    checklist, all_passed = build_checklist(m, audit_file, output_dir=output_dir)
 
     print()
 
@@ -576,10 +543,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

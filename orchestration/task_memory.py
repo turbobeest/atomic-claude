@@ -6,7 +6,7 @@ record decisions, findings, configuration changes, and conversation summaries.
 The orchestrator writes the accumulated content to memory after task completion.
 
 Usage in tasks:
-    def execute(atomic_root, output_dir, uat_mode=False, mem=None):
+    def execute(atomic_root, output_dir, mem=None):
         # ... task logic ...
         if mem:
             mem.finding("Detected 3 providers")

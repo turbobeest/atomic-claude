@@ -45,9 +45,7 @@ from phases.phase_02_prd.tasks import (
 
 # Get paths from environment
 ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
-PROJECT_ROOT = ATOMIC_ROOT.parent
-OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', PROJECT_ROOT / '.outputs' / '2-prd'))
-UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
+OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '2-prd'))
 
 
 def run_phase(resume_at: str = None) -> bool:
@@ -100,7 +98,6 @@ def run_phase(resume_at: str = None) -> bool:
         task_artifacts=task_artifacts,
         atomic_root=ATOMIC_ROOT,
         output_dir=OUTPUT_DIR,
-        uat_mode=UAT_MODE,
         resume_at=resume_at,
         graph=graph,
     )
@@ -110,32 +107,32 @@ def run_phase(resume_at: str = None) -> bool:
 
 def task_201_entry_validation(mem=None, graph=None) -> bool:
     """Task 201: Entry validation"""
-    return task_201(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_201(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_202_prd_setup(mem=None, graph=None) -> bool:
     """Task 202: PRD setup"""
-    return task_202(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_202(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_203_prd_interview(mem=None, graph=None) -> bool:
     """Task 203: PRD interview"""
-    return task_203(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_203(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_204_agent_selection(mem=None, graph=None) -> bool:
     """Task 204: Agent selection"""
-    return task_204(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_204(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_205_prd_authoring(mem=None, graph=None) -> bool:
     """Task 205: PRD authoring"""
-    return task_205(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_205(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_206_prd_validation(mem=None, graph=None) -> bool:
     """Task 206: PRD validation"""
-    return task_206(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_206(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 # task_206b is a helper module called internally by task_206 when validation fails
@@ -144,17 +141,17 @@ def task_206_prd_validation(mem=None, graph=None) -> bool:
 
 def task_207_prd_approval(mem=None, graph=None) -> bool:
     """Task 207: PRD approval"""
-    return task_207(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_207(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_208_phase_audit(mem=None, graph=None) -> bool:
     """Task 208: Phase audit"""
-    return task_208(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_208(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_209_closeout(mem=None, graph=None) -> bool:
     """Task 209: Closeout"""
-    return task_209(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_209(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
-    print_bold, print_cyan, print_yellow, print_green,
+    print_bold, print_cyan, print_green,
     print_red, print_dim
 )
 from core.utils.file_ops import read_json, write_json
@@ -36,16 +36,15 @@ def run_integration_tests(atomic_root: Path, setup_data: Dict) -> Dict:
     """
     # STUB: Returns simulated results. Implement actual test execution
     # (pytest, cargo test, etc.) for production use.
-    test_environments = setup_data.get("test_environments", [])
-    integration_points = setup_data.get("integration_points", [])
+    acceptance_criteria = setup_data.get("acceptance_criteria", {})
 
     total_tests = 0
     passed = 0
-    failed = 0
     test_details = []
 
     # E2E test suite
-    e2e_tests = max(len(integration_points), 5)
+    criteria_count = acceptance_criteria.get("total", 5) if isinstance(acceptance_criteria, dict) else 5
+    e2e_tests = max(criteria_count, 5)
     e2e_passed = e2e_tests  # Assume passing in default implementation
     total_tests += e2e_tests
     passed += e2e_passed
@@ -94,14 +93,13 @@ def run_integration_tests(atomic_root: Path, setup_data: Dict) -> Dict:
     }
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 704: Testing Execution.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, generate stub test results
 
     Returns:
         True if task completed successfully, False otherwise
@@ -116,35 +114,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # UAT Mode: Generate stub results
-    if uat_mode:
-        print(print_yellow("  UAT Mode: Generating stub test results"))
-        print()
-
-        results = {
-            "tests_run": 18,
-            "tests_passed": 18,
-            "tests_failed": 0,
-            "summary": "All integration tests passed (UAT stub)",
-            "success_rate": 100.0,
-            "executed_at": datetime.now(timezone.utc).isoformat(),
-            "mode": "uat",
-            "simulated": True,
-            "test_suites": [
-                {"suite": "e2e", "total": 8, "passed": 8, "failed": 0, "simulated": True},
-                {"suite": "acceptance", "total": 7, "passed": 7, "failed": 0, "simulated": True},
-                {"suite": "performance", "total": 3, "passed": 3, "failed": 0, "simulated": True}
-            ]
-        }
-
-        write_json(results_file, results)
-
-        print(print_green("  Integration tests complete (UAT mode)"))
-        print(print_green(f"    Tests: {results['tests_passed']}/{results['tests_run']} passed"))
-        print(print_green(f"    Success rate: {results['success_rate']}%"))
-        return True
-
-    # Normal Mode: Run actual integration tests
+    # Run actual integration tests
     print(print_bold("  INTEGRATION TEST EXECUTION"))
     print()
 
@@ -191,8 +161,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     # Build summary
-    if success_rate >= 95:
+    if success_rate == 100:
         summary = f"All integration tests passed ({tests_passed}/{tests_run})"
+    elif success_rate >= 95:
+        summary = f"Integration tests passed ({tests_passed}/{tests_run}, {tests_failed} minor failure(s))"
     elif success_rate >= 80:
         summary = f"Most integration tests passed ({tests_passed}/{tests_run}, {tests_failed} failures)"
     else:
@@ -230,10 +202,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (generate stub results)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

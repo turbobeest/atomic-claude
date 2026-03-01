@@ -24,14 +24,13 @@ from core.utils.file_ops import ensure_dir, read_file, write_file
 from core.memory import memory_save, MemoryEntryType
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 606: Phase Closeout.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -55,13 +54,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_dim("Final review before moving to Phase 7 (Integration Testing)."))
     print()
 
-    # UAT Mode Bypass
-    if uat_mode:
-        print(print_yellow("UAT Mode: Creating minimal valid output"))
-        # Orchestrator will create closeout.json automatically
-        print(print_green("✓ UAT bypass complete"))
-        return True
-
     ensure_dir(closeout_dir)
 
     # Run closeout checklist
@@ -70,7 +62,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     )
 
     # Get closeout approval
-    if not _get_closeout_approval(all_passed, review_dir, uat_mode):
+    if not _get_closeout_approval(all_passed, review_dir):
         return False
 
     # Generate closeout documents
@@ -241,11 +233,8 @@ def _run_closeout_checklist(
     return checklist, all_passed
 
 
-def _get_closeout_approval(all_passed: bool, review_dir: Path, uat_mode: bool) -> bool:
+def _get_closeout_approval(all_passed: bool, review_dir: Path) -> bool:
     """Get closeout approval from user."""
-    if uat_mode:
-        return True
-
     print()
     print(print_bold("- CLOSEOUT APPROVAL"))
     print()
@@ -487,10 +476,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

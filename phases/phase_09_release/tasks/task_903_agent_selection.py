@@ -4,6 +4,7 @@ Task 903: Agent Selection
 Present and select release agents for announcement writing.
 """
 
+import re
 import sys
 import logging
 from pathlib import Path
@@ -13,45 +14,27 @@ from typing import List
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.ui import success, error, warning, info, step
+from core.ui import success, warning, step
 from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, YELLOW, NC
 from core.utils.file_ops import write_json
 
 logger = logging.getLogger(__name__)
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 903: Agent Selection.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
     """
-    project_root = atomic_root.parent
-
     agents_file = output_dir / "release-agents.json"
 
     step("Agent Selection")
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(f"  {DIM}UAT Mode: Creating minimal valid output{NC}")
-
-        # Create minimal output that satisfies downstream tasks
-        output_dir.mkdir(parents=True, exist_ok=True)
-        selected_agents_file = output_dir / "release-agents.json"
-        write_json(selected_agents_file, {
-            "agents": ["announcement-writer-phd:haiku"],
-            "count": 1
-        })
-
-        success("UAT bypass complete")
-        return True
 
     print()
     print(f"  {DIM}Select agents for release execution.{NC}")
@@ -68,14 +51,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(f"    Announcement Writer ────→  Release Confirmation")
     print(f"        {DIM}(internal notes){NC}          {DIM}(human gate){NC}")
     print()
-
-    # Future workflow with external channels (hidden for now):
-    # print(f"    GitHub Releaser ─────────┐")
-    # print(f"        {DIM}(create tag){NC}         │")
-    # print(f"    Package Publisher ───────┼→  Release Confirmation")
-    # print(f"        {DIM}(registry upload){NC}    │       {DIM}(human gate){NC}")
-    # print(f"    Announcement Writer ─────┘")
-    # print(f"        {DIM}(stakeholder comms){NC}")
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # AVAILABLE AGENTS
@@ -128,8 +103,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     elif ann_choice.lower() in ["c", "custom"]:
         try:
             custom_name = input("  Custom agent name: ").strip()
-            custom_model = input("  Custom agent model (default: haiku): ").strip() or "haiku"
-            selected_agents.append(f"{custom_name}:{custom_model}")
+            if not custom_name:
+                print("  ⚠  Empty agent name. Defaulting to announcement-writer-phd:haiku")
+                selected_agents.append("announcement-writer-phd:haiku")
+            elif not re.match(r'^[A-Za-z0-9_-]+$', custom_name):
+                print(f"  ⚠  Invalid agent name '{custom_name}'. Only alphanumeric, hyphens, and underscores allowed.")
+                print("  Defaulting to announcement-writer-phd:haiku")
+                selected_agents.append("announcement-writer-phd:haiku")
+            else:
+                custom_model = input("  Custom agent model (default: haiku): ").strip() or "haiku"
+                selected_agents.append(f"{custom_name}:{custom_model}")
         except (EOFError, KeyboardInterrupt):
             logger.debug("Non-interactive mode: defaulting to announcement-writer-phd:haiku")
             selected_agents.append("announcement-writer-phd:haiku")
@@ -186,10 +169,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    result = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    result = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if result else 1)

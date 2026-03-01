@@ -19,7 +19,6 @@ import json
 import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +54,13 @@ EXPECTED_SECTIONS = [
 ]
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 206: PRD Validation.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, auto-pass validation for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -73,13 +71,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     prompts_dir = output_dir / "prompts"
 
     ensure_dir(prompts_dir)
-
-    # UAT mode bypass
-    if uat_mode:
-        print(print_yellow("  UAT mode: Auto-passing validation..."))
-        create_passing_validation(validation_file, prd_file)
-        print(print_green("✓ UAT mode: Validation passed (auto-approved)"))
-        return True
 
     print()
     print(print_dim("  ┌─────────────────────────────────────────────────────────┐"))
@@ -183,68 +174,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     return False
 
 
-def create_passing_validation(validation_file: Path, prd_file: Path) -> None:
-    """
-    Create passing validation result for UAT.
-
-    Args:
-        validation_file: Path to validation file
-        prd_file: Path to PRD file
-    """
-    sections_found = 10
-    if prd_file.exists():
-        content = read_file(prd_file)
-        sections_found = len(re.findall(r'^##\s', content, re.MULTILINE))
-
-    validation_data = {
-        "audit_timestamp": datetime.now(timezone.utc).isoformat(),
-        "overall_status": "PASS",
-        "overall_score": 85,
-        "completeness": {
-            "status": "PASS",
-            "score": 85,
-            "gaps": [],
-            "phase1_alignment": "UAT mode - validation bypassed"
-        },
-        "testability": {
-            "status": "PASS",
-            "score": 80,
-            "rfc2119_usage": "Adequate",
-            "scenario_coverage": "Minimal scenarios present",
-            "issues": []
-        },
-        "taskmaster_compatibility": {
-            "status": "PASS",
-            "score": 85,
-            "has_dependency_chain": True,
-            "has_explicit_tech_stack": True,
-            "has_scope_based_phases": True,
-            "issues": []
-        },
-        "openspec_compatibility": {
-            "status": "PASS",
-            "score": 80,
-            "scenario_format_correct": True,
-            "issues": []
-        },
-        "consistency": {
-            "status": "PASS",
-            "contradictions": [],
-            "ambiguous_items": []
-        },
-        "sample_gherkin": [
-            "Feature: Core Feature\n  Scenario: Basic test\n    Given system is ready\n    When user acts\n    Then outcome occurs"
-        ],
-        "recommendations": [],
-        "proceed_recommendation": True,
-        "proceed_rationale": "UAT mode - automated validation passed with minimal checks",
-        "sections_found": sections_found,
-        "mode": "uat"
-    }
-
-    write_file(validation_file, json.dumps(validation_data, indent=2))
-
-
 def validate_structure(prd_file: Path) -> Tuple[int, List[str]]:
     """
     Validate PRD structure.
@@ -322,9 +251,12 @@ def handle_structural_failure(prd_file: Path, sections_missing: List[str]) -> bo
 
     if choice == "path":
         new_path = prompt_user("  Path to PRD file: ").strip()
-        if new_path and not new_path.lower().endswith('.md'):
+        if not new_path:
+            print(print_red("  ✗ No path provided."))
+            return False
+        if not new_path.lower().endswith('.md'):
             print(print_yellow(f"  ! Warning: '{Path(new_path).name}' does not have a .md extension. Expected a Markdown file."))
-        if Path(new_path).exists():
+        if Path(new_path).is_file():
             # Copy to expected location
             content = read_file(Path(new_path))
             write_file(prd_file, content)
@@ -537,10 +469,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (auto-pass validation)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

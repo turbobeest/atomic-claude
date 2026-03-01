@@ -7,7 +7,7 @@ Stack detection uses a 4-strategy cascade:
   1. Filesystem — check for Cargo.toml, pyproject.toml, etc. in the host project
   2. PRD scan — keyword-match the approved PRD document
   3. Spec/task scan — keyword-match OpenSpec files and task titles
-  4. User prompt — ask interactively (defaults to "python" in UAT mode)
+  4. User prompt — ask interactively
 """
 
 import logging
@@ -179,15 +179,14 @@ def _load_spec_and_task_text(project_root: Path) -> Optional[str]:
     return combined if combined.strip() else None
 
 
-def detect_tech_stack(atomic_root: Path) -> str:
+def _detect_tech_stack_filesystem(atomic_root: Path) -> str:
     """Detect project tech stack from host project configuration files.
 
     Checks the HOST project root (atomic_root.parent), not the atomic-claude
     directory itself -- atomic-claude has its own requirements.txt which would
     always cause false "python" detection.
 
-    This is Strategy 1 (filesystem) only -- kept for backward compatibility.
-    Prefer detect_tech_stack_cascade() for full detection.
+    This is Strategy 1 (filesystem) only.
     """
     project_root = atomic_root.parent
     if (project_root / "Cargo.toml").exists():
@@ -203,7 +202,6 @@ def detect_tech_stack(atomic_root: Path) -> str:
 
 def detect_tech_stack_cascade(
     atomic_root: Path,
-    uat_mode: bool = False,
 ) -> Tuple[str, Dict[str, Any]]:
     """Cascading tech stack detection with 4 strategies.
 
@@ -211,7 +209,7 @@ def detect_tech_stack_cascade(
       1. Filesystem -- check for Cargo.toml, etc.
       2. PRD scan -- keyword-score the approved PRD document
       3. Spec/task scan -- keyword-score OpenSpec + task titles
-      4. User prompt -- interactive fallback (defaults to 'python' in UAT)
+      4. User prompt -- interactive fallback
 
     Returns:
         (detected_stack, metadata_dict) where metadata contains strategy,
@@ -221,7 +219,7 @@ def detect_tech_stack_cascade(
     THRESHOLD = 10  # Minimum score to accept a PRD/spec match
 
     # Strategy 1: Filesystem
-    fs_stack = detect_tech_stack(atomic_root)
+    fs_stack = _detect_tech_stack_filesystem(atomic_root)
     if fs_stack != "unknown":
         return fs_stack, {
             "strategy": "filesystem",
@@ -276,15 +274,7 @@ def detect_tech_stack_cascade(
                 "signals_found": signals_found[:20],
             }
 
-    # Strategy 4: User prompt (or UAT default)
-    if uat_mode:
-        return "python", {
-            "strategy": "uat_default",
-            "confidence": "low",
-            "score": None,
-            "signals_found": [],
-        }
-
+    # Strategy 4: User prompt
     print()
     print(print_yellow("  Stack could not be auto-detected from project files or PRD."))
     print()
@@ -360,14 +350,13 @@ def detect_cpu_count() -> int:
     return 4  # Default fallback
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 502: TDD Setup.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -376,38 +365,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
     setup_file = output_dir / "tdd-setup.json"
     config_file = project_root / ".claude" / "config" / "tdd-tools.json"
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print()
-        print(print_yellow("  UAT Mode: Skipping TDD configuration, creating minimal setup"))
-        print()
-
-        ensure_dir(setup_file.parent)
-
-        detected_stack, stack_meta = detect_tech_stack_cascade(atomic_root, uat_mode=True)
-
-        setup_data = {
-            "coverage_targets": {
-                "unit": 80,
-                "integration": 70
-            },
-            "pyramid_profile": "unit-heavy",
-            "execution": {
-                "mode": "parallel",
-                "workers": 2
-            },
-            "task_count": 3,
-            "detected_stack": detected_stack,
-            "stack_detection": stack_meta,
-            "token_budget_usd": 50.0,
-            "mode": "uat",
-            "configured_at": datetime.now(timezone.utc).isoformat()
-        }
-        write_file(setup_file, json.dumps(setup_data, indent=2))
-
-        print(print_green("  TDD Setup complete (UAT mode)"))
-        return True
 
     ensure_dir(setup_file.parent)
     ensure_dir(config_file.parent)
@@ -552,14 +509,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     cpu_count = detect_cpu_count()
     optimal_workers = min(4, cpu_count, task_count if task_count > 0 else 4)
 
-    # Check for blockers
-    blocked = False  # In real implementation, analyze task dependencies
-
-    if blocked:
-        print(print_yellow("  ! Cross-task dependencies detected. Falling back to sequential execution."))
-        optimal_workers = 1
-    else:
-        print(print_green("  No blockers detected. Parallel execution enabled."))
+    print(print_green("  No blockers detected. Parallel execution enabled."))
 
     print()
     print("  " + "─" * 114)
@@ -588,7 +538,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_bold("TECH STACK DETECTION"))
     print()
 
-    detected_stack, stack_meta = detect_tech_stack_cascade(atomic_root, uat_mode=False)
+    detected_stack, stack_meta = detect_tech_stack_cascade(atomic_root)
     strategy = stack_meta.get("strategy", "unknown")
     confidence = stack_meta.get("confidence", "unknown")
 
@@ -756,10 +706,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

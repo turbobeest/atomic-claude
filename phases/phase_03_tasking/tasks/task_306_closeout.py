@@ -30,14 +30,13 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 306: Phase Closeout.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -51,34 +50,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     packages_file = project_root / ".taskmaster" / "reports" / "work-packages.json"
 
     ensure_dir(closeout_dir)
-
-    # UAT Mode: Auto-approve closeout
-    if uat_mode:
-        print()
-        print(print_yellow("⚡ UAT Mode: Auto-approving closeout"))
-        print()
-
-        write_file(closeout_file, """# Phase 3: Tasking - Closeout
-
-## UAT Mode
-
-Phase 3 closeout auto-approved in UAT mode.
-
-## Status
-- All tasks completed
-- Ready for Phase 4 (Specification)
-""")
-
-        closeout_data = {
-            "phase": "3-tasking",
-            "status": "complete",
-            "approved": True,
-            "mode": "uat"
-        }
-        write_file(closeout_json, json.dumps(closeout_data, indent=2))
-
-        print(print_green("✓ Phase closeout complete (UAT mode)"))
-        return True
 
     print()
     print(print_dim("Final review before moving to Phase 4 (Specification)."))
@@ -160,7 +131,7 @@ Phase 3 closeout auto-approved in UAT mode.
     _memory_checkpoint(metrics)
 
     # Session End
-    _show_session_end(closeout_file, tasks_file)
+    _show_session_end()
 
     print(print_green("✓ Phase 3 closeout complete"))
     return True
@@ -243,8 +214,8 @@ def _run_checklist(
                 checklist.append(("Audit", "FAIL"))
         except Exception as e:
             logger.debug("Audit file parse error: %s", e)
-            print(print_green("[BLCK] ✓ Audit completed"))
-            checklist.append(("Audit", "PASS"))
+            print(print_yellow("[BLCK] ! Audit file could not be parsed"))
+            checklist.append(("Audit", "WARN"))
     else:
         print(print_yellow("[BLCK] ! Audit not completed"))
         checklist.append(("Audit", "SKIP"))
@@ -436,26 +407,13 @@ def _generate_json_closeout(
 
 def _memory_checkpoint(metrics: Dict[str, Any]) -> None:
     """Create memory checkpoint for next phase."""
-    summary = f"""PHASE 3 TASKING COMPLETE
-
-TASKS CREATED: {metrics['task_count']} total
-HIGH PRIORITY: {metrics['high_priority']} tasks
-WORK PACKAGES: {metrics['package_count']} packages
-
-KEY ARTIFACTS:
-- tasks.json: Task definitions with dependencies
-- work-packages.json: Work package groupings
-- dependency-graph.json: Task dependency analysis
-
-READY FOR: Phase 4 (Specification) - OpenSpec generation and TDD planning"""
-
     print()
     print(print_dim("Memory checkpoint created for Phase 4"))
     print(print_dim(f"Summary: {metrics['task_count']} tasks, {metrics['package_count']} packages"))
     print()
 
 
-def _show_session_end(closeout_file: Path, tasks_file: Path) -> None:
+def _show_session_end() -> None:
     """Show session end summary."""
     print(print_dim("─" * 100))
     print()
@@ -488,10 +446,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

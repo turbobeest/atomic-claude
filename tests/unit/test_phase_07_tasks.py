@@ -16,10 +16,8 @@ Requirements: Mock LLM calls, file operations, and test all code paths
 
 import pytest
 import json
-import tempfile
-import shutil
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open, call
+from unittest.mock import patch, MagicMock
 from datetime import datetime
 
 # Import task modules
@@ -32,7 +30,6 @@ from phases.phase_07_integration.tasks import (
     task_706_phase_audit,
     task_707_closeout,
 )
-
 
 # ============================================================================
 # FIXTURES
@@ -59,7 +56,6 @@ def temp_dirs(tmp_path):
         "claude_dir": claude_dir
     }
 
-
 @pytest.fixture
 def phase6_closeout(temp_dirs):
     """Create Phase 6 closeout file."""
@@ -80,7 +76,6 @@ def phase6_closeout(temp_dirs):
     closeout_file.write_text(json.dumps(closeout_data, indent=2))
     return closeout_file
 
-
 @pytest.fixture
 def project_config(temp_dirs):
     """Create project configuration file."""
@@ -98,7 +93,6 @@ def project_config(temp_dirs):
     config_file.write_text(json.dumps(config_data, indent=2))
     return config_file
 
-
 # ============================================================================
 # TASK 701: ENTRY INITIALIZATION TESTS
 # ============================================================================
@@ -106,22 +100,11 @@ def project_config(temp_dirs):
 class TestTask701EntryInitialization:
     """Test Task 701: Entry & Initialization."""
 
-    def test_701_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses prerequisite validation."""
-        result = task_701_entry_initialization.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-
     def test_701_missing_phase6_closeout(self, temp_dirs):
         """Test failure when Phase 6 closeout is missing."""
         result = task_701_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is False
@@ -135,7 +118,6 @@ class TestTask701EntryInitialization:
         result = task_701_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is False
@@ -149,7 +131,6 @@ class TestTask701EntryInitialization:
         result = task_701_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is True
@@ -164,7 +145,6 @@ class TestTask701EntryInitialization:
         result = task_701_entry_initialization.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         assert result is False
@@ -175,12 +155,10 @@ class TestTask701EntryInitialization:
             result = task_701_entry_initialization.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             # Verify output was printed
             assert mock_print.called
-
 
 # ============================================================================
 # TASK 702: INTEGRATION SETUP TESTS
@@ -189,24 +167,11 @@ class TestTask701EntryInitialization:
 class TestTask702IntegrationSetup:
     """Test Task 702: Integration Setup."""
 
-    def test_702_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode creates minimal valid output."""
-        result = task_702_integration_setup.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        setup_file = temp_dirs["output_dir"] / "integration-setup.json"
-        assert setup_file.exists()
-
     def test_702_setup_configuration(self, temp_dirs):
         """Test integration setup creates proper configuration."""
         result = task_702_integration_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "integration-setup.json"
@@ -220,7 +185,6 @@ class TestTask702IntegrationSetup:
         result = task_702_integration_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "integration-setup.json"
@@ -235,7 +199,6 @@ class TestTask702IntegrationSetup:
         result = task_702_integration_setup.execute(
             temp_dirs["atomic_root"],
             output_dir,
-            uat_mode=True
         )
 
         assert result is True
@@ -246,7 +209,6 @@ class TestTask702IntegrationSetup:
         result = task_702_integration_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "integration-setup.json"
@@ -263,12 +225,10 @@ class TestTask702IntegrationSetup:
             result = task_702_integration_setup.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             # Should handle gracefully or fail
             assert result in [True, False]
-
 
 # ============================================================================
 # TASK 703: AGENT SELECTION TESTS
@@ -277,24 +237,11 @@ class TestTask702IntegrationSetup:
 class TestTask703AgentSelection:
     """Test Task 703: Agent Selection."""
 
-    def test_703_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses agent selection."""
-        result = task_703_agent_selection.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        agents_file = temp_dirs["output_dir"] / "integration-agents.json"
-        assert agents_file.exists()
-
     def test_703_agent_roles_structure(self, temp_dirs):
         """Test agent selection creates proper role structure."""
         result = task_703_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "integration-agents.json"
@@ -308,7 +255,6 @@ class TestTask703AgentSelection:
         result = task_703_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "integration-agents.json"
@@ -323,7 +269,6 @@ class TestTask703AgentSelection:
         result = task_703_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "integration-agents.json"
@@ -337,7 +282,6 @@ class TestTask703AgentSelection:
         result = task_703_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "integration-agents.json"
@@ -359,11 +303,9 @@ class TestTask703AgentSelection:
             result = task_703_agent_selection.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is True
-
 
 # ============================================================================
 # TASK 704: TESTING EXECUTION TESTS
@@ -372,24 +314,11 @@ class TestTask703AgentSelection:
 class TestTask704TestingExecution:
     """Test Task 704: Testing Execution."""
 
-    def test_704_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses test execution."""
-        result = task_704_testing_execution.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        test_results = temp_dirs["output_dir"] / "integration-test-results.json"
-        assert test_results.exists()
-
     def test_704_test_suite_execution(self, temp_dirs):
         """Test integration test suite execution."""
         result = task_704_testing_execution.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         test_results = temp_dirs["output_dir"] / "integration-test-results.json"
@@ -404,7 +333,6 @@ class TestTask704TestingExecution:
         result = task_704_testing_execution.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         test_results = temp_dirs["output_dir"] / "integration-test-results.json"
@@ -421,7 +349,6 @@ class TestTask704TestingExecution:
             result = task_704_testing_execution.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is False
@@ -438,7 +365,6 @@ class TestTask704TestingExecution:
             result = task_704_testing_execution.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             # Should handle test failures appropriately
@@ -449,7 +375,6 @@ class TestTask704TestingExecution:
         result = task_704_testing_execution.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         test_results = temp_dirs["output_dir"] / "integration-test-results.json"
@@ -458,7 +383,6 @@ class TestTask704TestingExecution:
         assert "executed_at" in results_data
         datetime.fromisoformat(results_data["executed_at"])
 
-
 # ============================================================================
 # TASK 705: INTEGRATION APPROVAL TESTS
 # ============================================================================
@@ -466,24 +390,11 @@ class TestTask704TestingExecution:
 class TestTask705IntegrationApproval:
     """Test Task 705: Integration Approval."""
 
-    def test_705_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses approval gate."""
-        result = task_705_integration_approval.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        approval_file = temp_dirs["output_dir"] / "integration-approval.json"
-        assert approval_file.exists()
-
     def test_705_approval_criteria_validation(self, temp_dirs):
         """Test approval validates all criteria."""
         result = task_705_integration_approval.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         approval_file = temp_dirs["output_dir"] / "integration-approval.json"
@@ -500,7 +411,6 @@ class TestTask705IntegrationApproval:
             result = task_705_integration_approval.execute(
                 temp_dirs["atomic_root"],
                 temp_dirs["output_dir"],
-                uat_mode=False
             )
 
             assert result is False
@@ -519,7 +429,6 @@ class TestTask705IntegrationApproval:
         result = task_705_integration_approval.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         # Should fail if success rate too low
@@ -530,7 +439,6 @@ class TestTask705IntegrationApproval:
         result = task_705_integration_approval.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         approval_file = temp_dirs["output_dir"] / "integration-approval.json"
@@ -544,7 +452,6 @@ class TestTask705IntegrationApproval:
         result = task_705_integration_approval.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         approval_file = temp_dirs["output_dir"] / "integration-approval.json"
@@ -553,7 +460,6 @@ class TestTask705IntegrationApproval:
         assert "status" in approval_data
         assert approval_data["status"] in ["approved", "rejected", "conditional"]
 
-
 # ============================================================================
 # TASK 706: PHASE AUDIT TESTS
 # ============================================================================
@@ -561,24 +467,11 @@ class TestTask705IntegrationApproval:
 class TestTask706PhaseAudit:
     """Test Task 706: Phase Audit."""
 
-    def test_706_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode bypasses audit process."""
-        result = task_706_phase_audit.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        audit_file = temp_dirs["output_dir"] / "phase-audit.json"
-        assert audit_file.exists()
-
     def test_706_audit_checklist(self, temp_dirs):
         """Test audit validates all checklist items."""
         result = task_706_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
@@ -592,7 +485,6 @@ class TestTask706PhaseAudit:
         result = task_706_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=False
         )
 
         # Should fail with missing artifacts
@@ -603,7 +495,6 @@ class TestTask706PhaseAudit:
         result = task_706_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
@@ -617,7 +508,6 @@ class TestTask706PhaseAudit:
         result = task_706_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
@@ -631,14 +521,12 @@ class TestTask706PhaseAudit:
         result = task_706_phase_audit.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         audit_file = temp_dirs["output_dir"] / "phase-audit.json"
         audit_data = json.loads(audit_file.read_text())
 
         assert "recommendations" in audit_data
-
 
 # ============================================================================
 # TASK 707: CLOSEOUT TESTS
@@ -647,24 +535,11 @@ class TestTask706PhaseAudit:
 class TestTask707Closeout:
     """Test Task 707: Closeout."""
 
-    def test_707_uat_mode_bypass(self, temp_dirs):
-        """Test UAT mode creates valid closeout."""
-        result = task_707_closeout.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-
-        assert result is True
-        closeout_file = temp_dirs["output_dir"] / "closeout.json"
-        assert closeout_file.exists()
-
     def test_707_closeout_structure(self, temp_dirs):
         """Test closeout has required structure."""
         result = task_707_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -679,7 +554,6 @@ class TestTask707Closeout:
         result = task_707_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -692,7 +566,6 @@ class TestTask707Closeout:
         result = task_707_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -706,7 +579,6 @@ class TestTask707Closeout:
         result = task_707_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -719,7 +591,6 @@ class TestTask707Closeout:
         result = task_707_closeout.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         closeout_file = temp_dirs["output_dir"] / "closeout.json"
@@ -728,7 +599,6 @@ class TestTask707Closeout:
         assert "tasks" in closeout_data
         assert isinstance(closeout_data["tasks"], list)
 
-
 # ============================================================================
 # INTEGRATION TESTS
 # ============================================================================
@@ -736,75 +606,12 @@ class TestTask707Closeout:
 class TestPhase07Integration:
     """Integration tests for Phase 7 task flow."""
 
-    def test_phase07_complete_flow_uat(self, temp_dirs, phase6_closeout, project_config):
-        """Test complete Phase 7 flow in UAT mode."""
-        # Task 701
-        result = task_701_entry_initialization.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 702
-        result = task_702_integration_setup.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 703
-        result = task_703_agent_selection.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 704
-        result = task_704_testing_execution.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 705
-        result = task_705_integration_approval.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 706
-        result = task_706_phase_audit.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Task 707
-        result = task_707_closeout.execute(
-            temp_dirs["atomic_root"],
-            temp_dirs["output_dir"],
-            uat_mode=True
-        )
-        assert result is True
-
-        # Verify closeout exists
-        closeout_file = temp_dirs["output_dir"] / "closeout.json"
-        assert closeout_file.exists()
-
     def test_phase07_artifact_dependencies(self, temp_dirs, phase6_closeout):
         """Test artifact dependencies between tasks."""
         # Setup
         task_702_integration_setup.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         setup_file = temp_dirs["output_dir"] / "integration-setup.json"
@@ -814,7 +621,6 @@ class TestPhase07Integration:
         task_703_agent_selection.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         agents_file = temp_dirs["output_dir"] / "integration-agents.json"
@@ -824,7 +630,6 @@ class TestPhase07Integration:
         task_704_testing_execution.execute(
             temp_dirs["atomic_root"],
             temp_dirs["output_dir"],
-            uat_mode=True
         )
 
         results_file = temp_dirs["output_dir"] / "integration-test-results.json"

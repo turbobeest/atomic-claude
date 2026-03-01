@@ -60,14 +60,13 @@ def _strip_json_fences(text: str) -> str:
     return stripped
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 603: Comprehensive Review.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -88,40 +87,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
     print(print_dim("Executing parallel code review across all dimensions."))
     print()
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(print_yellow("UAT Mode: Creating minimal valid output"))
-        ensure_dir(review_dir)
-        ensure_dir(prompts_dir)
-
-        review_report = output_dir / "review-report.md"
-        write_file(review_report, """# Code Review Report (UAT Mode)
-
-## Summary
-UAT mode - stub review complete
-
-## Critical Issues
-None (UAT stub)
-
-## Major Issues
-None (UAT stub)
-
-## Minor Issues
-None (UAT stub)
-""")
-
-        write_file(findings_file, json.dumps({
-            "deep_code": {"critical": 0, "major": 0, "minor": 0, "suggestions": 0, "findings": []},
-            "architecture": {"critical": 0, "major": 0, "minor": 0, "suggestions": 0, "findings": []},
-            "performance": {"critical": 0, "major": 0, "minor": 0, "suggestions": 0, "findings": []},
-            "documentation": {"critical": 0, "major": 0, "minor": 0, "suggestions": 0, "findings": []},
-            "totals": {"critical": 0, "major": 0, "minor": 0, "suggestions": 0},
-            "reviewed_at": datetime.now(timezone.utc).isoformat()
-        }, indent=2))
-
-        print(print_green("✓ UAT bypass complete"))
-        return True
 
     ensure_dir(review_dir)
     ensure_dir(prompts_dir)
@@ -158,10 +123,10 @@ None (UAT stub)
             project_context, project_root,
         )
     else:
-        results["code"] = _deep_code_review(code_sample, prompts_dir, agents.get("deep"), project_context)
-        results["arch"] = _architecture_review(code_sample, prompts_dir, agents.get("arch"), project_context)
-        results["perf"] = _performance_review(code_sample, prompts_dir, agents.get("perf"), project_context)
-        results["doc"] = _documentation_review(code_sample, test_sample, prompts_dir, agents.get("doc"), project_context)
+        results["code"] = _deep_code_review(code_sample, prompts_dir, project_context, model=agents.get("deep_model", "sonnet"))
+        results["arch"] = _architecture_review(code_sample, prompts_dir, project_context, model=agents.get("arch_model", "sonnet"))
+        results["perf"] = _performance_review(code_sample, prompts_dir, project_context, model=agents.get("perf_model", "haiku"))
+        results["doc"] = _documentation_review(code_sample, test_sample, prompts_dir, project_context, model=agents.get("doc_model", "haiku"))
 
     # Display and save results
     _display_and_save_results(results, findings_file, graph=graph)
@@ -174,7 +139,7 @@ None (UAT stub)
 
 
 def _load_agents(agents_file: Path, atomic_root: Path) -> Dict[str, str]:
-    """Load agent names from selection file."""
+    """Load agent names and model tiers from selection file."""
     agents = {}
     if not agents_file.exists():
         return agents
@@ -186,6 +151,11 @@ def _load_agents(agents_file: Path, atomic_root: Path) -> Dict[str, str]:
         agents["arch"] = review_agents.get("architecture", {}).get("name", "")
         agents["perf"] = review_agents.get("performance", {}).get("name", "")
         agents["doc"] = review_agents.get("documentation", {}).get("name", "")
+        # Load model tiers selected by task_602
+        agents["deep_model"] = review_agents.get("deep_code", {}).get("model", "sonnet")
+        agents["arch_model"] = review_agents.get("architecture", {}).get("model", "sonnet")
+        agents["perf_model"] = review_agents.get("performance", {}).get("model", "haiku")
+        agents["doc_model"] = review_agents.get("documentation", {}).get("model", "haiku")
     except Exception as e:
         logger.debug("Failed to load review agents from %s: %s", agents_file, e)
 
@@ -225,8 +195,14 @@ def _discover_review_scope(project_root: Path, atomic_root: Path) -> Tuple[List[
         for ext in source_exts:
             for f in src_dir.rglob(ext):
                 if f not in seen and len(source_files) < 50:
-                    # Skip test files from source list
-                    if "test" in f.stem.lower() and src_dir != tdd_dir:
+                    # Skip test files from source list (word-boundary matching)
+                    stem_lower = f.stem.lower()
+                    if src_dir != tdd_dir and (
+                        stem_lower.startswith("test_") or
+                        stem_lower.endswith("_test") or
+                        stem_lower.startswith("tests") or
+                        stem_lower.endswith(".test")
+                    ):
                         continue
                     source_files.append(f)
                     seen.add(f)
@@ -387,22 +363,22 @@ def _run_team_session_review(
     # Build prompts and write to disk so agents can consume them
     dimensions = {
         "code": {
-            "prompt": _build_code_review_prompt(code_sample, agents.get("deep"), project_context),
+            "prompt": _build_code_review_prompt(code_sample, project_context),
             "label": "Deep Code Review",
             "color_fn": print_cyan,
         },
         "arch": {
-            "prompt": _build_architecture_prompt(code_sample, agents.get("arch"), project_context),
+            "prompt": _build_architecture_prompt(code_sample, project_context),
             "label": "Architecture Compliance",
             "color_fn": print_magenta,
         },
         "perf": {
-            "prompt": _build_performance_prompt(code_sample, agents.get("perf"), project_context),
+            "prompt": _build_performance_prompt(code_sample, project_context),
             "label": "Performance Analysis",
             "color_fn": print_yellow,
         },
         "doc": {
-            "prompt": _build_documentation_prompt(code_sample, test_sample, agents.get("doc"), project_context),
+            "prompt": _build_documentation_prompt(code_sample, test_sample, project_context),
             "label": "Documentation Review",
             "color_fn": print_blue,
         },
@@ -427,10 +403,19 @@ def _run_team_session_review(
     )
     team.start()
 
+    # Map dimension keys to model tiers from agent selection
+    dim_models = {
+        "code": agents.get("deep_model", "sonnet"),
+        "arch": agents.get("arch_model", "sonnet"),
+        "perf": agents.get("perf_model", "haiku"),
+        "doc": agents.get("doc_model", "haiku"),
+    }
+
     for dim_key, prompt_file in prompt_files.items():
+        model_flag = f" --model {dim_models.get(dim_key, 'sonnet')}"
         team.add_agent(
             agent_id=dim_key,
-            command=f"cat {shlex.quote(str(prompt_file))} | claude --print",
+            command=f"cat {shlex.quote(str(prompt_file))} | claude --print{model_flag}",
             cwd=str(project_root),
         )
 
@@ -465,51 +450,51 @@ def _run_team_session_review(
     return results
 
 
-def _deep_code_review(code_file: Path, prompts_dir: Path, agent_name: str,
-                      project_context: str = "") -> Dict[str, Any]:
+def _deep_code_review(code_file: Path, prompts_dir: Path,
+                      project_context: str = "", model: str = "sonnet") -> Dict[str, Any]:
     """Execute deep code review."""
     print(print_cyan("    Worker 1: Deep Code Review         "))
 
     output_file = prompts_dir / "review-code.json"
-    prompt = _build_code_review_prompt(code_file, agent_name, project_context)
+    prompt = _build_code_review_prompt(code_file, project_context)
 
-    return _execute_review(prompt, output_file, "sonnet")
+    return _execute_review(prompt, output_file, model)
 
 
-def _architecture_review(code_file: Path, prompts_dir: Path, agent_name: str,
-                          project_context: str = "") -> Dict[str, Any]:
+def _architecture_review(code_file: Path, prompts_dir: Path,
+                          project_context: str = "", model: str = "sonnet") -> Dict[str, Any]:
     """Execute architecture review."""
     print(print_magenta("    Worker 2: Architecture Compliance  "))
 
     output_file = prompts_dir / "review-arch.json"
-    prompt = _build_architecture_prompt(code_file, agent_name, project_context)
+    prompt = _build_architecture_prompt(code_file, project_context)
 
-    return _execute_review(prompt, output_file, "sonnet")
+    return _execute_review(prompt, output_file, model)
 
 
-def _performance_review(code_file: Path, prompts_dir: Path, agent_name: str,
-                         project_context: str = "") -> Dict[str, Any]:
+def _performance_review(code_file: Path, prompts_dir: Path,
+                         project_context: str = "", model: str = "haiku") -> Dict[str, Any]:
     """Execute performance review."""
     print(print_yellow("    Worker 3: Performance Analysis     "))
 
     output_file = prompts_dir / "review-perf.json"
-    prompt = _build_performance_prompt(code_file, agent_name, project_context)
+    prompt = _build_performance_prompt(code_file, project_context)
 
-    return _execute_review(prompt, output_file, "haiku")
+    return _execute_review(prompt, output_file, model)
 
 
 def _documentation_review(code_file: Path, test_file: Path, prompts_dir: Path,
-                           agent_name: str, project_context: str = "") -> Dict[str, Any]:
+                           project_context: str = "", model: str = "haiku") -> Dict[str, Any]:
     """Execute documentation review."""
     print(print_blue("    Worker 4: Documentation Review     "))
 
     output_file = prompts_dir / "review-doc.json"
-    prompt = _build_documentation_prompt(code_file, test_file, agent_name, project_context)
+    prompt = _build_documentation_prompt(code_file, test_file, project_context)
 
-    return _execute_review(prompt, output_file, "haiku")
+    return _execute_review(prompt, output_file, model)
 
 
-def _build_code_review_prompt(code_file: Path, agent_name: str,
+def _build_code_review_prompt(code_file: Path,
                                project_context: str = "") -> str:
     """Build deep code review prompt."""
     code_content = read_file(code_file) if code_file.exists() else ""
@@ -569,7 +554,7 @@ Be specific. If no issues found in a category, return 0 for that count.
 """
 
 
-def _build_architecture_prompt(code_file: Path, agent_name: str,
+def _build_architecture_prompt(code_file: Path,
                                 project_context: str = "") -> str:
     """Build architecture review prompt."""
     code_content = read_file(code_file) if code_file.exists() else ""
@@ -620,7 +605,7 @@ Respond with ONLY valid JSON (no markdown wrapper):
 """
 
 
-def _build_performance_prompt(code_file: Path, agent_name: str,
+def _build_performance_prompt(code_file: Path,
                                project_context: str = "") -> str:
     """Build performance review prompt."""
     code_content = read_file(code_file) if code_file.exists() else ""
@@ -673,7 +658,7 @@ Respond with ONLY valid JSON (no markdown wrapper):
 """
 
 
-def _build_documentation_prompt(code_file: Path, test_file: Path, agent_name: str,
+def _build_documentation_prompt(code_file: Path, test_file: Path,
                                  project_context: str = "") -> str:
     """Build documentation review prompt."""
     code_content = read_file(code_file) if code_file.exists() else ""
@@ -737,13 +722,17 @@ def _execute_review(prompt: str, output_file: Path, model: str) -> Dict[str, Any
         if len(prompt) > _MAX_PROMPT_CHARS:
             logger.warning("Prompt exceeds %d chars (%d); truncating code samples",
                            _MAX_PROMPT_CHARS, len(prompt))
-            # Re-append the JSON output instruction after truncation so it is
-            # never lost when the prompt is cut short.
+            # Truncate at last newline before the cap to avoid cutting mid-line,
+            # which could destroy JSON output format instructions.
+            truncated = prompt[:_MAX_PROMPT_CHARS]
+            last_nl = truncated.rfind("\n")
+            if last_nl > _MAX_PROMPT_CHARS // 2:
+                truncated = truncated[:last_nl]
             json_reminder = (
                 "\n\n[... truncated for token budget]\n\n"
                 "Respond with ONLY valid JSON (no markdown wrapper).\n"
             )
-            prompt = prompt[:_MAX_PROMPT_CHARS] + json_reminder
+            prompt = truncated + json_reminder
 
         response = invoke_llm(prompt=prompt, model=model)
 
@@ -924,10 +913,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

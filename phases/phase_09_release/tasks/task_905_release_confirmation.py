@@ -12,21 +12,20 @@ from datetime import datetime, timezone
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.ui import success, error, warning, info, step
+from core.ui import success, warning, step
 from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, RED, YELLOW, NC
 from core.utils.file_ops import read_json, write_json
 
 logger = logging.getLogger(__name__)
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 905: Release Confirmation.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -39,21 +38,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     step("Release Confirmation")
 
-    # UAT Mode Bypass
-    if uat_mode:
-        print(f"  {DIM}UAT Mode: Creating minimal valid output{NC}")
-
-        # Create minimal confirmation file
-        release_dir.mkdir(parents=True, exist_ok=True)
-        write_json(confirmation_file, {
-            "confirmed": True,
-            "confirmed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "confirmer": "UAT"
-        })
-
-        success("UAT bypass complete")
-        return True
-
     print()
     print(f"  {DIM}Human gate: Confirm release was successful.{NC}")
     print()
@@ -62,7 +46,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     version, channel, announcement_status = _load_release_status(execution_file)
 
     # Display approval criteria
-    all_criteria_met = _display_approval_criteria(version, announcement_status)
+    all_criteria_met = _display_approval_criteria(version, announcement_status, project_root)
 
     # Handle confirmation interaction (loop replaces recursion)
     result = _handle_confirmation(all_criteria_met, version, channel, confirmation_file, output_dir, mem=mem)
@@ -106,7 +90,7 @@ def _load_release_status(execution_file: Path) -> tuple:
     return version, channel, announcement_status
 
 
-def _display_approval_criteria(version: str, announcement_status: str) -> bool:
+def _display_approval_criteria(version: str, announcement_status: str, project_root: Path = None) -> bool:
     """Display approval criteria. Returns True if all criteria met."""
     print()
     print(f"  {BOLD}- APPROVAL CRITERIA{NC}")
@@ -126,7 +110,12 @@ def _display_approval_criteria(version: str, announcement_status: str) -> bool:
         print(f"  {RED}[CRIT]{NC} {RED}✗{NC} Version number not set")
         all_criteria_met = False
 
-    print(f"  {GREEN}[BLCK]{NC} {GREEN}✓{NC} Distribution artifacts ready")
+    dist_ready = project_root is not None and (project_root / "dist").exists()
+    if dist_ready:
+        print(f"  {GREEN}[BLCK]{NC} {GREEN}✓{NC} Distribution artifacts ready")
+    else:
+        print(f"  {RED}[BLCK]{NC} {RED}✗{NC} Distribution artifacts not found (dist/ missing)")
+        all_criteria_met = False
     print()
 
     return all_criteria_met
@@ -239,10 +228,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    result = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    result = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if result else 1)

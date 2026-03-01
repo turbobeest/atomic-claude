@@ -342,7 +342,7 @@ def extract_multi_file_response(response: str) -> Dict[str, str]:
     Returns dict of {relative_path: content}.
     """
     files: Dict[str, str] = {}
-    pattern = r"===\s*FILE:\s*(.+?)\s*===\n(.*?)(?=\n===\s*(?:FILE:|END))"
+    pattern = r"===\s*FILE:\s*(.+?)\s*===\n(.*?)(?=\n===\s*(?:FILE:|END)|$)"
     matches = re.findall(pattern, response, re.DOTALL)
 
     for path, content in matches:
@@ -774,6 +774,7 @@ def run_red_phase(
     dep_context: str = "",
     task_classification: str = "feature",
     project_manifest: str = "",
+    model_tier: str = "sonnet",
 ) -> Dict[str, Any]:
     """
     RED phase: LLM writes failing tests. Run them and verify they fail.
@@ -885,7 +886,7 @@ Output ONLY the {language} test code, no explanations. Wrap in ```{fence_lang} f
         print(print_red(f"    RED  ") + f"Writing tests for task {task_id}...")
 
     try:
-        response = invoke(prompt=prompt, model="sonnet")
+        response = invoke(prompt=prompt, model=model_tier)
     except Exception as e:
         if not quiet:
             print(print_dim(f"         LLM error: {e}"))
@@ -924,7 +925,7 @@ Output ONLY the {language} test code, no explanations. Wrap in ```{fence_lang} f
         # NOTE: For Go, `go test -- <file>` is non-standard; Go uses package
         # paths not file names. This works for simple cases but may need
         # adjustment for multi-package Go projects.
-        test_cmd = f"{commands['test']} {test_file}"
+        test_cmd = f"{commands['test']} {shlex.quote(str(test_file))}"
         if commands["test"].startswith(("cargo", "go")):
             test_cmd = _make_project_cmd(f"{commands['test']} -- {test_file.stem}", project_root)
 
@@ -966,6 +967,7 @@ def run_green_phase(
     task_classification: str = "feature",
     source_registry: Optional['ProjectSourceRegistry'] = None,
     project_manifest: str = "",
+    model_tier: str = "sonnet",
 ) -> Dict[str, Any]:
     """
     GREEN phase: LLM writes minimal implementation. Run tests, retry on failure.
@@ -1102,7 +1104,7 @@ If unsure of the project layout, place files in src/ or the appropriate module d
             print(print_green(f"    GREEN") + f" Writing implementation{attempt_label}...")
 
         try:
-            response = invoke(prompt=prompt, model="sonnet")
+            response = invoke(prompt=prompt, model=model_tier)
         except Exception as e:
             if not quiet:
                 print(print_dim(f"         LLM error: {e}"))
@@ -1224,7 +1226,7 @@ If unsure of the project layout, place files in src/ or the appropriate module d
                 return record
 
             # Run compilation gate (GREEN)
-            test_cmd = f"{commands['test']} {test_file}"
+            test_cmd = f"{commands['test']} {shlex.quote(str(test_file))}"
             if commands["test"].startswith(("cargo", "go")):
                 test_cmd = _make_project_cmd(f"{commands['test']} -- {test_file.stem}", project_root)
 
@@ -1270,6 +1272,7 @@ def run_refactor_phase(
     project_root: Path,
     quiet: bool = False,
     task_classification: str = "feature",
+    model_tier: str = "sonnet",
 ) -> Dict[str, Any]:
     """
     REFACTOR phase: LLM refactors implementation. If tests break, auto-revert.
@@ -1332,7 +1335,7 @@ Output ONLY the refactored {language} code. Wrap in ```{fence_lang} fences.
         print(print_cyan(f"    REFACTOR") + f" Improving code quality...")
 
     try:
-        response = invoke(prompt=prompt, model="sonnet")
+        response = invoke(prompt=prompt, model=model_tier)
     except Exception as e:
         if not quiet:
             print(print_dim(f"         LLM error: {e} — keeping original"))
@@ -1355,7 +1358,7 @@ Output ONLY the refactored {language} code. Wrap in ```{fence_lang} fences.
         return record
 
     # Verify tests still pass (REFACTOR gate)
-    test_cmd = f"{commands['test']} {test_file}"
+    test_cmd = f"{commands['test']} {shlex.quote(str(test_file))}"
     if commands["test"].startswith(("cargo", "go")):
         test_cmd = _make_project_cmd(f"{commands['test']} -- {test_file.stem}", project_root)
 
@@ -1391,6 +1394,7 @@ def run_verify_phase(
     project_root: Path,
     quiet: bool = False,
     task_classification: str = "feature",
+    model_tier: str = "haiku",
 ) -> Dict[str, Any]:
     """
     VERIFY phase: syntax/lint check + optional haiku security review.
@@ -1437,7 +1441,7 @@ def run_verify_phase(
         print(print_magenta(f"    VERIFY") + f" Running verification checks...")
 
     # 1. Syntax / lint check
-    verify_cmd = verify_cmd_template.format(impl_file=impl_file)
+    verify_cmd = verify_cmd_template.format(impl_file=shlex.quote(str(impl_file)))
     if verify_cmd.startswith(("cargo", "go")):
         verify_cmd = _make_project_cmd(verify_cmd, project_root)
 
@@ -1465,7 +1469,7 @@ If the code is safe, respond with just "PASS".
 ```{fence_lang}
 {impl_content}
 ```"""
-            sec_response = invoke(prompt=security_prompt, model="haiku")
+            sec_response = invoke(prompt=security_prompt, model=model_tier)
             sec_text = sec_response.strip() if isinstance(sec_response, str) else str(sec_response).strip()
 
             if sec_text.upper().startswith("PASS") or len(sec_text) < 10:
@@ -1631,6 +1635,7 @@ def _tdd_cycle_worker(
     project_root: Path,
     source_registry: Optional[ProjectSourceRegistry] = None,
     token_budget: Optional[TokenBudget] = None,
+    agent_models: Optional[Dict[str, str]] = None,
 ) -> Tuple[str, str, Dict[str, Any], float, Optional[str]]:
     """Run full TDD cycle for one task. Never raises.
 
@@ -1670,6 +1675,9 @@ def _tdd_cycle_worker(
     if source_registry:
         dep_context = source_registry.get_dependency_context(task)
 
+    # Resolve model tiers from agent_models (defaults if not provided)
+    _models = agent_models or {}
+
     try:
         # Scan project tree for context (populated after bootstrap runs)
         project_manifest = _scan_project_tree(project_root, stack_name)
@@ -1680,6 +1688,7 @@ def _tdd_cycle_worker(
             skip_execution, atomic_root, profile, project_root, quiet=True,
             dep_context=dep_context, task_classification=classification,
             project_manifest=project_manifest,
+            model_tier=_models.get("red", "sonnet"),
         )
         record["red"] = red_record
 
@@ -1701,6 +1710,7 @@ def _tdd_cycle_worker(
             skip_execution, atomic_root, profile, project_root, quiet=True,
             dep_context=dep_context, task_classification=classification,
             source_registry=source_registry, project_manifest=project_manifest,
+            model_tier=_models.get("green", "sonnet"),
         )
         record["green"] = green_record
 
@@ -1713,6 +1723,7 @@ def _tdd_cycle_worker(
             task, task_dir, agents.get("refactor", ""), commands,
             skip_execution, atomic_root, profile, project_root, quiet=True,
             task_classification=classification,
+            model_tier=_models.get("refactor", "sonnet"),
         )
         record["refactor"] = refactor_record
 
@@ -1721,6 +1732,7 @@ def _tdd_cycle_worker(
             task, task_dir, commands, skip_execution, atomic_root,
             profile, project_root, quiet=True,
             task_classification=classification,
+            model_tier=_models.get("verify", "haiku"),
         )
         record["verify"] = verify_record
 
@@ -1749,6 +1761,7 @@ def _pilot_run(
     project_root: Path,
     source_registry: Optional[ProjectSourceRegistry],
     token_budget: Optional[TokenBudget],
+    agent_models: Optional[Dict[str, str]] = None,
 ) -> Tuple[bool, str, List[Tuple]]:
     """Run pilot batch of 2-3 root tasks to detect systematic issues.
 
@@ -1774,6 +1787,7 @@ def _pilot_run(
             skip_execution, atomic_root, profile, project_root,
             source_registry=source_registry,
             token_budget=token_budget,
+            agent_models=agent_models,
         )
         results.append(result)
 
@@ -1816,6 +1830,7 @@ def _run_dag_parallel(
     source_registry: Optional[ProjectSourceRegistry] = None,
     token_budget: Optional[TokenBudget] = None,
     graph=None,
+    agent_models: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Run TDD cycles in parallel respecting DAG dependencies.
 
@@ -1983,7 +1998,7 @@ def _run_dag_parallel(
                         _tdd_cycle_worker,
                         task, spec, testing_dir, agents, commands,
                         skip_execution, atomic_root, profile, task_project_root,
-                        source_registry, token_budget,
+                        source_registry, token_budget, agent_models,
                     )
                     active_futures[future] = tid
 
@@ -2008,8 +2023,15 @@ def _run_dag_parallel(
                         logger.error("TDD worker failed for task %s: %s", tid, e)
                         task_status[tid] = "failed"
                         stats["tasks_failed"] += 1
-                        completed_ids.add(tid)
+                        # Do NOT add to completed_ids — transient errors
+                        # (network, timeout) should be retryable on resume.
                         scheduler.fail(tid)
+                        # Persist failure record so progress file reflects this (M7 fix)
+                        save_tdd_record(testing_dir, tid, {
+                            "task_id": tid,
+                            "status": "failed",
+                            "error": f"Worker exception: {e}",
+                        })
                         continue
                     results[tid] = result
 
@@ -2052,11 +2074,8 @@ def _run_dag_parallel(
                             except Exception:
                                 pass  # Non-blocking
 
-                        # Count partial cycles
-                        if "red" in record:
-                            stats["red_cycles"] += 1
-                        if "green" in record:
-                            stats["green_cycles"] += 1
+                        # Failed tasks: do NOT increment cycle counters
+                        # (cycle counts should reflect completed work only)
 
                         for ctid in cascaded:
                             task_status[ctid] = "cascaded"
@@ -2103,7 +2122,7 @@ def _run_dag_parallel(
 # Main execute function
 # ---------------------------------------------------------------------------
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 504: TDD Execution.
 
@@ -2123,7 +2142,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -2132,63 +2150,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     testing_dir = project_root / ".claude" / "testing"
     progress_file = output_dir / "tdd-progress.json"
     registry_file = testing_dir / "source-registry.json"
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print()
-        print(print_yellow("  UAT Mode: Creating stub implementation files (no actual TDD cycles)"))
-        print()
-
-        ensure_dir(testing_dir)
-
-        # Create minimal TDD progress file
-        progress_data = {
-            "tasks_completed": 3,
-            "tasks_total": 3,
-            "subtasks_completed": 12,
-            "subtasks_total": 12,
-            "red_cycles": 3,
-            "green_cycles": 3,
-            "refactor_cycles": 3,
-            "verify_cycles": 3,
-            "mode": "uat",
-            "completed_at": datetime.now(timezone.utc).isoformat()
-        }
-        write_file(progress_file, json.dumps(progress_data, indent=2))
-
-        # Create stub test and implementation files for 3 tasks
-        for task_id in range(1, 4):
-            task_dir = testing_dir / f"task-{task_id}"
-            ensure_dir(task_dir)
-
-            impl_file = task_dir / "implementation.py"
-            write_file(impl_file, "# Stub Implementation (UAT Mode)\ndef stub_function(): pass\n")
-
-            test_file = task_dir / "test_stub.py"
-            write_file(test_file, "# Stub Test (UAT Mode)\ndef test_stub(): assert True\n")
-
-            # Create minimal TDD record
-            tdd_record = {
-                "task_id": task_id,
-                "status": "complete",
-                "classification": "feature",
-                "red": {"status": "complete"},
-                "green": {"status": "complete"},
-                "refactor": {"status": "complete"},
-                "verify": {"status": "complete"},
-                "mode": "uat"
-            }
-            write_file(testing_dir / f"tdd-t{task_id}.json", json.dumps(tdd_record, indent=2))
-
-        print(print_green("  Created stub files for 3 tasks"))
-        print()
-
-        print(print_green("  TDD Execution complete (UAT mode)"))
-        return True
-
-    # =======================================================================
-    # LIVE PATH: Full TDD Execution
-    # =======================================================================
 
     # --- Initialize knowledge graph ---
     graph = None
@@ -2207,6 +2168,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         specs = load_specs(project_root)
     agents_data = load_json_safe(output_dir / "selected-agents.json")
     setup = load_json_safe(output_dir / "tdd-setup.json")
+
+    # Extract model tiers from selected agents — task_503 nests under "tdd_agents"
+    tdd_agents = agents_data.get("tdd_agents", agents_data)
+    agent_models = {
+        "red": tdd_agents.get("red", {}).get("model", "sonnet"),
+        "green": tdd_agents.get("green", {}).get("model", "sonnet"),
+        "refactor": tdd_agents.get("refactor", {}).get("model", "sonnet"),
+        "verify": tdd_agents.get("verify", {}).get("model", "haiku"),
+    }
 
     if not tasks:
         print()
@@ -2355,16 +2325,28 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         pilot_ok, pilot_msg, pilot_results = _pilot_run(
             pilot_candidates, specs, testing_dir, agents, commands,
             skip_execution, atomic_root, profile, project_root,
-            source_registry, token_budget,
+            source_registry, token_budget, agent_models,
         )
 
-        # Process pilot results
+        # Process pilot results and accumulate cycle counts
+        pilot_red = 0
+        pilot_green = 0
+        pilot_refactor = 0
+        pilot_verify = 0
         for result in pilot_results:
             task_id, status, record, duration, error = result
             save_tdd_record(testing_dir, task_id, record)
             if status == "complete":
                 completed_ids.add(task_id)
-                # Register in source registry from record
+                # Accumulate pilot cycle counts so they survive into DAG stats
+                if "red" in record:
+                    pilot_red += 1
+                if "green" in record:
+                    pilot_green += 1
+                if "refactor" in record:
+                    pilot_refactor += 1
+                if "verify" in record:
+                    pilot_verify += 1
             else:
                 pass  # Failed pilot tasks will be retried or cascaded
 
@@ -2411,7 +2393,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         source_registry=source_registry,
         token_budget=token_budget,
         graph=graph,
+        agent_models=agent_models,
     )
+
+    # Add pilot cycle counts (accumulated before DAG executor, which resets counters)
+    if pilot_candidates and remaining_count > 3:
+        stats["red_cycles"] += pilot_red
+        stats["green_cycles"] += pilot_green
+        stats["refactor_cycles"] += pilot_refactor
+        stats["verify_cycles"] += pilot_verify
 
     # Save source registry for resume
     source_registry.save(registry_file)
@@ -2461,10 +2451,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

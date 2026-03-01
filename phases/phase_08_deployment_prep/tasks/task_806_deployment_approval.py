@@ -22,14 +22,13 @@ from core.utils.file_ops import read_json, write_json
 logger = logging.getLogger(__name__)
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 806: Deployment Approval.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -42,19 +41,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     print(print_bold("Deployment Approval"))
     print()
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(print_dim("  UAT Mode: Creating minimal valid output"))
-        deployment_dir.mkdir(parents=True, exist_ok=True)
-        approval_data = {
-            "status": "approved",
-            "approved_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-            "approver": "UAT"
-        }
-        write_json(approval_file, approval_data)
-        print(print_green("✓ UAT bypass complete"))
-        return True
 
     print()
     print(print_dim("  Human gate: Review and approve deployment artifacts."))
@@ -227,10 +213,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

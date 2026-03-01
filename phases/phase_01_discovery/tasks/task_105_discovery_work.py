@@ -18,6 +18,7 @@ Outputs:
 
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.llm import invoke_llm as invoke
-from core.ui import success, warning, info, step, wrap_text
+from core.ui import success, warning, step, wrap_text
 
 try:
     from core.discovery.canvas import (
@@ -40,14 +41,13 @@ except ImportError:
     HAS_CANVAS = False
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 105: Discovery Conversation.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, skip interactive discovery
         mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
@@ -74,28 +74,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 logger.debug("Failed to load canvas: %s", e)
         if canvas is None:
             canvas = CanvasState()
-
-    # UAT Mode: Skip interactive discovery
-    if uat_mode:
-        print()
-        print("  ⚡ UAT Mode: Skipping interactive discovery")
-        print()
-
-        _create_uat_discovery(approaches_file, consensus_file, deliberation_log)
-
-        if HAS_CANVAS:
-            canvas_file = output_dir / "canvas.json"
-            if not canvas_file.exists():
-                try:
-                    uat_canvas = CanvasState()
-                    uat_canvas.scores["vision"] = 0.6
-                    uat_canvas.scores["architecture"] = 0.3
-                    canvas_file.write_text(json.dumps(uat_canvas.to_dict(), indent=2))
-                except Exception as e:
-                    logger.debug("Failed to save UAT canvas: %s", e)
-
-        success("Discovery conversation complete (UAT mode)")
-        return True
 
     # ═══════════════════════════════════════════════════════════════
     # INTRODUCTION
@@ -280,6 +258,33 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 logger.debug("Canvas render failed: %s", e)
             continue
 
+        # Parse command
+        input_lower = user_input.lower()
+
+        # Detect closure intent — require phrases at word boundaries and exclude negations
+        # This check runs BEFORE logging/turn-increment so that a false-positive
+        # decline lets the input fall through to normal processing without loss.
+        _negation_pats = ['not ready', "not done", "aren't ready", "isn't done",
+                          "how should we proceed", "how do we proceed", "when to finish",
+                          "not yet", "don't proceed", "before we proceed"]
+        _has_negation = any(neg in input_lower for neg in _negation_pats)
+        _closure_re = re.compile(
+            r'(?:^|\.\s+|\!\s+|\?\s+)'  # start of string or start of sentence
+            r'(?:let\'?s?\s+)?'          # optional "let's"
+            r'(?:done|proceed|move on|wrap up|finish|ready)\b',
+            re.IGNORECASE,
+        )
+        if not _has_negation and _closure_re.search(input_lower):
+            print()
+            confirm = input("  Did you mean to end the deliberation? [y/N] ").strip().lower()
+            if confirm in ('y', 'yes'):
+                print("  Closing deliberation...")
+                deliberation_complete = True
+                break
+            else:
+                print("  Continuing deliberation...")
+                # Fall through to log the input and process it normally
+
         # Log user input
         with open(deliberation_log, 'a') as f:
             f.write(f"## Human\n\n{user_input}\n\n")
@@ -291,16 +296,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         })
 
         turn += 1
-
-        # Parse command
-        input_lower = user_input.lower()
-
-        # Detect closure intent
-        if any(phrase in input_lower for phrase in ['done', 'proceed', 'move on', 'wrap up', 'finish', 'ready']):
-            print()
-            print("  Detected closure intent. Closing deliberation...")
-            deliberation_complete = True
-            break
 
         if input_lower in ('synthesize', 'summary'):
             _synthesize(prompts_dir, conversation)
@@ -660,8 +655,8 @@ Return ONLY valid JSON:
             print("  ✓ Approaches generated")
             print()
             for approach in data.get("approaches", []):
-                print(f"    [{approach['id']}] {approach['name']} ({approach.get('complexity', 'unknown')})")
-                print(f"        {approach['summary']}")
+                print(f"    [{approach.get('id', '?')}] {approach.get('name', 'Unknown')} ({approach.get('complexity', 'unknown')})")
+                print(f"        {approach.get('summary', '')}")
     except Exception as e:
         logger.warning("Approach generation failed: %s", e)
         print("  ! Approach generation failed. Check logs for details.")
@@ -752,12 +747,18 @@ Return ONLY valid JSON:
         if output_file.exists():
             raw = output_file.read_text().strip()
             # Strip markdown code fences (```json ... ```) that LLMs sometimes add
-            if raw.startswith("```"):
-                # Remove opening fence (```json or ```)
-                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-                # Remove closing fence
-                if raw.endswith("```"):
-                    raw = raw[:-3].rstrip()
+            if '```' in raw:
+                fence_lines = raw.split('\n')
+                json_lines = []
+                in_fence = False
+                for fl in fence_lines:
+                    if fl.strip().startswith('```'):
+                        in_fence = not in_fence
+                        continue
+                    if in_fence:
+                        json_lines.append(fl)
+                if json_lines:
+                    raw = '\n'.join(json_lines)
             return json.loads(raw)
     except Exception as e:
         logger.debug("LLM consensus generation failed: %s", e)
@@ -775,49 +776,11 @@ Return ONLY valid JSON:
     }
 
 
-def _create_uat_discovery(approaches_file: Path, consensus_file: Path, deliberation_log: Path) -> None:
-    """Create minimal discovery files for UAT mode."""
-    with open(approaches_file, 'w') as f:
-        json.dump({
-            "approaches": [
-                {
-                    "id": "A",
-                    "name": "Phased Implementation",
-                    "summary": "UAT mode: Minimal approach for testing",
-                    "description": "UAT mode: Minimal approach for testing",
-                    "pros": ["Systematic validation"],
-                    "cons": ["Simplified for testing"],
-                    "recommended": True
-                }
-            ]
-        }, f, indent=2)
-
-    with open(consensus_file, 'w') as f:
-        json.dump({
-            "agreed_direction": {
-                "approach": "Phased Implementation",
-                "rationale": "UAT mode auto-generated consensus"
-            },
-            "key_decisions": ["UAT mode testing"],
-            "open_items": [],
-            "next_steps": ["Proceed to approach selection"],
-            "dissenting_views": []
-        }, f, indent=2)
-
-    deliberation_log.write_text("""## UAT Mode
-
-Discovery conversation skipped in UAT mode.
-
-Approach: Phased Implementation (testing)
-""")
-
-
 
 
 if __name__ == "__main__":
     # CLI execution support
     atomic_root = Path.cwd()
     output_dir = atomic_root.parent / ".outputs" / "1-discovery"
-    uat_mode = "--uat" in sys.argv
 
-    sys.exit(0 if execute(atomic_root, output_dir, uat_mode) else 1)
+    sys.exit(0 if execute(atomic_root, output_dir) else 1)

@@ -11,12 +11,9 @@ Tests all 5 Phase 0 tasks with comprehensive coverage:
 
 import json
 import os
-import platform
 import pytest
-import subprocess
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, call
-from datetime import datetime
+from unittest.mock import Mock, patch, MagicMock
 
 # Import task modules
 import sys
@@ -28,7 +25,6 @@ from phases.phase_00_setup.tasks import task_003_setup_wizard
 from phases.phase_00_setup.tasks import task_004_material_scan
 from phases.phase_00_setup.tasks import task_005_repository_setup
 
-
 # ============================================================================
 # Task 001: Environment Bootstrap Tests
 # ============================================================================
@@ -36,66 +32,6 @@ from phases.phase_00_setup.tasks import task_005_repository_setup
 @pytest.mark.unit
 class TestTask001EnvironmentBootstrap:
     """Unit tests for task_001_environment_bootstrap."""
-
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._record_environment')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._launch_dashboard')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._install_dashboard_deps')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._show_summary')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._show_airgap_note')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._show_recommended_tools')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._show_required_tools')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._detect_os', return_value='linux')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._show_info_box')
-    def test_execute_uat_mode_returns_true(
-        self, mock_info, mock_os, mock_req, mock_rec, mock_air,
-        mock_summary, mock_deps, mock_launch, mock_record, temp_dir
-    ):
-        """Test execute in UAT mode returns True when all tools installed."""
-        output_dir = temp_dir / ".outputs" / "0-setup"
-        output_dir.mkdir(parents=True)
-
-        # Simulate all required tools installed
-        task_001_environment_bootstrap.REQUIRED_TOTAL = 6
-        task_001_environment_bootstrap.REQUIRED_INSTALLED = 6
-
-        result = task_001_environment_bootstrap.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
-
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._record_environment')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._launch_dashboard')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._install_dashboard_deps')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._show_summary')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._show_airgap_note')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._show_quick_install')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._show_recommended_tools')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._show_required_tools')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._detect_os', return_value='linux')
-    @patch('phases.phase_00_setup.tasks.task_001_environment_bootstrap._show_info_box')
-    def test_execute_uat_mode_continues_with_missing_tools(
-        self, mock_info, mock_os, mock_req, mock_rec, mock_quick,
-        mock_air, mock_summary, mock_deps, mock_launch, mock_record, temp_dir
-    ):
-        """Test execute in UAT mode continues even with missing tools."""
-        output_dir = temp_dir / ".outputs" / "0-setup"
-        output_dir.mkdir(parents=True)
-
-        # Simulate missing tools -- _show_required_tools sets these globals
-        task_001_environment_bootstrap.REQUIRED_TOTAL = 6
-        task_001_environment_bootstrap.REQUIRED_INSTALLED = 4
-
-        result = task_001_environment_bootstrap.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        # UAT mode continues despite missing tools
-        assert result is True
 
     def test_detect_os_returns_known_type(self):
         """Test _detect_os returns a recognized OS type."""
@@ -199,7 +135,6 @@ class TestTask001EnvironmentBootstrap:
 
         assert isinstance(hostname, str)
         assert len(hostname) > 0
-
 
 # ============================================================================
 # Task 002: Provider Detection Tests
@@ -396,7 +331,6 @@ class TestTask002ProviderDetection:
         secrets = json.loads(secrets_file.read_text())
         assert secrets["ollama_enabled"] is True
         assert secrets["ollama_host"] == "localhost:11434"
-
 
 # ============================================================================
 # Task 003: Setup Wizard Tests
@@ -611,7 +545,6 @@ class TestTask003SetupWizard:
         assert "sonnet" in task_003_setup_wizard.MODEL_TIERS
         assert "haiku" in task_003_setup_wizard.MODEL_TIERS
 
-
 # ============================================================================
 # Task 004: Material Scan Tests
 # ============================================================================
@@ -619,40 +552,6 @@ class TestTask003SetupWizard:
 @pytest.mark.unit
 class TestTask004MaterialScan:
     """Unit tests for task_004_material_scan."""
-
-    def test_execute_uat_mode_returns_true(self, temp_dir):
-        """Test execute in UAT mode returns True."""
-        output_dir = temp_dir / ".outputs" / "0-setup"
-        output_dir.mkdir(parents=True)
-
-        # Create project-config.json required by _record_reference_info
-        (output_dir / "project-config.json").write_text(json.dumps({"project": {"name": "test"}}))
-
-        result = task_004_material_scan.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
-
-    def test_execute_uat_mode_creates_manifest(self, temp_dir):
-        """Test execute creates material-manifest.json in UAT mode."""
-        output_dir = temp_dir / ".outputs" / "0-setup"
-        output_dir.mkdir(parents=True)
-        (output_dir / "project-config.json").write_text(json.dumps({"project": {"name": "test"}}))
-
-        task_004_material_scan.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        manifest_file = output_dir / "material-manifest.json"
-        assert manifest_file.exists()
-        manifest = json.loads(manifest_file.read_text())
-        assert "scanned_at" in manifest
-        assert "summary" in manifest
 
     def test_detect_key_files_finds_readme(self, temp_dir):
         """Test _detect_key_files detects README.md."""
@@ -836,7 +735,6 @@ class TestTask004MaterialScan:
         # .git contents should not appear
         assert all(".git" not in str(f) for f, _ in found)
 
-
 # ============================================================================
 # Task 005: Repository & System Setup Tests
 # ============================================================================
@@ -884,26 +782,6 @@ class TestTask005RepositorySetup:
         skills_dir.mkdir(parents=True)
 
         return output_dir
-
-    @patch('phases.phase_00_setup.tasks.task_005_repository_setup._assess_network')
-    @patch('phases.phase_00_setup.tasks.task_005_repository_setup._assess_storage')
-    @patch('phases.phase_00_setup.tasks.task_005_repository_setup._assess_memory')
-    @patch('phases.phase_00_setup.tasks.task_005_repository_setup._assess_gpu')
-    @patch('phases.phase_00_setup.tasks.task_005_repository_setup._assess_cpu')
-    @patch('phases.phase_00_setup.tasks.task_005_repository_setup._validate_git')
-    def test_execute_uat_mode_returns_true(
-        self, mock_git, mock_cpu, mock_gpu, mock_mem, mock_storage, mock_net, temp_dir
-    ):
-        """Test execute in UAT mode returns True."""
-        output_dir = self._setup_task_005_env(temp_dir)
-
-        result = task_005_repository_setup.execute(
-            atomic_root=temp_dir,
-            output_dir=output_dir,
-            uat_mode=True
-        )
-
-        assert result is True
 
     def test_verify_agents_reads_manifest(self, temp_dir):
         """Test _verify_agents reads agent manifest and counts agents."""

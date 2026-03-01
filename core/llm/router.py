@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Any, Generator
 from .base import BaseLLMProvider, LLMResponse, TokenUsage
 from .cache import LLMCache
 from .exceptions import (
+    AuthenticationException,
     LLMException,
     ProviderUnavailableException,
     RateLimitException,
@@ -153,6 +154,9 @@ class LLMRouter:
             last_check=datetime.now(timezone.utc),
         )
 
+        # Invalidate cached fallback chains so new provider is visible
+        self._fallback_chains.clear()
+
         logger.info(f"Registered provider: {name} with roles: {roles}")
 
     def unregister_provider(self, name: str) -> bool:
@@ -179,6 +183,9 @@ class LLMRouter:
         # Remove from health tracking
         if name in self._provider_health:
             del self._provider_health[name]
+
+        # Invalidate cached fallback chains so removed provider is excluded
+        self._fallback_chains.clear()
 
         logger.info(f"Unregistered provider: {name}")
         return True
@@ -282,8 +289,8 @@ class LLMRouter:
                 # Update success metrics
                 self._record_success(provider_name, time.time() - start_time, response)
 
-                # Cache response
-                if use_cache and self._cache:
+                # Cache response (only if well-formed)
+                if use_cache and self._cache and response.content:
                     self._cache.set(cache_key, response.to_dict())
 
                 return response
@@ -379,9 +386,36 @@ class LLMRouter:
                 self._record_success(provider_name, 0, None)
                 return
 
-            except Exception as e:
-                logger.error(f"Provider {provider_name} streaming failed: {str(e)}")
+            except (RateLimitException, TimeoutException) as e:
+                # Retryable errors - try next provider
                 self._record_failure(provider_name, retryable=True)
+                logger.warning(
+                    f"Provider {provider_name} streaming failed (retryable): {str(e)}"
+                )
+                continue
+
+            except AuthenticationException as e:
+                # Auth errors are NOT retryable - don't waste cycles
+                self._record_failure(provider_name, retryable=False)
+                logger.error(
+                    f"Provider {provider_name} streaming auth error: {str(e)}"
+                )
+                continue
+
+            except LLMException as e:
+                # Non-retryable LLM errors - try next provider
+                self._record_failure(provider_name, retryable=False)
+                logger.error(
+                    f"Provider {provider_name} streaming failed: {str(e)}"
+                )
+                continue
+
+            except Exception as e:
+                # Unexpected errors
+                self._record_failure(provider_name, retryable=False)
+                logger.exception(
+                    f"Provider {provider_name} streaming unexpected error: {str(e)}"
+                )
                 continue
 
         # All providers failed
@@ -489,17 +523,19 @@ class LLMRouter:
         if provider_name not in self._providers:
             return False
 
-        # Check circuit breaker
-        failure = self._failures.get(provider_name)
-        if failure and failure.disabled_until:
-            # Check if cooldown expired
-            if datetime.now(timezone.utc) < failure.disabled_until:
-                return False
-            else:
-                # Re-enable provider
-                failure.disabled_until = None
-                failure.failure_count = 0
-                logger.info(f"Re-enabled provider: {provider_name}")
+        # Check circuit breaker — hold _stats_lock so the cooldown-expiry
+        # reset cannot race with _record_failure() incrementing failure_count.
+        with self._stats_lock:
+            failure = self._failures.get(provider_name)
+            if failure and failure.disabled_until:
+                # Check if cooldown expired
+                if datetime.now(timezone.utc) < failure.disabled_until:
+                    return False
+                else:
+                    # Re-enable provider
+                    failure.disabled_until = None
+                    failure.failure_count = 0
+                    logger.info(f"Re-enabled provider: {provider_name}")
 
         return True
 
@@ -594,23 +630,23 @@ class LLMRouter:
             stats.total_requests += 1
             stats.failed_requests += 1
 
-        # Update circuit breaker
-        if provider_name not in self._failures:
-            self._failures[provider_name] = ProviderFailure(provider_name=provider_name)
+            # Update circuit breaker (under lock to avoid lost increments)
+            if provider_name not in self._failures:
+                self._failures[provider_name] = ProviderFailure(provider_name=provider_name)
 
-        failure = self._failures[provider_name]
-        failure.failure_count += 1
-        failure.last_failure = datetime.now(timezone.utc)
+            failure = self._failures[provider_name]
+            failure.failure_count += 1
+            failure.last_failure = datetime.now(timezone.utc)
 
-        # Check if we should disable provider (circuit breaker)
-        if failure.failure_count >= self.config.failure_threshold:
-            failure.disabled_until = datetime.now(timezone.utc) + timedelta(
-                minutes=self.config.cooldown_minutes
-            )
-            logger.warning(
-                f"Circuit breaker: Disabled provider {provider_name} "
-                f"until {failure.disabled_until}"
-            )
+            # Check if we should disable provider (circuit breaker)
+            if failure.failure_count >= self.config.failure_threshold:
+                failure.disabled_until = datetime.now(timezone.utc) + timedelta(
+                    minutes=self.config.cooldown_minutes
+                )
+                logger.warning(
+                    f"Circuit breaker: Disabled provider {provider_name} "
+                    f"until {failure.disabled_until}"
+                )
 
     def invalidate_cache(self) -> None:
         """Clear response cache."""

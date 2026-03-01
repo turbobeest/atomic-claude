@@ -38,9 +38,7 @@ from phases.phase_04_specification.tasks import (
 
 # Get paths from environment
 ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
-PROJECT_ROOT = ATOMIC_ROOT.parent
-OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', PROJECT_ROOT / '.outputs' / '4-specification'))
-UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
+OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '4-specification'))
 
 
 def run_phase(resume_at: str = None) -> bool:
@@ -87,7 +85,6 @@ def run_phase(resume_at: str = None) -> bool:
         task_artifacts=task_artifacts,
         atomic_root=ATOMIC_ROOT,
         output_dir=OUTPUT_DIR,
-        uat_mode=UAT_MODE,
         resume_at=resume_at,
         graph=graph,
     )
@@ -97,32 +94,32 @@ def run_phase(resume_at: str = None) -> bool:
 
 def task_401_entry_initialization(mem=None, graph=None) -> bool:
     """Task 401: Entry initialization"""
-    return task_401(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_401(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_402_agent_selection(mem=None, graph=None) -> bool:
     """Task 402: Agent selection"""
-    return task_402(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_402(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_403_openspec_generation(mem=None, graph=None) -> bool:
     """Task 403: OpenSpec generation"""
-    return task_403(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_403(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_404_tdd_subtask_injection(mem=None, graph=None) -> bool:
     """Task 404: TDD subtask injection"""
-    return task_404(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_404(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_405_phase_audit(mem=None, graph=None) -> bool:
     """Task 405: Phase audit"""
-    return task_405(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_405(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def task_406_closeout(mem=None, graph=None) -> bool:
     """Task 406: Closeout"""
-    return task_406(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
+    return task_406(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 if __name__ == "__main__":

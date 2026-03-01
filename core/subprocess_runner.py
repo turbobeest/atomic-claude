@@ -6,6 +6,7 @@ Executes external scripts and commands from Python orchestrators with proper env
 
 import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -183,26 +184,48 @@ def run_task_script_streaming(
         return 1
 
 
+_SHELL_META_RE = re.compile(r'[;&|`$]')
+
+
 def run_bash_command(
     command: str,
     phase_id: str,
     task_id: str,
     timeout: int = 60,
-    capture_output: bool = True
+    capture_output: bool = True,
+    reject_shell_meta: bool = False,
 ) -> Tuple[int, str, str]:
     """
     Execute a single bash command (not a script file).
 
+    SECURITY: command is passed to bash -c. Callers MUST use shlex.quote()
+    for any variable interpolated into the command string. This function
+    rejects commands containing null bytes as a minimal safety check.
+
     Args:
-        command: Bash command to execute
+        command: Bash command to execute (must not contain null bytes)
         phase_id: Phase identifier
         task_id: Task identifier
         timeout: Timeout in seconds
         capture_output: Whether to capture stdout/stderr
+        reject_shell_meta: If True, reject commands containing shell
+            metacharacters (;, &, |, `, $). Use for commands built from
+            variable input where chaining/expansion is not intended.
 
     Returns:
         Tuple of (exit_code, stdout, stderr)
     """
+    # Reject null bytes — a common injection vector
+    if "\x00" in command:
+        logger.error("Rejected command containing null bytes (phase=%s, task=%s)", phase_id, task_id)
+        return 1, "", "Command rejected: contains null bytes"
+
+    # Optional: reject obvious shell metacharacters when caller opts in
+    if reject_shell_meta and _SHELL_META_RE.search(command):
+        logger.error(
+            "Rejected command containing shell metacharacters (phase=%s, task=%s)", phase_id, task_id
+        )
+        return 1, "", "Command rejected: contains shell metacharacters (set reject_shell_meta=False to allow)"
     env = get_task_environment(phase_id, task_id)
     atomic_root = Path(__file__).parent.parent.resolve()
 

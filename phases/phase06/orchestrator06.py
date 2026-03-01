@@ -24,7 +24,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 logger = logging.getLogger(__name__)
 
 from orchestration.phase_runner import run_phase_tasks
-from core.graph import get_graph
+try:
+    from core.graph import get_graph
+except ImportError:
+    get_graph = None
 
 # Import Python task modules
 from phases.phase_06_code_review.tasks import (
@@ -38,41 +41,39 @@ from phases.phase_06_code_review.tasks import (
 
 # Environment variables
 ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
-PROJECT_ROOT = ATOMIC_ROOT.parent
-OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', PROJECT_ROOT / '.outputs' / '6-code-review'))
-UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
+OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '6-code-review'))
 
 
 # Task wrapper functions (call Python task modules)
 
-def task_601_wrapper(mem=None, **kwargs) -> bool:
+def task_601_wrapper(mem=None) -> bool:
     """Task 601: Entry initialization"""
-    return task_601(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_601(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_602_wrapper(mem=None, **kwargs) -> bool:
+def task_602_wrapper(mem=None) -> bool:
     """Task 602: Agent selection"""
-    return task_602(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_602(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_603_wrapper(mem=None, **kwargs) -> bool:
+def task_603_wrapper(mem=None) -> bool:
     """Task 603: Comprehensive review"""
-    return task_603(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_603(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
-def task_604_wrapper(mem=None, **kwargs) -> bool:
+def task_604_wrapper(mem=None, graph=None) -> bool:
     """Task 604: Refinement"""
-    return task_604(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=kwargs.get("graph"))
+    return task_604(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
-def task_605_wrapper(mem=None, **kwargs) -> bool:
+def task_605_wrapper(mem=None, graph=None) -> bool:
     """Task 605: Phase audit"""
-    return task_605(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=kwargs.get("graph"))
+    return task_605(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
-def task_606_wrapper(mem=None, **kwargs) -> bool:
+def task_606_wrapper(mem=None) -> bool:
     """Task 606: Closeout"""
-    return task_606(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_606(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 
 def run_phase(resume_at: str = None) -> bool:
@@ -87,9 +88,16 @@ def run_phase(resume_at: str = None) -> bool:
     """
     phase_id = "6-code-review"
 
-    # Initialize knowledge graph (raises GraphUnavailableError on failure)
-    graph = get_graph(phase_id=phase_id)
-    graph.ensure_schema()
+    # Initialize knowledge graph (optional — graceful degradation if unavailable)
+    graph = None
+    try:
+        if get_graph is not None:
+            graph = get_graph(phase_id=phase_id)
+            if graph:
+                graph.ensure_schema()
+    except Exception as e:
+        logger.warning("Knowledge graph unavailable for Phase 6: %s", e)
+        graph = None
 
     # Task list in execution order
     tasks = [
@@ -121,15 +129,12 @@ def run_phase(resume_at: str = None) -> bool:
         task_artifacts=task_artifacts,
         atomic_root=ATOMIC_ROOT,
         output_dir=OUTPUT_DIR,
-        uat_mode=UAT_MODE,
         resume_at=resume_at,
         graph=graph,
     )
 
 
 if __name__ == "__main__":
-    import sys
-
     resume_at = None
     if len(sys.argv) > 1:
         resume_at = sys.argv[1]

@@ -25,7 +25,7 @@ import resource
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from core.subprocess_runner import run_task_script, get_task_environment
+from core.subprocess_runner import run_task_script
 from core.state import StateManager
 
 

@@ -10,6 +10,8 @@ Allows users to go back to any point and start fresh by:
 """
 
 import logging
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 import shutil
@@ -47,40 +49,6 @@ PROJECT_DELIVERABLES = {
 }
 
 
-def _clear_directory_for_phases(base_dir: Path, phases: list, pattern_fn, label: str = "") -> None:
-    """Clear directories or files matching a pattern for a list of phases.
-
-    Args:
-        base_dir: Base directory to search in
-        phases: List of phase numbers to clear
-        pattern_fn: Callable(phase_num) -> list of (Path, is_glob) tuples to clear
-        label: Label for log messages
-    """
-    if not base_dir.exists():
-        return
-    for p in phases:
-        targets = pattern_fn(p)
-        for target, is_glob in targets:
-            if is_glob:
-                for f in base_dir.glob(str(target)):
-                    was_dir = f.is_dir()
-                    if was_dir:
-                        shutil.rmtree(f)
-                    else:
-                        f.unlink()
-                    print(f"   ✓ Cleared {f if was_dir else f.name}" +
-                          (f" ({label})" if label else ""))
-            else:
-                full_path = base_dir / target if not target.is_absolute() else target
-                if full_path.exists():
-                    if full_path.is_dir():
-                        shutil.rmtree(full_path)
-                    else:
-                        full_path.unlink()
-                    print(f"   ✓ Cleared {full_path}" +
-                          (f" ({label})" if label else ""))
-
-
 def _clear_state(state: dict, state_file: Path, phase: int, phase_name: str,
                  task: Optional[str], task_num: Optional[int],
                  phases_to_clear: list) -> None:
@@ -104,7 +72,11 @@ def _clear_state(state: dict, state_file: Path, phase: int, phase_name: str,
 
         cleared_count = 0
         for task_id in list(tasks.keys()):
-            if int(task_id) >= task_num:
+            try:
+                task_id_int = int(task_id)
+            except (ValueError, TypeError):
+                continue
+            if task_id_int >= task_num:
                 del tasks[task_id]
                 cleared_count += 1
 
@@ -277,7 +249,7 @@ def _clear_memory(phases_to_clear: list, phase: int, phase_name: str,
 
     # Clear memory entries and invalidate checkpoints
     try:
-        memory_init()
+        memory_init(atomic_root / ".state")
         memory_handle_backtrack(phase)
     except Exception as e:
         logger.warning("Memory cleanup during backtrack failed: %s", e)
@@ -379,6 +351,19 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
     2. Clear all artifacts after target
     3. Write updated state (last, so a crash mid-cleanup is safe)
     """
+    # Check for interrupted backtrack from a previous run
+    backtrack_marker = atomic_root / ".state" / "backtrack-in-progress"
+    if backtrack_marker.exists():
+        try:
+            marker_data = json.loads(backtrack_marker.read_text())
+            print(f"\n⚠️  WARNING: A previous backtrack was interrupted!")
+            print(f"   Target: Phase {marker_data.get('target_phase')}, Task {marker_data.get('target_task', 'N/A')}")
+            print(f"   Started: {marker_data.get('started_at', 'unknown')}")
+            print("   The pipeline state may be inconsistent. Proceeding with new backtrack.\n")
+        except (json.JSONDecodeError, OSError):
+            print("\n⚠️  WARNING: A previous backtrack was interrupted (marker file found).")
+            print("   The pipeline state may be inconsistent. Proceeding with new backtrack.\n")
+
     # Validate phase number
     if not isinstance(phase, int) or phase < 0 or phase > 9:
         print(f"\n❌ Invalid phase number: {phase}. Must be 0-9.")
@@ -418,7 +403,11 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
     # Parse task number early (needed for artifact cleanup logic too)
     task_num = None
     if task:
-        task_num = int(task) if task.isdigit() else int(task.replace("task", ""))
+        try:
+            task_num = int(task) if task.isdigit() else int(task.replace("task", ""))
+        except ValueError:
+            print(f"\n❌ Invalid task ID: '{task}'. Use a numeric ID like '205' or 'task205'.")
+            return
 
         # Validate task belongs to the target phase by checking actual task files
         expected_prefix = phase * 100
@@ -462,9 +451,21 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
         # Step 3: Update state in memory (modify dict but don't write yet)
         _clear_state(state, state_file, phase, phase_name, task, task_num, phases_to_clear)
 
-        # Step 4: Write state LAST so crash during cleanup doesn't leave
-        # state marked as backtracked while artifacts still exist (Finding #10, #11)
-        write_json(state_file, state)
+        # Step 4: Write state LAST with atomic replace so crash during cleanup
+        # doesn't leave state marked as backtracked while artifacts still exist.
+        # A crash between artifact deletion and this write is recoverable via
+        # the backtrack-in-progress marker checked on the next backtrack_to() call.
+        fd, tmp = tempfile.mkstemp(dir=state_file.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
+            os.replace(tmp, state_file)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
         # Step 5: Prompt for optional code cleanup
         project_root = atomic_root.parent

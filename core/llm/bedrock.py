@@ -55,6 +55,14 @@ BEDROCK_TIER_MAP = {
 }
 
 
+# Keys safe to forward from **kwargs into Bedrock request bodies.
+_BEDROCK_SAFE_KEYS = frozenset({
+    "prompt", "max_tokens", "temperature", "top_p", "top_k",
+    "stop_sequences", "system", "messages", "tools",
+    "tool_choice", "anthropic_version",
+})
+
+
 class BedrockProvider(BaseLLMProvider):
     """
     AWS Bedrock provider using boto3.
@@ -189,9 +197,6 @@ class BedrockProvider(BaseLLMProvider):
             request_body["system"] = system_prompt
 
         # Merge additional kwargs (filter to Bedrock-safe keys only)
-        _BEDROCK_SAFE_KEYS = {"prompt", "max_tokens", "temperature", "top_p", "top_k",
-                              "stop_sequences", "system", "messages", "tools",
-                              "tool_choice", "anthropic_version"}
         for key, value in kwargs.items():
             if key in _BEDROCK_SAFE_KEYS and key not in request_body:
                 request_body[key] = value
@@ -378,9 +383,6 @@ class BedrockProvider(BaseLLMProvider):
             request_body["system"] = system_prompt
 
         # Merge additional kwargs (filter to Bedrock-safe keys only)
-        _BEDROCK_SAFE_KEYS = {"prompt", "max_tokens", "temperature", "top_p", "top_k",
-                              "stop_sequences", "system", "messages", "tools",
-                              "tool_choice", "anthropic_version"}
         for key, value in kwargs.items():
             if key in _BEDROCK_SAFE_KEYS and key not in request_body:
                 request_body[key] = value

@@ -26,10 +26,17 @@ from core.utils.file_ops import ensure_dir, read_file, write_file
 def check_closeout_items(
     tasks_file: Path,
     specs_dir: Path,
-    audit_file: Path
+    audit_file: Path,
+    tasks_data: Dict = None
 ) -> Tuple[List[Tuple[str, str]], bool]:
     """
     Check closeout checklist items.
+
+    Args:
+        tasks_file: Path to tasks.json (used only if tasks_data not provided)
+        specs_dir: Path to specs directory
+        audit_file: Path to audit file
+        tasks_data: Pre-loaded tasks data dict (avoids re-reading tasks_file)
 
     Returns:
         Tuple of (checklist items, all_passed flag)
@@ -38,7 +45,8 @@ def check_closeout_items(
     all_passed = True
 
     try:
-        tasks_data = json.loads(read_file(tasks_file))
+        if tasks_data is None:
+            tasks_data = json.loads(read_file(tasks_file))
         tasks = tasks_data.get("tasks", [])
         task_count = len(tasks)
 
@@ -285,14 +293,13 @@ python main.py run 5
     return closeout_md, closeout_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 406: Phase Closeout.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, auto-approve closeout for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -313,19 +320,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         audit_file = project_root / ".outputs" / "audits" / "phase-4-report.json"
     if not audit_file.exists():
         audit_file = project_root / ".claude" / "audit" / "phase-04-audit.json"
-
-    # UAT Mode: Auto-approve closeout
-    if uat_mode:
-        print()
-        print(print_yellow("⚡ UAT Mode: Auto-approving closeout"))
-        print()
-        ensure_dir(output_dir)
-        write_file(output_dir / "closeout.json", json.dumps({
-            "approved": True,
-            "mode": "uat"
-        }, indent=2))
-        print(print_green("✓ Phase closeout complete (UAT mode)"))
-        return True
 
     ensure_dir(closeout_dir)
 
@@ -348,7 +342,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_bold("CLOSEOUT CHECKLIST"))
     print()
 
-    checklist, all_passed = check_closeout_items(tasks_file, specs_dir, audit_file)
+    checklist, all_passed = check_closeout_items(tasks_file, specs_dir, audit_file, tasks_data=tasks_data)
 
     print()
 
@@ -413,13 +407,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         except Exception as e:
             logger.warning("Graph export failed: %s", e)
 
-    # Memory Checkpoint (placeholder for future memory.py integration)
-    tasks = tasks_data.get("tasks", [])
-    spec_count = len(spec_files)
-    tasks_with_tdd = len([t for t in tasks if len(t.get("subtasks", [])) >= 4])
-    total_subtasks = sum(len(t.get("subtasks", [])) for t in tasks)
-
-    print(print_dim("  Memory checkpoint would save here..."))
     print()
 
     # Session End
@@ -460,10 +447,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (auto-approve closeout)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

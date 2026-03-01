@@ -29,20 +29,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.llm import invoke
 from core.utils.cli_ui import (
-    print_bold, print_cyan, print_yellow, print_green,
+    print_bold, print_yellow, print_green,
     print_red, print_dim
 )
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 303: Task Decomposition.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -139,7 +138,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Try per-feature decomposition for large PRDs
     features_text = sections.get("features", "")
     feature_list = _split_into_features(features_text) if features_text else []
-    use_per_feature = len(feature_list) >= 2 and not uat_mode
+    use_per_feature = len(feature_list) >= 2
 
     if use_per_feature:
         print(print_dim(f"Large PRD detected — decomposing {len(feature_list)} features individually"))
@@ -155,8 +154,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 decomposer_prompt,
                 project_name,
                 sections,
-                uat_mode,
-                feature=(feature_id, feature_content)
+                feature=(feature_id, feature_content),
+                graph_context=graph_context,
             )
 
             # Save per-feature prompt for debugging
@@ -212,12 +211,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             print(print_yellow("⚠ All per-feature calls failed — falling back to template"))
             _create_template_tasks(raw_tasks_file)
     else:
-        # Single-call path: small PRDs or UAT mode
+        # Single-call path: small PRDs
         prompt_content = _build_decomposition_prompt(
             decomposer_prompt,
             project_name,
             sections,
-            uat_mode
+            graph_context=graph_context,
         )
         prompt_file = prompts_dir / "task-decomposition.md"
         write_file(prompt_file, prompt_content)
@@ -226,7 +225,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print()
 
         # Use longer timeout for monolithic call
-        single_timeout = 1800 if not uat_mode else 600
+        single_timeout = 1800
 
         try:
             result = invoke(
@@ -447,21 +446,54 @@ def _merge_feature_tasks(
 
     # Second pass: remap dependencies and collect tasks
     all_tasks = []
+    dropped_cross_feature_deps: List[tuple] = []  # (task_id, feature_id, dep_id)
+    resolved_cross_feature_deps: List[tuple] = []  # (task_id, feature_id, dep_id, source_feat_idx)
     for feat_idx, (feature_id, tasks_data) in enumerate(feature_results):
         tasks = tasks_data.get("tasks", [])
         for task in tasks:
             old_deps = task.get("dependencies", [])
             new_deps = []
             for dep_id in old_deps:
-                # Look up the task_idx for this old dep_id, then get new id
+                # Look up the task_idx for this old dep_id within the same feature first
                 dep_task_idx = old_id_to_idx.get((feat_idx, dep_id))
                 if dep_task_idx is not None:
                     new_dep = id_remap.get((feat_idx, dep_task_idx))
                     if new_dep is not None:
                         new_deps.append(new_dep)
-                # else: cross-feature dep — leave for task 304 dependency mapper
+                else:
+                    # Cross-feature dep — attempt resolution across all features
+                    resolved = False
+                    for other_feat_idx in range(len(feature_results)):
+                        if other_feat_idx == feat_idx:
+                            continue
+                        cross_task_idx = old_id_to_idx.get((other_feat_idx, dep_id))
+                        if cross_task_idx is not None:
+                            cross_new_dep = id_remap.get((other_feat_idx, cross_task_idx))
+                            if cross_new_dep is not None:
+                                new_deps.append(cross_new_dep)
+                                resolved_cross_feature_deps.append(
+                                    (task["id"], feature_id, dep_id, other_feat_idx))
+                                resolved = True
+                                break
+                    if not resolved:
+                        dropped_cross_feature_deps.append((task["id"], feature_id, dep_id))
             task["dependencies"] = new_deps
             all_tasks.append(task)
+
+    if resolved_cross_feature_deps:
+        refs = [f"task {tid} ({fid}) -> dep {did} (from feature idx {sfx})"
+                for tid, fid, did, sfx in resolved_cross_feature_deps]
+        logger.warning(
+            "Resolved %d cross-feature dependencies during merge: %s",
+            len(resolved_cross_feature_deps), "; ".join(refs)
+        )
+
+    if dropped_cross_feature_deps:
+        refs = [f"task {tid} ({fid}) -> dep {did}" for tid, fid, did in dropped_cross_feature_deps]
+        logger.warning(
+            "Dropped %d cross-feature dependencies during merge (unresolvable): %s",
+            len(dropped_cross_feature_deps), "; ".join(refs)
+        )
 
     # Third pass: deduplicate bootstrap/scaffold tasks
     # Keep the first one, remove duplicates, remap any deps pointing to removed tasks
@@ -516,8 +548,8 @@ def _build_decomposition_prompt(
     agent_prompt: str,
     project_name: str,
     sections: Dict[str, str],
-    uat_mode: bool,
-    feature: Optional[tuple] = None
+    feature: Optional[tuple] = None,
+    graph_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build the task decomposition prompt."""
     if agent_prompt:
@@ -529,15 +561,7 @@ def _build_decomposition_prompt(
         prompt += "You are a task-decomposer agent. Your job is to break down the PRD into atomic, implementable tasks following PRD-TEMPLATE v3.0 structure.\n\n"
 
     # Fast-path constraint
-    if uat_mode:
-        prompt += "## Token Budget Warning\n\n"
-        prompt += "**FAST-PATH MODE**: Generate MAXIMUM 5 tasks only. Focus on:\n"
-        prompt += "- 1 infrastructure/setup task\n"
-        prompt += "- 1-2 core feature tasks\n"
-        prompt += "- 1 testing task\n"
-        prompt += "- 1 deployment task\n\n"
-        prompt += "Keep it minimal for pipeline testing.\n\n"
-    elif feature:
+    if feature:
         # Per-feature mode: smaller, focused output
         feature_id, feature_content = feature
         prompt += "## Token Budget Warning\n\n"
@@ -555,6 +579,10 @@ def _build_decomposition_prompt(
     # Add corpus analysis for technical context if available
     if "corpus_analysis" in sections:
         prompt += f"### Technical Landscape (Corpus Analysis)\n{sections['corpus_analysis']}\n\n"
+
+    # Add graph-powered context if available
+    if graph_context:
+        prompt += f"### Knowledge Graph Context\n{json.dumps(graph_context, indent=2)}\n\n"
 
     prompt += """## Task Generation Rules
 
@@ -763,10 +791,11 @@ def _repair_json(file_path: Path) -> bool:
             except Exception as e:
                 logger.debug("JSON repair from markdown failed: %s", e)
 
-    # Try to find JSON object
-    if "{" in content:
+    # Try to find JSON object — slice from first { to last }
+    if "{" in content and "}" in content:
         start = content.index("{")
-        json_content = content[start:]
+        end = content.rindex("}") + 1
+        json_content = content[start:end]
         try:
             json.loads(json_content)
             write_file(file_path, json_content)
@@ -846,10 +875,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

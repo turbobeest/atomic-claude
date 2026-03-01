@@ -30,14 +30,13 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 304: Dependency Analysis.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -51,22 +50,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     ensure_dir(graph_file.parent)
     ensure_dir(analysis_file.parent)
-
-    # UAT Mode: Auto-approve
-    if uat_mode:
-        print()
-        print(print_yellow("⚡ UAT Mode: Auto-approving dependency analysis"))
-        print()
-
-        analysis_data = {
-            "validation": "pass",
-            "cycles_detected": False,
-            "invalid_refs": [],
-            "mode": "uat"
-        }
-        write_file(analysis_file, json.dumps(analysis_data, indent=2))
-        print(print_green("✓ Dependency analysis complete (UAT mode)"))
-        return True
 
     print()
     print(print_dim("Validating DAG structure, computing execution levels, and generating work packages."))
@@ -158,6 +141,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             if not validation.get("valid", True):
                 fix_report = graph.fix_dependencies()
                 logger.info(f"Graph dependency fix: {fix_report}")
+                # Write graph-fixed dependencies back to tasks.json
+                try:
+                    tasks_data_current = json.loads(read_file(tasks_file))
+                    graph_tasks = graph.get_tasks() if hasattr(graph, "get_tasks") else None
+                    if graph_tasks:
+                        tasks_data_current["tasks"] = graph_tasks
+                        write_file(tasks_file, json.dumps(tasks_data_current, indent=2))
+                        logger.info("Wrote graph-fixed dependencies back to tasks.json")
+                        # Re-read tasks for subsequent steps
+                        tasks = tasks_data_current["tasks"]
+                except Exception as wb_err:
+                    logger.warning(f"Failed to write graph fixes back to tasks.json: {wb_err}")
                 print(print_green("  ✓ Graph dependencies validated and fixed"))
             else:
                 print(print_green("  ✓ Graph dependency validation passed"))
@@ -320,13 +315,19 @@ def _compute_levels(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             break
 
     # Group tasks by level
+    # Unresolved tasks (e.g., due to missing deps) default to max_level + 1
+    # so they execute last rather than first alongside their prerequisites.
+    fallback_level = max(levels_map.values(), default=0) + 1 if levels_map else 0
     levels_grouped: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     for task in tasks:
         task_id = task["id"]
         level = levels_map.get(task_id, None)
         if level is None:
-            logger.debug("Task %s not resolved to a level, defaulting to 0", task_id)
-            level = 0
+            logger.warning(
+                "Task %s not resolved to a level, defaulting to %d (last wave)",
+                task_id, fallback_level
+            )
+            level = fallback_level
         levels_grouped[level].append({
             "id": task["id"],
             "title": task.get("title", "Untitled"),
@@ -568,10 +569,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

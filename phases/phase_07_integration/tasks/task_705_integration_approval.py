@@ -15,21 +15,19 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
-    YELLOW, NC,
     print_bold, print_cyan, print_yellow, print_green,
     print_red, print_dim, prompt_user, clear_input_buffer
 )
 from core.utils.file_ops import read_json, write_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 705: Integration Approval.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -77,7 +75,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
                 criteria_total = suite.get("total", criteria_total)
         overall_status = "ready" if report_data.get("tests_failed", 0) == 0 else "issues"
     else:
-        print(f"{YELLOW}WARNING: Integration report not found -- cannot verify test results{NC}")
+        print(print_yellow("WARNING: Integration report not found -- cannot verify test results"))
         overall_status = "missing"
 
     print(print_dim("─" * 118))
@@ -181,51 +179,50 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     print()
 
-    if uat_mode:
-        print(print_yellow("UAT Mode: Auto-approving"))
-        approver_name = "UAT System"
-        approval_choice = "approve"
-    else:
-        approval_choice = None
-        while approval_choice != "approve":
-            print(print_dim("What would you like to do?"))
-            print()
-            print(print_green("  [approve]       ") + "Approve and proceed to audit")
-            print(print_cyan("  [investigate]   ") + "Look into specific results")
-            print(print_yellow("  [fix-and-rerun] ") + "Address issues and retest")
-            print()
-
-            clear_input_buffer()
-            approval_choice = prompt_user("Choice (default: approve): ").strip() or "approve"
-
-            if approval_choice == "investigate":
-                print()
-                print(print_dim("Investigation artifacts:"))
-                print("  .claude/integration/e2e-results.json")
-                print("  .claude/integration/acceptance-results.json")
-                print("  .claude/integration/performance-results.json")
-                print("  .claude/integration/integration-report.json")
-                print()
-                if integration_dir.exists():
-                    for f in sorted(integration_dir.iterdir()):
-                        print(f"  {f.name}")
-                print()
-                prompt_user("Press Enter after investigation to continue...")
-                print()
-                # Loop back to approval prompt
-                continue
-
-            elif approval_choice == "fix-and-rerun":
-                print()
-                print(print_yellow("⚠  Fix issues and re-run integration tests"))
-                print(print_dim("  After fixing, run: python main.py run 7 --resume-at=704"))
-                print()
-                return False
-
-        # Get approver name
+    approval_choice = None
+    while approval_choice != "approve":
+        print(print_dim("What would you like to do?"))
         print()
-        approver_name = prompt_user("Approver name: ").strip() or "Human Operator"
+        print(print_green("  [approve]       ") + "Approve and proceed to audit")
+        print(print_cyan("  [investigate]   ") + "Look into specific results")
+        print(print_yellow("  [fix-and-rerun] ") + "Address issues and retest")
         print()
+
+        clear_input_buffer()
+        approval_choice = prompt_user("Choice (default: approve): ").strip() or "approve"
+
+        if approval_choice == "investigate":
+            print()
+            print(print_dim("Investigation artifacts:"))
+            print("  .outputs/7-integration/integration-test-results.json")
+            print()
+            if integration_dir.exists():
+                for f in sorted(integration_dir.iterdir()):
+                    print(f"  {f.name}")
+            print()
+            prompt_user("Press Enter after investigation to continue...")
+            print()
+            # Loop back to approval prompt
+            continue
+
+        elif approval_choice == "fix-and-rerun":
+            print()
+            print(print_yellow("Fix issues and re-run integration tests"))
+            print(print_dim("  After fixing, run: python main.py run 7 --resume-at=704"))
+            print()
+            return False
+
+        elif approval_choice != "approve":
+            print()
+            print(print_yellow(f"Unrecognized choice: '{approval_choice}'. Please choose approve, investigate, or fix-and-rerun."))
+            print()
+            approval_choice = None  # Reset so the loop re-renders
+            continue
+
+    # Get approver name
+    print()
+    approver_name = prompt_user("Approver name: ").strip() or "Human Operator"
+    print()
 
     # Save approval
     approval_data = {
@@ -259,10 +256,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

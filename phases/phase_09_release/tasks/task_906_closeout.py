@@ -14,21 +14,20 @@ from typing import List
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from core.ui import success, error, warning, info, step
+from core.ui import success, warning, step
 from core.utils.cli_ui import CYAN, DIM, BOLD, GREEN, RED, YELLOW, NC
 from core.utils.file_ops import read_json, write_json, write_file
 
 logger = logging.getLogger(__name__)
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     """
     Execute Task 906: Phase Closeout (Final).
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
 
     Returns:
         True if task completed successfully, False otherwise
@@ -45,23 +44,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     step("Phase Closeout")
 
     closeout_dir.mkdir(parents=True, exist_ok=True)
-
-    # UAT Mode Bypass
-    if uat_mode:
-        print(f"  {DIM}UAT Mode: Creating minimal valid output{NC}")
-
-        # Create minimal closeout files
-        write_file(closeout_file, "# Phase 9: Release - Closeout (UAT)\n\nRelease completed in UAT mode.\n")
-
-        write_json(closeout_json, {
-            "phase": "9-release",
-            "status": "complete",
-            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "uat_mode": True
-        })
-
-        success("UAT bypass complete")
-        return True
 
     print()
     print(f"  {DIM}Final phase closeout - completing project.{NC}")
@@ -163,8 +145,14 @@ def _run_checklist(release_dir: Path, version: str, confirmation_status: str) ->
         all_passed = False
 
     # Check artifacts
-    print(f"  {GREEN}[BLCK]{NC} {GREEN}✓{NC} Distribution artifacts ready")
-    checklist.append("Distribution artifacts ready:PASS")
+    dist_dir = release_dir.parent.parent / "dist"
+    if dist_dir.exists():
+        print(f"  {GREEN}[BLCK]{NC} {GREEN}✓{NC} Distribution artifacts ready")
+        checklist.append("Distribution artifacts ready:PASS")
+    else:
+        print(f"  {RED}[BLCK]{NC} {RED}✗{NC} Distribution artifacts not found (dist/ missing)")
+        checklist.append("Distribution artifacts ready:FAIL")
+        all_passed = False
 
     # Check confirmation
     if confirmation_status == "confirmed":
@@ -235,12 +223,10 @@ def _generate_closeout_md(
         status = parts[1] if len(parts) > 1 else "UNKNOWN"
         if status == "PASS":
             checklist_md_lines.append(f"- [x] {name}")
-        elif status == "WARN":
-            checklist_md_lines.append(f"- [~] {name} (warning)")
         elif status == "FAIL":
             checklist_md_lines.append(f"- [ ] {name} (failed)")
         else:
-            checklist_md_lines.append(f"- [-] {name} (deferred)")
+            checklist_md_lines.append(f"- [?] {name} (unknown)")
 
     return f"""# Phase 9 Closeout: Release (Final)
 
@@ -322,10 +308,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    result = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    result = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if result else 1)

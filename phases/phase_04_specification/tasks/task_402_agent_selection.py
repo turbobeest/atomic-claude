@@ -127,14 +127,13 @@ def recommend_agents(characteristics: Dict[str, Any]) -> Tuple[List[str], List[s
     return recommended, reasons
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     """
     Execute Task 402: Agent Selection.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, auto-select agents for testing
         graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
@@ -150,19 +149,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         agent_repo = atomic_root / "agents"
 
     csv_path = agent_repo / "agent-inventory.csv"
-
-    # UAT Mode: Auto-select agents
-    if uat_mode:
-        print()
-        print(print_yellow("⚡ UAT Mode: Auto-selecting specification agents"))
-        print()
-        ensure_dir(output_dir)
-        write_file(output_dir / "selected-agents.json", json.dumps({
-            "agents": ["specification-agent", "tdd-agent"],
-            "mode": "uat"
-        }, indent=2))
-        print(print_green("✓ Agent selection complete (UAT mode)"))
-        return True
 
     print()
     print(print_dim("  Selecting agents for OpenSpec generation and TDD subtask creation."))
@@ -213,6 +199,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     characteristics = analyze_project_characteristics(tasks_file)
+
+    # Fallback: if analysis failed, try to count tasks from disk
+    if not characteristics and tasks_file.exists():
+        try:
+            fallback_data = json.loads(read_file(tasks_file))
+            fallback_tasks = fallback_data.get("tasks", [])
+            characteristics = {'task_count': len(fallback_tasks), 'has_api': False,
+                               'has_auth': False, 'has_data': False, 'complex_count': 0}
+            logger.info("Used fallback task count from tasks.json: %d", len(fallback_tasks))
+        except Exception:
+            characteristics = {}
+
     recommended_agents, reasons = recommend_agents(characteristics)
 
     print(print_dim("  Based on your tasks:"))
@@ -361,10 +359,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (auto-select agents)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

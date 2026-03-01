@@ -18,7 +18,7 @@ import json
 import argparse
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from datetime import datetime
 
 # Repo root
@@ -589,7 +589,6 @@ class StateAuditRunner:
 
         env = os.environ.copy()
         env["ATOMIC_ROOT"] = str(REPO_ROOT)
-        env["ATOMIC_UAT_MODE"] = "true"
 
         try:
             result = subprocess.run(
