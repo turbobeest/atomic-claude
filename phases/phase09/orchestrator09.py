@@ -46,25 +46,35 @@ def task_901_wrapper(mem=None) -> bool:
     """Task 901: Entry initialization"""
     return task_901(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_901_wrapper.uses_llm = False
+
 
 def task_902_wrapper(mem=None) -> bool:
     """Task 902: Release setup"""
     return task_902(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+
+task_902_wrapper.uses_llm = False
 
 
 def task_903_wrapper(mem=None) -> bool:
     """Task 903: Agent selection"""
     return task_903(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_903_wrapper.uses_llm = False
+
 
 def task_904_wrapper(mem=None) -> bool:
     """Task 904: Release execution"""
     return task_904(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_904_wrapper.model_tier = "haiku"
+
 
 def task_905_wrapper(mem=None) -> bool:
     """Task 905: Release confirmation"""
     return task_905(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+
+task_905_wrapper.uses_llm = False
 
 
 def task_906_wrapper(mem=None) -> bool:

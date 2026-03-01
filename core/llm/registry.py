@@ -426,51 +426,77 @@ class ModelRegistry:
         return count
 
     def _probe_ollama(self) -> int:
-        """Query Ollama /api/tags for locally pulled models."""
-        host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-        url = f"{host}/api/tags"
+        """Query Ollama /api/tags for locally pulled models.
 
+        Checks hosts in this order:
+        1. OLLAMA_HOST env var (defaults to localhost:11434)
+        2. ollama_hosts from .outputs/0-setup/secrets.json
+
+        Aggregates model counts across all reachable hosts, deduplicating
+        models that appear on multiple hosts.
+        """
+        # Build list of unique hosts to probe
+        hosts_to_probe: list[str] = []
+        env_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+        hosts_to_probe.append(env_host)
+
+        # Also check configured hosts from secrets.json
+        secrets_path = self._atomic_root / ".outputs" / "0-setup" / "secrets.json"
         try:
-            req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            if secrets_path.exists():
+                secrets_data = json.loads(secrets_path.read_text())
+                configured_hosts = secrets_data.get("ollama_hosts", [])
+                for h in configured_hosts:
+                    normalized = h.rstrip("/")
+                    if normalized not in hosts_to_probe:
+                        hosts_to_probe.append(normalized)
         except Exception as e:
-            logger.debug("Ollama probe failed: %s", e)
-            return 0
+            logger.debug("Failed to read ollama_hosts from secrets.json: %s", e)
 
         count = 0
         now = datetime.now(timezone.utc).isoformat()
-        for model in data.get("models", []):
-            name = model.get("name", "")
-            if not name:
+
+        for host in hosts_to_probe:
+            url = f"{host}/api/tags"
+            try:
+                req = urllib.request.Request(url, method="GET")
+                with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+            except Exception as e:
+                logger.debug("Ollama probe failed for %s: %s", host, e)
                 continue
 
-            # Extract parameter size from details
-            details = model.get("details", {})
-            param_size = details.get("parameter_size", "")
+            for model in data.get("models", []):
+                name = model.get("name", "")
+                if not name:
+                    continue
 
-            key = f"ollama:{name}"
-            if key in self._models:
-                self._models[key].available = True
-                self._models[key].last_verified = now
-                self._models[key].source = "probed"
-            else:
-                # Determine context window from parameter size heuristic
-                param_billions = self._parse_param_size(param_size)
-                ctx = 131_072 if param_billions >= 30 else 32_768
+                # Extract parameter size from details
+                details = model.get("details", {})
+                param_size = details.get("parameter_size", "")
 
-                self._models[key] = ModelRecord(
-                    model_id=name,
-                    provider_id="ollama",
-                    display_name=name,
-                    context_window=ctx,
-                    max_output=ctx // 4,
-                    tier=self.classify_tier(name, param_size=param_size),
-                    available=True,
-                    source="probed",
-                    last_verified=now,
-                )
-            count += 1
+                key = f"ollama:{name}"
+                if key in self._models:
+                    self._models[key].available = True
+                    self._models[key].last_verified = now
+                    self._models[key].source = "probed"
+                else:
+                    # Determine context window from parameter size heuristic
+                    param_billions = self._parse_param_size(param_size)
+                    ctx = 131_072 if param_billions >= 30 else 32_768
+
+                    self._models[key] = ModelRecord(
+                        model_id=name,
+                        provider_id="ollama",
+                        display_name=name,
+                        context_window=ctx,
+                        max_output=ctx // 4,
+                        tier=self.classify_tier(name, param_size=param_size),
+                        available=True,
+                        source="probed",
+                        last_verified=now,
+                    )
+                count += 1
 
         return count
 

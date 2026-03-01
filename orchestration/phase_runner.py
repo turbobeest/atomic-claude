@@ -136,11 +136,14 @@ def run_phase_tasks(
         # Agent roster & dashboard
         print(f"\n⚡ Running Task {task_id}: {task_name}")
         ensure_dashboard(atomic_root)
-        if is_infrastructure_task(task_name):
+        # Skip agent roster for infrastructure tasks and non-LLM tasks
+        task_uses_llm = getattr(task_func, 'uses_llm', True)
+        if is_infrastructure_task(task_name) or not task_uses_llm:
             print(f"\n  {task_name}\n")
             write_current_task(phase_id, task_id, task_name)
         else:
-            roster = resolve_agent_roster(phase_id, task_id, output_dir)
+            task_tier = getattr(task_func, 'model_tier', None)
+            roster = resolve_agent_roster(phase_id, task_id, output_dir, tier_hint=task_tier)
             roster = display_task_roster(task_id, task_name, roster)
             write_current_task(
                 phase_id, task_id, task_name,

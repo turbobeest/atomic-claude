@@ -311,30 +311,28 @@ def _clear_graph(phases_to_clear: list, phase: int, phase_name: str,
         logger.debug("FalkorDB unavailable for backtrack graph cleanup")
 
 
-def _prompt_code_cleanup(project_root: Path, force: bool) -> None:
-    """Prompt user to optionally clear generated code and tests."""
-    print("\n🗂️  Generated code...")
-    if force:
-        clear_code = "n"
-    else:
-        clear_code = input("Clear generated code in ../src/? (y/n): ")
-    if clear_code.lower() == "y":
-        src_dir = project_root / "src"
-        if src_dir.exists():
-            shutil.rmtree(src_dir)
-            src_dir.mkdir()
-            print("   ✓ Cleared ../src/")
+def _prompt_code_cleanup(project_root: Path, clear_code: bool) -> None:
+    """Clear generated code and tests if requested.
 
-    if force:
-        clear_tests = "n"
-    else:
-        clear_tests = input("Clear generated tests in ../tests/? (y/n): ")
-    if clear_tests.lower() == "y":
-        tests_dir = project_root / "tests"
-        if tests_dir.exists():
-            shutil.rmtree(tests_dir)
-            tests_dir.mkdir()
-            print("   ✓ Cleared ../tests/")
+    Args:
+        project_root: Path to the project root (parent of atomic-claude)
+        clear_code: Whether to clear src/ and tests/ (decided at confirmation prompt)
+    """
+    if not clear_code:
+        return
+
+    print("\n🗂️  Clearing generated code...")
+    src_dir = project_root / "src"
+    if src_dir.exists():
+        shutil.rmtree(src_dir)
+        src_dir.mkdir()
+        print("   ✓ Cleared ../src/")
+
+    tests_dir = project_root / "tests"
+    if tests_dir.exists():
+        shutil.rmtree(tests_dir)
+        tests_dir.mkdir()
+        print("   ✓ Cleared ../tests/")
 
 
 def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
@@ -381,14 +379,23 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
     print("   - Artifacts will be deleted")
     print("   - Memory will be cleared")
 
+    clear_code = False
     if not force:
         try:
-            confirm = input("\nType 'yes' to confirm: ")
+            print("\nOptions:")
+            print("   yes  — backtrack AND clear generated code in ../src/ and ../tests/")
+            print("   keep — backtrack but KEEP generated code")
+            print("   no   — cancel")
+            confirm = input("\nChoice: ").strip().lower()
         except EOFError:
             print("❌ Backtrack cancelled (stdin closed)")
             return False
 
-        if confirm.lower() != "yes":
+        if confirm == "yes":
+            clear_code = True
+        elif confirm == "keep":
+            clear_code = False
+        else:
             print("❌ Backtrack cancelled")
             return
 
@@ -471,9 +478,9 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
                 pass
             raise
 
-        # Step 5: Prompt for optional code cleanup
+        # Step 5: Clear generated code if user chose 'yes' (not 'keep')
         project_root = atomic_root.parent
-        _prompt_code_cleanup(project_root, force)
+        _prompt_code_cleanup(project_root, clear_code)
     finally:
         # Remove marker — backtrack is complete (or failed and state is untouched)
         if backtrack_marker.exists():

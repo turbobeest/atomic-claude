@@ -98,6 +98,11 @@ def write_current_task(phase_id: str, task_id: str, task_name: str,
 
     effort_level = None
 
+    tier = None
+    source = None
+    extended_thinking = None
+    thinking_budget = None
+
     if resolved is not None:
         provider = resolved.provider
         model = resolved.model_id
@@ -105,6 +110,10 @@ def write_current_task(phase_id: str, task_id: str, task_name: str,
         context_window = resolved.context_window
         max_output = resolved.max_output
         effort_level = resolved.effort_level
+        tier = resolved.tier
+        source = resolved.source
+        extended_thinking = resolved.extended_thinking
+        thinking_budget = resolved.thinking_budget
     elif provider is None or model is None:
         cfg_provider, cfg_model = _resolve_phase_model(phase_id)
         provider = provider or cfg_provider
@@ -123,8 +132,12 @@ def write_current_task(phase_id: str, task_id: str, task_name: str,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "provider": provider,
         "model": model,
+        "tier": tier,
+        "source": source,
         "phase_weight": phase_weight,
         "effort_level": effort_level,
+        "extended_thinking": extended_thinking,
+        "thinking_budget": thinking_budget,
         "online": provider is not None,
         "context_window": context_window,
         "max_output": max_output,
@@ -138,6 +151,8 @@ def write_current_task(phase_id: str, task_id: str, task_name: str,
                 "label": entry.label,
                 "provider": rm.provider,
                 "model": rm.model_id,
+                "tier": rm.tier,
+                "source": rm.source,
                 "context_window": rm.context_window,
                 "effort_level": rm.effort_level,
             }

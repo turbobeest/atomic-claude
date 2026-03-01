@@ -53,20 +53,28 @@ def task_801_wrapper(mem=None) -> bool:
     """Task 801: Entry initialization"""
     return task_801(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_801_wrapper.uses_llm = False
+
 
 def task_802_wrapper(mem=None) -> bool:
     """Task 802: Deployment setup"""
     return task_802(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+
+task_802_wrapper.uses_llm = False
 
 
 def task_803_wrapper(mem=None) -> bool:
     """Task 803: Agent selection"""
     return task_803(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_803_wrapper.uses_llm = False
+
 
 def task_804_wrapper(mem=None) -> bool:
     """Task 804: Artifact generation"""
     return task_804(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+
+task_804_wrapper.model_tier = "sonnet"
 
 
 def task_805_wrapper(mem=None, graph=None) -> bool:
@@ -77,6 +85,8 @@ def task_805_wrapper(mem=None, graph=None) -> bool:
 def task_806_wrapper(mem=None) -> bool:
     """Task 806: Deployment approval"""
     return task_806(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+
+task_806_wrapper.uses_llm = False
 
 
 def task_807_wrapper(mem=None) -> bool:

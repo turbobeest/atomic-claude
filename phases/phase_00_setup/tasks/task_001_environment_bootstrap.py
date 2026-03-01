@@ -650,6 +650,110 @@ def _get_hostname() -> str:
 # FalkorDB knowledge graph
 # ---------------------------------------------------------------------------
 
+def _ensure_docker_group() -> bool:
+    """Ensure current user is in the docker group (Linux only).
+
+    Returns:
+        True if docker is usable, False if not fixable now.
+    """
+    import platform
+    import grp
+
+    if platform.system() != "Linux":
+        return True
+
+    user = os.environ.get("USER", "")
+    if not user:
+        return True
+
+    # Check if user is already in docker group
+    try:
+        docker_group = grp.getgrnam("docker")
+        if user in docker_group.gr_mem:
+            return True
+    except KeyError:
+        # docker group doesn't exist — docker may not be installed
+        return True
+
+    # Also check if the user's primary group is docker (unlikely but possible)
+    try:
+        import pwd
+        pw = pwd.getpwnam(user)
+        if pw.pw_gid == docker_group.gr_gid:
+            return True
+    except (KeyError, ImportError):
+        pass
+
+    # User is NOT in docker group — offer to fix
+    print(print_yellow(f"  ! User '{user}' is not in the 'docker' group."))
+    print(print_dim("    Docker requires group membership to run without sudo."))
+    print()
+
+    clear_input_buffer()
+    choice = prompt_user(f"  Run 'sudo usermod -aG docker {user}'? [Y/n]: ") or "y"
+
+    if choice.lower() not in ("y", "yes"):
+        print(print_dim("  Skipped — docker commands may fail with 'permission denied'."))
+        return False
+
+    try:
+        result = subprocess.run(
+            ["sudo", "usermod", "-aG", "docker", user],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            print(print_green(f"  ✓ Added '{user}' to docker group."))
+            print(print_yellow("    Note: You may need to log out and back in for full effect."))
+            print(print_dim("    Using 'sg docker' for this session's docker commands."))
+            print()
+            return True
+        else:
+            print(print_red(f"  ✗ Failed: {result.stderr.strip()}"))
+            return False
+    except subprocess.TimeoutExpired:
+        print(print_red("  ✗ sudo timed out"))
+        return False
+    except Exception as e:
+        print(print_red(f"  ✗ {e}"))
+        return False
+
+
+def _run_docker_compose(args: list, atomic_root: Path, timeout: int = 60) -> subprocess.CompletedProcess:
+    """Run a docker compose command, falling back to 'sg docker' if needed.
+
+    When the user was just added to the docker group in this session,
+    'sg docker -c "..."' runs the command under the new group without re-login.
+    """
+    import grp
+
+    user = os.environ.get("USER", "")
+    compose_file = str(atomic_root / "docker-compose.yml")
+    full_cmd = ["docker", "compose", "-f", compose_file] + args
+
+    # First try direct
+    result = subprocess.run(
+        full_cmd, capture_output=True, text=True, timeout=timeout,
+        cwd=str(atomic_root),
+    )
+
+    # If permission denied, try with sg docker
+    if result.returncode != 0 and "permission denied" in result.stderr.lower():
+        try:
+            docker_group = grp.getgrnam("docker")
+            if user in docker_group.gr_mem:
+                # User is in group but session doesn't have it yet — use sg
+                sg_cmd = " ".join(full_cmd)
+                result = subprocess.run(
+                    ["sg", "docker", "-c", sg_cmd],
+                    capture_output=True, text=True, timeout=timeout,
+                    cwd=str(atomic_root),
+                )
+        except (KeyError, OSError):
+            pass
+
+    return result
+
+
 def _start_falkordb(atomic_root: Path) -> None:
     """Start FalkorDB via docker compose and verify it's healthy."""
     import time
@@ -665,12 +769,13 @@ def _start_falkordb(atomic_root: Path) -> None:
     print(print_cyan("  Starting FalkorDB knowledge graph..."))
     print()
 
+    # Ensure docker group membership before attempting compose
+    _ensure_docker_group()
+
     try:
         # Start FalkorDB container
-        result = subprocess.run(
-            ["docker", "compose", "-f", str(compose_file), "up", "-d", "falkordb"],
-            capture_output=True, text=True, timeout=60,
-            cwd=str(atomic_root),
+        result = _run_docker_compose(
+            ["up", "-d", "falkordb"], atomic_root, timeout=60,
         )
 
         if result.returncode != 0:
@@ -682,11 +787,9 @@ def _start_falkordb(atomic_root: Path) -> None:
         ready = False
         for attempt in range(15):
             try:
-                check = subprocess.run(
-                    ["docker", "compose", "-f", str(compose_file),
-                     "exec", "-T", "falkordb", "redis-cli", "ping"],
-                    capture_output=True, text=True, timeout=5,
-                    cwd=str(atomic_root),
+                check = _run_docker_compose(
+                    ["exec", "-T", "falkordb", "redis-cli", "ping"],
+                    atomic_root, timeout=5,
                 )
                 if check.returncode == 0 and "PONG" in check.stdout:
                     ready = True

@@ -96,20 +96,28 @@ def task_401_entry_initialization(mem=None, graph=None) -> bool:
     """Task 401: Entry initialization"""
     return task_401(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
+task_401_entry_initialization.uses_llm = False
+
 
 def task_402_agent_selection(mem=None, graph=None) -> bool:
     """Task 402: Agent selection"""
     return task_402(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+
+task_402_agent_selection.uses_llm = False
 
 
 def task_403_openspec_generation(mem=None, graph=None) -> bool:
     """Task 403: OpenSpec generation"""
     return task_403(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
+task_403_openspec_generation.model_tier = "opus"
+
 
 def task_404_tdd_subtask_injection(mem=None, graph=None) -> bool:
     """Task 404: TDD subtask injection"""
     return task_404(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+
+task_404_tdd_subtask_injection.model_tier = "opus"
 
 
 def task_405_phase_audit(mem=None, graph=None) -> bool:

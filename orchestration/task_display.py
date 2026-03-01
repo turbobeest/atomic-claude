@@ -160,21 +160,32 @@ def resolve_agent_roster(
     phase_id: str,
     task_id: str,
     output_dir: Path,
+    tier_hint: str = None,
 ) -> List[Tuple[AgentEntry, ResolvedModel]]:
     """Resolve model for each discovered agent.
 
     Uses resolver with agent_name to get per-agent model resolution.
     Falls back to phase-level resolution if no agents found.
+
+    Args:
+        tier_hint: Optional model tier hint from task decorator (e.g. "opus",
+            "sonnet", "haiku"). When provided, passed as override_tier to
+            resolve_model() so the roster display reflects the task's
+            dominant model tier.
     """
     agents = discover_agents(output_dir)
+    resolve_kwargs = {}
+    if tier_hint:
+        resolve_kwargs["override_tier"] = tier_hint
+
     if not agents:
         # No agent file yet (pre-selection task, phase 0, etc.)
-        resolved = resolve_model(phase_id, task_id, agent_name="__default__")
+        resolved = resolve_model(phase_id, task_id, agent_name="__default__", **resolve_kwargs)
         return [(AgentEntry(name="\u2014"), resolved)]
 
     roster = []
     for agent in agents:
-        resolved = resolve_model(phase_id, task_id, agent_name=agent.name)
+        resolved = resolve_model(phase_id, task_id, agent_name=agent.name, **resolve_kwargs)
         roster.append((agent, resolved))
     return roster
 
@@ -240,9 +251,9 @@ def display_task_roster(
 
     print()
 
-    # Interactive prompt — always offer model override
+    # Interactive prompt — Enter = accept resolved model, m = override
     clear_input_buffer()
-    choice = prompt_user("  Enter to continue, [m] to change model: ").strip().lower()
+    choice = prompt_user("  Continue [Y] / change model [m]: ").strip().lower()
     if choice == "m":
         roster = _handle_override(roster)
 

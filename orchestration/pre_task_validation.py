@@ -183,7 +183,7 @@ def is_allowed_file(file_path: Path, acp_root: Path) -> bool:
         "main.py", "README.md", "CLAUDE.md", "OPERATIONAL.md",
         ".gitignore", ".DS_Store",
         ".claudeignore", ".env.example", ".env",
-        "setup.py", "MANIFEST.in",
+        "setup.py", "setup.cfg", "pyproject.toml", "MANIFEST.in",
         "pytest.ini", "coverage.xml",
         "requirements.txt", "requirements-dev.txt", "requirements-llm.txt",
         "docker-compose.yml", "docker-compose.yaml",

@@ -849,7 +849,9 @@ def _health_check_providers(
         servers: Dict[str, Dict[str, Any]] = {}
         for host in ollama_hosts:
             try:
-                provider = OllamaProvider({"host": host})
+                # Hosts come from secrets.json (user-configured in setup wizard),
+                # so mark them trusted to allow LAN/private IPs through SSRF checks.
+                provider = OllamaProvider({"host": host}, trusted=True)
                 status = provider.health_check()
                 models: List[str] = []
                 if status.value == "healthy":

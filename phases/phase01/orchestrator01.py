@@ -114,35 +114,47 @@ def task_101_entry_validation(mem=None, graph=None) -> bool:
     """Task 101: Entry validation & corpus analysis"""
     return task_101(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
+task_101_entry_validation.model_tier = "sonnet"
+
 
 def task_102_import_requirements(mem=None, graph=None) -> bool:
     """Task 102: Import requirements"""
     return task_102(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+task_102_import_requirements.uses_llm = False
 
 
 def task_103_agent_selection(mem=None, graph=None) -> bool:
     """Task 103: Agent selection"""
     return task_103(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
+task_103_agent_selection.model_tier = "haiku"
+
 
 def task_104_opening_dialogue(mem=None, graph=None) -> bool:
     """Task 104: Opening dialogue"""
     return task_104(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+
+task_104_opening_dialogue.model_tier = "sonnet"
 
 
 def task_105_discovery_work(mem=None, graph=None) -> bool:
     """Task 105: Discovery work"""
     return task_105(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
+task_105_discovery_work.model_tier = "sonnet"
+
 
 def task_106_approach_selection(mem=None, graph=None) -> bool:
     """Task 106: Approach selection"""
     return task_106(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+task_106_approach_selection.uses_llm = False
 
 
 def task_107_discovery_diagrams(mem=None, graph=None) -> bool:
     """Task 107: Discovery diagrams"""
     return task_107(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+
+task_107_discovery_diagrams.model_tier = "sonnet"
 
 
 def task_108_phase_audit(mem=None, graph=None) -> bool:

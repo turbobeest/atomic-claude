@@ -98,26 +98,32 @@ def run_phase(resume_at: str = None) -> bool:
 def task_001_environment_bootstrap(mem=None) -> bool:
     """Execute task 001: Environment bootstrap."""
     return task_001(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+task_001_environment_bootstrap.uses_llm = False
 
 
 def task_002_provider_detection(mem=None) -> bool:
     """Execute task 002: Provider detection."""
     return task_002(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+task_002_provider_detection.uses_llm = False
 
 
 def task_003_setup_wizard(mem=None) -> bool:
     """Execute task 003: Setup wizard."""
     return task_003(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_003_setup_wizard.model_tier = "haiku"
+
 
 def task_004_material_scan(mem=None) -> bool:
     """Execute task 004: Material scan & reference organization."""
     return task_004(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+task_004_material_scan.uses_llm = False
 
 
 def task_005_repository_setup(mem=None) -> bool:
     """Execute task 005: Repository & system setup."""
     return task_005(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+task_005_repository_setup.uses_llm = False
 
 
 if __name__ == "__main__":

@@ -109,30 +109,42 @@ def task_201_entry_validation(mem=None, graph=None) -> bool:
     """Task 201: Entry validation"""
     return task_201(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
+task_201_entry_validation.uses_llm = False
+
 
 def task_202_prd_setup(mem=None, graph=None) -> bool:
     """Task 202: PRD setup"""
     return task_202(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+
+task_202_prd_setup.uses_llm = False
 
 
 def task_203_prd_interview(mem=None, graph=None) -> bool:
     """Task 203: PRD interview"""
     return task_203(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
+task_203_prd_interview.uses_llm = False
+
 
 def task_204_agent_selection(mem=None, graph=None) -> bool:
     """Task 204: Agent selection"""
     return task_204(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+
+task_204_agent_selection.uses_llm = False
 
 
 def task_205_prd_authoring(mem=None, graph=None) -> bool:
     """Task 205: PRD authoring"""
     return task_205(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
+task_205_prd_authoring.model_tier = "opus"
+
 
 def task_206_prd_validation(mem=None, graph=None) -> bool:
     """Task 206: PRD validation"""
     return task_206(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+
+task_206_prd_validation.model_tier = "sonnet"
 
 
 # task_206b is a helper module called internally by task_206 when validation fails
@@ -142,6 +154,8 @@ def task_206_prd_validation(mem=None, graph=None) -> bool:
 def task_207_prd_approval(mem=None, graph=None) -> bool:
     """Task 207: PRD approval"""
     return task_207(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+
+task_207_prd_approval.model_tier = "opus"
 
 
 def task_208_phase_audit(mem=None, graph=None) -> bool:

@@ -50,20 +50,26 @@ def task_601_wrapper(mem=None) -> bool:
     """Task 601: Entry initialization"""
     return task_601(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_601_wrapper.uses_llm = False
 
 def task_602_wrapper(mem=None) -> bool:
     """Task 602: Agent selection"""
     return task_602(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_602_wrapper.uses_llm = False
 
 def task_603_wrapper(mem=None) -> bool:
     """Task 603: Comprehensive review"""
     return task_603(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_603_wrapper.model_tier = "sonnet"
+
 
 def task_604_wrapper(mem=None, graph=None) -> bool:
     """Task 604: Refinement"""
     return task_604(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+
+task_604_wrapper.model_tier = "sonnet"
 
 
 def task_605_wrapper(mem=None, graph=None) -> bool:

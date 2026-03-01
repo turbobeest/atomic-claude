@@ -52,25 +52,35 @@ def task_501_wrapper(mem=None) -> bool:
     """Task 501: Entry initialization"""
     return task_501_entry_initialization.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_501_wrapper.uses_llm = False
+
 
 def task_502_wrapper(mem=None) -> bool:
     """Task 502: TDD setup"""
     return task_502_tdd_setup.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+
+task_502_wrapper.uses_llm = False
 
 
 def task_503_wrapper(mem=None) -> bool:
     """Task 503: Agent selection"""
     return task_503_agent_selection.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_503_wrapper.uses_llm = False
+
 
 def task_504_wrapper(mem=None) -> bool:
     """Task 504: TDD execution"""
     return task_504_tdd_execution.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
+task_504_wrapper.model_tier = "sonnet"
+
 
 def task_505_wrapper(mem=None) -> bool:
     """Task 505: Validation"""
     return task_505_validation.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+
+task_505_wrapper.uses_llm = False
 
 
 def task_506_wrapper(mem=None, graph=None) -> bool:

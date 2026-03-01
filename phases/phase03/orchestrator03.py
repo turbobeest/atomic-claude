@@ -96,20 +96,28 @@ def task_301_entry_initialization(mem=None, graph=None) -> bool:
     """Task 301: Entry initialization"""
     return task_301(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
+task_301_entry_initialization.uses_llm = False
+
 
 def task_302_agent_selection(mem=None, graph=None) -> bool:
     """Task 302: Agent selection"""
     return task_302(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+
+task_302_agent_selection.uses_llm = False
 
 
 def task_303_task_decomposition(mem=None, graph=None) -> bool:
     """Task 303: Task decomposition"""
     return task_303(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
+task_303_task_decomposition.model_tier = "opus"
+
 
 def task_304_dependency_analysis(mem=None, graph=None) -> bool:
     """Task 304: Dependency analysis"""
     return task_304(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
+
+task_304_dependency_analysis.uses_llm = False
 
 
 def task_305_phase_audit(mem=None, graph=None) -> bool:

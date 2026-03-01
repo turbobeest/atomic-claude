@@ -60,7 +60,7 @@ class OllamaProvider(BaseLLMProvider):
     - auto_pull: Automatically pull missing models (default: True)
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, trusted: bool = False):
         """
         Initialize Ollama provider.
 
@@ -70,6 +70,9 @@ class OllamaProvider(BaseLLMProvider):
                 - default_model: Default model name
                 - timeout: Request timeout
                 - auto_pull: Auto-pull missing models
+            trusted: If True, skip private/RFC-1918 IP blocking (for user-configured
+                LAN hosts from secrets.json). Still blocks link-local and cloud
+                metadata addresses. Default False.
         """
         super().__init__(config)
         self.provider_name = "ollama"
@@ -84,7 +87,7 @@ class OllamaProvider(BaseLLMProvider):
         self.host = self.host.rstrip('/')
 
         # SSRF protection: validate host URL scheme and reject known internal/metadata addresses
-        self._validate_host(self.host)
+        self._validate_host(self.host, trusted=trusted)
 
     # Blocked host patterns: cloud metadata endpoints and link-local addresses
     _BLOCKED_HOST_RE = re.compile(
@@ -111,8 +114,15 @@ class OllamaProvider(BaseLLMProvider):
     )
 
     @staticmethod
-    def _validate_host(host: str) -> None:
+    def _validate_host(host: str, trusted: bool = False) -> None:
         """Validate that the Ollama host URL is safe (not an SSRF target).
+
+        Args:
+            host: The Ollama host URL to validate.
+            trusted: If True, skip RFC-1918 private IP blocking. The host was
+                explicitly configured by the user (e.g. from secrets.json) so
+                LAN addresses like 192.168.x.x are expected. Link-local and
+                cloud metadata addresses are still blocked.
 
         Raises ValueError if the URL uses a non-http(s) scheme or points at
         a known cloud-metadata / link-local address.
@@ -139,15 +149,18 @@ class OllamaProvider(BaseLLMProvider):
             raise ValueError(
                 f"Ollama host '{hostname}' is blocked (link-local address range)"
             )
-        # Block IP-literal URLs that resolve to private/reserved ranges
-        if OllamaProvider._PRIVATE_IP_RE.match(hostname):
+        # Block IP-literal URLs that resolve to private/reserved ranges.
+        # When trusted=True (user-configured LAN host), skip this check —
+        # Ollama is inherently a LAN service and users explicitly set these IPs.
+        if not trusted and OllamaProvider._PRIVATE_IP_RE.match(hostname):
             raise ValueError(
                 f"Ollama host '{hostname}' is blocked (private/reserved IP range)"
             )
         # DNS rebinding protection: resolve hostname to IP and validate the result.
         # Skip resolution for localhost (primary use case) and raw IP literals
-        # (already validated above).
-        if hostname != "localhost" and not OllamaProvider._PRIVATE_IP_RE.match(hostname):
+        # (already validated above). Also skip when trusted — LAN hostnames
+        # will naturally resolve to private IPs.
+        if not trusted and hostname != "localhost" and not OllamaProvider._PRIVATE_IP_RE.match(hostname):
             try:
                 resolved_ip = socket.gethostbyname(hostname)
             except socket.gaierror:
