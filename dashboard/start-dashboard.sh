@@ -90,50 +90,6 @@ if _wait_for_port "$PORT" 5 "Main dashboard"; then
     echo "Dashboard server started (PID: $SERVER_PID, port $PORT)"
 fi
 
-# --- Start browser sub-apps ---
-
-_start_subapp() {
-    local name="$1" dir="$2" port="$3" pidname="$4"
-
-    # Verify directory and package.json exist
-    if [[ ! -d "$dir" ]]; then
-        echo "  ! $name directory not found: $dir"
-        return 1
-    fi
-    if [[ ! -f "$dir/package.json" ]]; then
-        echo "  ! $name missing package.json, skipping"
-        return 1
-    fi
-
-    # Install dependencies if needed
-    if [[ ! -d "$dir/node_modules" ]]; then
-        echo "  Installing $name dependencies..."
-        (cd "$dir" && npm install --silent 2>/dev/null) || { echo "  ! $name npm install failed"; return 1; }
-    fi
-
-    # Start dev server, bind all interfaces for remote access
-    # Use setsid on Linux, plain background on macOS (setsid not available)
-    cd "$dir"
-    if command -v setsid &>/dev/null; then
-        setsid nohup npx vite dev --port "$port" --host 0.0.0.0 > "$dir/dev.log" 2>&1 &
-    else
-        # macOS: use nohup without setsid
-        nohup npx vite dev --port "$port" --host 0.0.0.0 > "$dir/dev.log" 2>&1 &
-    fi
-    local pid=$!
-    echo "$pid" > "$PID_DIR/${pidname}.pid"
-
-    # Wait for sub-app to be ready
-    if _wait_for_port "$port" 10 "$name"; then
-        echo "  $name started (PID: $pid, port $port)"
-    fi
-}
-
-echo ""
-echo "Starting browser sub-apps..."
-_start_subapp "Agent Manager"  "$ATOMIC_ROOT/agents/agent-manager"  5175 agents
-_start_subapp "Audit Browser"  "$ATOMIC_ROOT/audits/audit-browser"  5176 audits
-_start_subapp "Skills Browser" "$ATOMIC_ROOT/skills/skills-browser"  5177 skills
 
 # Open browser (detached from this process)
 (
@@ -143,5 +99,4 @@ _start_subapp "Skills Browser" "$ATOMIC_ROOT/skills/skills-browser"  5177 skills
 
 echo ""
 echo "Dashboard available at: http://127.0.0.1:$PORT"
-echo "  Sub-apps: Agents(:5175) Audits(:5176) Skills(:5177)"
 echo "  PID files: $PID_DIR/"

@@ -994,63 +994,12 @@ app.get('/api/timeline', (req, res) => {
 // API: Get skills catalog
 app.get('/api/skills', (req, res) => {
   try {
-    const skillsDir = path.join(__dirname, '..', 'skills');
-    const skills = [];
+    // Load skills from pre-built JSON (generated from core/skills/catalog.py)
+    const skillsDataPath = path.join(__dirname, '..', 'config', 'skills.json');
+    let skills = [];
 
-    function safeDirs(dir) {
-      if (!fs.existsSync(dir)) return [];
-      return fs.readdirSync(dir).filter(f => {
-        try { return fs.statSync(path.join(dir, f)).isDirectory(); }
-        catch { return false; }
-      });
-    }
-
-    // Scan tactical skills: tactical/{category}/{skill}/README.md
-    const tacticalDir = path.join(skillsDir, 'tactical');
-    for (const category of safeDirs(tacticalDir)) {
-      const categoryPath = path.join(tacticalDir, category);
-      for (const skillDir of safeDirs(categoryPath)) {
-        const readmePath = path.join(categoryPath, skillDir, 'README.md');
-        if (fs.existsSync(readmePath)) {
-          const content = fs.readFileSync(readmePath, 'utf-8');
-          const skill = parseSkillReadme(content, skillDir, category, 'tactical',
-            path.relative(skillsDir, readmePath));
-          if (skill) skills.push(skill);
-        }
-      }
-    }
-
-    // Scan community skills - superpowers: community/superpowers/skills/{skill}/README.md
-    const superpowersDir = path.join(skillsDir, 'community', 'superpowers', 'skills');
-    for (const skillDir of safeDirs(superpowersDir)) {
-      const readmePath = path.join(superpowersDir, skillDir, 'README.md');
-      if (fs.existsSync(readmePath)) {
-        const content = fs.readFileSync(readmePath, 'utf-8');
-        const skill = parseSkillReadme(content, skillDir, 'superpowers', 'community',
-          path.relative(skillsDir, readmePath));
-        if (skill) skills.push(skill);
-      }
-    }
-
-    // Scan community skills - trailofbits plugins (README.md at plugin root)
-    const trailofbitsDir = path.join(skillsDir, 'community', 'trailofbits', 'plugins');
-    for (const pluginDir of safeDirs(trailofbitsDir)) {
-      const readmePath = path.join(trailofbitsDir, pluginDir, 'README.md');
-      if (fs.existsSync(readmePath)) {
-        const content = fs.readFileSync(readmePath, 'utf-8');
-        const skill = parseSkillReadme(content, pluginDir, 'trailofbits', 'community',
-          path.relative(skillsDir, readmePath));
-        if (skill) skills.push(skill);
-      }
-    }
-
-    // Scan community skills - ralph (single entry)
-    const ralphReadme = path.join(skillsDir, 'community', 'ralph', 'README.md');
-    if (fs.existsSync(ralphReadme)) {
-      const content = fs.readFileSync(ralphReadme, 'utf-8');
-      const skill = parseSkillReadme(content, 'ralph', 'ralph', 'community',
-        path.relative(skillsDir, ralphReadme));
-      if (skill) skills.push(skill);
+    if (fs.existsSync(skillsDataPath)) {
+      skills = JSON.parse(fs.readFileSync(skillsDataPath, 'utf-8')).skills || [];
     }
 
     const { search, type } = req.query;
@@ -1074,83 +1023,7 @@ app.get('/api/skills', (req, res) => {
   }
 });
 
-// Parse a skill README.md and extract metadata
-function parseSkillReadme(content, dirName, category, type, relativePath) {
-  try {
-    const lines = content.split('\n');
-
-    // Extract title from first # heading
-    let name = dirName.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    for (const line of lines) {
-      const m = line.match(/^#\s+(.+)/);
-      if (m) { name = m[1].trim(); break; }
-    }
-
-    // Extract description: first non-empty paragraph after heading
-    let description = '';
-    let pastHeading = false;
-    for (const line of lines) {
-      if (line.startsWith('# ')) { pastHeading = true; continue; }
-      if (!pastHeading) continue;
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      if (trimmed.startsWith('[![') || trimmed.startsWith('![')) continue;
-      if (trimmed.startsWith('> ')) {
-        description = trimmed.replace(/^>\s*\**/, '').replace(/\**$/, '').trim();
-        break;
-      }
-      if (trimmed.startsWith('**Author:**')) continue;
-      if (trimmed.startsWith('#') || trimmed.startsWith('|') || trimmed.startsWith('```')) break;
-      description = trimmed;
-      break;
-    }
-
-    // Extract author
-    let author = '';
-    for (const line of lines) {
-      const m = line.match(/\*\*Author:\*\*\s*(.+)/);
-      if (m) { author = m[1].trim(); break; }
-    }
-
-    return {
-      name,
-      description,
-      author,
-      category,
-      type,
-      dirName,
-      path: relativePath
-    };
-  } catch (error) {
-    console.error(`Error parsing skill ${dirName}:`, error);
-    return null;
-  }
-}
-
-// API: Read skill definition file
-app.get('/api/skills/definition', (req, res) => {
-  try {
-    const relPath = req.query.path;
-    if (!relPath) return res.status(400).json({ error: 'Missing path parameter' });
-
-    const skillsDir = path.join(__dirname, '..', 'skills');
-    const resolved = path.resolve(skillsDir, relPath);
-    if (!resolved.startsWith(path.resolve(skillsDir))) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-    if (!fs.existsSync(resolved)) {
-      return res.status(404).json({ error: 'File not found' });
-    }
-
-    const stat = fs.statSync(resolved);
-    const content = fs.readFileSync(resolved, 'utf-8');
-    res.json({ content, size: stat.size, modified: stat.mtime.toISOString(), path: relPath });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// API: Save skill definition file
+// API: Save skill definition (no-op after sub-app removal)
 app.put('/api/skills/definition', (req, res) => {
   try {
     const { path: relPath, content } = req.body || {};
@@ -1158,15 +1031,7 @@ app.put('/api/skills/definition', (req, res) => {
       return res.status(400).json({ error: 'Missing path or content' });
     }
 
-    const skillsDir = path.join(__dirname, '..', 'skills');
-    const resolved = path.resolve(skillsDir, relPath);
-    if (!resolved.startsWith(path.resolve(skillsDir))) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    fs.writeFileSync(resolved, content, 'utf-8');
-    const stat = fs.statSync(resolved);
-    res.json({ success: true, size: stat.size, modified: stat.mtime.toISOString() });
+    return res.status(501).json({ error: 'Skill editing requires full install. Skills are managed in core/skills/catalog.py' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1215,9 +1080,9 @@ let auditCatalogCache = null;
 app.get('/api/audits', (req, res) => {
   try {
     if (!auditCatalogCache) {
-      const dataPath = path.join(__dirname, '..', 'audits', 'audit-browser', 'static', 'data', 'audits.json');
+      const dataPath = path.join(__dirname, '..', 'audits', 'data', 'audits.json');
       if (!fs.existsSync(dataPath)) {
-        return res.status(404).json({ error: 'Audit data not found. Run: cd audits/audit-browser && npm run generate-data' });
+        return res.status(404).json({ error: 'Audit data not found. Expected: audits/data/audits.json' });
       }
       auditCatalogCache = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
     }

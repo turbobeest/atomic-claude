@@ -25,11 +25,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Sub-app ports (Finding #18)
-AUDIT_BROWSER_PORT = 5175
-AGENT_MANAGER_PORT = 5176
-SKILLS_BROWSER_PORT = 5177
-_SUBAPP_PORTS = (AGENT_MANAGER_PORT, AUDIT_BROWSER_PORT, SKILLS_BROWSER_PORT)
 
 try:
     import requests
@@ -286,22 +281,11 @@ def _get_dashboard_port() -> str:
     return os.environ.get("ATOMIC_TASKS_PORT", "5174")
 
 
-def _check_port_listening(port) -> bool:
-    """Quick check if something is listening on a port."""
-    import socket
-    try:
-        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.5):
-            return True
-    except (OSError, ConnectionRefusedError):
-        return False
-
-
 def ensure_dashboard(atomic_root=None) -> bool:
     """Pre-task dashboard health check.
 
-    Verifies the main dashboard server and browser sub-apps (agents,
-    audits, skills) are all running.  Calls start-dashboard.sh to
-    start anything that is down.
+    Verifies the main dashboard server is running.  Calls
+    start-dashboard.sh to start it if it is down.
 
     Args:
         atomic_root: Expected project root (Path or str).
@@ -329,10 +313,7 @@ def ensure_dashboard(atomic_root=None) -> bool:
     except Exception as e:
         logger.debug("Dashboard health check failed: %s", e)
 
-    # Check sub-apps (agent-manager, audit-browser, skills-browser)
-    subapps_ok = all(_check_port_listening(p) for p in _SUBAPP_PORTS)
-
-    if main_ok and subapps_ok:
+    if main_ok:
         return True
 
     # Something is down — call start-dashboard.sh which handles everything

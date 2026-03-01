@@ -24,9 +24,6 @@ fi
 PID_DIR="$PROJECT_ROOT/.state/dashboard"
 
 PORT_MAIN="${ATOMIC_TASKS_PORT:-5174}"
-PORT_AGENTS=5175
-PORT_AUDITS=5176
-PORT_SKILLS=5177
 
 STOPPED=0
 
@@ -84,11 +81,8 @@ _kill_port() {
 
 echo "Stopping dashboard processes..."
 
-# Try PID files first, then fall back to port-based kill
+# Try PID file first, then fall back to port-based kill
 _kill_pidfile "Main dashboard" "$PID_DIR/main.pid"    || _kill_port "Main dashboard" "$PORT_MAIN"
-_kill_pidfile "Agent Manager"  "$PID_DIR/agents.pid"  || _kill_port "Agent Manager"  "$PORT_AGENTS"
-_kill_pidfile "Audit Browser"  "$PID_DIR/audits.pid"  || _kill_port "Audit Browser"  "$PORT_AUDITS"
-_kill_pidfile "Skills Browser" "$PID_DIR/skills.pid"  || _kill_port "Skills Browser" "$PORT_SKILLS"
 
 # Brief wait for processes to exit, then check for stragglers
 if [[ $STOPPED -gt 0 ]]; then

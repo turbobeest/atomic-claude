@@ -520,9 +520,6 @@ def _install_dashboard_deps(atomic_root: Path) -> None:
 
     subapps = [
         ("Dashboard",       atomic_root / "dashboard"),
-        ("Agent Browser",   atomic_root / "agents"  / "agent-manager"),
-        ("Audit Browser",   atomic_root / "audits"  / "audit-browser"),
-        ("Skills Browser",  atomic_root / "skills"  / "skills-browser"),
     ]
 
     for name, app_dir in subapps:
@@ -552,20 +549,6 @@ def _install_dashboard_deps(atomic_root: Path) -> None:
             print(f"\r" + print_yellow(f"    ! {name} — npm install timed out"))
         except Exception as e:
             print(f"\r" + print_yellow(f"    ! {name} — {e}"))
-
-    # Run svelte-kit sync for SvelteKit apps (generates .svelte-kit/)
-    for name, app_dir in subapps[1:]:  # skip Dashboard (not SvelteKit)
-        svelte_kit_dir = app_dir / ".svelte-kit"
-        if svelte_kit_dir.exists() or not (app_dir / "node_modules").exists():
-            continue
-        try:
-            subprocess.run(
-                ["npx", "svelte-kit", "sync"],
-                cwd=str(app_dir),
-                capture_output=True, text=True, timeout=30,
-            )
-        except Exception as e:
-            logger.debug("svelte-kit sync failed (non-critical): %s", e)
 
     print()
 
