@@ -2,6 +2,13 @@
 
 Python SDLC pipeline with phased orchestration, LLM routing, memory, and agent-driven tasks.
 
+## Installation Modes
+
+- **Runtime** (`curl | bash`): Sparse checkout ~23MB. Core pipeline, agents, audits, config. No tests/docs/scripts.
+- **Full** (`--full` flag or `git clone`): Everything ~160MB. Includes tests, docs, scripts, dev tooling.
+
+See `install.sh` at repo root for the installer. Runtime manifest: `config/runtime-manifest.json`.
+
 ## Project Structure
 
 ```
@@ -46,17 +53,11 @@ agents/                # 221 agent definitions (186 expert + 35 pipeline)
   agent-manifest.json  # Central agent registry (v3.0.0)
   expert-agents/       # 19 category directories
   pipeline-agents/     # 13 pipeline stage directories
-  templates/           # Agent definition templates
 audits/                # 43-category audit framework
-  categories/          # 17+ audit category definitions
-  schema/              # Audit schema definitions
-  audit-browser/       # Browser UI for audits
-skills/                # Skills system
-  community/           # Community skills
-  tactical/            # Tactical skills
-  skills-browser/      # Web-based skills browser UI
+  categories/          # Audit category definitions
+  data/                # Pre-built audit catalog (JSON)
 tests/                 # pytest suite (unit, integration, e2e, uat, performance)
-dashboard/             # Real-time web dashboard (Node.js/Express, port 3000)
+dashboard/             # Real-time web dashboard (Node.js/Express, port 5174)
 config/                # Configuration files
   models.json          # LLM provider and model configuration
 scripts/               # Utility scripts and audit runners

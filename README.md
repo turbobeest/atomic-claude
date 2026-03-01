@@ -12,6 +12,28 @@ Python-based SDLC pipeline with phased orchestration, LLM routing, memory, and a
 - **Please report bugs as issues**: https://github.com/turbobeest/atomic-claude/issues
 - Workflow: Find bug → Fix task → `python main.py backtrack <phase> <task>` → Retry
 
+## Installation
+
+### Quick Install (Mac/Linux)
+```bash
+curl -fsSL https://raw.githubusercontent.com/turbobeest/atomic-claude/python/install.sh | bash
+```
+
+### Install Options
+```bash
+# Skip dashboard (no Node.js required)
+curl -fsSL .../install.sh | bash -s -- --no-dashboard
+
+# Full clone with dev tools, tests, docs (~160MB)
+curl -fsSL .../install.sh | bash -s -- --full
+
+# Custom install directory
+curl -fsSL .../install.sh | bash -s -- --dir=my-project/atomic-claude
+```
+
+The runtime install uses git sparse-checkout to download only pipeline essentials (~23MB).
+Use `--full` to get everything including tests, docs, and dev scripts.
+
 ## Quick Start
 
 ### Running the Pipeline
@@ -72,18 +94,17 @@ Configure via `.env` - see `.env.example` for options.
 - **221 agents** (186 expert + 35 pipeline)
 - **19 categories**: Backend, Frontend, DevOps, Data, Security, Business Ops, etc.
 - Centralized registry: `agents/agent-manifest.json` (v3.0.0)
-- Browse agents: http://127.0.0.1:5175 (when dashboard running)
+- Browse agents via dashboard at http://127.0.0.1:5174
 
 ### 🔍 Audit Framework
 - **43 audit categories** with 2,186+ checks
 - Security, performance, dependency, code quality audits
 - Automated audit runners in `scripts/`
-- Browse audits: http://127.0.0.1:5176 (when dashboard running)
 
 ### 🎯 Skills System
-- **Tactical skills** - Project-specific capabilities
-- **Community skills** - superpowers, trailofbits plugins, ralph monitoring
-- Web browser UI: http://127.0.0.1:5177 (when dashboard running)
+- **64 built-in skills** embedded in `core/skills/catalog.py`
+- FalkorDB knowledge graph for skill selection, learning, and composition
+- Graph-based skill selection with 3-stage matching (workflow, structural, full-text)
 
 ### 💾 Memory System
 - **Checkpoint creation** - Capture task context
@@ -92,10 +113,7 @@ Configure via `.env` - see `.env.example` for options.
 - **Persistence** - State maintained in `.state/memory/`
 
 ### 📊 Real-Time Dashboard
-- **Main dashboard** (port 5174): Pipeline status, task tracking, memory flow
-- **Agent Manager** (port 5175): Browse and search agents
-- **Audit Browser** (port 5176): Explore audit categories
-- **Skills Browser** (port 5177): View available skills
+- **Main dashboard** (port 5174): Pipeline status, task tracking, agents, audits, skills
 
 ### 🔄 Phase Management
 - **10 phases** (0-9): Setup → Discovery → PRD → Tasking → Specification → Implementation → Code Review → Integration → Deployment Prep → Release
@@ -138,11 +156,7 @@ atomic-claude/
 │   └── pipeline-agents/    # 13 pipeline stage directories
 ├── audits/                 # 43-category audit framework
 │   ├── categories/         # Audit definitions
-│   └── audit-browser/      # Web UI (port 5176)
-├── skills/                 # Skills system
-│   ├── tactical/           # Project-specific skills
-│   ├── community/          # Community contributions
-│   └── skills-browser/     # Web UI (port 5177)
+│   └── data/               # Pre-built audit catalog (JSON)
 ├── dashboard/              # Real-time monitoring
 │   ├── server.js           # Express server (port 5174)
 │   ├── public/             # Web UI

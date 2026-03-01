@@ -187,6 +187,7 @@ def is_allowed_file(file_path: Path, acp_root: Path) -> bool:
         "pytest.ini", "coverage.xml",
         "requirements.txt", "requirements-dev.txt", "requirements-llm.txt",
         "docker-compose.yml", "docker-compose.yaml",
+        "install.sh",
     }
     if str(rel_path) in allowed_root_files:
         return True
