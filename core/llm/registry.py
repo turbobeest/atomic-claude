@@ -441,17 +441,23 @@ class ModelRegistry:
         hosts_to_probe.append(env_host)
 
         # Also check configured hosts from secrets.json
-        secrets_path = self._atomic_root / ".outputs" / "0-setup" / "secrets.json"
-        try:
-            if secrets_path.exists():
-                secrets_data = json.loads(secrets_path.read_text())
-                configured_hosts = secrets_data.get("ollama_hosts", [])
-                for h in configured_hosts:
-                    normalized = h.rstrip("/")
-                    if normalized not in hosts_to_probe:
-                        hosts_to_probe.append(normalized)
-        except Exception as e:
-            logger.debug("Failed to read ollama_hosts from secrets.json: %s", e)
+        # .outputs/ may be in atomic_root or its parent (project root)
+        candidates = [
+            self._atomic_root / ".outputs" / "0-setup" / "secrets.json",
+            self._atomic_root.parent / ".outputs" / "0-setup" / "secrets.json",
+        ]
+        for secrets_path in candidates:
+            try:
+                if secrets_path.exists():
+                    secrets_data = json.loads(secrets_path.read_text())
+                    configured_hosts = secrets_data.get("ollama_hosts", [])
+                    for h in configured_hosts:
+                        normalized = h.rstrip("/")
+                        if normalized not in hosts_to_probe:
+                            hosts_to_probe.append(normalized)
+                    break  # Found secrets, stop looking
+            except Exception as e:
+                logger.debug("Failed to read ollama_hosts from %s: %s", secrets_path, e)
 
         count = 0
         now = datetime.now(timezone.utc).isoformat()
