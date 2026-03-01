@@ -1,8 +1,6 @@
-# Atomic Claude
-
 ![atomic-claude](https://github.com/user-attachments/assets/596f7dc5-0293-4dc8-a342-d0c391a147de)
 
-
+# Atomic Claude
 An AI-powered SDLC pipeline that takes a software project from idea to deployment-ready code. Ten phases — setup, discovery, PRD, tasking, specification, implementation, code review, integration, deployment prep, and release — each orchestrated by specialized agents with full state management, rollback, and memory.
 
 ## Install
