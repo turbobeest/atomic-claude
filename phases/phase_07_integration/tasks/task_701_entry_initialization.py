@@ -73,8 +73,11 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
             print(print_red("  [CRIT] ✗ Phase 6 closeout corrupt or unreadable"))
             all_valid = False
             closeout_data = None
-        if closeout_data is None:
-            pass  # already reported above
+        if closeout_data is None or not isinstance(closeout_data, dict):
+            if closeout_data is not None:
+                logger.debug("Phase 6 closeout is not a dict: %s", type(closeout_data).__name__)
+                print(print_red("  [CRIT] ✗ Phase 6 closeout has unexpected format"))
+            all_valid = False
         else:
             phase_6_status = closeout_data.get("status", "unknown")
             if phase_6_status == "complete" or "tasks_completed" in closeout_data:

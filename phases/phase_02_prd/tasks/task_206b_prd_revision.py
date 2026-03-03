@@ -248,19 +248,37 @@ def apply_edit_blocks(
             content = content.replace(search, replace, 1)
             applied += 1
         else:
-            # Fuzzy fallback: strip trailing whitespace per line, normalize runs of spaces
+            # Fuzzy fallback: normalize trailing whitespace only on the search
+            # term and the matched region, preserving markdown trailing-double-
+            # space line breaks in surrounding text.
             def normalize(text: str) -> str:
                 lines = [line.rstrip() for line in text.splitlines()]
                 return "\n".join(lines)
 
-            norm_content = normalize(content)
             norm_search = normalize(search)
 
-            if norm_search in norm_content:
-                # Find position in normalized content, then rebuild
-                idx = norm_content.index(norm_search)
-                # Map back to original: replace in normalized, then use that
-                content = norm_content[:idx] + replace + norm_content[idx + len(norm_search):]
+            # Build a line-level mapping so we can find the match region
+            # in the original content without normalizing the whole document.
+            orig_lines = content.split('\n')
+            norm_lines = [line.rstrip() for line in orig_lines]
+
+            # Scan normalized lines to find the range matching norm_search
+            norm_search_lines = norm_search.split('\n')
+            match_start_line = None
+            for i in range(len(norm_lines) - len(norm_search_lines) + 1):
+                if norm_lines[i:i + len(norm_search_lines)] == norm_search_lines:
+                    match_start_line = i
+                    break
+
+            if match_start_line is not None:
+                match_end_line = match_start_line + len(norm_search_lines)
+                # Compute character offsets in the original content
+                orig_start = sum(len(orig_lines[j]) + 1 for j in range(match_start_line))
+                orig_end = sum(len(orig_lines[j]) + 1 for j in range(match_end_line))
+                # Trim trailing newline from the replaced region
+                if orig_end > 0 and orig_end <= len(content):
+                    orig_end -= 1
+                content = content[:orig_start] + replace + content[orig_end:]
                 applied += 1
             else:
                 skipped += 1

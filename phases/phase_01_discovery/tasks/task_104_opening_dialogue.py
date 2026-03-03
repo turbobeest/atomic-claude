@@ -591,9 +591,10 @@ Return ONLY valid JSON with no additional text:
 
             return json.loads(content)
     except Exception as e:
-        logger.debug("LLM dialogue synthesis failed: %s", e)
+        logger.warning("LLM dialogue synthesis failed (using fallback placeholders): %s", e)
 
-    # Fallback synthesis
+    # Fallback synthesis — placeholder data, not actual synthesis
+    warning("Synthesis failed — using placeholder data (not derived from conversation)")
     return {
         "vision": {"core_problem": "Not fully captured", "solution_concept": "", "why_now": ""},
         "impact": {"primary_impact": "Not discussed", "success_metrics": [], "timeline_to_value": ""},

@@ -60,7 +60,7 @@ def _locked_file(filepath: Path, mode: str = "r+"):
                 fcntl.flock(fh, fcntl.LOCK_EX)
             elif sys.platform == 'win32':
                 import msvcrt
-                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 2**20)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
         except OSError as e:
             raise OSError(f"Failed to acquire lock on {filepath}: {e}") from e
         fh.seek(0)
@@ -72,7 +72,7 @@ def _locked_file(filepath: Path, mode: str = "r+"):
             import msvcrt
             try:
                 fh.seek(0)
-                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 2**20)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
             except OSError:
                 pass  # Unlock failure on Windows is non-fatal; file handle close releases it
         fh.close()
@@ -274,6 +274,7 @@ def clear_current_task(atomic_root: Optional[Path] = None):
 
     Uses atomic write (write empty to temp, rename) instead of direct
     delete to avoid a race with the dashboard reader (Finding #19).
+    Also validates state files to keep dashboard consistent.
     """
     ct = _get_state_dir(atomic_root) / "current-task.json"
     if ct.exists():
@@ -289,6 +290,13 @@ def clear_current_task(atomic_root: Optional[Path] = None):
                 ct.unlink()
             except OSError:
                 pass
+
+    # Validate state files after clearing (best-effort)
+    try:
+        if not validate_state_files(atomic_root):
+            fix_state_inconsistencies(atomic_root)
+    except Exception as e:
+        logger.debug("Post-task state validation failed (non-blocking): %s", e)
 
 
 def _get_dashboard_port() -> str:

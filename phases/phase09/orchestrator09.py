@@ -36,7 +36,7 @@ from phases.phase_09_release.tasks import (
 )
 
 # Environment variables
-ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
+ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path(__file__).resolve().parent.parent.parent))
 OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '9-release'))
 
 
@@ -80,6 +80,8 @@ task_905_wrapper.uses_llm = False
 def task_906_wrapper(mem=None) -> bool:
     """Task 906: Closeout"""
     return task_906(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+
+task_906_wrapper.uses_llm = False
 
 
 def run_phase(resume_at: str = None) -> bool:

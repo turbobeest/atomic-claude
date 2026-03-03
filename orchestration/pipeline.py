@@ -740,16 +740,8 @@ class PhasePipeline:
         if task_id:
             print(f"   Task: {task_id}")
 
-        # Clear memory state for phases being rolled back
         try:
-            memory_init(self.atomic_root / ".state")
-            result = memory_handle_backtrack(phase_num)
-            print(f"   Memory: cleared {result.get('cleared_entries', 0)} entries, "
-                  f"invalidated {result.get('invalidated_checkpoints', 0)} checkpoints")
-        except Exception as e:
-            print(f"  [memory] backtrack warning: {e}")
-
-        try:
+            # backtrack_to() already calls memory_handle_backtrack internally
             backtrack_to(phase_num, task_id)
             print(f"\n✅ Rollback complete")
             return True

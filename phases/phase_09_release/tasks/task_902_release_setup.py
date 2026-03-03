@@ -137,7 +137,7 @@ def _get_final_confirmation() -> bool:
         logger.debug("Non-interactive mode: defaulting to 'yes'")
         proceed_choice = "yes"
 
-    if proceed_choice in ["review again", "review"]:
+    while proceed_choice in ["review again", "review"]:
         print()
         print(f"  {DIM}Key files to review:{NC}")
         print(f"    CHANGELOG.md")
@@ -148,9 +148,23 @@ def _get_final_confirmation() -> bool:
             input("  Press Enter after review...")
         except (EOFError, KeyboardInterrupt):
             logger.debug("Non-interactive mode: skipping review prompt")
+            break
         print()
-        return True
-    elif proceed_choice == "abort":
+
+        print(f"  {DIM}Proceed with release?{NC}")
+        print()
+        print(f"    {GREEN}[yes]{NC}          Proceed to release")
+        print(f"    {CYAN}[review again]{NC} Review artifacts")
+        print(f"    {RED}[abort]{NC}        Cancel release")
+        print()
+
+        try:
+            proceed_choice = input("  Choice (default: yes): ").strip().lower() or "yes"
+        except (EOFError, KeyboardInterrupt):
+            logger.debug("Non-interactive mode: defaulting to 'yes'")
+            proceed_choice = "yes"
+
+    if proceed_choice == "abort":
         print()
         return False
 

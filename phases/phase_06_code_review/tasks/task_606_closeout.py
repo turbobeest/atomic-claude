@@ -68,7 +68,8 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     # Generate closeout documents
     _generate_closeout_documents(
         closeout_file, closeout_json, checklist,
-        findings_file, refinement_file
+        findings_file, refinement_file,
+        project_root=project_root,
     )
 
     # Memory checkpoint
@@ -354,7 +355,8 @@ python main.py run 7
 def _generate_closeout_json(
     closeout_json: Path,
     checklist: List[Tuple[str, str]],
-    metrics: dict
+    metrics: dict,
+    project_root: Path = None,
 ) -> None:
     """Generate closeout JSON document."""
     checklist_json = [f"{name}:{status}" for name, status in checklist]
@@ -384,7 +386,9 @@ def _generate_closeout_json(
     print(print_green("  ✓ Generated phase-06-closeout.json"))
 
     # Also write to .outputs/ path for new-style consumers
-    outputs_closeout = closeout_json.parent.parent.parent / ".outputs" / "6-code-review" / "closeout.json"
+    if project_root is None:
+        project_root = closeout_json.parent.parent.parent
+    outputs_closeout = project_root / ".outputs" / "6-code-review" / "closeout.json"
     ensure_dir(outputs_closeout.parent)
     write_file(outputs_closeout, json.dumps(json_content, indent=2))
     print(print_green("  ✓ Generated .outputs/6-code-review/closeout.json"))
@@ -395,7 +399,8 @@ def _generate_closeout_documents(
     closeout_json: Path,
     checklist: List[Tuple[str, str]],
     findings_file: Path,
-    refinement_file: Path
+    refinement_file: Path,
+    project_root: Path = None,
 ) -> None:
     """Generate closeout markdown and JSON documents."""
     print()
@@ -404,7 +409,7 @@ def _generate_closeout_documents(
 
     metrics = _load_review_metrics(findings_file, refinement_file)
     _generate_closeout_markdown(closeout_file, checklist, metrics)
-    _generate_closeout_json(closeout_json, checklist, metrics)
+    _generate_closeout_json(closeout_json, checklist, metrics, project_root=project_root)
     print()
 
 

@@ -328,6 +328,12 @@ def _resolve_source_path(finding_file: str, project_root: Path) -> Optional[Path
 def _build_fix_prompt(finding: Dict, source_context: str, finding_file: str,
                       finding_line: int) -> str:
     """Build the LLM prompt for a code fix request."""
+    # Escape curly braces in finding data to prevent f-string corruption
+    severity = str(finding.get('severity', 'major')).replace('{', '{{').replace('}', '}}')
+    category = str(finding.get('category', 'general')).replace('{', '{{').replace('}', '}}')
+    description = str(finding.get('description', 'No description')).replace('{', '{{').replace('}', '}}')
+    recommendation = str(finding.get('recommendation', 'Fix the issue')).replace('{', '{{').replace('}', '}}')
+
     code_section = ""
     if source_context:
         code_section = f"""## Source Code (around line {finding_line})
@@ -346,10 +352,10 @@ You are a code-refiner agent. Apply a minimal, targeted fix for the issue descri
 
 - **File**: {finding_file}
 - **Line**: {finding_line}
-- **Severity**: {finding.get('severity', 'major')}
-- **Category**: {finding.get('category', 'general')}
-- **Description**: {finding.get('description', 'No description')}
-- **Recommendation**: {finding.get('recommendation', 'Fix the issue')}
+- **Severity**: {severity}
+- **Category**: {category}
+- **Description**: {description}
+- **Recommendation**: {recommendation}
 
 {code_section}## Fix Requirements
 
@@ -395,6 +401,10 @@ def _apply_llm_fix(prompt: str, output_prefix: Path, finding_file: str) -> bool:
             response = stripped
 
         result = json.loads(response)
+
+        if not isinstance(result, dict):
+            logger.debug("LLM returned non-dict JSON for %s: %s", finding_file, type(result).__name__)
+            return False
 
         # Save result
         output_file = Path(str(output_prefix) + "-fix.json")
@@ -490,6 +500,7 @@ def _run_test_verification(atomic_root: Path) -> tuple:
     tests_total = 0
     tests_passed = 0
     result = None
+    timed_out = False
 
     try:
         # Try cargo test (Rust)
@@ -535,6 +546,9 @@ def _run_test_verification(atomic_root: Path) -> tuple:
                 timeout=60
             )
             tests_passing = (result.returncode == 0)
+    except subprocess.TimeoutExpired as e:
+        logger.warning("Test verification timed out after %ss: %s", e.timeout, e)
+        timed_out = True
     except FileNotFoundError as e:
         logger.warning("Test tool not installed: %s", e)
     except Exception as e:
@@ -550,9 +564,12 @@ def _run_test_verification(atomic_root: Path) -> tuple:
     print(print_bold("TEST RESULTS"))
     print()
 
-    if result is None:
-        print(print_yellow("  ⚠ No test runner detected"))
-        print(print_yellow("  ! Could not verify tests — no supported test runner found"))
+    if timed_out:
+        print(print_yellow("  ! Test verification timed out"))
+        print(print_yellow("  ! Tests may still be passing but took too long"))
+    elif result is None:
+        print(print_yellow("  ! No test runner detected"))
+        print(print_yellow("  ! Could not verify tests -- no supported test runner found"))
     elif tests_passing:
         print(print_green(f"  Passing:  {tests_passed if tests_passed > 0 else 'unknown (not parsed)'}"))
         print(print_green("  Failing:  0"))

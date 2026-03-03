@@ -235,8 +235,16 @@ class ConfigLoader:
         """Load configuration from Phase 00 JSON outputs."""
         config = {}
 
+        # Sanity-check: don't read from parent directory if we're at the
+        # filesystem root (e.g. / or C:\).  This prevents accidentally
+        # reading configs from an unrelated location.
+        parent = self.atomic_root.parent.resolve()
+        if parent == parent.parent:
+            logger.debug("Skipping parent-dir config load: atomic_root appears to be at filesystem root")
+            return config
+
         # Load project config (Phase 00 Task 002/003)
-        project_config_file = self.atomic_root.parent / ".outputs" / "0-setup" / "project-config.json"
+        project_config_file = parent / ".outputs" / "0-setup" / "project-config.json"
         if project_config_file.exists():
             try:
                 with open(project_config_file, 'r') as f:
@@ -256,7 +264,7 @@ class ConfigLoader:
                 pass
 
         # Load secrets (Phase 00 Task 004)
-        secrets_file = self.atomic_root.parent / ".outputs" / "0-setup" / "secrets.json"
+        secrets_file = parent / ".outputs" / "0-setup" / "secrets.json"
         if secrets_file.exists():
             try:
                 with open(secrets_file, 'r') as f:

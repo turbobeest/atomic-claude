@@ -66,10 +66,10 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     all_passed = True
 
     # Check artifacts
-    all_passed = _check_artifact(output_dir, "corpus.json", "Corpus collected", "CRIT", checklist) and all_passed
+    all_passed = _check_artifact(output_dir, "corpus.json", "Corpus collected", "WARN", checklist) and all_passed
     all_passed = _check_artifact(output_dir, "dialogue.json", "Dialogue completed", "CRIT", checklist) and all_passed
     all_passed = _check_artifact(output_dir, "selected-agents.json", "Agents selected", "BLCK", checklist) and all_passed
-    all_passed = _check_artifact(output_dir, "approaches.json", "Approaches generated", "CRIT", checklist) and all_passed
+    all_passed = _check_artifact(output_dir, "approaches.json", "Approaches generated", "WARN", checklist) and all_passed
     all_passed = _check_artifact(output_dir, "selected-approach.json", "Approach selected", "CRIT", checklist) and all_passed
 
     # Check diagrams

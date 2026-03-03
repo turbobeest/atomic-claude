@@ -299,6 +299,13 @@ def _configure_taskmaster_provider(
     if env_additions:
         # Ensure .gitignore protects .env BEFORE writing secrets to disk
         _ensure_env_gitignored(atomic_root.parent)
+        # Verify gitignore was actually updated before writing secrets
+        gitignore_path = atomic_root.parent / ".gitignore"
+        if gitignore_path.exists():
+            gi_content = read_file(gitignore_path)
+            if not any(line.strip() == ".env" for line in gi_content.splitlines()):
+                print(print_red("  ✗ Failed to verify .env in .gitignore — skipping credential write"))
+                return
         _append_env_vars(env_file, env_additions)
 
 
@@ -456,16 +463,21 @@ def _append_env_vars(env_file: Path, lines: list) -> None:
 
     # Filter out lines whose key is already set
     new_lines = []
+    has_new_key = False
     for line in lines:
         if line.startswith("#"):
-            new_lines.append(line)
-            continue
+            continue  # Skip comment headers; only add them if we have new keys
         key = line.split("=", 1)[0]
         if not any(ex_line.startswith(key + "=") for ex_line in existing.splitlines()):
             new_lines.append(line)
+            has_new_key = True
 
-    if not any(not l.startswith("#") for l in new_lines):
+    if not has_new_key:
         return  # All keys already present
+
+    # Prepend comment header from original lines
+    comment_lines = [l for l in lines if l.startswith("#")]
+    new_lines = comment_lines + new_lines
 
     content = "\n" + "\n".join(new_lines) + "\n"
     if existing:

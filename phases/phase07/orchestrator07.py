@@ -42,37 +42,37 @@ from phases.phase_07_integration.tasks import (
 )
 
 # Environment variables
-ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
+ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path(__file__).resolve().parent.parent.parent))
 OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '7-integration'))
 
 
 # Task wrapper functions (call Python task modules)
 
-def task_701_wrapper(mem=None) -> bool:
+def task_701_wrapper(mem=None, graph=None) -> bool:
     """Task 701: Entry initialization"""
     return task_701(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 task_701_wrapper.uses_llm = False
 
-def task_702_wrapper(mem=None) -> bool:
+def task_702_wrapper(mem=None, graph=None) -> bool:
     """Task 702: Integration setup"""
     return task_702(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 task_702_wrapper.uses_llm = False
 
-def task_703_wrapper(mem=None) -> bool:
+def task_703_wrapper(mem=None, graph=None) -> bool:
     """Task 703: Agent selection"""
     return task_703(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 task_703_wrapper.uses_llm = False
 
-def task_704_wrapper(mem=None) -> bool:
+def task_704_wrapper(mem=None, graph=None) -> bool:
     """Task 704: Testing execution"""
     return task_704(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 task_704_wrapper.uses_llm = False
 
-def task_705_wrapper(mem=None) -> bool:
+def task_705_wrapper(mem=None, graph=None) -> bool:
     """Task 705: Integration approval"""
     return task_705(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
@@ -83,7 +83,7 @@ def task_706_wrapper(mem=None, graph=None) -> bool:
     return task_706(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
-def task_707_wrapper(mem=None) -> bool:
+def task_707_wrapper(mem=None, graph=None) -> bool:
     """Task 707: Closeout"""
     return task_707(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 

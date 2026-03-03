@@ -127,8 +127,12 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
 
         print()
         print(print_dim("Edit .taskmaster/tasks/tasks.json to fix dependency issues."))
-        print(print_dim("Press Enter when ready to re-validate..."))
-        input()
+        if sys.stdin.isatty():
+            print(print_dim("Press Enter when ready to re-validate..."))
+            input()
+        else:
+            print(print_red("Non-interactive mode — cannot prompt for manual fix"))
+            return False
     else:
         # Exhausted retries
         print(print_red(f"✗ Validation failed after {MAX_VALIDATION_RETRIES} attempts"))

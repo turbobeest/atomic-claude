@@ -147,7 +147,7 @@ def _validate_checklist(artifacts_file: Path, approval_status: str) -> tuple:
             return [f"Artifacts file unreadable:FAIL"], False
         package_status = artifacts_data.get("artifacts", {}).get("package", {}).get("status", "unknown")
 
-        if package_status == "success":
+        if package_status in ("success", "cached"):
             print("  [CRIT] ✓ Release package prepared")
             checklist.append("Release package prepared:PASS")
         else:
@@ -157,7 +157,7 @@ def _validate_checklist(artifacts_file: Path, approval_status: str) -> tuple:
 
         # Check changelog
         changelog_status = artifacts_data.get("artifacts", {}).get("changelog", {}).get("status", "unknown")
-        if changelog_status == "success":
+        if changelog_status in ("success", "cached"):
             print("  [CRIT] ✓ Changelog generated")
             checklist.append("Changelog generated:PASS")
         else:
@@ -167,7 +167,7 @@ def _validate_checklist(artifacts_file: Path, approval_status: str) -> tuple:
 
         # Check documentation
         docs_status = artifacts_data.get("artifacts", {}).get("documentation", {}).get("status", "unknown")
-        if docs_status == "success":
+        if docs_status in ("success", "cached"):
             print("  [BLCK] ✓ Documentation complete")
             checklist.append("Documentation complete:PASS")
         else:
@@ -177,7 +177,7 @@ def _validate_checklist(artifacts_file: Path, approval_status: str) -> tuple:
 
         # Check installation guide
         install_status = artifacts_data.get("artifacts", {}).get("installation_guide", {}).get("status", "unknown")
-        if install_status == "success":
+        if install_status in ("success", "cached"):
             print("  [BLCK] ✓ Installation guide created")
             checklist.append("Installation guide created:PASS")
         else:

@@ -364,34 +364,58 @@ def extract_multi_file_response(response: str) -> Dict[str, str]:
 # Helper: scan project tree for LLM context
 # ---------------------------------------------------------------------------
 
+_scan_cache: Dict[str, str] = {}
+_SCAN_EXCLUDE_DIRS = {
+    "node_modules", ".git", "__pycache__", ".venv", "venv",
+    ".tox", ".mypy_cache", ".pytest_cache", "target", "dist",
+    "build", ".eggs", ".state", ".outputs", ".logs",
+}
+
+
+def _should_exclude(path: Path) -> bool:
+    """Check if a path should be excluded from project tree scan."""
+    return bool(set(path.parts) & _SCAN_EXCLUDE_DIRS)
+
+
 def _scan_project_tree(project_root: Path, stack: str) -> str:
-    """Scan actual project tree and return a manifest for LLM context."""
+    """Scan actual project tree and return a manifest for LLM context.
+
+    Results are cached so repeated calls (e.g. per-worker) are free.
+    """
+    cache_key = f"{project_root}:{stack}"
+    if cache_key in _scan_cache:
+        return _scan_cache[cache_key]
+
     manifest_lines = []
 
     if stack == "rust":
         tomls = sorted(project_root.rglob("Cargo.toml"))
         files = sorted(project_root.rglob("*.rs"))
         manifest_lines = [str(f.relative_to(project_root)) for f in tomls + files
-                         if "target" not in str(f)]
+                         if not _should_exclude(f.relative_to(project_root))]
     elif stack == "python":
         files = sorted(project_root.rglob("*.py"))
         manifest_lines = [str(f.relative_to(project_root)) for f in files
-                         if "__pycache__" not in str(f)]
+                         if not _should_exclude(f.relative_to(project_root))]
     elif stack in ("node", "javascript", "typescript"):
         files = sorted(project_root.rglob("*.js")) + sorted(project_root.rglob("*.ts"))
         pkg = sorted(project_root.rglob("package.json"))
         manifest_lines = [str(f.relative_to(project_root)) for f in pkg + files
-                         if "node_modules" not in str(f)]
+                         if not _should_exclude(f.relative_to(project_root))]
     elif stack == "go":
         files = sorted(project_root.rglob("*.go"))
         mods = sorted(project_root.rglob("go.mod"))
-        manifest_lines = [str(f.relative_to(project_root)) for f in mods + files]
+        manifest_lines = [str(f.relative_to(project_root)) for f in mods + files
+                         if not _should_exclude(f.relative_to(project_root))]
     else:
+        _scan_cache[cache_key] = ""
         return ""
 
     if len(manifest_lines) > 100:
         manifest_lines = manifest_lines[:100] + [f"... and {len(manifest_lines) - 100} more"]
-    return "\n".join(manifest_lines)
+    result = "\n".join(manifest_lines)
+    _scan_cache[cache_key] = result
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -636,6 +660,7 @@ def verify_test_runner(commands: Dict[str, str], project_root: Path) -> bool:
     env_prefix = 'test -f "$HOME/.cargo/env" && . "$HOME/.cargo/env"; '
     exit_code, _, _ = run_bash_command(
         env_prefix + check_cmd, "5-implementation", "504", timeout=15,
+        reject_shell_meta=False,  # uses shell env sourcing and &&
     )
     return exit_code == 0
 
@@ -678,8 +703,9 @@ def extract_code_from_response(response: str, language: str = "python") -> str:
     if generic_blocks:
         return "\n\n".join(block.strip() for block in generic_blocks)
 
-    # No fences found — return the whole response stripped of obvious non-code
-    return response.strip()
+    # No fences found — raw LLM prose should not be written as source code
+    logger.warning("No code fences found in LLM response (%d chars); returning empty", len(response))
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -698,6 +724,7 @@ def _run_gate(gate_cmd: str, project_root: Path, timeout: int = 60) -> Tuple[boo
 
     exit_code, stdout, stderr = run_bash_command(
         cmd, "5-implementation", "504", timeout=timeout,
+        reject_shell_meta=False,  # cmd may contain cd && from _make_project_cmd
     )
     output = (stdout + "\n" + stderr).strip()
     return exit_code == 0, output
@@ -919,6 +946,7 @@ Output ONLY the {language} test code, no explanations. Wrap in ```{fence_lang} f
         env_source = 'test -f "$HOME/.cargo/env" && . "$HOME/.cargo/env"; '
         exit_code, stdout, stderr = run_bash_command(
             f"{env_source}cd {shlex.quote(str(project_root))} && bash {shlex.quote(str(test_file))}", "5-implementation", "504", timeout=30,
+            reject_shell_meta=False,  # uses shell env sourcing and &&
         )
     else:
         # Standard: run tests -- expect them to FAIL
@@ -930,7 +958,8 @@ Output ONLY the {language} test code, no explanations. Wrap in ```{fence_lang} f
             test_cmd = _make_project_cmd(f"{commands['test']} -- {test_file.stem}", project_root)
 
         exit_code, stdout, stderr = run_bash_command(
-            test_cmd, "5-implementation", "504", timeout=30
+            test_cmd, "5-implementation", "504", timeout=30,
+            reject_shell_meta=False,  # cmd may contain cd && from _make_project_cmd
         )
 
     if exit_code != 0:
@@ -1155,6 +1184,7 @@ If unsure of the project layout, place files in src/ or the appropriate module d
                 env_source = 'test -f "$HOME/.cargo/env" && . "$HOME/.cargo/env"; '
                 exit_code, stdout, stderr = run_bash_command(
                     f"{env_source}cd {shlex.quote(str(project_root))} && bash {shlex.quote(str(verify_script))}", "5-implementation", "504", timeout=30,
+                    reject_shell_meta=False,  # uses shell env sourcing and &&
                 )
                 if exit_code == 0:
                     if not quiet:
@@ -1204,6 +1234,19 @@ If unsure of the project layout, place files in src/ or the appropriate module d
                 record["files_written"] = written_files
                 if not quiet:
                     print(print_dim(f"         Wrote {len(written_files)} files to project tree"))
+
+                # Copy primary impl file to task_dir so REFACTOR and VERIFY can find it
+                if not impl_file.exists():
+                    for rel_path, content in files.items():
+                        if Path(rel_path).name == impl_filename or rel_path.endswith(impl_filename):
+                            write_file(impl_file, content)
+                            break
+                    else:
+                        # No exact match -- copy first source file as fallback
+                        for rel_path, content in files.items():
+                            if rel_path.endswith(('.py', '.rs', '.js', '.ts', '.go')):
+                                write_file(impl_file, content)
+                                break
             else:
                 # Fallback: single code block → write to task dir (legacy behavior)
                 code = extract_code_from_response(response, fence_lang)
@@ -1231,7 +1274,8 @@ If unsure of the project layout, place files in src/ or the appropriate module d
                 test_cmd = _make_project_cmd(f"{commands['test']} -- {test_file.stem}", project_root)
 
             exit_code, stdout, stderr = run_bash_command(
-                test_cmd, "5-implementation", "504", timeout=60
+                test_cmd, "5-implementation", "504", timeout=60,
+                reject_shell_meta=False,  # cmd may contain cd && from _make_project_cmd
             )
 
             if exit_code == 0:
@@ -1363,7 +1407,8 @@ Output ONLY the refactored {language} code. Wrap in ```{fence_lang} fences.
         test_cmd = _make_project_cmd(f"{commands['test']} -- {test_file.stem}", project_root)
 
     exit_code, _, _ = run_bash_command(
-        test_cmd, "5-implementation", "504", timeout=60
+        test_cmd, "5-implementation", "504", timeout=60,
+        reject_shell_meta=False,  # cmd may contain cd && from _make_project_cmd
     )
 
     if exit_code == 0:
@@ -1446,7 +1491,8 @@ def run_verify_phase(
         verify_cmd = _make_project_cmd(verify_cmd, project_root)
 
     exit_code, stdout, stderr = run_bash_command(
-        verify_cmd, "5-implementation", "504", timeout=15
+        verify_cmd, "5-implementation", "504", timeout=15,
+        reject_shell_meta=False,  # cmd may contain cd && from _make_project_cmd
     )
 
     if exit_code == 0:

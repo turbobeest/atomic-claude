@@ -43,7 +43,8 @@ class TaskRequirements:
     def for_phase_role(phase_id: str, task_id: str = None, graph=None) -> "TaskRequirements":
         """Factory: build requirements from phase role + graph risk budget.
 
-        Uses the risk module to compute a risk budget from the knowledge graph.
+        Uses the risk module to compute a risk budget from the knowledge graph,
+        and resolves the preferred tier from the phase role mapping.
         """
         risk_budget = 0.0
         if graph and task_id:
@@ -52,7 +53,20 @@ class TaskRequirements:
                 risk_budget = compute_risk_budget(task_id, graph)
             except Exception:
                 pass
-        return TaskRequirements(risk_budget=risk_budget)
+
+        # Resolve preferred tier from phase role
+        preferred_tier = None
+        if phase_id:
+            try:
+                resolver = get_resolver()
+                phase_roles = resolver._get_phase_roles()
+                role = phase_roles.get(phase_id)
+                if role:
+                    preferred_tier = resolver._role_to_tier(role)
+            except Exception:
+                pass
+
+        return TaskRequirements(risk_budget=risk_budget, preferred_tier=preferred_tier)
 
 
 @dataclass(frozen=True)
@@ -460,7 +474,10 @@ class ModelResolver:
 
     def _get_config_mtime(self) -> float:
         """Get mtime of project config file, 0 if missing."""
-        config_path = self._atomic_root.parent / ".outputs" / "0-setup" / "project-config.json"
+        parent = self._atomic_root.parent.resolve()
+        if parent == parent.parent:
+            return 0  # at filesystem root, skip
+        config_path = parent / ".outputs" / "0-setup" / "project-config.json"
         try:
             return config_path.stat().st_mtime
         except OSError:
@@ -477,7 +494,11 @@ class ModelResolver:
 
     def _load_project_config(self) -> Dict[str, Any]:
         """Load .outputs/0-setup/project-config.json -> extracted section."""
-        config_path = self._atomic_root.parent / ".outputs" / "0-setup" / "project-config.json"
+        parent = self._atomic_root.parent.resolve()
+        if parent == parent.parent:
+            logger.debug("Skipping parent-dir config load: atomic_root at filesystem root")
+            return {}
+        config_path = parent / ".outputs" / "0-setup" / "project-config.json"
         try:
             data = json.loads(config_path.read_text())
             return data.get("extracted", {})

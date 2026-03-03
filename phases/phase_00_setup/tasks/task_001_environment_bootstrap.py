@@ -657,10 +657,11 @@ def _ensure_docker_group() -> bool:
         True if docker is usable, False if not fixable now.
     """
     import platform
-    import grp
 
     if platform.system() != "Linux":
         return True
+
+    import grp
 
     user = os.environ.get("USER", "")
     if not user:
@@ -724,8 +725,6 @@ def _run_docker_compose(args: list, atomic_root: Path, timeout: int = 60) -> sub
     When the user was just added to the docker group in this session,
     'sg docker -c "..."' runs the command under the new group without re-login.
     """
-    import grp
-
     user = os.environ.get("USER", "")
     compose_file = str(atomic_root / "docker-compose.yml")
     full_cmd = ["docker", "compose", "-f", compose_file] + args
@@ -739,6 +738,7 @@ def _run_docker_compose(args: list, atomic_root: Path, timeout: int = 60) -> sub
     # If permission denied, try with sg docker
     if result.returncode != 0 and "permission denied" in result.stderr.lower():
         try:
+            import grp
             docker_group = grp.getgrnam("docker")
             if user in docker_group.gr_mem:
                 # User is in group but session doesn't have it yet — use sg

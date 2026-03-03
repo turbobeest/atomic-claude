@@ -286,6 +286,15 @@ def _find_closeout(atomic_root: Path, phase_id: str) -> Optional[Path]:
 
 def _flatten_config(config_file: Path, config_data: Dict[str, Any]) -> None:
     """Flatten extracted config data into main config."""
+    # Backup before overwriting
+    backup_file = config_file.with_suffix('.json.bak')
+    try:
+        import shutil
+        shutil.copy2(config_file, backup_file)
+        logger.info("Backed up project-config.json to %s", backup_file)
+    except Exception as e:
+        logger.warning("Failed to create backup of project-config.json: %s", e)
+
     extracted = config_data.get('extracted', {})
 
     # Flatten extracted fields

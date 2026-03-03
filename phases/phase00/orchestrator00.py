@@ -34,7 +34,7 @@ from phases.phase_00_setup.tasks import (
 )
 
 # Get paths from environment
-ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
+ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path(__file__).resolve().parent.parent.parent))
 OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '0-setup'))
 
 

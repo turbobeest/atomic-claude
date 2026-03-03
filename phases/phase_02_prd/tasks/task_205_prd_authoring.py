@@ -347,6 +347,13 @@ def generate_section(
             content = extract_markdown(content)
             content = _strip_llm_preamble(content)
             return content
+        elif content and not output_file.exists():
+            logger.warning(
+                "LLM returned content for section '%s' but output file was not written — content lost",
+                section_name,
+            )
+            print(print_yellow(f"      Warning: LLM content for {section_name} was not saved to disk"))
+            return ""
         else:
             return ""
 

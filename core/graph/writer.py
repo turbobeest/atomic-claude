@@ -314,10 +314,18 @@ class GraphWriter:
         return deleted
 
     def ensure_indexes(self) -> None:
-        """Create all indexes defined in the schema."""
+        """Create all indexes defined in the schema.
+
+        INDEX_DEFINITIONS and FULLTEXT_INDEX_DEFINITIONS come from the
+        schema module (trusted, not user input). As defense-in-depth we
+        validate each label/property against _VALID_LABELS and _SAFE_KEY_RE
+        before interpolation.
+        """
         from .schema import INDEX_DEFINITIONS, FULLTEXT_INDEX_DEFINITIONS
 
         for label, prop in INDEX_DEFINITIONS:
+            _validate_label(label)
+            _validate_property_key(prop)
             try:
                 cypher = f"CREATE INDEX FOR (n:{label}) ON (n.{prop})"
                 self.conn.query(cypher)
@@ -327,6 +335,9 @@ class GraphWriter:
                     logger.debug("Index creation note for %s.%s: %s", label, prop, e)
 
         for label, fields in FULLTEXT_INDEX_DEFINITIONS:
+            _validate_label(label)
+            for f in fields:
+                _validate_property_key(f)
             try:
                 fields_str = ", ".join(f"'{f}'" for f in fields)
                 cypher = f"CALL db.idx.fulltext.createNodeIndex('{label}', {fields_str})"

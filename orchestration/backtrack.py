@@ -199,10 +199,22 @@ def _clear_artifacts(phases_to_clear: list, phase: int, phase_name: str,
         current_task_file.unlink()
         print("   ✓ Cleared dashboard current-task status")
 
-    # Clear error log (prevents stale error cards in dashboard)
+    # Clear error log (prevents stale error cards in dashboard) — atomic write
     errors_file = atomic_root / ".logs" / "errors.json"
     if errors_file.exists():
-        errors_file.write_text('{"errors": []}')
+        fd_err, tmp_err = tempfile.mkstemp(dir=str(errors_file.parent), suffix=".tmp")
+        try:
+            os.write(fd_err, b'{"errors": []}')
+            os.close(fd_err)
+            os.replace(tmp_err, str(errors_file))
+        except BaseException:
+            try:
+                os.close(fd_err)
+            except OSError:
+                pass
+            if os.path.exists(tmp_err):
+                os.unlink(tmp_err)
+            raise
         print("   ✓ Cleared error log")
 
     # Signal dashboard to clear error state
@@ -365,7 +377,7 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
     # Validate phase number
     if not isinstance(phase, int) or phase < 0 or phase > 9:
         print(f"\n❌ Invalid phase number: {phase}. Must be 0-9.")
-        return
+        return False
 
     # Safety check: ensure we're in the right directory
     if not (atomic_root / "main.py").exists():
@@ -397,13 +409,13 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
             clear_code = False
         else:
             print("❌ Backtrack cancelled")
-            return
+            return False
 
     # Load state
     state_file = atomic_root / ".state" / "task-state.json"
     if not state_file.exists():
         print("❌ No state file found")
-        return
+        return False
 
     with open(state_file, encoding="utf-8") as f:
         state = json.load(f)
@@ -435,12 +447,12 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
                 valid_range = sorted(actual_task_nums)
                 print(f"\n\u274c Task {task} doesn't exist in Phase {phase}.")
                 print(f"   Valid tasks: {', '.join(f'{t:03d}' for t in valid_range)}")
-                return
+                return False
         elif not (expected_prefix < task_num <= expected_prefix + 99):
             print(f"\n❌ Task {task} doesn't belong to Phase {phase}.")
             print(f"   Phase {phase} tasks are numbered {expected_prefix + 1:03d}–{expected_prefix + 99:03d}")
             print(f"   Example: python main.py backtrack {phase} {expected_prefix + 1:03d}")
-            return
+            return False
 
     # Write backtrack-in-progress marker so interrupted backtracks are detectable
     backtrack_marker = atomic_root / ".state" / "backtrack-in-progress"
@@ -493,3 +505,5 @@ def backtrack_to(phase: int, task: Optional[str] = None, force: bool = False):
         print(f"   python main.py run {phase} --resume-at={task}")
     else:
         print(f"   python main.py run {phase}")
+
+    return True

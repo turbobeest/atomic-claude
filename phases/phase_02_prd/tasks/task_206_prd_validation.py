@@ -319,29 +319,24 @@ def validate_content(
             content = read_file(output_file)
             # Extract JSON if wrapped in code fence
             content = extract_json(content)
-            # Parse result: invoke() always writes a string to the output file,
-            # but json.loads may return a non-dict (list, scalar) if the LLM
-            # responded with unexpected structure.
-            if isinstance(content, dict):
-                validation_result = content
-            else:
-                try:
-                    parsed = json.loads(content)
-                except json.JSONDecodeError as e:
-                    logger.error("Failed to parse LLM validation response as JSON: %s", e)
-                    logger.debug("Raw LLM response: %s", content[:500])
-                    print(print_red(f"  ✗ LLM response was not valid JSON: {e}"))
-                    return None
-                if not isinstance(parsed, dict):
-                    logger.error(
-                        "LLM validation response parsed to %s, expected dict",
-                        type(parsed).__name__
-                    )
-                    print(print_red(
-                        f"  ✗ LLM response parsed to {type(parsed).__name__}, expected a JSON object"
-                    ))
-                    return None
-                validation_result = parsed
+            # extract_json() always returns a string; parse it as JSON
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.error("Failed to parse LLM validation response as JSON: %s", e)
+                logger.debug("Raw LLM response: %s", content[:500])
+                print(print_red(f"  ✗ LLM response was not valid JSON: {e}"))
+                return None
+            if not isinstance(parsed, dict):
+                logger.error(
+                    "LLM validation response parsed to %s, expected dict",
+                    type(parsed).__name__
+                )
+                print(print_red(
+                    f"  ✗ LLM response parsed to {type(parsed).__name__}, expected a JSON object"
+                ))
+                return None
+            validation_result = parsed
             print(print_green("  ✓ Content validation complete"))
             return validation_result
         else:

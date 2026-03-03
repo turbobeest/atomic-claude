@@ -125,14 +125,27 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     else:
         results["code"] = _deep_code_review(code_sample, prompts_dir, project_context, model=agents.get("deep_model", "sonnet"))
         results["arch"] = _architecture_review(code_sample, prompts_dir, project_context, model=agents.get("arch_model", "sonnet"))
-        results["perf"] = _performance_review(code_sample, prompts_dir, project_context, model=agents.get("perf_model", "haiku"))
-        results["doc"] = _documentation_review(code_sample, test_sample, prompts_dir, project_context, model=agents.get("doc_model", "haiku"))
+        results["perf"] = _performance_review(code_sample, prompts_dir, project_context, model=agents.get("perf_model", "sonnet"))
+        results["doc"] = _documentation_review(code_sample, test_sample, prompts_dir, project_context, model=agents.get("doc_model", "sonnet"))
 
     # Display and save results
     _display_and_save_results(results, findings_file, graph=graph)
 
     # Generate review-report.md (expected by orchestrator artifact check)
     _generate_review_report(results, output_dir)
+
+    # Record review results in task memory
+    if mem:
+        total_critical = sum(r.get("critical", 0) for r in results.values())
+        total_major = sum(r.get("major", 0) for r in results.values())
+        total_findings = sum(len(r.get("findings", [])) for r in results.values())
+        mem.finding(f"Review complete: {total_findings} findings ({total_critical} critical, {total_major} major)")
+        mem.finding(f"Review scope: {len(source_files)} source files, {len(test_files)} test files")
+        mem.decision(f"Review method: {'TeamSession parallel' if HAS_TEAM_SESSION else 'sequential'}")
+        if total_critical > 0:
+            mem.warning(f"{total_critical} critical findings require immediate attention")
+        if graph:
+            mem.finding("Review findings written to knowledge graph")
 
     print(print_green("✓ Comprehensive Review complete"))
     return True
@@ -154,10 +167,10 @@ def _load_agents(agents_file: Path, atomic_root: Path) -> Dict[str, str]:
         # Load model tiers selected by task_602
         agents["deep_model"] = review_agents.get("deep_code", {}).get("model", "sonnet")
         agents["arch_model"] = review_agents.get("architecture", {}).get("model", "sonnet")
-        agents["perf_model"] = review_agents.get("performance", {}).get("model", "haiku")
-        agents["doc_model"] = review_agents.get("documentation", {}).get("model", "haiku")
+        agents["perf_model"] = review_agents.get("performance", {}).get("model", "sonnet")
+        agents["doc_model"] = review_agents.get("documentation", {}).get("model", "sonnet")
     except Exception as e:
-        logger.debug("Failed to load review agents from %s: %s", agents_file, e)
+        logger.warning("Failed to load review agents from %s: %s -- defaulting to sonnet", agents_file, e)
 
     return agents
 

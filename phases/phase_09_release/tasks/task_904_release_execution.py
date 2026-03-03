@@ -46,11 +46,13 @@ def find_agent_prompt(agent_name: str, agent_repo: Path) -> Optional[str]:
         if pattern.exists():
             try:
                 content = read_file(pattern)
-                # Strip frontmatter (lines between --- markers)
+                # Strip frontmatter (lines between --- markers at top of file)
                 lines = content.split('\n')
                 if lines and lines[0].strip() == '---':
                     try:
-                        end_idx = lines[1:].index('---') + 2
+                        # Only search for closing --- within first 20 lines
+                        search_lines = lines[1:20]
+                        end_idx = search_lines.index('---') + 2
                         return '\n'.join(lines[end_idx:])
                     except ValueError:
                         logger.debug("No closing frontmatter marker in %s", pattern)

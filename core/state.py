@@ -202,7 +202,13 @@ class StateLock:
 
         while True:
             try:
-                self.lock_fd = open(self.lock_file, 'w')
+                # Open with 'a' (append) to avoid truncating the file.
+                # On Windows, msvcrt.locking needs at least 1 byte in the
+                # file, so write a sentinel byte if the file is empty.
+                self.lock_fd = open(self.lock_file, 'a+')
+                if self.lock_fd.tell() == 0:
+                    self.lock_fd.write('\0')
+                    self.lock_fd.flush()
                 if _HAS_FCNTL:
                     fcntl.flock(self.lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 elif sys.platform == 'win32':

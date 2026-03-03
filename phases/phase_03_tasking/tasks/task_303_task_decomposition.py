@@ -133,6 +133,11 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     print(print_dim("  Extracted: Feature Requirements, Dependencies, Phases, Tech Stack"))
     print()
 
+    if mem:
+        mem.finding(f"PRD loaded: {prd_lines} lines, {len(sections)} sections extracted")
+        if graph_context:
+            mem.finding("Graph context loaded for task decomposition")
+
     # Task Generation
     print(print_dim("─" * 100))
     print()
@@ -186,8 +191,9 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                         feature_results.append((feature_id, feat_tasks))
                     except json.JSONDecodeError:
                         # Try repair
-                        if _repair_json(feat_output):
-                            feat_tasks = json.loads(read_file(feat_output))
+                        repaired = _repair_json(feat_output)
+                        if repaired is not False:
+                            feat_tasks = repaired if isinstance(repaired, dict) else {}
                             count = len(feat_tasks.get("tasks", []))
                             print(print_green(f"    ✓ {count} tasks from {feature_id} (repaired)"))
                             feature_results.append((feature_id, feat_tasks))
@@ -211,6 +217,11 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
             print(print_green(f"✓ Merged {total} tasks from {len(feature_results)} features"))
             if failed_features:
                 print(print_yellow(f"⚠ Skipped features: {', '.join(failed_features)}"))
+            if mem:
+                mem.finding(f"Per-feature decomposition: {total} tasks from {len(feature_results)} features")
+                mem.decision(f"Decomposition strategy: per-feature ({len(feature_list)} features)")
+                if failed_features:
+                    mem.warning(f"Skipped features: {', '.join(failed_features)}")
         else:
             print(print_yellow("⚠ All per-feature calls failed — falling back to template"))
             _create_template_tasks(raw_tasks_file)
@@ -245,9 +256,13 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                     tasks_data = json.loads(read_file(raw_tasks_file))
                     task_count = len(tasks_data.get("tasks", []))
                     print(print_green(f"✓ Generated {task_count} tasks"))
+                    if mem:
+                        mem.finding(f"Single-call decomposition: {task_count} tasks generated")
+                        mem.decision("Decomposition strategy: single-call (small PRD)")
                 except json.JSONDecodeError:
                     print(print_yellow("⚠ Invalid JSON output - attempting repair"))
-                    if not _repair_json(raw_tasks_file):
+                    repaired = _repair_json(raw_tasks_file)
+                    if repaired is False:
                         _create_template_tasks(raw_tasks_file)
             else:
                 print(print_yellow("⚠ Task decomposition failed - creating template"))
@@ -268,9 +283,14 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
             tasks = tasks_data.get("tasks", [])
             graph_count = 0
             for task in tasks:
+                task_id = task.get("id")
+                task_title = task.get("title")
+                if task_id is None or task_title is None:
+                    logger.warning("Skipping task with missing id or title: %s", task)
+                    continue
                 graph.add_task(
-                    id=task["id"],
-                    title=task["title"],
+                    id=task_id,
+                    title=task_title,
                     description=task.get("description", ""),
                     requirements=task.get("requirements", []),
                     depends_on=task.get("dependencies", [])
@@ -278,8 +298,12 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                 graph_count += 1
             logger.info(f"Wrote {graph_count} tasks to knowledge graph")
             print(print_green(f"  ✓ {graph_count} tasks written to knowledge graph"))
+            if mem:
+                mem.finding(f"{graph_count} tasks written to knowledge graph")
         except Exception as e:
             logger.warning(f"Graph task write failed: {e}")
+            if mem:
+                mem.warning(f"Graph task write failed: {e}")
 
     # TaskMaster Integration
     print(print_dim("─" * 100))
@@ -778,8 +802,12 @@ def _show_task_preview(tasks_file: Path) -> None:
         print()
 
 
-def _repair_json(file_path: Path) -> bool:
-    """Attempt to repair malformed JSON."""
+def _repair_json(file_path: Path):
+    """Attempt to repair malformed JSON.
+
+    Returns the parsed dict/list on success, or False on failure.
+    Also writes the repaired JSON back to disk for consistency.
+    """
     content = read_file(file_path)
 
     # Try to extract JSON from markdown code blocks
@@ -788,10 +816,10 @@ def _repair_json(file_path: Path) -> bool:
         if match:
             json_content = match.group(1)
             try:
-                json.loads(json_content)
+                parsed = json.loads(json_content)
                 write_file(file_path, json_content)
                 print(print_green("✓ JSON repaired from markdown"))
-                return True
+                return parsed
             except Exception as e:
                 logger.debug("JSON repair from markdown failed: %s", e)
 
@@ -801,10 +829,10 @@ def _repair_json(file_path: Path) -> bool:
         end = content.rindex("}") + 1
         json_content = content[start:end]
         try:
-            json.loads(json_content)
+            parsed = json.loads(json_content)
             write_file(file_path, json_content)
             print(print_green("✓ JSON extracted from output"))
-            return True
+            return parsed
         except Exception as e:
             logger.debug("JSON extraction from output failed: %s", e)
 

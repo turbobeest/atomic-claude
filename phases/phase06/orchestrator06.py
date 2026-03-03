@@ -40,25 +40,25 @@ from phases.phase_06_code_review.tasks import (
 )
 
 # Environment variables
-ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
+ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path(__file__).resolve().parent.parent.parent))
 OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '6-code-review'))
 
 
 # Task wrapper functions (call Python task modules)
 
-def task_601_wrapper(mem=None) -> bool:
+def task_601_wrapper(mem=None, graph=None) -> bool:
     """Task 601: Entry initialization"""
     return task_601(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 task_601_wrapper.uses_llm = False
 
-def task_602_wrapper(mem=None) -> bool:
+def task_602_wrapper(mem=None, graph=None) -> bool:
     """Task 602: Agent selection"""
     return task_602(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
 task_602_wrapper.uses_llm = False
 
-def task_603_wrapper(mem=None) -> bool:
+def task_603_wrapper(mem=None, graph=None) -> bool:
     """Task 603: Comprehensive review"""
     return task_603(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 
@@ -77,7 +77,7 @@ def task_605_wrapper(mem=None, graph=None) -> bool:
     return task_605(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
-def task_606_wrapper(mem=None) -> bool:
+def task_606_wrapper(mem=None, graph=None) -> bool:
     """Task 606: Closeout"""
     return task_606(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
 

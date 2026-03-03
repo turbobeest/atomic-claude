@@ -137,6 +137,7 @@ def run_phase_tasks(
         print(f"\n⚡ Running Task {task_id}: {task_name}")
         ensure_dashboard(atomic_root)
         # Skip agent roster for infrastructure tasks and non-LLM tasks
+        roster = None
         task_uses_llm = getattr(task_func, 'uses_llm', True)
         if is_infrastructure_task(task_name) or not task_uses_llm:
             print(f"\n  {task_name}\n")
@@ -327,12 +328,10 @@ def run_phase_tasks(
 
             except Exception as e:
                 last_error = str(e)
+                success = False
                 logger.warning(
                     "Task %s attempt %d failed: %s", task_id, attempt, e,
                 )
-                if attempt == max_attempts - 1:
-                    # Final attempt — propagate as failure
-                    success = False
 
         # Clear context vars after task execution
         try:
@@ -494,8 +493,19 @@ def create_phase_closeout(phase_id: str, tasks: List[TaskEntry],
     try:
         with os.fdopen(fd, 'w') as f:
             json.dump(closeout_data, f, indent=2, default=str)
+    except BaseException:
+        # os.fdopen failed or json.dump failed — fd may still be open
+        try:
+            os.close(fd)
+        except OSError:
+            pass  # Already closed by os.fdopen
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+    try:
         os.replace(tmp_path, str(closeout_file))
-    except Exception:
-        os.unlink(tmp_path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
         raise
     print(f"\n✅ Phase {phase_num} closeout: {closeout_file}")

@@ -228,7 +228,8 @@ def _check_credentials(
     print(print_green("  Credentials validated"))
 
     # Create secrets.json
-    _create_secrets_file(output_dir, env_vars, has_aws, has_anthropic, has_ollama)
+    if _create_secrets_file(output_dir, env_vars, has_aws, has_anthropic, has_ollama) is False:
+        logger.warning("Failed to write secrets.json — continuing with in-memory credentials")
     return has_aws, has_anthropic, has_ollama, env_vars
 
 
@@ -470,7 +471,9 @@ def _create_secrets_file(
         })
 
     if has_anthropic:
-        secrets["anthropic_api_key"] = env_vars.get('ANTHROPIC_API_KEY')
+        api_key = env_vars.get('ANTHROPIC_API_KEY')
+        if api_key:
+            secrets["anthropic_api_key"] = api_key
 
     if has_ollama:
         secrets.update({"ollama_enabled": True, "ollama_host": "localhost:11434"})

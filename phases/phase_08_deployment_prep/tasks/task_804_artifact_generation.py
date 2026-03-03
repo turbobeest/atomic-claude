@@ -191,7 +191,9 @@ You are a release packager agent preparing distribution artifacts.
 
 ## Project Context
 
+<prd_content>
 {context}
+</prd_content>
 
 ## Instructions
 
@@ -267,7 +269,9 @@ You are a changelog writer agent. Generate a changelog entry for version {safe_v
 
 ## Project Context
 
+<prd_content>
 {context}
+</prd_content>
 
 ## Instructions
 
@@ -334,7 +338,9 @@ You are a documentation generator agent. Create comprehensive user documentation
 
 ## Project Context
 
+<prd_content>
 {context}
+</prd_content>
 
 ## Instructions
 
@@ -399,7 +405,9 @@ You are an installation guide writer agent. Create an installation guide for ver
 
 ## Project Context
 
+<prd_content>
 {context}
+</prd_content>
 
 ## Instructions
 

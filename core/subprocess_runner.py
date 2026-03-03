@@ -193,7 +193,7 @@ def run_bash_command(
     task_id: str,
     timeout: int = 60,
     capture_output: bool = True,
-    reject_shell_meta: bool = False,
+    reject_shell_meta: bool = True,
 ) -> Tuple[int, str, str]:
     """
     Execute a single bash command (not a script file).

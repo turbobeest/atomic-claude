@@ -217,7 +217,7 @@ def _locked_tokens_file(filepath: Path):
                 fcntl.flock(fh, fcntl.LOCK_EX)
             elif sys.platform == 'win32':
                 import msvcrt
-                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 2**20)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
         except OSError as e:
             raise OSError(f"Failed to acquire lock on {filepath}: {e}") from e
         fh.seek(0)
@@ -229,7 +229,7 @@ def _locked_tokens_file(filepath: Path):
             import msvcrt
             try:
                 fh.seek(0)
-                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 2**20)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
             except OSError:
                 pass
         fh.close()
@@ -325,6 +325,68 @@ def _track_tokens(response):
             fh.write(json.dumps(data, indent=2))
     except Exception as e:
         logger.warning("Token tracking failed: %s", e)
+
+
+def _track_stream_tokens(estimated_output_tokens: int, provider):
+    """Update session token tracking for streaming calls.
+
+    Streams don't provide usage metadata, so we estimate output tokens
+    from character count (chars / 4) and record with input_tokens=0.
+    """
+    try:
+        tokens_file = Path(os.environ.get("ATOMIC_ROOT", ".")) / ".state" / "session-tokens.json"
+        tokens_file.parent.mkdir(parents=True, exist_ok=True)
+
+        _empty_data = {
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "estimated_cost_usd": 0,
+            "cost_available": True,
+            "by_provider": {},
+            "by_model": {},
+        }
+
+        with _locked_tokens_file(tokens_file) as fh:
+            raw = fh.read()
+            try:
+                data = json.loads(raw) if raw.strip() else dict(_empty_data)
+            except (json.JSONDecodeError, ValueError):
+                data = dict(_empty_data)
+
+            for key, default in _empty_data.items():
+                data.setdefault(key, default)
+
+            data["total_output_tokens"] += estimated_output_tokens
+
+            provider_name = getattr(provider, 'provider_name', 'unknown')
+            model_id = getattr(provider, 'model', 'unknown')
+
+            if provider_name not in data["by_provider"]:
+                data["by_provider"][provider_name] = {
+                    "input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
+                }
+            data["by_provider"][provider_name]["output_tokens"] += estimated_output_tokens
+
+            if model_id not in data["by_model"]:
+                data["by_model"][model_id] = {
+                    "input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
+                }
+            data["by_model"][model_id]["output_tokens"] += estimated_output_tokens
+
+            # Cost estimation (skip for subscription/local providers)
+            if provider_name not in _NO_COST_PROVIDERS:
+                tier = _resolve_tier(model_id)
+                if tier and tier in _MODEL_PRICING:
+                    call_cost = (estimated_output_tokens / 1_000_000) * _MODEL_PRICING[tier]["output"]
+                    data["estimated_cost_usd"] += call_cost
+                    data["by_provider"][provider_name]["cost_usd"] += call_cost
+                    data["by_model"][model_id]["cost_usd"] += call_cost
+
+            fh.seek(0)
+            fh.truncate()
+            fh.write(json.dumps(data, indent=2))
+    except Exception as e:
+        logger.warning("Stream token tracking failed: %s", e)
 
 
 class FeatureAwareLLMInvoker:
@@ -685,4 +747,16 @@ def stream_llm(
         kwargs["model"] = _resolve_model_for_provider(kwargs["model"], provider)
 
     invoker = FeatureAwareLLMInvoker(provider)
-    yield from invoker.stream(prompt, **kwargs)
+    output_chars = 0
+    for chunk in invoker.stream(prompt, **kwargs):
+        output_chars += len(chunk)
+        yield chunk
+
+    # Estimate output tokens from stream (no usage object available in streams)
+    # Use chars/4 heuristic, matching _track_tokens' approach
+    if output_chars > 0:
+        estimated_output_tokens = max(1, output_chars // 4)
+        try:
+            _track_stream_tokens(estimated_output_tokens, provider)
+        except Exception as e:
+            logger.debug("Stream token tracking failed: %s", e)

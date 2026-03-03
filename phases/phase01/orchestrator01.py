@@ -43,7 +43,7 @@ from phases.phase_01_discovery.tasks import (
 )
 
 # Get paths from environment
-ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
+ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path(__file__).resolve().parent.parent.parent))
 OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '1-discovery'))
 
 

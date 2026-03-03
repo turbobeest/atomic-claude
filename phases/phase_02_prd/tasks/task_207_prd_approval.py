@@ -140,7 +140,9 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                     if validation_result:
                         write_file(validation_file, json.dumps(validation_result, indent=2))
                         show_validation_scores(validation_file)
-            refinement_count += 1
+                    refinement_count += 1
+                else:
+                    print(print_yellow("  Refinement did not produce changes — not counting toward limit"))
             print()
 
         elif choice in ["refine", "r"]:
@@ -152,13 +154,24 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                 if validation_result:
                     write_file(validation_file, json.dumps(validation_result, indent=2))
                     show_validation_scores(validation_file)
-            refinement_count += 1
+                refinement_count += 1
+            else:
+                print(print_yellow("  Refinement did not produce changes — not counting toward limit"))
 
         else:
             print(print_red("  Invalid choice"))
 
-    print(print_yellow("  Maximum refinement iterations reached - proceeding with approval"))
-    approve_prd(approval_file, prd_file, "auto-approved")
+    print(print_yellow("  Maximum refinement iterations reached."))
+    print()
+    clear_input_buffer()
+    final_choice = prompt_user("  Approve PRD now? (yes/no, default: yes): ").strip().lower() or "yes"
+    if final_choice in ["yes", "y"]:
+        approver = prompt_user("  Your name (for approval record): ").strip() or "auto-approved"
+        approve_prd(approval_file, prd_file, approver)
+        print(print_green("✓ PRD approved"))
+    else:
+        print(print_yellow("  PRD not approved. Re-run task 207 to try again."))
+        return False
     return True
 
 

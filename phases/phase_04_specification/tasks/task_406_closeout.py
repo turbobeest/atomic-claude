@@ -371,7 +371,11 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     if closeout_choice == "review":
         print()
         print(print_dim("  Key artifacts:"))
-        print(f"    {specs_dir.relative_to(project_root)}/                     - OpenSpec definitions")
+        try:
+            specs_rel = specs_dir.relative_to(project_root)
+        except ValueError:
+            specs_rel = specs_dir
+        print(f"    {specs_rel}/                     - OpenSpec definitions")
         print("    .taskmaster/tasks/tasks.json       - Tasks with TDD subtasks")
         print("    .outputs/audits/phase-4/           - Audit results")
         print()
@@ -422,7 +426,11 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     print(print_dim("    .claude/closeout/phase-04-closeout.md"))
     print()
     print("  Specifications saved to:")
-    print(print_dim(f"    {specs_dir.relative_to(project_root)}/spec-*.json"))
+    try:
+        specs_rel = specs_dir.relative_to(project_root)
+    except ValueError:
+        specs_rel = specs_dir
+    print(print_dim(f"    {specs_rel}/spec-*.json"))
     print()
     print("  Tasks updated at:")
     print(print_dim("    .taskmaster/tasks/tasks.json"))

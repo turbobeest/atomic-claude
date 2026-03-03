@@ -159,6 +159,7 @@ def _run_test_suite(
 
     exit_code, stdout, stderr = run_bash_command(
         cmd, "5-implementation", "505", timeout=120,
+        reject_shell_meta=False,  # commands use cd && and 2>&1
     )
 
     output = (stdout + "\n" + stderr).strip()
@@ -253,6 +254,7 @@ def _run_coverage(
 
     exit_code, stdout, stderr = run_bash_command(
         cmd, "5-implementation", "505", timeout=180,
+        reject_shell_meta=False,  # commands use cd && and 2>&1
     )
 
     if exit_code != 0:

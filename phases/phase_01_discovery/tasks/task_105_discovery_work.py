@@ -774,9 +774,10 @@ Return ONLY valid JSON:
                     raw = '\n'.join(json_lines)
             return json.loads(raw)
     except Exception as e:
-        logger.debug("LLM consensus generation failed: %s", e)
+        logger.warning("LLM consensus generation failed (using fallback placeholders): %s", e)
 
-    # Fallback consensus
+    # Fallback consensus — placeholder data, not derived from discussion
+    warning("Consensus generation failed — using placeholder data (not derived from discussion)")
     return {
         "agreed_direction": {
             "approach": "Phased Implementation",

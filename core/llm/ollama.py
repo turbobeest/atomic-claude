@@ -160,6 +160,15 @@ class OllamaProvider(BaseLLMProvider):
         # Skip resolution for localhost (primary use case) and raw IP literals
         # (already validated above). Also skip when trusted — LAN hostnames
         # will naturally resolve to private IPs.
+        #
+        # KNOWN LIMITATION (TOCTOU): There is an inherent gap between this DNS
+        # resolution check and the actual HTTP request. A DNS rebinding attack
+        # could return a safe IP here but a private IP when urllib later resolves
+        # the same hostname. Full mitigation would require a custom urllib opener
+        # that pins the resolved IP for the connection (e.g. via a custom
+        # HTTPAdapter or by rewriting the URL to use the IP with a Host header).
+        # For now we accept this residual risk since Ollama is typically used on
+        # trusted networks, and the check still catches static misconfigurations.
         if not trusted and hostname != "localhost" and not OllamaProvider._PRIVATE_IP_RE.match(hostname):
             try:
                 resolved_ip = socket.gethostbyname(hostname)

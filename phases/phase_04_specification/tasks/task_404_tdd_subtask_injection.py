@@ -108,10 +108,17 @@ def _load_openspec(task_id: int, openspec_dir: Path) -> Optional[Dict]:
                 return json.loads(fenced)
             except json.JSONDecodeError as e:
                 logger.debug("Fenced JSON parse failed for spec-t%s.json: %s", task_id, e)
-        # Last resort: find first { ... } block
-        match = re.search(r'\{[\s\S]*\}', content)
-        if match:
-            return json.loads(match.group())
+        # Last resort: use JSONDecoder to find first valid JSON object
+        decoder = json.JSONDecoder()
+        idx = content.find('{')
+        while idx != -1:
+            try:
+                parsed, _ = decoder.raw_decode(content, idx)
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+            idx = content.find('{', idx + 1)
         return None
     except Exception as e:
         logger.debug("Could not load openspec for task %s: %s", task_id, e)
@@ -557,9 +564,12 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
         with os.fdopen(fd, 'w') as tmp_f:
             tmp_f.write(json.dumps(tasks_data, indent=2))
         os.replace(tmp_path, tasks_file)
-    except BaseException:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            logger.debug("Failed to clean up temp file: %s", tmp_path)
         raise
 
     # Compute stats

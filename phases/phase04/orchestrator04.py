@@ -37,7 +37,7 @@ from phases.phase_04_specification.tasks import (
 )
 
 # Get paths from environment
-ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
+ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path(__file__).resolve().parent.parent.parent))
 OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs' / '4-specification'))
 
 
@@ -53,9 +53,15 @@ def run_phase(resume_at: str = None) -> bool:
     """
     phase_id = "4-specification"
 
-    # Initialize knowledge graph (raises GraphUnavailableError on failure)
-    graph = get_graph(phase_id=phase_id)
-    graph.ensure_schema()
+    # Initialize knowledge graph (graceful degradation if unavailable)
+    graph = None
+    try:
+        graph = get_graph(phase_id=phase_id)
+        if graph:
+            graph.ensure_schema()
+    except Exception as e:
+        logger.warning("Knowledge graph unavailable for Phase 4: %s", e)
+        graph = None
 
     # Task list in execution order
     tasks = [

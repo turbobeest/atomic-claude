@@ -61,9 +61,9 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     if artifacts_file.exists():
         try:
             artifacts_data = read_json(artifacts_file)
-        except (json.JSONDecodeError, Exception) as e:
-            logger.error("Failed to parse artifacts file: %s", e)
-            print(print_red(f"  ✗ Failed to parse artifacts file: {e}"))
+        except Exception as e:
+            logger.error("Failed to load artifacts file: %s", e)
+            print(print_red(f"  ✗ Failed to load artifacts file: {e}"))
             return False
         version = artifacts_data.get("release", {}).get("version", "0.1.0")
         package_status = artifacts_data.get("artifacts", {}).get("package", {}).get("status", "unknown")
@@ -93,25 +93,25 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
 
     all_criteria_met = True
 
-    if package_status == "success":
+    if package_status in ("success", "cached"):
         print("  [CRIT] ✓ Package builds successfully")
     else:
         print("  [CRIT] ✗ Package build failed")
         all_criteria_met = False
 
-    if docs_status == "success":
+    if docs_status in ("success", "cached"):
         print("  [CRIT] ✓ Documentation complete")
     else:
         print("  [CRIT] ✗ Documentation incomplete")
         all_criteria_met = False
 
-    if changelog_status == "success":
+    if changelog_status in ("success", "cached"):
         print("  [BLCK] ✓ Changelog accurate")
     else:
         print("  [BLCK] ✗ Changelog missing")
         all_criteria_met = False
 
-    if install_status == "success":
+    if install_status in ("success", "cached"):
         print("  [BLCK] ✓ Installation guide tested")
     else:
         print("  [BLCK] ✗ Installation guide missing")
@@ -199,7 +199,7 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
 
 def _display_status(label: str, status: str):
     """Display a status line."""
-    if status == "success":
+    if status in ("success", "cached"):
         print(f"    [ok] {label}")
     else:
         print(f"    [fail] {label}")

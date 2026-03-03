@@ -121,7 +121,7 @@ def execute(atomic_root: Path, output_dir: Path, mem=None) -> bool:
     # Load integration setup
     try:
         setup_data = read_json(setup_file)
-    except (FileNotFoundError, ValueError) as e:
+    except (FileNotFoundError, ValueError, OSError) as e:
         print(print_red(f"  Integration setup not found: {e}"))
         print(print_red("  Run Task 702 (Integration Setup) first."))
         return False
