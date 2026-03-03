@@ -7,9 +7,10 @@ Provides context assembly for LLM prompts and graph traversal.
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from core.graph.schema import NodeLabel
+from .schema import NodeLabel
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,42 @@ _VALID_ORDER_PROPERTIES: Set[str] = {
 
 # Valid node labels for Cypher injection prevention
 _VALID_LABELS: Set[str] = {label.value for label in NodeLabel}
+
+# Property key validation (same pattern as writer.py)
+_SAFE_KEY_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+# Valid relationship types (from schema)
+try:
+    from .schema import RelType
+    _VALID_REL_TYPES: Set[str] = {rt.value for rt in RelType}
+except ImportError:
+    _VALID_REL_TYPES = set()
+
+
+def _validate_label(label: str) -> None:
+    """Raise ValueError if label is not in the schema allowlist."""
+    if label not in _VALID_LABELS:
+        raise ValueError(
+            f"Invalid node label '{label}'. Valid labels: {sorted(_VALID_LABELS)}"
+        )
+
+
+def _validate_property_key(key: str) -> None:
+    """Raise ValueError if key contains unsafe characters."""
+    if not _SAFE_KEY_RE.match(key):
+        raise ValueError(
+            f"Invalid property key '{key}'. "
+            "Keys must match [a-zA-Z_][a-zA-Z0-9_]*."
+        )
+
+
+def _validate_rel_type(rel_type: str) -> None:
+    """Raise ValueError if relationship type is not in the schema allowlist."""
+    if _VALID_REL_TYPES and rel_type not in _VALID_REL_TYPES:
+        raise ValueError(
+            f"Invalid relationship type '{rel_type}'. "
+            f"Valid types: {sorted(_VALID_REL_TYPES)}"
+        )
 
 
 class GraphReader:
@@ -47,6 +84,7 @@ class GraphReader:
         Returns:
             Property dict or None if not found
         """
+        _validate_label(label)
         id_prop = "task_id" if label == "Spec" else "id"
         cypher = f"MATCH (n:{label} {{{id_prop}: $nid}}) RETURN n"
         result = self.conn.query(cypher, {"nid": node_id})
@@ -68,6 +106,7 @@ class GraphReader:
         Returns:
             List of property dicts
         """
+        _validate_label(label)
         if order_by and order_by not in _VALID_ORDER_PROPERTIES:
             raise ValueError(f"Invalid order_by property: {order_by}")
         if limit is not None:
@@ -78,6 +117,7 @@ class GraphReader:
 
         if filters:
             for i, (key, value) in enumerate(filters.items()):
+                _validate_property_key(key)
                 param_name = f"f{i}"
                 where_clauses.append(f"n.{key} = ${param_name}")
                 params[param_name] = value
@@ -92,11 +132,13 @@ class GraphReader:
 
     def count_nodes(self, label: str, filters: Dict[str, Any] = None) -> int:
         """Count nodes matching label and optional filters."""
+        _validate_label(label)
         params = {}
         where_clauses = []
 
         if filters:
             for i, (key, value) in enumerate(filters.items()):
+                _validate_property_key(key)
                 param_name = f"f{i}"
                 where_clauses.append(f"n.{key} = ${param_name}")
                 params[param_name] = value
@@ -125,6 +167,9 @@ class GraphReader:
         Returns:
             List of connected node property dicts
         """
+        _validate_label(label)
+        if rel_type:
+            _validate_rel_type(rel_type)
         id_prop = "task_id" if label == "Spec" else "id"
         rel_pattern = f":{rel_type}" if rel_type else ""
 
@@ -152,6 +197,11 @@ class GraphReader:
             List of node dicts along the path, or empty list if no path
         """
         max_depth = max(1, min(int(max_depth), 50))
+        _validate_label(from_label)
+        _validate_label(to_label)
+        if rel_types:
+            for rt in rel_types:
+                _validate_rel_type(rt)
 
         from_id_prop = "task_id" if from_label == "Spec" else "id"
         to_id_prop = "task_id" if to_label == "Spec" else "id"
@@ -475,6 +525,25 @@ class GraphReader:
         )
         result = self.conn.query(cypher, {"query": query_text})
         return [self._node_to_dict(row[0]) for row in result.result_set]
+
+    # ========================================================================
+    # RAW QUERY (for operations that need custom Cypher)
+    # ========================================================================
+
+    def raw_query(self, cypher: str, params: Dict[str, Any] = None):
+        """Execute a raw Cypher query and return the result set.
+
+        Use this for complex queries (recursive traversals, aggregations)
+        that don't fit the standard get_node/get_nodes/get_neighbors API.
+
+        Args:
+            cypher: Cypher query string
+            params: Query parameters
+
+        Returns:
+            Query result object (has .result_set attribute)
+        """
+        return self.conn.query(cypher, params or {})
 
     # ========================================================================
     # HELPERS
