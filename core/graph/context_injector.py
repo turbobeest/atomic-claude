@@ -62,6 +62,11 @@ def build_graph_context(
         Formatted context string, or None if no context available.
     """
     if graph is None:
+        logger.warning(
+            "build_graph_context called with graph=None for task %s — "
+            "LLM will operate without graph context (higher token usage, less precision)",
+            task_id,
+        )
         return None
 
     gravity_key = gravity.value if hasattr(gravity, "value") else str(gravity)
@@ -86,6 +91,10 @@ def build_graph_context(
         sections.append(memory_section)
 
     if not sections:
+        logger.warning(
+            "Graph context for task %s is empty — graph may not have data yet",
+            task_id,
+        )
         return None
 
     return "\n\n".join(sections)
@@ -147,7 +156,7 @@ def _format_agent_context(
         return "\n".join(lines) if len(lines) > 1 else ""
 
     except Exception as e:
-        logger.debug("Agent context formatting failed: %s", e)
+        logger.warning("Agent context formatting failed: %s", e)
         return ""
 
 
@@ -158,7 +167,7 @@ def _format_traceability_context(
 
     LIGHT: accepted decisions only, limit 3.
     STANDARD: decisions + phase requirements.
-    INTENSIVE: full task_context() preset from ContextCompiler.
+    INTENSIVE: task-specific context with decisions + requirements + findings.
     """
     if budget_tokens <= 0:
         return ""
@@ -208,11 +217,16 @@ def _format_traceability_context(
             return compiler.compile(traversals, max_tokens=budget_tokens)
 
         else:
-            # INTENSIVE: full task context preset
-            return compiler.task_context(task_id=None, max_tokens=budget_tokens)
+            # INTENSIVE: task-specific context (decisions + requirements + findings)
+            # Convert task_id to int for graph queries if possible
+            try:
+                tid = int(task_id) if task_id else None
+            except (ValueError, TypeError):
+                tid = None
+            return compiler.task_context(task_id=tid, max_tokens=budget_tokens)
 
     except Exception as e:
-        logger.debug("Traceability context formatting failed: %s", e)
+        logger.warning("Traceability context formatting failed: %s", e)
         return ""
 
 
@@ -242,16 +256,6 @@ def _format_memory_context(
         if not entries:
             return ""
 
-        # Priority-based budget reservation: reserve a portion for P0/P1 entries
-        # LIGHT: 25%, STANDARD: 20%, INTENSIVE: 15%
-        if budget_tokens <= 100:
-            reserved_pct = 0.25
-        elif budget_tokens <= 300:
-            reserved_pct = 0.20
-        else:
-            reserved_pct = 0.15
-        reserved_chars = int(budget_tokens * 4 * reserved_pct)
-
         # Separate high-priority and normal entries
         high_priority = [e for e in entries if e.get("priority", "P2") in ("P0", "P1")]
         normal = [e for e in entries if e.get("priority", "P2") not in ("P0", "P1")]
@@ -260,7 +264,11 @@ def _format_memory_context(
         budget_chars = budget_tokens * 4
         chars_used = len(lines[0]) + 1
 
-        # Fill reserved budget with high-priority entries first
+        # Reserve space for high-priority entries: they get first pick of budget
+        # After high-priority fills, normal entries share whatever remains
+        hi_budget = min(budget_chars, max(int(budget_chars * 0.5), 200)) if high_priority else 0
+        hi_chars = 0
+
         for entry in high_priority:
             content = entry.get("content", "")
             if not content:
@@ -268,12 +276,15 @@ def _format_memory_context(
             if len(content) > 200:
                 content = content[:197] + "..."
             line = f"- {content}"
+            if hi_chars + len(line) + 1 > hi_budget:
+                break
             if chars_used + len(line) + 1 > budget_chars:
                 break
             lines.append(line)
             chars_used += len(line) + 1
+            hi_chars += len(line) + 1
 
-        # Fill remaining with normal entries
+        # Fill remaining budget with normal entries
         for entry in normal:
             content = entry.get("content", "")
             if not content:
@@ -289,5 +300,5 @@ def _format_memory_context(
         return "\n".join(lines) if len(lines) > 1 else ""
 
     except Exception as e:
-        logger.debug("Memory context formatting failed: %s", e)
+        logger.warning("Memory context formatting failed: %s", e)
         return ""

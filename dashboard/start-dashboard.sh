@@ -90,6 +90,14 @@ if _wait_for_port "$PORT" 5 "Main dashboard"; then
     echo "Dashboard server started (PID: $SERVER_PID, port $PORT)"
 fi
 
+# Auto-seed graph if FalkorDB is available (non-blocking)
+if [[ -f "$SCRIPT_DIR/seed-graph.js" ]]; then
+    (
+        node "$SCRIPT_DIR/seed-graph.js" 2>/dev/null && \
+            echo "Graph seeded successfully" || \
+            echo "Graph seeding skipped (FalkorDB not available)"
+    ) &
+fi
 
 # Open browser (detached from this process)
 (

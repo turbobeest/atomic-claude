@@ -48,19 +48,19 @@ OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs'
 
 def task_601_wrapper(mem=None, graph=None) -> bool:
     """Task 601: Entry initialization"""
-    return task_601(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_601(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_601_wrapper.uses_llm = False
 
 def task_602_wrapper(mem=None, graph=None) -> bool:
     """Task 602: Agent selection"""
-    return task_602(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_602(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_602_wrapper.uses_llm = False
 
 def task_603_wrapper(mem=None, graph=None) -> bool:
     """Task 603: Comprehensive review"""
-    return task_603(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_603(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_603_wrapper.model_tier = "sonnet"
 
@@ -79,7 +79,7 @@ def task_605_wrapper(mem=None, graph=None) -> bool:
 
 def task_606_wrapper(mem=None, graph=None) -> bool:
     """Task 606: Closeout"""
-    return task_606(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_606(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def run_phase(resume_at: str = None) -> bool:
@@ -94,7 +94,7 @@ def run_phase(resume_at: str = None) -> bool:
     """
     phase_id = "6-code-review"
 
-    # Initialize knowledge graph (optional — graceful degradation if unavailable)
+    # Initialize knowledge graph (REQUIRED — graph drives context and decisions)
     graph = None
     try:
         if get_graph is not None:
@@ -102,7 +102,11 @@ def run_phase(resume_at: str = None) -> bool:
             if graph:
                 graph.ensure_schema()
     except Exception as e:
-        logger.warning("Knowledge graph unavailable for Phase 6: %s", e)
+        logger.error("Knowledge graph unavailable for Phase 6: %s", e)
+        print("  ⚠ FalkorDB knowledge graph is not available!")
+        print("    The graph is required for effective context assembly and token efficiency.")
+        print("    Run: docker compose up -d falkordb")
+        print()
         graph = None
 
     # Task list in execution order

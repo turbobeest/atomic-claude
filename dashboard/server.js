@@ -1269,10 +1269,24 @@ const GRAPH_NAME = process.env.ATOMIC_GRAPH_NAME || 'atomic-claude';
 
 async function getRedisClient() {
   if (redisClient && redisClient.isOpen) return redisClient;
-  redisClient = createClient({ socket: { host: GRAPH_HOST, port: GRAPH_PORT } });
+  redisClient = createClient({ socket: { host: GRAPH_HOST, port: GRAPH_PORT, connectTimeout: 5000, commandTimeout: 10000 } });
   redisClient.on('error', () => {}); // Suppress connection errors in logs
   await redisClient.connect();
   return redisClient;
+}
+
+// Execute a Cypher query via GRAPH.QUERY sendCommand (redis v5 dropped @redis/graph)
+// Returns array of objects keyed by column name.
+async function graphQuery(client, graphName, cypher) {
+  const raw = await client.sendCommand(['GRAPH.QUERY', graphName, cypher]);
+  // raw = [ [col_headers], [[row1_vals], [row2_vals], ...], [stats] ]
+  const headers = raw[0];
+  const dataRows = raw[1] || [];
+  return dataRows.map(row => {
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = row[i]; });
+    return obj;
+  });
 }
 
 // Lazy-cached agent name -> path index from manifest
@@ -1298,35 +1312,33 @@ app.get('/api/agents/graph', async (req, res) => {
     const client = await getRedisClient();
     const { tier, category, search } = req.query;
 
-    // Build Cypher query with optional filters
+    // Build Cypher query with sanitized filters (strip non-alphanumeric except hyphens/spaces)
+    const sanitize = (s) => s.replace(/[^a-zA-Z0-9\s\-_]/g, '');
     let where = [];
-    if (tier) where.push(`n.tier = '${tier.replace(/'/g, "\\'")}'`);
-    if (category) where.push(`n.category = '${category.replace(/'/g, "\\'")}'`);
+    if (tier) where.push(`n.tier = '${sanitize(tier)}'`);
+    if (category) where.push(`n.category = '${sanitize(category)}'`);
     if (search) {
-      const safe = search.replace(/'/g, "\\'");
+      const safe = sanitize(search);
       where.push(`(toLower(n.name) CONTAINS toLower('${safe}') OR toLower(n.description) CONTAINS toLower('${safe}'))`);
     }
 
     const whereClause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
-    const cypher = `MATCH (n:Agent)${whereClause} RETURN n ORDER BY n.category, n.name`;
+    const cypher = `MATCH (n:Agent)${whereClause} RETURN n.name AS name, n.tier AS tier, n.category AS category, n.subcategory AS subcategory, n.role AS role, n.description AS description, n.grade AS grade, n.composite_score AS composite_score ORDER BY n.category, n.name`;
 
-    const result = await client.graph.query(GRAPH_NAME, cypher);
+    const rows = await graphQuery(client, GRAPH_NAME, cypher);
 
     const pathIdx = getAgentPathIndex();
-    const agents = result.data.map(row => {
-      const node = row.n;
-      return {
-        name: node.name,
-        tier: node.tier,
-        category: node.category,
-        subcategory: node.subcategory || '',
-        role: node.role,
-        description: node.description || '',
-        grade: node.grade || '',
-        composite_score: parseFloat(node.composite_score || 0),
-        path: pathIdx[node.name] || '',
-      };
-    });
+    const agents = rows.map(row => ({
+      name: row.name || '',
+      tier: row.tier || '',
+      category: row.category || '',
+      subcategory: row.subcategory || '',
+      role: row.role || '',
+      description: row.description || '',
+      grade: row.grade || '',
+      composite_score: parseFloat(row.composite_score || 0),
+      path: pathIdx[row.name] || '',
+    }));
 
     // Group by category for the UI
     const byCategory = {};
@@ -1405,6 +1417,281 @@ app.put('/api/agents/definition', (req, res) => {
     res.json({ success: true, size: stat.size, modified: stat.mtime });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================================
+// Knowledge Graph Phase Summary
+// ============================================================================
+
+const PHASE_GROUPS = {
+  discovery:       { phases: [1], prefixes: ['1'] },
+  prd:             { phases: [2], prefixes: ['2'] },
+  architecture:    { phases: [3, 4], prefixes: ['3', '4'] },
+  implementation:  { phases: [5, 6], prefixes: ['5', '6'] },
+  operations:      { phases: [7, 8, 9], prefixes: ['7', '8', '9'] },
+};
+
+app.get('/api/graph/phase-summary', async (req, res) => {
+  const { group } = req.query;
+
+  if (!group || !PHASE_GROUPS[group]) {
+    return res.status(400).json({
+      error: 'Invalid group. Valid: ' + Object.keys(PHASE_GROUPS).join(', ')
+    });
+  }
+
+  const config = PHASE_GROUPS[group];
+
+  try {
+    const client = await getRedisClient();
+
+    // Build phase filter using toString() to handle mixed int/string phase values
+    // Exclude catalog node types (Agent, Category, SDLCPhase, Skill) — those belong in catalog views only
+    const CATALOG_TYPES = "['Agent', 'Category', 'SDLCPhase', 'Skill']";
+    const phaseFilter = config.prefixes.map(p => `toString(n.phase) STARTS WITH '${p}'`).join(' OR ');
+
+    // Query 1: Node counts by label (exclude catalog types)
+    const countCypher = `MATCH (n) WHERE (${phaseFilter}) AND NOT labels(n)[0] IN ${CATALOG_TYPES} RETURN labels(n)[0] AS type, count(n) AS count ORDER BY count DESC`;
+    const countRows = await graphQuery(client, GRAPH_NAME, countCypher);
+    const nodeCounts = countRows.map(row => ({
+      type: row.type,
+      count: typeof row.count === 'number' ? row.count : parseInt(row.count)
+    }));
+
+    // Query 2: Relationship summary (exclude catalog types)
+    const aFilter = config.prefixes.map(p => `toString(a.phase) STARTS WITH '${p}'`).join(' OR ');
+    const bFilter = config.prefixes.map(p => `toString(b.phase) STARTS WITH '${p}'`).join(' OR ');
+    const relCypher = `MATCH (a)-[r]->(b) WHERE ((${aFilter}) OR (${bFilter})) AND NOT labels(a)[0] IN ${CATALOG_TYPES} AND NOT labels(b)[0] IN ${CATALOG_TYPES} RETURN labels(a)[0] AS fromType, type(r) AS relType, labels(b)[0] AS toType, count(r) AS count ORDER BY count DESC LIMIT 20`;
+    const relRows = await graphQuery(client, GRAPH_NAME, relCypher);
+    const relationships = relRows.map(row => ({
+      fromType: row.fromType,
+      relType: row.relType,
+      toType: row.toType,
+      count: typeof row.count === 'number' ? row.count : parseInt(row.count)
+    }));
+
+    res.json({
+      group,
+      phases: config.phases,
+      nodeCounts,
+      relationships,
+      totalNodes: nodeCounts.reduce((sum, nc) => sum + nc.count, 0)
+    });
+  } catch (error) {
+    // Graceful fallback if FalkorDB is unavailable
+    res.json({
+      group,
+      phases: config.phases,
+      nodeCounts: [],
+      relationships: [],
+      totalNodes: 0,
+      fallback: true
+    });
+  }
+});
+
+// ============================================================================
+// Catalog Graph Summary (Agents, Audits, Skills)
+// ============================================================================
+
+const AUDIT_GRAPH_NAME = process.env.ATOMIC_AUDIT_GRAPH_NAME || 'atomic-audits';
+
+const CATALOG_CONFIGS = {
+  agents: {
+    label: 'Agent',
+    graphName: null, // uses default GRAPH_NAME
+    queries: {
+      nodeCounts: `MATCH (n) WHERE n:Agent OR (n:Category AND n.domain = 'agent') RETURN labels(n)[0] AS type, count(n) AS count ORDER BY count DESC`,
+      relationships: `MATCH (a:Agent)-[r]->(b) RETURN labels(a)[0] AS fromType, type(r) AS relType, labels(b)[0] AS toType, count(r) AS count ORDER BY count DESC LIMIT 20`,
+      phaseCoverage: `MATCH (a:Agent)-[:APPLICABLE_IN]->(p:SDLCPhase) RETURN p.name AS phase, count(a) AS count ORDER BY p.num`,
+    }
+  },
+  audits: {
+    label: 'Audit',
+    graphName: 'audit', // uses AUDIT_GRAPH_NAME
+    queries: {
+      nodeCounts: `MATCH (n) WHERE n:Audit OR (n:Category AND n.domain = 'audit') RETURN labels(n)[0] AS type, count(n) AS count ORDER BY count DESC`,
+      relationships: `MATCH (a)-[r]->(b) WHERE a:Audit OR a:Category RETURN labels(a)[0] AS fromType, type(r) AS relType, labels(b)[0] AS toType, count(r) AS count ORDER BY count DESC LIMIT 20`,
+      phaseCoverage: `MATCH (a:Audit)-[:APPLICABLE_IN]->(p:SDLCPhase) RETURN p.name AS phase, count(a) AS count ORDER BY p.num`,
+    }
+  },
+  skills: {
+    label: 'Skill',
+    graphName: null, // uses default GRAPH_NAME
+    queries: {
+      nodeCounts: `MATCH (n) WHERE n:Skill OR (n:Category AND n.domain = 'skill') RETURN labels(n)[0] AS type, count(n) AS count ORDER BY count DESC`,
+      relationships: `MATCH (a:Skill)-[r]->(b) RETURN labels(a)[0] AS fromType, type(r) AS relType, labels(b)[0] AS toType, count(r) AS count ORDER BY count DESC LIMIT 20`,
+      phaseCoverage: `MATCH (s:Skill)-[:BELONGS_TO]->(p:SDLCPhase) RETURN p.name AS phase, count(s) AS count ORDER BY p.num`,
+    }
+  }
+};
+
+app.get('/api/graph/catalog-summary', async (req, res) => {
+  const { catalog } = req.query;
+
+  if (!catalog || !CATALOG_CONFIGS[catalog]) {
+    return res.status(400).json({
+      error: 'Invalid catalog. Valid: ' + Object.keys(CATALOG_CONFIGS).join(', ')
+    });
+  }
+
+  const config = CATALOG_CONFIGS[catalog];
+  const graphName = config.graphName === 'audit' ? AUDIT_GRAPH_NAME : GRAPH_NAME;
+
+  try {
+    const client = await getRedisClient();
+
+    // Node counts
+    const countRows = await graphQuery(client, graphName, config.queries.nodeCounts);
+    const nodeCounts = countRows.map(row => ({
+      type: row.type,
+      count: typeof row.count === 'number' ? row.count : parseInt(row.count)
+    }));
+
+    // Relationships
+    const relRows = await graphQuery(client, graphName, config.queries.relationships);
+    const relationships = relRows.map(row => ({
+      fromType: row.fromType,
+      relType: row.relType,
+      toType: row.toType,
+      count: typeof row.count === 'number' ? row.count : parseInt(row.count)
+    }));
+
+    // Phase coverage
+    let phaseCoverage = [];
+    try {
+      const phaseRows = await graphQuery(client, graphName, config.queries.phaseCoverage);
+      phaseCoverage = phaseRows.map(row => ({
+        phase: row.phase,
+        count: typeof row.count === 'number' ? row.count : parseInt(row.count)
+      }));
+    } catch (e) {
+      // Phase coverage query may fail if no APPLICABLE_IN edges exist yet
+    }
+
+    res.json({
+      catalog,
+      nodeCounts,
+      relationships,
+      phaseCoverage,
+      totalNodes: nodeCounts.reduce((sum, nc) => sum + nc.count, 0)
+    });
+  } catch (error) {
+    res.json({
+      catalog,
+      nodeCounts: [],
+      relationships: [],
+      phaseCoverage: [],
+      totalNodes: 0,
+      fallback: true
+    });
+  }
+});
+
+// ============================================================================
+// Graph Visualization Data (nodes + edges for vis-network)
+// ============================================================================
+
+// Color palette for node types
+const NODE_COLORS = {
+  Agent: '#7c3aed', Finding: '#22c55e', Decision: '#f59e0b', Approach: '#3b82f6',
+  Requirement: '#ef4444', Feature: '#8b5cf6', Memory: '#06b6d4', Source: '#64748b',
+  Task: '#ec4899', Category: '#f97316', SDLCPhase: '#14b8a6', Skill: '#a855f7',
+  Audit: '#6366f1', Specification: '#0ea5e9', PhaseCheckpoint: '#84cc16',
+  DEFAULT: '#6b7280',
+};
+
+app.get('/api/graph/phase-graph', async (req, res) => {
+  const { group } = req.query;
+  if (!group || !PHASE_GROUPS[group]) {
+    return res.status(400).json({ error: 'Invalid group' });
+  }
+  const config = PHASE_GROUPS[group];
+  const EXCL = "['Agent', 'Category', 'SDLCPhase', 'Skill']";
+  const phaseFilter = config.prefixes.map(p => `toString(n.phase) STARTS WITH '${p}'`).join(' OR ');
+  const aPhaseFilter = config.prefixes.map(p => `toString(a.phase) STARTS WITH '${p}'`).join(' OR ');
+  const bPhaseFilter = config.prefixes.map(p => `toString(b.phase) STARTS WITH '${p}'`).join(' OR ');
+
+  try {
+    const client = await getRedisClient();
+
+    // Nodes (limit 500, exclude catalog types)
+    const nodeRows = await graphQuery(client, GRAPH_NAME,
+      `MATCH (n) WHERE (${phaseFilter}) AND NOT labels(n)[0] IN ${EXCL} RETURN ID(n) AS id, labels(n)[0] AS type, COALESCE(n.name, n.title, n.id, toString(ID(n))) AS label LIMIT 500`
+    );
+    const nodes = nodeRows.map(r => ({
+      id: r.id, label: r.label || `${r.type}`,
+      group: r.type,
+      color: NODE_COLORS[r.type] || NODE_COLORS.DEFAULT,
+    }));
+
+    // Edges (exclude catalog types)
+    const edgeRows = await graphQuery(client, GRAPH_NAME,
+      `MATCH (a)-[r]->(b) WHERE ((${aPhaseFilter}) OR (${bPhaseFilter})) AND NOT labels(a)[0] IN ${EXCL} AND NOT labels(b)[0] IN ${EXCL} RETURN ID(a) AS source, ID(b) AS target, type(r) AS label LIMIT 1000`
+    );
+    // Only include edges where both endpoints are in our node set
+    const nodeIds = new Set(nodes.map(n => n.id));
+    const edges = edgeRows
+      .filter(r => nodeIds.has(r.source) && nodeIds.has(r.target))
+      .map(r => ({ from: r.source, to: r.target, label: r.label }));
+
+    res.json({ nodes, edges });
+  } catch (error) {
+    res.json({ nodes: [], edges: [], fallback: true });
+  }
+});
+
+app.get('/api/graph/catalog-graph', async (req, res) => {
+  const { catalog } = req.query;
+  if (!catalog || !CATALOG_CONFIGS[catalog]) {
+    return res.status(400).json({ error: 'Invalid catalog' });
+  }
+  const config = CATALOG_CONFIGS[catalog];
+  const graphName = config.graphName === 'audit' ? AUDIT_GRAPH_NAME : GRAPH_NAME;
+  const nodeLabel = config.label; // Agent, Audit, or Skill
+
+  try {
+    const client = await getRedisClient();
+
+    // Nodes: catalog items + related Category and SDLCPhase nodes
+    const itemRows = await graphQuery(client, graphName,
+      `MATCH (n:${nodeLabel}) RETURN ID(n) AS id, labels(n)[0] AS type, COALESCE(n.name, n.id) AS label LIMIT 500`
+    );
+    const catRows = await graphQuery(client, graphName,
+      `MATCH (n:Category) WHERE n.domain = '${catalog.replace(/s$/, '')}' RETURN ID(n) AS id, labels(n)[0] AS type, n.name AS label`
+    );
+    const phaseRows = await graphQuery(client, graphName,
+      `MATCH (n:SDLCPhase) RETURN ID(n) AS id, labels(n)[0] AS type, n.name AS label`
+    );
+
+    const allNodes = [...itemRows, ...catRows, ...phaseRows];
+    const nodes = allNodes.map(r => ({
+      id: r.id, label: r.label || `${r.type}`,
+      group: r.type,
+      color: NODE_COLORS[r.type] || NODE_COLORS.DEFAULT,
+    }));
+
+    // Edges from catalog items
+    const nodeIds = new Set(nodes.map(n => n.id));
+    const edgeRows = await graphQuery(client, graphName,
+      `MATCH (a:${nodeLabel})-[r]->(b) RETURN ID(a) AS source, ID(b) AS target, type(r) AS label LIMIT 2000`
+    );
+    // Also get Category->Category edges (SUBCATEGORY_OF)
+    let catEdgeRows = [];
+    try {
+      catEdgeRows = await graphQuery(client, graphName,
+        `MATCH (a:Category)-[r:SUBCATEGORY_OF]->(b:Category) RETURN ID(a) AS source, ID(b) AS target, type(r) AS label`
+      );
+    } catch(e) {}
+
+    const edges = [...edgeRows, ...catEdgeRows]
+      .filter(r => nodeIds.has(r.source) && nodeIds.has(r.target))
+      .map(r => ({ from: r.source, to: r.target, label: r.label }));
+
+    res.json({ nodes, edges });
+  } catch (error) {
+    res.json({ nodes: [], edges: [], fallback: true });
   }
 });
 

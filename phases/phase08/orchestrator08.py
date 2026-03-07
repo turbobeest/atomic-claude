@@ -51,28 +51,28 @@ OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs'
 
 def task_801_wrapper(mem=None, graph=None) -> bool:
     """Task 801: Entry initialization"""
-    return task_801(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_801(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_801_wrapper.uses_llm = False
 
 
 def task_802_wrapper(mem=None, graph=None) -> bool:
     """Task 802: Deployment setup"""
-    return task_802(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_802(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_802_wrapper.uses_llm = False
 
 
 def task_803_wrapper(mem=None, graph=None) -> bool:
     """Task 803: Agent selection"""
-    return task_803(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_803(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_803_wrapper.uses_llm = False
 
 
 def task_804_wrapper(mem=None, graph=None) -> bool:
     """Task 804: Artifact generation"""
-    return task_804(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_804(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_804_wrapper.model_tier = "sonnet"
 
@@ -84,14 +84,14 @@ def task_805_wrapper(mem=None, graph=None) -> bool:
 
 def task_806_wrapper(mem=None, graph=None) -> bool:
     """Task 806: Deployment approval"""
-    return task_806(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_806(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_806_wrapper.uses_llm = False
 
 
 def task_807_wrapper(mem=None, graph=None) -> bool:
     """Task 807: Closeout"""
-    return task_807(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_807(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def run_phase(resume_at: str = None) -> bool:
@@ -126,14 +126,18 @@ def run_phase(resume_at: str = None) -> bool:
         "807": [],
     }
 
-    # Initialize knowledge graph (guarded)
+    # Initialize knowledge graph (REQUIRED — graph drives context and decisions)
     graph = None
     if get_graph is not None:
         try:
             graph = get_graph(phase_id="8-deployment-prep")
             graph.ensure_schema()
         except Exception as e:
-            logger.warning("Graph unavailable for phase 8: %s", e)
+            logger.error("Graph unavailable for phase 8: %s", e)
+            print("  ⚠ FalkorDB knowledge graph is not available!")
+            print("    The graph is required for effective context assembly and token efficiency.")
+            print("    Run: docker compose up -d falkordb")
+            print()
             graph = None
 
     return run_phase_tasks(

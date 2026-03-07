@@ -310,7 +310,10 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                     title=task_title,
                     description=task.get("description", ""),
                     requirements=task.get("requirements", []),
-                    depends_on=task.get("dependencies", [])
+                    depends_on=task.get("dependencies", []),
+                    acceptance_criteria=task.get("acceptance_criteria", ""),
+                    category=task.get("category", "feature"),
+                    priority=task.get("priority", "medium"),
                 )
                 graph_count += 1
             logger.info(f"Wrote {graph_count} tasks to knowledge graph")
@@ -350,8 +353,9 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                                         "Finding", finding.get("id"),
                                     )
                                     informed_count += 1
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.warning("INFORMED_BY edge T%s->F%s failed: %s",
+                                                   task_id, finding.get("id"), e)
                     if informed_count:
                         print(print_green(f"  ✓ {informed_count} INFORMED_BY edges created"))
                         logger.info("Created %d INFORMED_BY edges", informed_count)

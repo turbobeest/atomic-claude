@@ -50,35 +50,35 @@ OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs'
 
 def task_501_wrapper(mem=None, graph=None) -> bool:
     """Task 501: Entry initialization"""
-    return task_501_entry_initialization.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_501_entry_initialization.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_501_wrapper.uses_llm = False
 
 
 def task_502_wrapper(mem=None, graph=None) -> bool:
     """Task 502: TDD setup"""
-    return task_502_tdd_setup.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_502_tdd_setup.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_502_wrapper.uses_llm = False
 
 
 def task_503_wrapper(mem=None, graph=None) -> bool:
     """Task 503: Agent selection"""
-    return task_503_agent_selection.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_503_agent_selection.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_503_wrapper.uses_llm = False
 
 
 def task_504_wrapper(mem=None, graph=None) -> bool:
     """Task 504: TDD execution"""
-    return task_504_tdd_execution.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_504_tdd_execution.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_504_wrapper.model_tier = "sonnet"
 
 
 def task_505_wrapper(mem=None, graph=None) -> bool:
     """Task 505: Validation"""
-    return task_505_validation.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_505_validation.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_505_wrapper.uses_llm = False
 
@@ -90,7 +90,7 @@ def task_506_wrapper(mem=None, graph=None) -> bool:
 
 def task_507_wrapper(mem=None, graph=None) -> bool:
     """Task 507: Closeout"""
-    return task_507_closeout.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_507_closeout.execute(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 
 def run_phase(resume_at: str = None) -> bool:
@@ -103,7 +103,7 @@ def run_phase(resume_at: str = None) -> bool:
     Returns:
         bool: True if phase completed successfully
     """
-    # Initialize knowledge graph (optional — graceful degradation if unavailable)
+    # Initialize knowledge graph (REQUIRED — graph drives context and decisions)
     graph = None
     try:
         from core.graph import get_graph
@@ -111,7 +111,11 @@ def run_phase(resume_at: str = None) -> bool:
         if graph:
             graph.ensure_schema()
     except Exception as e:
-        logger.warning("Knowledge graph unavailable for Phase 5: %s", e)
+        logger.error("Knowledge graph unavailable for Phase 5: %s", e)
+        print("  ⚠ FalkorDB knowledge graph is not available!")
+        print("    The graph is required for effective context assembly and token efficiency.")
+        print("    Run: docker compose up -d falkordb")
+        print()
         graph = None
 
     # Task list in execution order
@@ -129,7 +133,7 @@ def run_phase(resume_at: str = None) -> bool:
     task_artifacts = {
         "501": ["initialization.json"],
         "502": ["tdd-setup.json"],
-        "503": ["selected-agents.json"],
+        "503": [],
         "504": ["tdd-progress.json"],
         "505": [],  # validation — writes to .claude/testing/, not OUTPUT_DIR
         "506": [],  # audit — writes to audits dir, not OUTPUT_DIR

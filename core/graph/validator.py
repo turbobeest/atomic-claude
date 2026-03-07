@@ -38,6 +38,15 @@ class GraphDataIssue:
 # expected relationships, and specific property checks.
 
 PHASE_EXPECTATIONS: Dict[int, Dict[str, Any]] = {
+    1: {
+        "name": "Discovery",
+        "required_nodes": {
+            "Agent": {"min": 10, "description": "Agent catalog should be loaded in phase 0"},
+        },
+        "required_categories": {},
+        "required_relationships": [],
+        "task_specific": {},
+    },
     2: {
         "name": "PRD Generation",
         "required_nodes": {
@@ -120,6 +129,39 @@ PHASE_EXPECTATIONS: Dict[int, Dict[str, Any]] = {
         "required_relationships": [
             ("Task", "HAS_SPEC", "Spec", "Specs define review criteria"),
         ],
+        "task_specific": {},
+    },
+    7: {
+        "name": "Integration Testing",
+        "required_nodes": {
+            "Task": {"min": 1, "description": "Tasks for integration testing"},
+            "Spec": {"min": 1, "description": "Specs defining test criteria"},
+            "ReviewFinding": {"min": 0, "description": "Review findings from code review"},
+        },
+        "required_categories": {},
+        "required_relationships": [
+            ("Task", "HAS_SPEC", "Spec", "Specs define integration test scenarios"),
+        ],
+        "task_specific": {},
+    },
+    8: {
+        "name": "Deployment Prep",
+        "required_nodes": {
+            "Task": {"min": 1, "description": "Tasks for deployment artifacts"},
+            "Spec": {"min": 1, "description": "Specs for deployment requirements"},
+        },
+        "required_categories": {},
+        "required_relationships": [],
+        "task_specific": {},
+    },
+    9: {
+        "name": "Release",
+        "required_nodes": {
+            "Task": {"min": 1, "description": "Tasks for release validation"},
+            "Decision": {"min": 1, "description": "Decisions accumulated across pipeline"},
+        },
+        "required_categories": {},
+        "required_relationships": [],
         "task_specific": {},
     },
 }

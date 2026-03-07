@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 
 from orchestration.phase_runner import run_phase_tasks
 
+try:
+    from core.graph import get_graph
+except ImportError:
+    get_graph = None
+
 # Import Python task modules
 from phases.phase_09_release.tasks import (
     task_901,
@@ -42,44 +47,44 @@ OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT.parent / '.outputs'
 
 # Task wrapper functions (call Python task modules)
 
-def task_901_wrapper(mem=None) -> bool:
+def task_901_wrapper(mem=None, graph=None) -> bool:
     """Task 901: Entry initialization"""
-    return task_901(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_901(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_901_wrapper.uses_llm = False
 
 
-def task_902_wrapper(mem=None) -> bool:
+def task_902_wrapper(mem=None, graph=None) -> bool:
     """Task 902: Release setup"""
-    return task_902(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_902(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_902_wrapper.uses_llm = False
 
 
-def task_903_wrapper(mem=None) -> bool:
+def task_903_wrapper(mem=None, graph=None) -> bool:
     """Task 903: Agent selection"""
-    return task_903(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_903(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_903_wrapper.uses_llm = False
 
 
-def task_904_wrapper(mem=None) -> bool:
+def task_904_wrapper(mem=None, graph=None) -> bool:
     """Task 904: Release execution"""
-    return task_904(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_904(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_904_wrapper.model_tier = "haiku"
 
 
-def task_905_wrapper(mem=None) -> bool:
+def task_905_wrapper(mem=None, graph=None) -> bool:
     """Task 905: Release confirmation"""
-    return task_905(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_905(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_905_wrapper.uses_llm = False
 
 
-def task_906_wrapper(mem=None) -> bool:
+def task_906_wrapper(mem=None, graph=None) -> bool:
     """Task 906: Closeout"""
-    return task_906(ATOMIC_ROOT, OUTPUT_DIR, mem=mem)
+    return task_906(ATOMIC_ROOT, OUTPUT_DIR, mem=mem, graph=graph)
 
 task_906_wrapper.uses_llm = False
 
@@ -114,6 +119,20 @@ def run_phase(resume_at: str = None) -> bool:
         "906": [],
     }
 
+    # Initialize knowledge graph (REQUIRED — graph drives context and decisions)
+    graph = None
+    if get_graph is not None:
+        try:
+            graph = get_graph(phase_id="9-release")
+            graph.ensure_schema()
+        except Exception as e:
+            logger.error("Graph unavailable for phase 9: %s", e)
+            print("  ⚠ FalkorDB knowledge graph is not available!")
+            print("    The graph is required for effective context assembly and token efficiency.")
+            print("    Run: docker compose up -d falkordb")
+            print()
+            graph = None
+
     return run_phase_tasks(
         phase_num=9,
         phase_name="Release",
@@ -123,6 +142,7 @@ def run_phase(resume_at: str = None) -> bool:
         atomic_root=ATOMIC_ROOT,
         output_dir=OUTPUT_DIR,
         resume_at=resume_at,
+        graph=graph,
     )
 
 
