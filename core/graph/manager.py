@@ -142,13 +142,21 @@ class GraphManager:
         return self.writer.update_node("Task", task_id, {"status": status})
 
     def add_spec(self, task_id: Any, spec_data: dict) -> None:
-        """Add a Spec node linked to its Task via HAS_SPEC."""
+        """Add a Spec node linked to its Task via HAS_SPEC.
+
+        Nested dicts/lists in spec_data are serialized to JSON strings
+        so they can be stored as graph node properties. Key nested fields
+        like 'interfaces' become 'interfaces_json' for reader queries.
+        """
         spec_id = f"spec-{task_id}"
-        self.writer.add_node("Spec", {
-            "id": spec_id,
-            "task_id": task_id,
-            **spec_data,
-        })
+        # Flatten nested structures to JSON strings for graph storage
+        flat = {"id": spec_id, "task_id": task_id}
+        for key, value in spec_data.items():
+            if isinstance(value, (dict, list)):
+                flat[f"{key}_json"] = json.dumps(value)
+            else:
+                flat[key] = value
+        self.writer.add_node("Spec", flat)
         self.writer.add_edge(
             "HAS_SPEC", "Task", task_id, "Spec", task_id,
         )
@@ -246,7 +254,72 @@ class GraphManager:
         except OSError as exc:
             logger.warning(f"Could not write manifest hash file: {exc}")
         logger.info(f"Loaded {loaded} agents from manifest into graph")
+
+        # Create structural edges for agents
+        self._create_agent_structure(agents)
+
         return loaded
+
+    def _create_agent_structure(self, agents: list) -> None:
+        """Create Category nodes and structural edges for loaded agents.
+
+        For each agent:
+        - Creates a Category node for its category (domain=agent)
+        - Creates BELONGS_TO edge: Agent → Category
+        - Creates APPLICABLE_IN edge: Agent → SDLCPhase (from agent's phase property)
+        """
+        # Ensure SDLCPhase nodes exist
+        self.ensure_sdlc_phases()
+
+        # Collect distinct categories
+        categories = set()
+        for agent in agents:
+            cat = agent.get("category", "")
+            if cat:
+                categories.add(cat)
+
+        # Create Category nodes
+        for cat in categories:
+            cat_id = f"cat-agent-{cat}"
+            self.ensure_category(cat_id, cat, "agent")
+
+        # Create edges in bulk via raw Cypher for efficiency
+        cat_edges = 0
+        phase_edges = 0
+        for agent in agents:
+            name = agent["name"]
+            cat = agent.get("category", "")
+            phase = agent.get("phase", "")
+
+            # BELONGS_TO → Category
+            if cat:
+                cat_id = f"cat-agent-{cat}"
+                cypher = (
+                    "MATCH (a:Agent {id: $agent_id}), (c:Category {id: $cat_id}) "
+                    "MERGE (a)-[:BELONGS_TO]->(c)"
+                )
+                self.conn.query(cypher, {"agent_id": name, "cat_id": cat_id})
+                cat_edges += 1
+
+            # APPLICABLE_IN → SDLCPhase
+            # Agent phase is like "1-discovery" — extract number
+            if phase:
+                try:
+                    phase_num = int(str(phase).split("-")[0])
+                    phase_id = f"phase-{phase_num}"
+                    cypher = (
+                        "MATCH (a:Agent {id: $agent_id}), (p:SDLCPhase {id: $phase_id}) "
+                        "MERGE (a)-[:APPLICABLE_IN]->(p)"
+                    )
+                    self.conn.query(cypher, {"agent_id": name, "phase_id": phase_id})
+                    phase_edges += 1
+                except (ValueError, IndexError):
+                    pass
+
+        logger.info(
+            "Agent structure: %d BELONGS_TO category edges, %d APPLICABLE_IN phase edges",
+            cat_edges, phase_edges,
+        )
 
     def query_agent_catalog(self, tier: str = None,
                             categories: List[str] = None) -> str:
@@ -288,6 +361,162 @@ class GraphManager:
             parts.append("")  # blank line between categories
 
         return "\n".join(parts)
+
+    # ========================================================================
+    # SDLC PHASE & CATALOG STRUCTURE
+    # ========================================================================
+
+    # Canonical SDLC phase definitions for SDLCPhase node creation.
+    _SDLC_PHASES = {
+        0: "Setup & Mode Selection",
+        1: "Discovery & Analysis",
+        2: "PRD Generation",
+        3: "Task Decomposition",
+        4: "Specification",
+        5: "Implementation",
+        6: "Code Review",
+        7: "Integration Testing",
+        8: "Deployment Preparation",
+        9: "Release",
+    }
+
+    def ensure_sdlc_phases(self) -> int:
+        """Create SDLCPhase nodes (0-9) if they don't already exist.
+
+        Uses MERGE for idempotency. Returns count of phases ensured.
+        """
+        count = 0
+        for phase_num, phase_name in self._SDLC_PHASES.items():
+            phase_id = f"phase-{phase_num}"
+            cypher = (
+                "MERGE (p:SDLCPhase {id: $id}) "
+                "SET p.name = $name, p.phase_number = $num"
+            )
+            self.conn.query(cypher, {
+                "id": phase_id, "name": phase_name, "num": phase_num,
+            })
+            count += 1
+        logger.debug("Ensured %d SDLCPhase nodes", count)
+        return count
+
+    def ensure_category(self, category_id: str, name: str,
+                        domain: str, parent_id: str = None) -> None:
+        """Create a Category node if it doesn't exist. Optionally link to parent.
+
+        Uses MERGE for idempotency.
+        """
+        cypher = (
+            "MERGE (c:Category {id: $id}) "
+            "SET c.name = $name, c.domain = $domain"
+        )
+        self.conn.query(cypher, {
+            "id": category_id, "name": name, "domain": domain,
+        })
+        if parent_id:
+            cypher_edge = (
+                "MATCH (child:Category {id: $child_id}), "
+                "(parent:Category {id: $parent_id}) "
+                "MERGE (child)-[:SUBCATEGORY_OF]->(parent)"
+            )
+            self.conn.query(cypher_edge, {
+                "child_id": category_id, "parent_id": parent_id,
+            })
+
+    def load_skills_into_graph(self) -> int:
+        """Load skills from catalog into graph with BELONGS_TO edges.
+
+        Integrates the skill ingestion that was previously only in a dev script.
+        Uses MERGE for full idempotency. Returns count of skills loaded.
+        """
+        try:
+            from core.skills.catalog import SKILL_CATALOG
+        except ImportError:
+            logger.warning("core.skills.catalog not available — skipping skill ingestion")
+            return 0
+
+        # Ensure SDLCPhase nodes exist first
+        self.ensure_sdlc_phases()
+
+        # Known skill compositions
+        known_compositions = [
+            ("fmt-markdown", "validate-yaml", 15, 0.92),
+            ("fmt-markdown", "validate-json", 12, 0.89),
+            ("git-commit-msg", "git-branch-naming", 20, 0.95),
+            ("test-coverage", "security-scan", 8, 0.85),
+            ("doc-gen-readme", "validate-markdown", 10, 0.90),
+        ]
+
+        count = 0
+        for skill in SKILL_CATALOG:
+            s = skill.model_dump() if hasattr(skill, "model_dump") else skill
+            skill_id = s.get("id", "")
+            if not skill_id:
+                continue
+
+            cypher = (
+                "MERGE (s:Skill {id: $id}) "
+                "SET s.name = $name, s.category = $category, "
+                "s.description = $description, "
+                "s.source = $source, "
+                "s.risk_level = $risk_level, "
+                "s.requires_internet = $requires_internet, "
+                "s.requires_saas = $requires_saas"
+            )
+            self.conn.query(cypher, {
+                "id": skill_id,
+                "name": s.get("name", skill_id),
+                "category": s.get("category", "custom"),
+                "description": s.get("description", ""),
+                "source": s.get("source", "community"),
+                "risk_level": s.get("risk_level", "None"),
+                "requires_internet": s.get("requires_internet", False),
+                "requires_saas": s.get("requires_saas", False),
+            })
+
+            # BELONGS_TO edges to SDLCPhase
+            phases = s.get("sdlc_phases") or s.get("phases", [])
+            for phase_num in phases:
+                phase_id = f"phase-{phase_num}"
+                cypher_bt = (
+                    "MATCH (s:Skill {id: $skill_id}), (p:SDLCPhase {id: $phase_id}) "
+                    "MERGE (s)-[:BELONGS_TO]->(p)"
+                )
+                self.conn.query(cypher_bt, {
+                    "skill_id": skill_id, "phase_id": phase_id,
+                })
+
+            # BELONGS_TO edge to skill Category
+            cat = s.get("category", "custom")
+            cat_id = f"cat-skill-{cat}"
+            self.ensure_category(cat_id, cat, "skill")
+            cypher_cat = (
+                "MATCH (s:Skill {id: $skill_id}), (c:Category {id: $cat_id}) "
+                "MERGE (s)-[:BELONGS_TO]->(c)"
+            )
+            self.conn.query(cypher_cat, {
+                "skill_id": skill_id, "cat_id": cat_id,
+            })
+
+            count += 1
+
+        # Composition edges
+        for skill_a, skill_b, co_occur, avg_success in known_compositions:
+            cypher_comp = (
+                "MATCH (a:Skill {id: $a_id}), (b:Skill {id: $b_id}) "
+                "MERGE (a)-[r:COMPOSES_WITH]->(b) "
+                "SET r.co_occurrence = $co_occur, "
+                "r.avg_combined_success = $avg_success"
+            )
+            try:
+                self.conn.query(cypher_comp, {
+                    "a_id": skill_a, "b_id": skill_b,
+                    "co_occur": co_occur, "avg_success": avg_success,
+                })
+            except Exception:
+                pass  # Skills may not exist in catalog
+
+        logger.info("Loaded %d skills into graph with phase/category edges", count)
+        return count
 
     # ========================================================================
     # REVIEW FINDING OPERATIONS
@@ -380,11 +609,23 @@ class GraphManager:
     # MEMORY OPERATIONS
     # ========================================================================
 
+    # Memory priority by entry type — higher priority = recalled first
+    _MEMORY_PRIORITY = {
+        "phase_closeout": "P0",
+        "checkpoint": "P0",
+        "task_end": "P1",
+        "task_start": "P2",
+        "task_progress": "P2",
+        "user_note": "P1",
+        "system_event": "P3",
+    }
+
     def save_memory(self, entry_id: str, phase: str, content: str,
                     entry_type: str = "task_end", task_id: str = None,
                     tags: List[str] = None, relevance_score: float = 0.8,
                     metadata: dict = None) -> None:
         """Save a memory entry as a Memory node in the graph."""
+        priority = self._MEMORY_PRIORITY.get(entry_type, "P2")
         self.writer.add_node("Memory", {
             "id": entry_id,
             "phase": phase,
@@ -393,6 +634,7 @@ class GraphManager:
             "content": content,
             "tags_csv": ",".join(tags) if tags else "",
             "relevance_score": relevance_score,
+            "priority": priority,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
 

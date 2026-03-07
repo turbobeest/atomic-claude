@@ -30,6 +30,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.llm import invoke_llm as invoke
 from core.ui import success, warning, step, wrap_text
+from core.utils.cli_ui import prompt_dialogue, clear_input_buffer
+from core.discovery.commands import handle_command
 
 try:
     from core.discovery.canvas import (
@@ -245,7 +247,19 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                 pass
 
         print()
-        user_input = input("  You: ").strip()
+        _cmd_handler = (
+            lambda cmd: handle_command(cmd, graph, output_dir)
+            if graph else None
+        )
+        user_input, cmd_result = prompt_dialogue(
+            label="You",
+            command_handler=_cmd_handler if graph else None,
+        )
+
+        # If a /command was handled, display result and continue
+        if cmd_result is not None:
+            print(f"\n  {cmd_result}\n")
+            continue
 
         if not user_input:
             continue
@@ -276,6 +290,7 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
         )
         if not _has_negation and _closure_re.search(input_lower):
             print()
+            clear_input_buffer()
             confirm = input("  Did you mean to end the deliberation? [y/N] ").strip().lower()
             if confirm in ('y', 'yes'):
                 print("  Closing deliberation...")
@@ -441,6 +456,18 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                 category="open_question",
                 title=f"Open Item {i+1}",
                 content=str(item),
+                source_id="S-105-deliberation",
+            )
+        # Technical finding from agreed direction (needed by PRD features section)
+        agreed = consensus.get("agreed_direction", {})
+        approach = agreed.get("approach", "")
+        rationale = agreed.get("rationale", "")
+        if approach:
+            graph.add_finding(
+                id="F-105-technical-approach",
+                category="technical",
+                title="Technical Approach",
+                content=f"{approach}. {rationale}".strip(". "),
                 source_id="S-105-deliberation",
             )
 

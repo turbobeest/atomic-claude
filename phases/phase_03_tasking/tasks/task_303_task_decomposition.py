@@ -93,14 +93,31 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
         print(print_dim("No agent selection found - using built-in decomposition logic"))
         print()
 
-    # Graph-powered context (if available)
+    # Graph-powered context — structured requirements, features, and decisions
+    # instead of raw file dumps. This is the PRIMARY context source.
     graph_context = None
     if graph:
         try:
             graph_context = graph.query_task_context()
-            logger.info("Graph context loaded for task decomposition")
+            if graph_context and len(graph_context.strip()) > 50:
+                logger.info(
+                    "Graph context loaded for task decomposition: %d chars",
+                    len(graph_context),
+                )
+            else:
+                logger.warning(
+                    "Graph returned thin task context (%d chars) — "
+                    "graph may not have enough data yet",
+                    len(graph_context.strip()) if graph_context else 0,
+                )
+                graph_context = None
         except Exception as e:
-            logger.warning(f"Graph query failed, using file context: {e}")
+            logger.error("Graph query failed for task decomposition: %s", e)
+    else:
+        logger.warning(
+            "No graph available for task decomposition — "
+            "using full PRD file (higher token usage)"
+        )
 
     # PRD Extraction
     print(print_dim("─" * 100))
@@ -300,6 +317,70 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
             print(print_green(f"  ✓ {graph_count} tasks written to knowledge graph"))
             if mem:
                 mem.finding(f"{graph_count} tasks written to knowledge graph")
+
+            # Create INFORMED_BY edges linking tasks to relevant findings
+            try:
+                findings = graph.reader.get_nodes("Finding")
+                if findings:
+                    informed_count = 0
+                    for task in tasks:
+                        task_id = task.get("id")
+                        if task_id is None:
+                            continue
+                        task_cat = task.get("category", "feature")
+                        task_desc = (task.get("description", "") + " " +
+                                     task.get("title", "")).lower()
+                        for finding in findings:
+                            f_cat = finding.get("category", "")
+                            f_content = finding.get("content", "").lower()
+                            # Match by category affinity or content overlap
+                            match = False
+                            if task_cat in ("infrastructure", "security") and f_cat == "technical":
+                                match = True
+                            elif task_cat == "feature" and f_cat in ("vision", "technical"):
+                                match = True
+                            elif f_cat == "constraint":
+                                match = True  # constraints inform all tasks
+                            elif f_cat == "non_negotiable":
+                                match = True
+                            if match:
+                                try:
+                                    graph.link(
+                                        "INFORMED_BY", "Task", task_id,
+                                        "Finding", finding.get("id"),
+                                    )
+                                    informed_count += 1
+                                except Exception:
+                                    pass
+                    if informed_count:
+                        print(print_green(f"  ✓ {informed_count} INFORMED_BY edges created"))
+                        logger.info("Created %d INFORMED_BY edges", informed_count)
+            except Exception as e:
+                logger.warning("INFORMED_BY edge creation failed: %s", e)
+
+            # Validate task graph: check for dependency cycles and orphans
+            try:
+                cycles = graph.reader.detect_cycles()
+                if cycles:
+                    print(print_yellow(f"  ⚠ {len(cycles)} dependency cycle(s) detected:"))
+                    for cycle in cycles[:3]:
+                        print(print_yellow(f"    → {' → '.join(str(c) for c in cycle)}"))
+                    if mem:
+                        mem.warning(f"Task dependency cycles detected: {len(cycles)}")
+                else:
+                    print(print_green("  ✓ No dependency cycles"))
+
+                orphans = graph.reader.find_orphan_tasks()
+                if orphans:
+                    print(print_dim(f"  ℹ {len(orphans)} standalone task(s): {orphans[:5]}"))
+
+                topo_order = graph.reader.get_topological_order()
+                if topo_order:
+                    print(print_green(f"  ✓ Topological order: {len(topo_order)} tasks validated"))
+                    logger.info("Task topological order: %s", topo_order)
+            except Exception as e:
+                logger.warning("Graph task validation failed: %s", e)
+
         except Exception as e:
             logger.warning(f"Graph task write failed: {e}")
             if mem:
@@ -608,9 +689,9 @@ def _build_decomposition_prompt(
     if "corpus_analysis" in sections:
         prompt += f"### Technical Landscape (Corpus Analysis)\n{sections['corpus_analysis']}\n\n"
 
-    # Add graph-powered context if available
+    # Add graph-powered context (structured requirements, features, decisions)
     if graph_context:
-        prompt += f"### Knowledge Graph Context\n{json.dumps(graph_context, indent=2)}\n\n"
+        prompt += f"### Knowledge Graph Context\n{graph_context}\n\n"
 
     prompt += """## Task Generation Rules
 

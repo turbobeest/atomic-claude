@@ -141,15 +141,24 @@ def run_phase_tasks(
         task_uses_llm = getattr(task_func, 'uses_llm', True)
         if is_infrastructure_task(task_name) or not task_uses_llm:
             print(f"\n  {task_name}\n")
-            write_current_task(phase_id, task_id, task_name)
+            try:
+                write_current_task(phase_id, task_id, task_name)
+            except Exception as e:
+                logger.warning("Dashboard sync failed for task %s: %s", task_id, e)
         else:
             task_tier = getattr(task_func, 'model_tier', None)
-            roster = resolve_agent_roster(phase_id, task_id, output_dir, tier_hint=task_tier)
-            roster = display_task_roster(task_id, task_name, roster)
-            write_current_task(
-                phase_id, task_id, task_name,
-                resolved=roster[0][1], agent_roster=roster,
+            roster = resolve_agent_roster(
+                phase_id, task_id, output_dir,
+                tier_hint=task_tier, task_name=task_name, graph=graph,
             )
+            roster = display_task_roster(task_id, task_name, roster)
+            try:
+                write_current_task(
+                    phase_id, task_id, task_name,
+                    resolved=roster[0][1], agent_roster=roster,
+                )
+            except Exception as e:
+                logger.warning("Dashboard sync failed for task %s: %s", task_id, e)
 
         state.mark_task_started(phase_id, task_id, task_name)
         mem = TaskMemory(
@@ -169,10 +178,11 @@ def run_phase_tasks(
             gravity_classifier = GravityClassifier()
             skill_selector = SkillSelector()
 
+            # StateManager has no .get() — use get_raw_state() for dict access
+            raw_state = state.get_raw_state() if hasattr(state, "get_raw_state") else {}
             gravity_assessment = gravity_classifier.assess(
                 task_prompt=task_name,
-                project_id=state.get("project.id", "default")
-                if hasattr(state, "get") else "default",
+                project_id=raw_state.get("project.id", "default"),
             )
             logger.info(
                 "Task %s gravity: %s (confidence=%.2f)",
@@ -216,6 +226,24 @@ def run_phase_tasks(
             except Exception as e:
                 logger.debug("Skill context formatting skipped: %s", e)
 
+        # Pre-task graph validation: alert loudly if expected data is missing
+        if graph is not None:
+            try:
+                from core.graph.validator import validate_graph_for_phase
+                graph_issues = validate_graph_for_phase(
+                    graph, phase_id=phase_id, task_id=task_id,
+                )
+                if graph_issues:
+                    critical = [i for i in graph_issues if i.severity == "CRITICAL"]
+                    if critical:
+                        logger.error(
+                            "Task %s has %d CRITICAL graph data issues — "
+                            "LLM context will be degraded",
+                            task_id, len(critical),
+                        )
+            except Exception as e:
+                logger.debug("Graph validation skipped: %s", e)
+
         # Format graph context (agents, traceability, memory) and set context var
         if graph is not None and gravity_assessment:
             try:
@@ -237,7 +265,8 @@ def run_phase_tasks(
                         task_id, len(graph_ctx),
                     )
             except Exception as e:
-                logger.debug("Graph context assembly skipped: %s", e)
+                logger.warning("Graph context assembly failed: %s", e)
+                print(f"  ⚠ Graph context unavailable for task {task_id}: {e}")
 
         # Resolve retry policy and pattern selection from gravity
         gravity_key = (
@@ -377,9 +406,21 @@ def run_phase_tasks(
                             phase_id=phase_id,
                             content=shadow_content,
                             artifacts=artifacts,
+                            gravity=gravity_key,
                         )
-                        shadow.evaluate_async(shadow_ctx)
-                        logger.info("Shadow audit submitted for task %s", task_id)
+                        future = shadow.evaluate_async(shadow_ctx)
+                        if future:
+                            logger.info("Shadow audit submitted for task %s", task_id)
+                            # Best-effort: check if audit completed quickly
+                            try:
+                                findings = future.result(timeout=2.0)
+                                if findings:
+                                    logger.info(
+                                        "Shadow audit for task %s: %d findings",
+                                        task_id, len(findings),
+                                    )
+                            except Exception:
+                                logger.debug("Shadow audit for task %s still running (will complete in background)", task_id)
             except Exception as e:
                 logger.debug("Shadow audit skipped: %s", e)
 
@@ -396,7 +437,8 @@ def run_phase_tasks(
                     memory_content = summarize_task_artifacts(
                         artifacts, task_id, task_name, output_dir=output_dir,
                     )
-                memory_metadata = {}
+                # Preserve gravity/skill metadata even when mem had no entries
+                memory_metadata = mem.build_metadata() if hasattr(mem, 'build_metadata') else {}
             memory_save(
                 phase=phase_id,
                 task_id=task_id,
@@ -454,7 +496,7 @@ def run_phase_tasks(
 
     # Create closeout file
     try:
-        create_phase_closeout(phase_id, tasks)
+        create_phase_closeout(phase_id, tasks, output_dir=output_dir)
     except Exception as e:
         logger.warning("Closeout file creation failed: %s", e)
 

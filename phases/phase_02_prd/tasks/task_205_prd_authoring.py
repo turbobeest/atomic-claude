@@ -171,17 +171,35 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
 
         print(f"  [{gen_num}/12] {section_name}...")
 
-        # Use graph context if available (focused context instead of full prior_content)
+        # Graph context is the PRIMARY source — targeted findings, decisions,
+        # and requirements instead of dumping full file content (saves tokens).
         effective_prior = prd_content
         if graph:
             try:
                 graph_context = graph.query_prd_context(section=section_name, max_tokens=8000)
-                if graph_context:
+                if graph_context and len(graph_context.strip()) > 50:
                     effective_prior = graph_context
-                    logger.info(f"Using graph context for section '{section_name}'")
+                    saved = len(prd_content) - len(graph_context)
+                    logger.info(
+                        "Graph context for '%s': %d chars (saved ~%d chars vs file dump)",
+                        section_name, len(graph_context), max(0, saved),
+                    )
+                else:
+                    logger.warning(
+                        "Graph returned thin context for '%s' (%d chars) — "
+                        "using file context as fallback",
+                        section_name, len(graph_context.strip()) if graph_context else 0,
+                    )
             except Exception as e:
-                logger.warning(f"Graph query failed, falling back to file context: {e}")
-                effective_prior = prd_content  # fallback
+                logger.error(
+                    "Graph query failed for PRD section '%s': %s — falling back to file context",
+                    section_name, e,
+                )
+        else:
+            logger.warning(
+                "No graph available for PRD section '%s' — using full file context (higher token usage)",
+                section_name,
+            )
 
         # Generate section
         section_content = generate_section(
@@ -198,17 +216,28 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
             completed_gens.add(gen_num)
             print(print_green(f"    ✓ {section_name} complete"))
 
-            # Write Feature node to graph for this section
+            # Write Feature node and extract Requirements to graph
             if graph:
                 try:
+                    feature_id = f"F-{gen_num}"
                     graph.add_feature(
-                        id=f"F-{gen_num}",
+                        id=feature_id,
                         title=section_name,
                         description=section_content[:500],
                     )
-                    logger.info(f"Wrote Feature node F-{gen_num} to graph")
+                    logger.info("Wrote Feature node %s to graph", feature_id)
+
+                    # Extract requirement-like statements from section content
+                    req_count = _extract_requirements_to_graph(
+                        graph, feature_id, section_name, section_content, gen_num,
+                    )
+                    if req_count:
+                        logger.info(
+                            "Extracted %d requirements from '%s' into graph",
+                            req_count, section_name,
+                        )
                 except Exception as e:
-                    logger.warning(f"Graph write failed for section '{section_name}': {e}")
+                    logger.warning("Graph write failed for section '%s': %s", section_name, e)
         else:
             print(print_red(f"    ✗ Failed to generate {section_name} — skipping"))
             logger.warning("Section generation returned empty for '%s' (gen %d)", section_name, gen_num)
@@ -229,6 +258,81 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     else:
         print(print_green(f"✓ PRD authoring complete: {prd_file}"))
     return True
+
+
+def _extract_requirements_to_graph(graph, feature_id: str, section_name: str,
+                                    content: str, gen_num: int) -> int:
+    """Extract requirement-like statements from PRD section content and write to graph.
+
+    Looks for RFC 2119 keywords (SHALL, SHOULD, MAY) and bullet-pointed requirements.
+    Creates Requirement nodes linked to the Feature via CONTAINS edges.
+
+    Returns count of requirements extracted.
+    """
+    # Map section names to requirement types
+    section_type_map = {
+        "Feature Requirements": "functional",
+        "Non-Functional Requirements": "non_functional",
+        "TDD Requirements": "functional",
+        "Operational Requirements": "non_functional",
+        "Code Structure": "constraint",
+        "Integration Testing": "functional",
+    }
+    req_type = "functional"
+    for key, val in section_type_map.items():
+        if key.lower() in section_name.lower():
+            req_type = val
+            break
+
+    # Extract lines that look like requirements
+    requirements = []
+    for line in content.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Skip headers
+        if line.startswith("#"):
+            continue
+        # Detect RFC 2119 keywords
+        rfc_match = re.search(r'\b(SHALL|SHOULD|MAY|MUST|MUST NOT|SHALL NOT)\b', line)
+        # Detect bullet-pointed requirement patterns
+        is_bullet = line.startswith(("- ", "* ", "• ")) and len(line) > 20
+        if rfc_match or is_bullet:
+            # Clean up bullet prefix
+            clean = re.sub(r'^[-*•]\s+', '', line)
+            if len(clean) > 15:
+                keyword = rfc_match.group(1) if rfc_match else "SHOULD"
+                # Normalize MUST -> SHALL
+                if keyword in ("MUST", "MUST NOT"):
+                    keyword = "SHALL"
+                elif keyword == "SHALL NOT":
+                    keyword = "SHALL"
+                # Only keep valid RFC 2119 keywords
+                if keyword not in ("SHALL", "SHOULD", "MAY"):
+                    keyword = "SHOULD"
+                requirements.append((clean, keyword))
+
+    # Write up to 30 requirements per section
+    count = 0
+    for i, (text, keyword) in enumerate(requirements[:30]):
+        req_id = f"REQ-{gen_num}-{i+1}"
+        title = text[:80] + ("..." if len(text) > 80 else "")
+        try:
+            graph.add_requirement(
+                id=req_id,
+                type=req_type,
+                title=title,
+                content=text,
+                feature_id=feature_id,
+                section=section_name.lower().replace(" ", "_"),
+                rfc2119_keyword=keyword,
+                priority="medium",
+            )
+            count += 1
+        except Exception as e:
+            logger.debug("Requirement write failed for %s: %s", req_id, e)
+
+    return count
 
 
 def load_prd_context(atomic_root: Path, output_dir: Path) -> Dict[str, Any]:

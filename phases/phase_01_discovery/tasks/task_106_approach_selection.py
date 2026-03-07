@@ -403,12 +403,26 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
 
     # Write to knowledge graph
     if graph:
-        # Update decisions from 105 to "accepted" status
+        # Mark all prior proposed decisions as accepted (direction is locked)
+        try:
+            proposed = graph.reader.get_nodes(
+                "Decision", filters={"status": "proposed"},
+            )
+            for dec in proposed:
+                dec_id = dec.get("id", "")
+                if dec_id:
+                    graph.writer.update_node("Decision", dec_id, {"status": "accepted"})
+            if proposed:
+                logger.info("Promoted %d proposed decisions to accepted", len(proposed))
+        except Exception as e:
+            logger.warning("Failed to promote proposed decisions: %s", e)
+
+        # Record new decisions from the lock-in
         for i, decision in enumerate(key_decisions[:10]):
             graph.add_decision(
                 id=f"DEC-106-{i+1}",
                 title=str(decision),
-                rationale=f"Confirmed by human at direction lock-in",
+                rationale="Confirmed by human at direction lock-in",
                 status="accepted",
             )
         if direction:

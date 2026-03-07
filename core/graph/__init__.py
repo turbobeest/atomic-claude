@@ -30,6 +30,7 @@ from .context_injector import (
     set_active_graph_context,
     get_active_graph_context,
 )
+from .validator import validate_graph_for_phase
 
 
 def get_graph(phase_id: str = "unknown", host: str = None,
@@ -68,4 +69,6 @@ __all__ = [
     "build_graph_context",
     "set_active_graph_context",
     "get_active_graph_context",
+    # Validator
+    "validate_graph_for_phase",
 ]

@@ -31,6 +31,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.llm import invoke_llm as invoke
 from core.ui import success, warning, step, wrap_text
+from core.utils.cli_ui import prompt_dialogue, clear_input_buffer
+from core.discovery.commands import handle_command
 
 try:
     from core.discovery.canvas import (
@@ -213,7 +215,19 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
             except Exception as e:
                 logger.debug("Canvas suggestion failed: %s", e)
 
-        human_response = input("  You: ").strip()
+        _cmd_handler = (
+            lambda cmd: handle_command(cmd, graph, output_dir)
+            if graph else None
+        )
+        human_response, cmd_result = prompt_dialogue(
+            label="You",
+            command_handler=_cmd_handler if graph else None,
+        )
+
+        # If a /command was handled, display result and continue
+        if cmd_result is not None:
+            print(f"\n  {cmd_result}\n")
+            continue
 
         # Check for canvas command
         input_lower = human_response.lower()
@@ -322,6 +336,7 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
     print()
 
     # Confirm with human
+    clear_input_buffer()
     confirm = input("  Does this capture our conversation accurately? [Y/n]: ").strip().lower()
     if confirm == 'n':
         print()
@@ -446,6 +461,24 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                 category="open_question",
                 title="Open Questions",
                 content=", ".join(str(q) for q in open_q),
+                source_id="S-104-dialogue",
+            )
+        # Technical findings (needed by PRD features section)
+        tech_parts = []
+        solution = vision.get("solution_concept", "")
+        if solution:
+            tech_parts.append(f"Solution: {solution}")
+        constraints_data = synthesis.get("constraints", {})
+        if isinstance(constraints_data, dict):
+            tech_stack = constraints_data.get("tech_stack", "")
+            if tech_stack and tech_stack != "Flexible":
+                tech_parts.append(f"Tech stack: {tech_stack}")
+        if tech_parts:
+            graph.add_finding(
+                id="F-104-technical",
+                category="technical",
+                title="Technical Overview",
+                content="; ".join(tech_parts),
                 source_id="S-104-dialogue",
             )
 
