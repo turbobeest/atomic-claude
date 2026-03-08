@@ -391,15 +391,18 @@ class GraphManager:
 
         Uses MERGE for idempotency. Returns count of phases ensured.
         """
+        now = datetime.now(timezone.utc).isoformat()
         count = 0
         for phase_num, phase_name in self._SDLC_PHASES.items():
             phase_id = f"phase-{phase_num}"
             cypher = (
                 "MERGE (p:SDLCPhase {id: $id}) "
-                "SET p.name = $name, p.phase_number = $num"
+                "SET p.name = $name, p.phase_number = $num, "
+                "p.created_at = COALESCE(p.created_at, $ts)"
             )
             self.conn.query(cypher, {
                 "id": phase_id, "name": phase_name, "num": phase_num,
+                "ts": now,
             })
             count += 1
         logger.debug("Ensured %d SDLCPhase nodes", count)
@@ -411,12 +414,15 @@ class GraphManager:
 
         Uses MERGE for idempotency.
         """
+        now = datetime.now(timezone.utc).isoformat()
         cypher = (
             "MERGE (c:Category {id: $id}) "
-            "SET c.name = $name, c.domain = $domain"
+            "SET c.name = $name, c.domain = $domain, "
+            "c.created_at = COALESCE(c.created_at, $ts)"
         )
         self.conn.query(cypher, {
             "id": category_id, "name": name, "domain": domain,
+            "ts": now,
         })
         if parent_id:
             cypher_edge = (
@@ -459,6 +465,7 @@ class GraphManager:
             if not skill_id:
                 continue
 
+            now = datetime.now(timezone.utc).isoformat()
             cypher = (
                 "MERGE (s:Skill {id: $id}) "
                 "SET s.name = $name, s.category = $category, "
@@ -466,7 +473,13 @@ class GraphManager:
                 "s.source = $source, "
                 "s.risk_level = $risk_level, "
                 "s.requires_internet = $requires_internet, "
-                "s.requires_saas = $requires_saas"
+                "s.requires_saas = $requires_saas, "
+                "s.installed = COALESCE(s.installed, $installed), "
+                "s.times_used = COALESCE(s.times_used, $times_used), "
+                "s.avg_success_score = COALESCE(s.avg_success_score, $avg_success), "
+                "s.content_hash = COALESCE(s.content_hash, $content_hash), "
+                "s.blocked_by_profile = COALESCE(s.blocked_by_profile, $blocked_by), "
+                "s.created_at = COALESCE(s.created_at, $ts)"
             )
             self.conn.query(cypher, {
                 "id": skill_id,
@@ -477,6 +490,12 @@ class GraphManager:
                 "risk_level": s.get("risk_level", "None"),
                 "requires_internet": s.get("requires_internet", False),
                 "requires_saas": s.get("requires_saas", False),
+                "installed": False,
+                "times_used": 0,
+                "avg_success": 0.0,
+                "content_hash": "",
+                "blocked_by": "",
+                "ts": now,
             })
 
             # BELONGS_TO edges to SDLCPhase

@@ -214,9 +214,9 @@ VALID_VALUES: Dict[str, Dict[str, Set[str]]] = {
 
 # Optional properties with defaults
 PROPERTY_DEFAULTS: Dict[str, Dict[str, Any]] = {
-    NodeLabel.SOURCE: {"phase": "1-discovery", "created_at": ""},
+    NodeLabel.SOURCE: {"phase": "1-discovery", "created_at": "", "content_hash": "", "file_path": ""},
     NodeLabel.FINDING: {"confidence": 0.8, "phase": "1-discovery", "created_at": ""},
-    NodeLabel.DECISION: {"status": "proposed", "confidence": 0.7, "alternatives_json": "", "created_at": ""},
+    NodeLabel.DECISION: {"status": "proposed", "confidence": 0.7, "alternatives_json": "", "phase": "1-discovery", "created_at": ""},
     NodeLabel.REQUIREMENT: {"priority": "medium", "status": "draft", "created_at": ""},
     NodeLabel.FEATURE: {"created_at": ""},
     NodeLabel.TASK: {
@@ -225,9 +225,9 @@ PROPERTY_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "estimated_complexity": 5,
     },
     NodeLabel.SPEC: {},
-    NodeLabel.AGENT: {"composite_score": 0.0},
-    NodeLabel.MEMORY: {"relevance_score": 0.8, "tags_csv": ""},
-    NodeLabel.PHASE_CHECKPOINT: {"status": "valid"},
+    NodeLabel.AGENT: {"composite_score": 0.0, "description": "", "grade": "", "phase": "", "subcategory": "", "created_at": ""},
+    NodeLabel.MEMORY: {"relevance_score": 0.8, "tags_csv": "", "priority": "P2", "task_id": "", "created_at": ""},
+    NodeLabel.PHASE_CHECKPOINT: {"status": "valid", "key_decisions_csv": "", "artifacts_csv": "", "created_at": ""},
     NodeLabel.AUDIT: {
         "status": "active",
         "severity": "medium",
@@ -244,14 +244,16 @@ PROPERTY_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "requires_internet": False,
         "requires_saas": False,
         "risk_level": "None",
+        "source": "community",
         "times_used": 0,
         "avg_success_score": 0.0,
         "description": "",
         "blocked_by_profile": "",
         "content_hash": "",
+        "created_at": "",
     },
-    NodeLabel.SDLC_PHASE: {},
-    NodeLabel.CATEGORY: {},
+    NodeLabel.SDLC_PHASE: {"phase_number": 0, "created_at": ""},
+    NodeLabel.CATEGORY: {"created_at": ""},
     NodeLabel.EPISODE: {
         "success_score": 0.0,
         "tokens_consumed": 0,

@@ -457,11 +457,16 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                     logger.debug("DEC-106 INFORMS failed: %s", e)
 
         # DEC-106-N supersedes DEC-105-N (locked replaces proposed)
+        from datetime import datetime, timezone as tz
+        superseded_at = datetime.now(tz.utc).isoformat()
         for i in range(len(key_decisions[:10])):
             proposed_id = f"DEC-105-{i+1}"
             locked_id = f"DEC-106-{i+1}"
             try:
-                graph.link("SUPERSEDES", "Decision", locked_id, "Decision", proposed_id)
+                graph.link("SUPERSEDES", "Decision", locked_id, "Decision", proposed_id,
+                           superseded_at=superseded_at, reason="Confirmed at direction lock-in")
+                # Mark the old decision as superseded
+                graph.writer.update_node("Decision", proposed_id, {"status": "superseded"})
             except Exception as e:
                 logger.debug("SUPERSEDES %s->%s failed: %s", locked_id, proposed_id, e)
 
