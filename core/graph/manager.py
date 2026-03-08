@@ -36,6 +36,10 @@ class GraphManager:
         self.exporter = GraphExporter(self.reader)
         self.operations = GraphOperations(self.reader, self.writer)
 
+        # Ensure SDLCPhase anchor nodes exist so RECORDED_DURING
+        # and BELONGS_TO edges can be created from the start.
+        self.ensure_sdlc_phases()
+
     # ========================================================================
     # WRITE OPERATIONS
     # ========================================================================
@@ -696,7 +700,7 @@ class GraphManager:
                         phase_name: str, summary: str,
                         key_decisions: List[str] = None,
                         artifacts: List[str] = None) -> None:
-        """Save a phase checkpoint as a PhaseCheckpoint node."""
+        """Save a phase checkpoint as a PhaseCheckpoint node, linked to its SDLCPhase."""
         self.writer.add_node("PhaseCheckpoint", {
             "id": checkpoint_id,
             "phase": phase,
@@ -707,6 +711,16 @@ class GraphManager:
             "status": "valid",
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
+
+        # Link checkpoint to its SDLCPhase
+        try:
+            phase_node_id = f"phase-{phase}"
+            self.writer.add_edge(
+                "BELONGS_TO", "PhaseCheckpoint", checkpoint_id,
+                "SDLCPhase", phase_node_id,
+            )
+        except Exception as e:
+            logger.debug("Checkpoint->SDLCPhase edge skipped: %s", e)
 
     def invalidate_checkpoints_after(self, phase_num: int) -> int:
         """Mark all PhaseCheckpoint nodes after phase_num as invalidated."""

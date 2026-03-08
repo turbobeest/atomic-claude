@@ -444,20 +444,43 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
                 source_id="S-105-deliberation",
             )
         for i, decision in enumerate(consensus.get("key_decisions", [])[:10]):
+            dec_id = f"DEC-105-{i+1}"
             graph.add_decision(
-                id=f"DEC-105-{i+1}",
+                id=dec_id,
                 title=f"Key Decision {i+1}",
                 rationale=str(decision),
                 status="proposed",
             )
+            # Decision traces back to its deliberation source
+            try:
+                graph.link("DERIVED_FROM", "Decision", dec_id, "Source", "S-105-deliberation")
+            except Exception as e:
+                logger.debug("Decision->Source edge failed: %s", e)
+            # Direction finding informs this decision
+            if direction:
+                try:
+                    graph.link("INFORMS", "Finding", "F-105-direction", "Decision", dec_id)
+                except Exception as e:
+                    logger.debug("Finding->Decision INFORMS edge failed: %s", e)
+        # Collect decision IDs for INFORMS edge creation below
+        decision_ids = [f"DEC-105-{j+1}" for j in range(len(consensus.get("key_decisions", [])[:10]))]
+
         for i, item in enumerate(consensus.get("open_items", [])[:10]):
+            open_id = f"F-105-open-{i+1}"
             graph.add_finding(
-                id=f"F-105-open-{i+1}",
+                id=open_id,
                 category="open_question",
                 title=f"Open Item {i+1}",
                 content=str(item),
                 source_id="S-105-deliberation",
             )
+            # Open items inform the decisions they emerged alongside
+            for did in decision_ids:
+                try:
+                    graph.link("INFORMS", "Finding", open_id, "Decision", did)
+                except Exception as e:
+                    logger.debug("Open item INFORMS edge failed: %s", e)
+
         # Technical finding from agreed direction (needed by PRD features section)
         agreed = consensus.get("agreed_direction", {})
         approach = agreed.get("approach", "")

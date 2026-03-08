@@ -345,7 +345,8 @@ VALID_RELATIONSHIPS: Dict[str, tuple] = {
         {NodeLabel.REQUIREMENT},
     ),
     RelType.BELONGS_TO: (
-        {NodeLabel.SKILL, NodeLabel.AGENT, NodeLabel.AUDIT, NodeLabel.FINDING},
+        {NodeLabel.SKILL, NodeLabel.AGENT, NodeLabel.AUDIT, NodeLabel.FINDING,
+         NodeLabel.PHASE_CHECKPOINT},
         {NodeLabel.SDLC_PHASE, NodeLabel.CATEGORY},
     ),
     RelType.APPLICABLE_IN: (

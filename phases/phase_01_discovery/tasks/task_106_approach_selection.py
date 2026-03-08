@@ -417,22 +417,80 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
         except Exception as e:
             logger.warning("Failed to promote proposed decisions: %s", e)
 
-        # Record new decisions from the lock-in
-        for i, decision in enumerate(key_decisions[:10]):
-            graph.add_decision(
-                id=f"DEC-106-{i+1}",
-                title=str(decision),
-                rationale="Confirmed by human at direction lock-in",
-                status="accepted",
-            )
+        # Create source for the approach selection gate
+        graph.add_source(
+            id="S-106-approach",
+            type="meeting",
+            title="Direction Confirmation Gate",
+        )
+
+        # Create locked-direction finding FIRST (so INFORMS edges can reference it)
         if direction:
             graph.add_finding(
                 id="F-106-locked-direction",
                 category="vision",
                 title="Locked Direction",
                 content=str(direction),
+                source_id="S-106-approach",
                 confidence=1.0,
             )
+
+        # Record new decisions from the lock-in, linked to source and finding
+        for i, decision in enumerate(key_decisions[:10]):
+            dec_id = f"DEC-106-{i+1}"
+            graph.add_decision(
+                id=dec_id,
+                title=str(decision),
+                rationale="Confirmed by human at direction lock-in",
+                status="accepted",
+            )
+            # Decision traces back to its source
+            try:
+                graph.link("DERIVED_FROM", "Decision", dec_id, "Source", "S-106-approach")
+            except Exception as e:
+                logger.debug("DEC-106 DERIVED_FROM failed: %s", e)
+            # Locked direction finding informs this decision
+            if direction:
+                try:
+                    graph.link("INFORMS", "Finding", "F-106-locked-direction", "Decision", dec_id)
+                except Exception as e:
+                    logger.debug("DEC-106 INFORMS failed: %s", e)
+
+        # DEC-106-N supersedes DEC-105-N (locked replaces proposed)
+        for i in range(len(key_decisions[:10])):
+            proposed_id = f"DEC-105-{i+1}"
+            locked_id = f"DEC-106-{i+1}"
+            try:
+                graph.link("SUPERSEDES", "Decision", locked_id, "Decision", proposed_id)
+            except Exception as e:
+                logger.debug("SUPERSEDES %s->%s failed: %s", locked_id, proposed_id, e)
+
+        # Also link all promoted decisions to their source findings
+        try:
+            all_findings = graph.reader.get_nodes("Finding")
+            all_decisions = graph.reader.get_nodes("Decision", filters={"status": "accepted"})
+            informs_count = 0
+            for dec in all_decisions:
+                dec_id = dec.get("id", "")
+                dec_text = (dec.get("title", "") + " " + dec.get("rationale", "")).lower()
+                for f in all_findings:
+                    f_cat = f.get("category", "")
+                    f_content = f.get("content", "").lower()
+                    # Match decisions to findings by category affinity
+                    if f_cat in ("vision", "technical", "non_negotiable"):
+                        # Check for keyword overlap (at least 2 significant words)
+                        f_words = set(w for w in f_content.split() if len(w) > 4)
+                        d_words = set(w for w in dec_text.split() if len(w) > 4)
+                        if len(f_words & d_words) >= 2:
+                            try:
+                                graph.link("INFORMS", "Finding", f.get("id"), "Decision", dec_id)
+                                informs_count += 1
+                            except Exception:
+                                pass
+            if informs_count:
+                logger.info("Created %d Finding->Decision INFORMS edges", informs_count)
+        except Exception as e:
+            logger.debug("Bulk INFORMS edge creation failed: %s", e)
 
     success("Direction confirmed")
     return True
