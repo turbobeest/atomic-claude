@@ -86,6 +86,7 @@ class GraphManager:
             "type": type,
             "title": title,
             "content": content,
+            "phase": self.phase_id,
             **kwargs,
         })
         if feature_id:
@@ -100,6 +101,7 @@ class GraphManager:
             "id": id,
             "title": title,
             "description": description or "",
+            "phase": self.phase_id,
             **kwargs,
         })
 
@@ -624,7 +626,7 @@ class GraphManager:
                     entry_type: str = "task_end", task_id: str = None,
                     tags: List[str] = None, relevance_score: float = 0.8,
                     metadata: dict = None) -> None:
-        """Save a memory entry as a Memory node in the graph."""
+        """Save a memory entry as a Memory node in the graph, linked to phase/task."""
         priority = self._MEMORY_PRIORITY.get(entry_type, "P2")
         self.writer.add_node("Memory", {
             "id": entry_id,
@@ -637,6 +639,26 @@ class GraphManager:
             "priority": priority,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
+
+        # Link Memory to SDLCPhase (always)
+        try:
+            phase_num = int(phase.split("-")[0])
+            self.writer.add_edge(
+                "RECORDED_DURING", "Memory", entry_id,
+                "SDLCPhase", f"phase-{phase_num}",
+            )
+        except (ValueError, IndexError, Exception) as e:
+            logger.debug("Memory->SDLCPhase edge skipped: %s", e)
+
+        # Link Memory to Task (when task_id is present)
+        if task_id:
+            try:
+                self.writer.add_edge(
+                    "RECORDED_DURING", "Memory", entry_id,
+                    "Task", task_id,
+                )
+            except Exception as e:
+                logger.debug("Memory->Task edge skipped: %s", e)
 
     def recall_memory(self, query: str, phase: str = None,
                       task_id: str = None, limit: int = 20) -> List[Dict]:

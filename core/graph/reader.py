@@ -505,6 +505,27 @@ class GraphReader:
         result = self.conn.query(cypher)
         return [row[0] for row in result.result_set]
 
+    def find_orphan_nodes(self, label: str) -> List[Dict[str, Any]]:
+        """Find nodes of any label with zero relationships (completely disconnected).
+
+        Unlike find_orphan_tasks() which only checks TASK_DEPENDS_ON edges,
+        this checks ALL relationship types — a truly isolated node.
+
+        Args:
+            label: Node label to scan (e.g., "Requirement", "Feature", "Memory")
+
+        Returns:
+            List of orphan node property dicts
+        """
+        _validate_label(label)
+        cypher = (
+            f"MATCH (n:{label}) "
+            f"WHERE NOT EXISTS {{ MATCH (n)-[]-() }} "
+            f"RETURN n ORDER BY n.id"
+        )
+        result = self.conn.query(cypher)
+        return [self._node_to_dict(row[0]) for row in result.result_set]
+
     def fulltext_search(self, label: str, query_text: str,
                         limit: int = 10) -> List[Dict[str, Any]]:
         """

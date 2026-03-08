@@ -14,23 +14,31 @@ from typing import Dict, List, Set, Any, Optional
 # ============================================================================
 
 class NodeLabel(str, Enum):
-    """Graph node types."""
-    SOURCE = "Source"
-    FINDING = "Finding"
-    DECISION = "Decision"
-    REQUIREMENT = "Requirement"
-    FEATURE = "Feature"
-    TASK = "Task"
-    SPEC = "Spec"
-    AGENT = "Agent"
-    MEMORY = "Memory"
-    PHASE_CHECKPOINT = "PhaseCheckpoint"
-    AUDIT = "Audit"
-    REVIEW_FINDING = "ReviewFinding"
-    SKILL = "Skill"
-    SDLC_PHASE = "SDLCPhase"
-    EPISODE = "Episode"
-    WORKFLOW = "Workflow"
+    """Graph node types for the SDLC pipeline knowledge graph.
+
+    Core pipeline chain: Source -> Finding -> Decision -> Feature ->
+    Requirement -> Task -> Spec -> ReviewFinding
+
+    Supporting types: Agent, Memory, Skill, Audit, SDLCPhase, Category
+    Reserved (future): Episode, Workflow, PhaseCheckpoint
+    """
+    SOURCE = "Source"           # Original material (dialogue, corpus, document)
+    FINDING = "Finding"         # Insight extracted during discovery
+    DECISION = "Decision"       # Accepted/rejected choice with rationale
+    REQUIREMENT = "Requirement" # Formal requirement from PRD (SHALL/SHOULD/MAY)
+    FEATURE = "Feature"         # Product feature grouping requirements
+    TASK = "Task"               # Decomposed work unit implementing requirements
+    SPEC = "Spec"               # OpenSpec document guiding task implementation
+    AGENT = "Agent"             # Pipeline or expert agent definition
+    MEMORY = "Memory"           # Task/phase memory entry for context recall
+    PHASE_CHECKPOINT = "PhaseCheckpoint"  # Saved state at phase boundary
+    AUDIT = "Audit"             # Audit check definition from catalog
+    REVIEW_FINDING = "ReviewFinding"      # Issue found during code review
+    SKILL = "Skill"             # Reusable skill definition
+    SDLC_PHASE = "SDLCPhase"   # Pipeline phase (0-9) anchor node
+    CATEGORY = "Category"       # Taxonomy category for agents/skills/audits
+    EPISODE = "Episode"         # (Reserved) Task execution instance for replay
+    WORKFLOW = "Workflow"       # (Reserved) Multi-skill workflow composition
 
 
 # ============================================================================
@@ -38,7 +46,43 @@ class NodeLabel(str, Enum):
 # ============================================================================
 
 class RelType(str, Enum):
-    """Graph relationship types."""
+    """Graph relationship types.
+
+    Traceability chain (phases 1-6):
+      DERIVED_FROM: Finding/Decision/Requirement -> Source (provenance)
+      INFORMS:      Finding -> Decision (discovery insight influences choice)
+      SUPPORTS:     Decision -> Feature (decision justifies feature)
+      CONTAINS:     Feature -> Requirement (feature decomposes into reqs)
+      IMPLEMENTS:   Task -> Requirement (task fulfills requirement)
+      INFORMED_BY:  Task -> Finding/Decision (research context for execution)
+      TASK_DEPENDS_ON: Task -> Task (execution order dependency)
+      HAS_SPEC:     Task -> Spec (implementation specification)
+      TRACED_TO:    Requirement -> Spec/Finding (cross-artifact traceability)
+      SPEC_INTERFACE: Spec -> Spec (API contract between dependent specs)
+      REVIEW_OF:    ReviewFinding -> Task/Spec/Feature (review targets)
+      VIOLATES:     ReviewFinding -> Requirement (review finding breaks req)
+
+    Lifecycle:
+      SUPERSEDES:   Any -> Same type (version replacement)
+      RECORDED_DURING: Memory -> Task/SDLCPhase (when memory was captured)
+
+    Taxonomy:
+      BELONGS_TO:    Skill/Agent/Audit/Finding -> SDLCPhase/Category
+      APPLICABLE_IN: Agent/Audit -> SDLCPhase (phase applicability)
+      SUBCATEGORY_OF: Category -> Category (taxonomy hierarchy)
+      AUDIT_COVERS:  Audit -> Task/Requirement/Spec (audit scope)
+      COMMONLY_COMBINED: Audit -> Audit (audit co-occurrence)
+
+    Requirements:
+      DEPENDS_ON:     Requirement -> Requirement (req-level dependency)
+      CONFLICTS_WITH: Requirement -> Requirement (req-level conflict)
+
+    Skills (reserved):
+      COMPOSES_WITH:   Skill -> Skill (composition pattern)
+      USED_IN:         Skill -> Episode (execution tracking)
+      STEP:            Workflow -> Skill (workflow step)
+      SKILL_DEPENDS_ON: Skill -> Skill (skill prerequisite)
+    """
     DERIVED_FROM = "DERIVED_FROM"
     INFORMS = "INFORMS"
     SUPPORTS = "SUPPORTS"
@@ -61,6 +105,9 @@ class RelType(str, Enum):
     USED_IN = "USED_IN"
     STEP = "STEP"
     SKILL_DEPENDS_ON = "SKILL_DEPENDS_ON"
+    APPLICABLE_IN = "APPLICABLE_IN"
+    SUBCATEGORY_OF = "SUBCATEGORY_OF"
+    RECORDED_DURING = "RECORDED_DURING"
 
 
 # ============================================================================
@@ -83,6 +130,7 @@ REQUIRED_PROPERTIES: Dict[str, List[str]] = {
     NodeLabel.REVIEW_FINDING: ["id", "severity", "category", "description"],
     NodeLabel.SKILL: ["id", "name", "category"],
     NodeLabel.SDLC_PHASE: ["id", "name"],
+    NodeLabel.CATEGORY: ["id", "name", "domain"],
     NodeLabel.EPISODE: ["id", "task_id"],
     NodeLabel.WORKFLOW: ["id", "name", "task_pattern"],
 }
@@ -156,6 +204,9 @@ VALID_VALUES: Dict[str, Dict[str, Set[str]]] = {
         "risk_level": {"None", "Low", "Medium", "High"},
         "source": {"anthropic-official", "playbooks", "awesome-claude-code", "community", "tactical-builtin"},
     },
+    NodeLabel.CATEGORY: {
+        "domain": {"agent", "audit", "skill", "finding"},
+    },
     NodeLabel.EPISODE: {
         "outcome": {"success", "partial", "failure"},
     },
@@ -163,11 +214,11 @@ VALID_VALUES: Dict[str, Dict[str, Set[str]]] = {
 
 # Optional properties with defaults
 PROPERTY_DEFAULTS: Dict[str, Dict[str, Any]] = {
-    NodeLabel.SOURCE: {"phase": "1-discovery"},
-    NodeLabel.FINDING: {"confidence": 0.8, "phase": "1-discovery"},
-    NodeLabel.DECISION: {"status": "proposed", "confidence": 0.7, "alternatives_json": ""},
-    NodeLabel.REQUIREMENT: {"priority": "medium", "status": "draft"},
-    NodeLabel.FEATURE: {},
+    NodeLabel.SOURCE: {"phase": "1-discovery", "created_at": ""},
+    NodeLabel.FINDING: {"confidence": 0.8, "phase": "1-discovery", "created_at": ""},
+    NodeLabel.DECISION: {"status": "proposed", "confidence": 0.7, "alternatives_json": "", "created_at": ""},
+    NodeLabel.REQUIREMENT: {"priority": "medium", "status": "draft", "created_at": ""},
+    NodeLabel.FEATURE: {"created_at": ""},
     NodeLabel.TASK: {
         "status": "pending",
         "priority": "medium",
@@ -200,6 +251,7 @@ PROPERTY_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "content_hash": "",
     },
     NodeLabel.SDLC_PHASE: {},
+    NodeLabel.CATEGORY: {},
     NodeLabel.EPISODE: {
         "success_score": 0.0,
         "tokens_consumed": 0,
@@ -255,7 +307,7 @@ VALID_RELATIONSHIPS: Dict[str, tuple] = {
     ),
     RelType.TRACED_TO: (
         {NodeLabel.REQUIREMENT},
-        {NodeLabel.SPEC},
+        {NodeLabel.SPEC, NodeLabel.FINDING},
     ),
     RelType.INFORMED_BY: (
         {NodeLabel.TASK},
@@ -267,12 +319,14 @@ VALID_RELATIONSHIPS: Dict[str, tuple] = {
          NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK,
          NodeLabel.SPEC, NodeLabel.AGENT, NodeLabel.MEMORY,
          NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT, NodeLabel.REVIEW_FINDING,
-         NodeLabel.SKILL, NodeLabel.SDLC_PHASE, NodeLabel.EPISODE, NodeLabel.WORKFLOW},
+         NodeLabel.SKILL, NodeLabel.SDLC_PHASE, NodeLabel.CATEGORY,
+         NodeLabel.EPISODE, NodeLabel.WORKFLOW},
         {NodeLabel.SOURCE, NodeLabel.FINDING, NodeLabel.DECISION,
          NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK,
          NodeLabel.SPEC, NodeLabel.AGENT, NodeLabel.MEMORY,
          NodeLabel.PHASE_CHECKPOINT, NodeLabel.AUDIT, NodeLabel.REVIEW_FINDING,
-         NodeLabel.SKILL, NodeLabel.SDLC_PHASE, NodeLabel.EPISODE, NodeLabel.WORKFLOW},
+         NodeLabel.SKILL, NodeLabel.SDLC_PHASE, NodeLabel.CATEGORY,
+         NodeLabel.EPISODE, NodeLabel.WORKFLOW},
     ),
     RelType.AUDIT_COVERS: (
         {NodeLabel.AUDIT},
@@ -291,8 +345,20 @@ VALID_RELATIONSHIPS: Dict[str, tuple] = {
         {NodeLabel.REQUIREMENT},
     ),
     RelType.BELONGS_TO: (
-        {NodeLabel.SKILL},
+        {NodeLabel.SKILL, NodeLabel.AGENT, NodeLabel.AUDIT, NodeLabel.FINDING},
+        {NodeLabel.SDLC_PHASE, NodeLabel.CATEGORY},
+    ),
+    RelType.APPLICABLE_IN: (
+        {NodeLabel.AGENT, NodeLabel.AUDIT},
         {NodeLabel.SDLC_PHASE},
+    ),
+    RelType.SUBCATEGORY_OF: (
+        {NodeLabel.CATEGORY},
+        {NodeLabel.CATEGORY},
+    ),
+    RelType.RECORDED_DURING: (
+        {NodeLabel.MEMORY},
+        {NodeLabel.TASK, NodeLabel.SDLC_PHASE},
     ),
     RelType.COMPOSES_WITH: (
         {NodeLabel.SKILL},
@@ -340,6 +406,7 @@ INDEX_DEFINITIONS = [
     ("Task", "id"),
     ("Spec", "task_id"),
     # Phase-scoped queries
+    ("Source", "phase"),
     ("Finding", "phase"),
     ("Finding", "category"),
     ("Requirement", "type"),
@@ -379,6 +446,9 @@ INDEX_DEFINITIONS = [
     ("Skill", "source"),
     # SDLCPhase lookups
     ("SDLCPhase", "id"),
+    # Category lookups
+    ("Category", "id"),
+    ("Category", "domain"),
     # Episode lookups
     ("Episode", "id"),
     ("Episode", "task_id"),
@@ -474,5 +544,12 @@ def validate_relationship(rel_type: str, from_label: str, to_label: str) -> Opti
         return f"{rel_str} cannot originate from {from_str}"
     if to_str not in to_values:
         return f"{rel_str} cannot target {to_str}"
+
+    # SUPERSEDES must connect nodes of the same type
+    if rel_str == RelType.SUPERSEDES and from_str != to_str:
+        return (
+            f"SUPERSEDES requires same-type nodes, got "
+            f"{from_str} -> {to_str}"
+        )
 
     return None

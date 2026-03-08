@@ -362,15 +362,81 @@ def execute(atomic_root: Path, output_dir: Path, mem=None, graph=None) -> bool:
             except Exception as e:
                 logger.warning("INFORMED_BY edge creation failed: %s", e)
 
+            # Create IMPLEMENTS edges linking tasks to requirements
+            try:
+                requirements = graph.reader.get_nodes("Requirement")
+                if requirements:
+                    implements_count = 0
+                    for task in tasks:
+                        task_id = task.get("id")
+                        if task_id is None:
+                            continue
+                        task_text = (task.get("title", "") + " " +
+                                     task.get("description", "")).lower()
+                        task_words = set(w for w in task_text.split() if len(w) > 4)
+                        for req in requirements:
+                            req_text = (req.get("title", "") + " " +
+                                        req.get("content", "")).lower()
+                            req_words = set(w for w in req_text.split() if len(w) > 4)
+                            # Match if significant word overlap
+                            if len(task_words & req_words) >= 3:
+                                try:
+                                    graph.link(
+                                        "IMPLEMENTS", "Task", task_id,
+                                        "Requirement", req.get("id"),
+                                    )
+                                    implements_count += 1
+                                except Exception:
+                                    pass
+                    if implements_count:
+                        print(print_green(f"  ✓ {implements_count} IMPLEMENTS edges created"))
+                        logger.info("Created %d IMPLEMENTS edges", implements_count)
+            except Exception as e:
+                logger.warning("IMPLEMENTS edge creation failed: %s", e)
+
+            # Also link tasks to accepted decisions via INFORMED_BY
+            try:
+                decisions = graph.reader.get_nodes("Decision", filters={"status": "accepted"})
+                if decisions:
+                    dec_informed = 0
+                    for task in tasks:
+                        task_id = task.get("id")
+                        if task_id is None:
+                            continue
+                        task_text = (task.get("title", "") + " " +
+                                     task.get("description", "")).lower()
+                        task_words = set(w for w in task_text.split() if len(w) > 4)
+                        for dec in decisions:
+                            dec_text = (dec.get("title", "") + " " +
+                                        dec.get("rationale", "")).lower()
+                            dec_words = set(w for w in dec_text.split() if len(w) > 4)
+                            if len(task_words & dec_words) >= 2:
+                                try:
+                                    graph.link(
+                                        "INFORMED_BY", "Task", task_id,
+                                        "Decision", dec.get("id"),
+                                    )
+                                    dec_informed += 1
+                                except Exception:
+                                    pass
+                    if dec_informed:
+                        print(print_green(f"  ✓ {dec_informed} Task->Decision INFORMED_BY edges created"))
+            except Exception as e:
+                logger.warning("Task->Decision INFORMED_BY creation failed: %s", e)
+
             # Validate task graph: check for dependency cycles and orphans
             try:
                 cycles = graph.reader.detect_cycles()
                 if cycles:
-                    print(print_yellow(f"  ⚠ {len(cycles)} dependency cycle(s) detected:"))
-                    for cycle in cycles[:3]:
-                        print(print_yellow(f"    → {' → '.join(str(c) for c in cycle)}"))
+                    cycle_details = "; ".join(
+                        " → ".join(str(c) for c in cyc) for cyc in cycles[:3]
+                    )
+                    msg = f"{len(cycles)} dependency cycle(s) detected: {cycle_details}"
+                    print(print_yellow(f"  ⚠ {msg}"))
                     if mem:
                         mem.warning(f"Task dependency cycles detected: {len(cycles)}")
+                    from core.graph.exceptions import CycleDetectedError
+                    raise CycleDetectedError(msg, cycle_path=cycles[0])
                 else:
                     print(print_green("  ✓ No dependency cycles"))
 
